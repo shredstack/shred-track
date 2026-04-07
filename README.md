@@ -32,6 +32,12 @@ supabase start
 
 This spins up a full Supabase stack in Docker (Postgres, Auth, Studio, Mailpit, etc.). On first run it pulls the required Docker images.
 
+Or to run with a clean slate (if Docker is currently in a stale state) as this will skip backing up a bad database that failed to start:
+
+```bash
+supabase stop --no-backup && supabase start
+```
+
 ### 3. Configure environment
 
 The `.env.local` file should already be configured for local development. If not, copy the values from `supabase status`:
@@ -84,9 +90,9 @@ Open http://localhost:3000 — you'll be redirected to the login page. Create an
 | Service | URL |
 |---------|-----|
 | App | http://localhost:3000 |
-| Supabase Studio | http://127.0.0.1:54323 |
-| Mailpit (email testing) | http://127.0.0.1:54324 |
-| Supabase API | http://127.0.0.1:54321 |
+| Supabase Studio | http://127.0.0.1:54353 |
+| Mailpit (email testing) | http://127.0.0.1:54354 |
+| Supabase API | http://127.0.0.1:54351 |
 
 ## Database Migration Workflow
 
@@ -113,8 +119,39 @@ For Supabase-specific migrations (triggers, RLS policies, functions):
 Google sign-in works out of the box with Supabase. For local dev:
 
 1. Create a Google Cloud project and OAuth credentials
-2. Set the authorized redirect URI to `http://127.0.0.1:54321/auth/v1/callback`
+2. Set the authorized redirect URI to `http://127.0.0.1:54351/auth/v1/callback`
 3. Add your client ID and secret to `supabase/config.toml` under `[auth.external.google]`
+
+## GitHub Repository Setup
+
+### Required Secrets
+
+The CI/CD workflows require the following secrets configured in your GitHub repository settings (**Settings → Secrets and variables → Actions**):
+
+#### For Claude PR Review (`claude-pr-review.yml`)
+
+| Secret | Description | Where to get it |
+|--------|-------------|-----------------|
+| `ANTHROPIC_API_KEY` | API key for Claude PR reviews | [Anthropic Console](https://console.anthropic.com/) → API Keys |
+
+#### For Database Migration Deployment (`deploy_database_migrations.yml`)
+
+| Secret | Description | Where to get it |
+|--------|-------------|-----------------|
+| `SUPABASE_ACCESS_TOKEN` | Personal CLI access token (not a project API key) | [Supabase Dashboard](https://supabase.com/dashboard/) → Account Settings (top-right avatar) → Access Tokens |
+| `SUPABASE_DB_PASSWORD` | The database password set when creating the project | Supabase Dashboard → Project Settings → Database |
+| `SUPABASE_PROJECT_REF` | Your project's reference ID (e.g., `abcdefghijkl`) | Supabase Dashboard → Project Settings → General |
+
+> **Note:** The `SUPABASE_ACCESS_TOKEN` is your **personal Supabase CLI token**, not the project's `anon` or `service_role` key. Those project API keys are for your app's runtime code, not for CI/CD.
+
+### Optional: Production Environment Protection
+
+For an extra safety layer on database migrations, create a `production` environment with required reviewers:
+
+1. Go to **Settings → Environments → New environment**
+2. Name it `production`
+3. Enable **Required reviewers** and add yourself
+4. Migration deployments will now require manual approval before running
 
 ## Project Structure
 

@@ -102,7 +102,7 @@ export function SessionDetail({ session, onBack, onLog }: SessionDetailProps) {
           <h2 className="text-lg font-semibold">{session.title}</h2>
         </div>
         {submitted && (
-          <Badge variant="default" className="bg-green-500/20 text-green-400">
+          <Badge variant="default" className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">
             <CheckCircle2 className="mr-1 h-3 w-3" />
             Logged
           </Badge>

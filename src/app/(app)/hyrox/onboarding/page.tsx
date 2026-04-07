@@ -8,16 +8,15 @@ export default function HyroxOnboardingPage() {
   const router = useRouter();
 
   const handleComplete = (plan: GeneratedPlan) => {
-    // Store the generated plan in localStorage for now
     localStorage.setItem("hyrox-plan", JSON.stringify(plan));
     router.push("/hyrox");
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">HYROX Setup</h1>
-        <p className="text-sm text-muted-foreground">
+        <p className="mt-1 text-sm text-muted-foreground">
           Let&apos;s build your personalized training plan.
         </p>
       </div>

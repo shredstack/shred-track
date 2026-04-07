@@ -29,6 +29,7 @@ import type {
   WorkoutType,
   WorkoutMovementDisplay,
   ScoreInput,
+  ScoreDisplay,
   MovementScaling,
 } from "@/types/crossfit";
 import { WORKOUT_TYPE_LABELS } from "@/types/crossfit";
@@ -45,6 +46,7 @@ interface ScoreEntryProps {
   workoutType: WorkoutType;
   timeCapSeconds?: number;
   movements: WorkoutMovementDisplay[];
+  existingScore?: ScoreDisplay;
   onSubmit?: (score: ScoreInput) => void;
 }
 
@@ -134,19 +136,22 @@ export function ScoreEntry({
   workoutType,
   timeCapSeconds,
   movements,
+  existingScore,
   onSubmit,
 }: ScoreEntryProps) {
-  // Core score state
-  const [division, setDivision] = useState<"rx" | "scaled" | "rx_plus">("rx");
-  const [timeSeconds, setTimeSeconds] = useState<number | undefined>();
-  const [hitTimeCap, setHitTimeCap] = useState(false);
-  const [totalReps, setTotalReps] = useState<string>("");
-  const [rounds, setRounds] = useState<string>("");
-  const [remainderReps, setRemainderReps] = useState<string>("");
-  const [weightLbs, setWeightLbs] = useState<string>("");
-  const [scoreText, setScoreText] = useState<string>("");
-  const [rpe, setRpe] = useState<number>(7);
-  const [notes, setNotes] = useState<string>("");
+  const isEditing = !!existingScore;
+
+  // Core score state — pre-populate from existing score when editing
+  const [division, setDivision] = useState<"rx" | "scaled" | "rx_plus">(existingScore?.division ?? "rx");
+  const [timeSeconds, setTimeSeconds] = useState<number | undefined>(existingScore?.timeSeconds);
+  const [hitTimeCap, setHitTimeCap] = useState(existingScore?.hitTimeCap ?? false);
+  const [totalReps, setTotalReps] = useState<string>(existingScore?.totalReps?.toString() ?? "");
+  const [rounds, setRounds] = useState<string>(existingScore?.rounds?.toString() ?? "");
+  const [remainderReps, setRemainderReps] = useState<string>(existingScore?.remainderReps?.toString() ?? "");
+  const [weightLbs, setWeightLbs] = useState<string>(existingScore?.weightLbs ?? "");
+  const [scoreText, setScoreText] = useState<string>(existingScore?.scoreText ?? "");
+  const [rpe, setRpe] = useState<number>(existingScore?.rpe ?? 7);
+  const [notes, setNotes] = useState<string>(existingScore?.notes ?? "");
 
   // Scaling state
   const [showScaling, setShowScaling] = useState(false);
@@ -457,8 +462,10 @@ export function ScoreEntry({
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Trophy className="size-4 text-primary" />
-            Log Score
+            <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-primary/10">
+              <Trophy className="size-3.5 text-primary" />
+            </div>
+            {isEditing ? "Edit Score" : "Log Score"}
           </DialogTitle>
           <DialogDescription>
             {workoutTitle || "Workout"} &middot;{" "}
@@ -672,7 +679,7 @@ export function ScoreEntry({
         <DialogFooter>
           <Button onClick={handleSubmit} className="w-full sm:w-auto">
             <Save className="size-4" />
-            Save Score
+            {isEditing ? "Update Score" : "Save Score"}
           </Button>
         </DialogFooter>
       </DialogContent>

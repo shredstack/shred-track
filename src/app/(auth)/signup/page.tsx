@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Dumbbell, ArrowRight, Loader2, Eye, EyeOff, CheckCircle } from "lucide-react";
+import Image from "next/image";
+import { ArrowRight, Loader2, Eye, EyeOff, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { createClient } from "@/lib/supabase/client";
 
@@ -69,32 +69,37 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="flex min-h-full flex-col items-center justify-center px-4">
+    <div className="flex min-h-full flex-col items-center justify-center px-4 bg-mesh">
       <div className="w-full max-w-sm">
         {/* Brand */}
-        <div className="mb-8 flex flex-col items-center gap-3">
-          <div className="rounded-2xl bg-primary/10 p-4">
-            <Dumbbell className="h-10 w-10 text-primary" />
-          </div>
+        <div className="mb-10 flex flex-col items-center gap-4">
+          <Image
+            src="/shredtrack_logo.png"
+            alt="ShredTrack"
+            width={80}
+            height={80}
+            className="h-20 w-20 rounded-2xl glow-primary"
+          />
           <div className="text-center">
-            <h1 className="text-3xl font-bold tracking-tight">ShredTrack</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <h1 className="text-3xl font-extrabold tracking-tight text-gradient-primary">
+              ShredTrack
+            </h1>
+            <p className="mt-2 text-sm text-muted-foreground">
               Track workouts. Crush goals. Compete.
             </p>
           </div>
         </div>
 
-        <Card>
-          <CardHeader className="pb-4">
-            <h2 className="text-center text-lg font-semibold">
+        <div className="gradient-border rounded-2xl">
+          <div className="rounded-2xl bg-card/80 p-6 backdrop-blur-sm">
+            <h2 className="mb-6 text-center text-lg font-semibold">
               {isSuccess ? "Check your email" : "Create your account"}
             </h2>
-          </CardHeader>
-          <CardContent>
+
             {isSuccess ? (
-              <div className="flex flex-col items-center gap-4 py-2">
-                <div className="rounded-full bg-emerald-500/10 p-3">
-                  <CheckCircle className="h-8 w-8 text-emerald-500" />
+              <div className="flex flex-col items-center gap-4 py-4">
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/10 glow-primary-sm">
+                  <CheckCircle className="h-7 w-7 text-emerald-400" />
                 </div>
                 <p className="text-center text-sm text-muted-foreground">
                   We sent a confirmation link to{" "}
@@ -112,7 +117,7 @@ export default function SignupPage() {
                 {/* Google OAuth */}
                 <Button
                   variant="outline"
-                  className="w-full gap-2"
+                  className="w-full gap-2 h-11 border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06]"
                   onClick={handleGoogleLogin}
                   disabled={isGoogleLoading}
                 >
@@ -143,14 +148,16 @@ export default function SignupPage() {
 
                 <div className="flex items-center gap-3">
                   <Separator className="flex-1" />
-                  <span className="text-xs text-muted-foreground">or</span>
+                  <span className="text-xs text-muted-foreground/60">or</span>
                   <Separator className="flex-1" />
                 </div>
 
                 {/* Signup form */}
                 <form onSubmit={handleSignup} className="flex flex-col gap-4">
                   <div className="flex flex-col gap-2">
-                    <Label htmlFor="name">Name</Label>
+                    <Label htmlFor="name" className="text-xs text-muted-foreground">
+                      Name
+                    </Label>
                     <Input
                       id="name"
                       type="text"
@@ -160,10 +167,13 @@ export default function SignupPage() {
                       required
                       autoComplete="name"
                       autoFocus
+                      className="h-11 bg-white/[0.03] border-white/[0.08]"
                     />
                   </div>
                   <div className="flex flex-col gap-2">
-                    <Label htmlFor="email">Email</Label>
+                    <Label htmlFor="email" className="text-xs text-muted-foreground">
+                      Email
+                    </Label>
                     <Input
                       id="email"
                       type="email"
@@ -172,10 +182,13 @@ export default function SignupPage() {
                       onChange={(e) => setEmail(e.target.value)}
                       required
                       autoComplete="email"
+                      className="h-11 bg-white/[0.03] border-white/[0.08]"
                     />
                   </div>
                   <div className="flex flex-col gap-2">
-                    <Label htmlFor="password">Password</Label>
+                    <Label htmlFor="password" className="text-xs text-muted-foreground">
+                      Password
+                    </Label>
                     <div className="relative">
                       <Input
                         id="password"
@@ -186,12 +199,12 @@ export default function SignupPage() {
                         required
                         minLength={6}
                         autoComplete="new-password"
-                        className="pr-10"
+                        className="h-11 pr-10 bg-white/[0.03] border-white/[0.08]"
                       />
                       <button
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-muted-foreground transition-colors"
                       >
                         {showPassword ? (
                           <EyeOff className="h-4 w-4" />
@@ -203,10 +216,12 @@ export default function SignupPage() {
                   </div>
 
                   {error && (
-                    <p className="text-sm text-destructive">{error}</p>
+                    <div className="rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-2">
+                      <p className="text-sm text-destructive">{error}</p>
+                    </div>
                   )}
 
-                  <Button type="submit" disabled={isLoading} className="w-full">
+                  <Button type="submit" disabled={isLoading} className="w-full h-11 mt-1">
                     {isLoading ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
@@ -219,22 +234,22 @@ export default function SignupPage() {
                 </form>
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
         {!isSuccess && (
-          <p className="mt-4 text-center text-sm text-muted-foreground">
+          <p className="mt-6 text-center text-sm text-muted-foreground">
             Already have an account?{" "}
             <a
               href="/login"
-              className="font-medium text-primary underline-offset-4 hover:underline"
+              className="font-semibold text-primary hover:text-primary/80 transition-colors"
             >
               Sign in
             </a>
           </p>
         )}
 
-        <p className="mt-4 text-center text-xs text-muted-foreground">
+        <p className="mt-4 text-center text-[11px] text-muted-foreground/50">
           By continuing, you agree to our Terms of Service and Privacy Policy.
         </p>
       </div>

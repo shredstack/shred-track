@@ -8,8 +8,6 @@ import {
   Minus,
   Activity,
   BarChart3,
-  CheckCircle2,
-  Percent,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,24 +16,15 @@ import {
   CONFIDENCE_LABELS,
   formatTime,
   formatLongTime,
-  type StationName,
 } from "@/lib/hyrox-data";
 import type { GeneratedPlan } from "@/lib/plan-generator";
-
-// ---------------------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------------------
 
 interface DashboardProps {
   plan: GeneratedPlan;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function getTrend(confidence: number): { icon: typeof TrendingUp; color: string; label: string } {
-  if (confidence >= 4) return { icon: TrendingUp, color: "text-green-400", label: "Improving" };
+  if (confidence >= 4) return { icon: TrendingUp, color: "text-emerald-400", label: "Improving" };
   if (confidence <= 2) return { icon: TrendingDown, color: "text-amber-400", label: "Needs work" };
   return { icon: Minus, color: "text-muted-foreground", label: "Steady" };
 }
@@ -53,23 +42,16 @@ function computeAdherence(plan: GeneratedPlan): number {
   return total > 0 ? Math.round((completed / total) * 100) : 0;
 }
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-
 export function Dashboard({ plan }: DashboardProps) {
   const adherence = computeAdherence(plan);
 
-  // Breakdown estimates
   const runTime = Math.round(plan.estimatedCurrentTime * 0.5);
   const stationTime = Math.round(plan.estimatedCurrentTime * 0.38);
   const transitionTime = plan.estimatedCurrentTime - runTime - stationTime;
 
   const goalDiff = plan.estimatedCurrentTime - plan.goalTime;
 
-  // Station confidence data (mock based on plan structure — in prod would come from logged data)
   const stationData = STATION_ORDER.map((station, i) => {
-    // Derive a confidence from plan session order cycling
     const confidence = Math.min(5, Math.max(1, 3 + Math.floor(Math.random() * 0.5)));
     const bestTime = Math.round(plan.estimatedCurrentTime * 0.045 + i * 5);
     return { station, confidence, bestTime };
@@ -77,19 +59,21 @@ export function Dashboard({ plan }: DashboardProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Big estimated time */}
-      <Card className="bg-gradient-to-br from-primary/5 to-primary/10">
-        <CardContent className="py-6 text-center">
-          <p className="text-xs text-muted-foreground">Estimated Race Time</p>
-          <p className="mt-1 text-4xl font-bold font-mono tracking-tight">
+      {/* Big estimated time - hero card */}
+      <Card className="gradient-border overflow-visible">
+        <CardContent className="py-8 text-center bg-mesh rounded-xl">
+          <p className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
+            Estimated Race Time
+          </p>
+          <p className="mt-2 text-5xl font-extrabold font-mono tracking-tight text-gradient-primary">
             {formatLongTime(plan.estimatedCurrentTime)}
           </p>
-          <div className="mt-3 flex items-center justify-center gap-2">
-            <Target className="h-4 w-4 text-green-400" />
-            <span className="text-sm text-green-400">
+          <div className="mt-4 flex items-center justify-center gap-2.5">
+            <Target className="h-4 w-4 text-emerald-400" />
+            <span className="text-sm font-medium text-emerald-400">
               Goal: {formatLongTime(plan.goalTime)}
             </span>
-            <Badge variant="secondary" className="text-[10px]">
+            <Badge variant="secondary" className="text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
               -{formatTime(goalDiff)}
             </Badge>
           </div>
@@ -99,14 +83,16 @@ export function Dashboard({ plan }: DashboardProps) {
       {/* Breakdown */}
       <div className="grid grid-cols-3 gap-2">
         {[
-          { label: "Running", value: formatTime(runTime), icon: Activity, color: "text-blue-400" },
-          { label: "Stations", value: formatTime(stationTime), icon: BarChart3, color: "text-orange-400" },
-          { label: "Transitions", value: formatTime(transitionTime), icon: Clock, color: "text-muted-foreground" },
+          { label: "Running", value: formatTime(runTime), icon: Activity, color: "text-blue-400", bg: "bg-blue-500/10" },
+          { label: "Stations", value: formatTime(stationTime), icon: BarChart3, color: "text-orange-400", bg: "bg-orange-500/10" },
+          { label: "Transitions", value: formatTime(transitionTime), icon: Clock, color: "text-muted-foreground", bg: "bg-white/[0.04]" },
         ].map((item) => (
           <Card key={item.label} size="sm">
-            <CardContent className="flex flex-col items-center gap-1 py-3">
-              <item.icon className={`h-4 w-4 ${item.color}`} />
-              <span className="font-mono text-sm font-semibold">{item.value}</span>
+            <CardContent className="flex flex-col items-center gap-1.5 py-3">
+              <div className={`flex h-7 w-7 items-center justify-center rounded-lg ${item.bg}`}>
+                <item.icon className={`h-3.5 w-3.5 ${item.color}`} />
+              </div>
+              <span className="font-mono text-sm font-bold">{item.value}</span>
               <span className="text-[10px] text-muted-foreground">{item.label}</span>
             </CardContent>
           </Card>
@@ -124,8 +110,8 @@ export function Dashboard({ plan }: DashboardProps) {
                 r="24"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="4"
-                className="text-muted"
+                strokeWidth="3.5"
+                className="text-white/[0.06]"
               />
               <circle
                 cx="28"
@@ -133,10 +119,10 @@ export function Dashboard({ plan }: DashboardProps) {
                 r="24"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="4"
+                strokeWidth="3.5"
                 strokeDasharray={`${(adherence / 100) * 150.8} 150.8`}
                 strokeLinecap="round"
-                className="text-primary"
+                className="text-primary drop-shadow-[0_0_6px_oklch(0.85_0.20_130_/_40%)]"
               />
             </svg>
             <span className="absolute text-xs font-bold">{adherence}%</span>
@@ -156,7 +142,7 @@ export function Dashboard({ plan }: DashboardProps) {
 
       {/* Station progress cards */}
       <div>
-        <h3 className="mb-3 text-sm font-semibold">Station Progress</h3>
+        <h3 className="mb-3 text-sm font-bold">Station Progress</h3>
         <div className="grid grid-cols-2 gap-2">
           {stationData.map(({ station, confidence, bestTime }) => {
             const trend = getTrend(confidence);
@@ -165,21 +151,23 @@ export function Dashboard({ plan }: DashboardProps) {
               <Card key={station} size="sm">
                 <CardContent className="py-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium truncate">{station}</span>
+                    <span className="text-[11px] font-medium truncate text-muted-foreground">{station}</span>
                     <TrendIcon className={`h-3.5 w-3.5 ${trend.color}`} />
                   </div>
-                  <p className="mt-1 font-mono text-lg font-bold">{formatTime(bestTime)}</p>
-                  <div className="mt-1 flex items-center gap-1">
+                  <p className="mt-1.5 font-mono text-lg font-bold">{formatTime(bestTime)}</p>
+                  <div className="mt-2 flex items-center gap-1">
                     {[1, 2, 3, 4, 5].map((n) => (
                       <div
                         key={n}
-                        className={`h-1 flex-1 rounded-full ${
-                          n <= confidence ? "bg-primary" : "bg-muted"
+                        className={`h-1 flex-1 rounded-full transition-colors ${
+                          n <= confidence
+                            ? "bg-primary drop-shadow-[0_0_4px_oklch(0.85_0.20_130_/_30%)]"
+                            : "bg-white/[0.06]"
                         }`}
                       />
                     ))}
                   </div>
-                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                  <p className="mt-1 text-[10px] text-muted-foreground">
                     {CONFIDENCE_LABELS[confidence]}
                   </p>
                 </CardContent>
@@ -193,17 +181,18 @@ export function Dashboard({ plan }: DashboardProps) {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-sm">
-            <Activity className="h-4 w-4 text-blue-400" />
+            <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-blue-500/10">
+              <Activity className="h-3.5 w-3.5 text-blue-400" />
+            </div>
             Run Pace Trend
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex items-end gap-1 h-20">
-            {/* Simple bar chart visualization */}
             {[5.5, 5.4, 5.3, 5.2, 5.3, 5.1, 5.0, 4.9, 5.0, 4.8, 4.7, 4.6].map((pace, i) => (
               <div
                 key={i}
-                className="flex-1 rounded-t bg-blue-500/30 hover:bg-blue-500/50 transition-colors"
+                className="flex-1 rounded-t bg-blue-500/25 hover:bg-blue-500/40 transition-colors"
                 style={{ height: `${((pace - 4) / 2) * 100}%` }}
                 title={`Week ${i + 1}: ${Math.floor(pace)}:${String(Math.round((pace % 1) * 60)).padStart(2, "0")} /km`}
               />
