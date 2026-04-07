@@ -9,24 +9,17 @@ import {
   Zap,
   BedDouble,
   CheckCircle2,
-  SkipForward,
-  AlertCircle,
-  Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import type { GeneratedPlan, PlanSession, PlanWeek, SessionType } from "@/lib/plan-generator";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+import type { GeneratedPlan, PlanSession, SessionType } from "@/lib/plan-generator";
 
 const TYPE_CONFIG: Record<SessionType, { icon: typeof Activity; color: string; bg: string }> = {
   run: { icon: Activity, color: "text-blue-400", bg: "bg-blue-500/10" },
   station: { icon: Dumbbell, color: "text-orange-400", bg: "bg-orange-500/10" },
-  hyrox_class: { icon: Zap, color: "text-purple-400", bg: "bg-purple-500/10" },
-  rest: { icon: BedDouble, color: "text-muted-foreground", bg: "bg-muted/30" },
+  hyrox_class: { icon: Zap, color: "text-violet-400", bg: "bg-violet-500/10" },
+  rest: { icon: BedDouble, color: "text-muted-foreground", bg: "bg-white/[0.04]" },
 };
 
 const STATUS_STYLES: Record<string, { badge: "default" | "secondary" | "outline" | "destructive"; text: string }> = {
@@ -35,10 +28,6 @@ const STATUS_STYLES: Record<string, { badge: "default" | "secondary" | "outline"
   skipped: { badge: "secondary", text: "Skipped" },
   missed: { badge: "destructive", text: "Missed" },
 };
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 interface PlanViewProps {
   plan: GeneratedPlan;
@@ -60,32 +49,32 @@ export function PlanView({ plan, onSelectSession, onUpdateSession }: PlanViewPro
     <div className="flex flex-col gap-4">
       {/* Week selector */}
       <div className="flex items-center justify-between">
-        <Button variant="ghost" size="icon" onClick={prevWeek} disabled={weekIndex === 0}>
-          <ChevronLeft className="h-5 w-5" />
+        <Button variant="ghost" size="icon-xs" onClick={prevWeek} disabled={weekIndex === 0}>
+          <ChevronLeft className="h-4 w-4" />
         </Button>
         <div className="text-center">
-          <p className="font-semibold">{week.label}</p>
+          <p className="font-bold">{week.label}</p>
           <p className="text-xs text-muted-foreground">{week.focus}</p>
         </div>
         <Button
           variant="ghost"
-          size="icon"
+          size="icon-xs"
           onClick={nextWeek}
           disabled={weekIndex === plan.weeks.length - 1}
         >
-          <ChevronRight className="h-5 w-5" />
+          <ChevronRight className="h-4 w-4" />
         </Button>
       </div>
 
       {/* Week progress */}
-      <div className="flex items-center gap-2">
-        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+      <div className="flex items-center gap-2.5">
+        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.06]">
           <div
-            className="h-full bg-green-500 transition-all"
+            className="h-full bg-primary transition-all drop-shadow-[0_0_6px_oklch(0.85_0.20_130_/_30%)]"
             style={{ width: `${totalNonRest ? (completedCount / totalNonRest) * 100 : 0}%` }}
           />
         </div>
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs font-mono text-muted-foreground">
           {completedCount}/{totalNonRest}
         </span>
       </div>
@@ -100,13 +89,13 @@ export function PlanView({ plan, onSelectSession, onUpdateSession }: PlanViewPro
           return (
             <Card
               key={session.id}
-              className={`cursor-pointer transition-colors hover:ring-primary/30 ${
+              className={`cursor-pointer transition-all duration-200 hover:ring-1 hover:ring-primary/20 ${
                 session.status === "completed"
-                  ? "ring-green-500/20"
+                  ? "ring-1 ring-emerald-500/15"
                   : session.status === "missed"
-                    ? "ring-amber-500/20"
+                    ? "ring-1 ring-amber-500/15"
                     : session.status === "skipped"
-                      ? "opacity-60"
+                      ? "opacity-50"
                       : ""
               }`}
               size="sm"
@@ -118,8 +107,8 @@ export function PlanView({ plan, onSelectSession, onUpdateSession }: PlanViewPro
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-muted-foreground">{session.dayLabel}</span>
-                    <span className="truncate text-sm font-medium">{session.title}</span>
+                    <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">{session.dayLabel}</span>
+                    <span className="truncate text-sm font-semibold">{session.title}</span>
                   </div>
                   {session.targets.length > 0 && (
                     <p className="truncate text-xs text-muted-foreground">

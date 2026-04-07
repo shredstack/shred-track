@@ -10,6 +10,7 @@ import {
   jsonb,
   uniqueIndex,
   index,
+  foreignKey,
 } from "drizzle-orm/pg-core";
 
 // ============================================
@@ -163,7 +164,7 @@ export const scores = pgTable(
 export const scoreMovementDetails = pgTable("score_movement_details", {
   id: uuid("id").defaultRandom().primaryKey(),
   scoreId: uuid("score_id").notNull().references(() => scores.id, { onDelete: "cascade" }),
-  workoutMovementId: uuid("workout_movement_id").notNull().references(() => workoutMovements.id),
+  workoutMovementId: uuid("workout_movement_id").notNull(),
   wasRx: boolean("was_rx").default(true).notNull(),
   actualWeight: numeric("actual_weight"),
   actualReps: text("actual_reps"),
@@ -171,7 +172,13 @@ export const scoreMovementDetails = pgTable("score_movement_details", {
   substitutionMovementId: uuid("substitution_movement_id").references(() => movements.id),
   setWeights: jsonb("set_weights"), // for_load: per-set weights
   notes: text("notes"),
-});
+}, (table) => [
+  foreignKey({
+    name: "smd_workout_movement_id_fk",
+    columns: [table.workoutMovementId],
+    foreignColumns: [workoutMovements.id],
+  }),
+]);
 
 // ============================================
 // HYROX: Profile & Assessments

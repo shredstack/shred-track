@@ -10,13 +10,12 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import {
   Clock,
   Dumbbell,
   Trophy,
-  CalendarDays,
   CheckCircle2,
+  Flame,
 } from "lucide-react";
 import type { WorkoutDisplay } from "@/types/crossfit";
 import {
@@ -25,19 +24,11 @@ import {
 } from "@/types/crossfit";
 import { formatTime } from "@/lib/workout-parser";
 
-// ============================================
-// Props
-// ============================================
-
 interface WorkoutCardProps {
   workout: WorkoutDisplay;
   onLogScore?: (workoutId: string) => void;
   onViewLeaderboard?: (workoutId: string) => void;
 }
-
-// ============================================
-// Component
-// ============================================
 
 export function WorkoutCard({
   workout,
@@ -48,22 +39,13 @@ export function WorkoutCard({
   const typeColor = WORKOUT_TYPE_COLORS[workout.workoutType];
   const hasScore = !!workout.score;
 
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr + "T00:00:00");
-    return date.toLocaleDateString("en-US", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-    });
-  };
-
   const renderMetadata = () => {
     const items: React.ReactNode[] = [];
 
     if (workout.timeCapSeconds) {
       items.push(
         <span key="tc" className="flex items-center gap-1 text-muted-foreground">
-          <Clock className="size-3.5" />
+          <Clock className="size-3" />
           {formatTime(workout.timeCapSeconds)} cap
         </span>
       );
@@ -71,14 +53,14 @@ export function WorkoutCard({
     if (workout.amrapDurationSeconds) {
       items.push(
         <span key="amrap" className="flex items-center gap-1 text-muted-foreground">
-          <Clock className="size-3.5" />
+          <Clock className="size-3" />
           {formatTime(workout.amrapDurationSeconds)}
         </span>
       );
     }
     if (workout.repScheme) {
       items.push(
-        <span key="reps" className="text-muted-foreground">
+        <span key="reps" className="text-muted-foreground font-mono">
           {workout.repScheme}
         </span>
       );
@@ -87,7 +69,7 @@ export function WorkoutCard({
     if (items.length === 0) return null;
 
     return (
-      <div className="flex flex-wrap items-center gap-3 text-xs">
+      <div className="flex flex-wrap items-center gap-2.5 text-[11px]">
         {items}
       </div>
     );
@@ -113,9 +95,9 @@ export function WorkoutCard({
     }
 
     const divisionColors = {
-      rx: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
-      scaled: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-      rx_plus: "bg-purple-500/20 text-purple-400 border-purple-500/30",
+      rx: "bg-emerald-500/15 text-emerald-400 border-emerald-500/25",
+      scaled: "bg-amber-500/15 text-amber-400 border-amber-500/25",
+      rx_plus: "bg-violet-500/15 text-violet-400 border-violet-500/25",
     };
 
     const divisionLabels = {
@@ -125,9 +107,9 @@ export function WorkoutCard({
     };
 
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 rounded-lg bg-emerald-500/5 border border-emerald-500/10 px-3 py-2">
         <CheckCircle2 className="size-4 text-emerald-400" />
-        <span className="font-mono font-semibold text-foreground">
+        <span className="font-mono text-sm font-bold text-foreground">
           {scoreDisplay}
         </span>
         <Badge
@@ -137,7 +119,7 @@ export function WorkoutCard({
           {divisionLabels[s.division]}
         </Badge>
         {s.rpe && (
-          <span className="text-[10px] text-muted-foreground">
+          <span className="ml-auto text-[10px] text-muted-foreground font-mono">
             RPE {s.rpe}
           </span>
         )}
@@ -146,23 +128,19 @@ export function WorkoutCard({
   };
 
   return (
-    <Card className="border-border/50 bg-card/80 backdrop-blur-sm">
+    <Card className="gradient-border overflow-visible">
       <CardHeader>
         <div className="flex items-start gap-2">
-          <div className="flex-1 space-y-1">
-            <CardTitle className="text-base font-semibold">
+          <div className="flex-1 space-y-0.5">
+            <CardTitle className="text-base font-bold tracking-tight">
               {workout.title || "Workout"}
             </CardTitle>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <CalendarDays className="size-3.5" />
-              {formatDate(workout.workoutDate)}
-            </div>
           </div>
         </div>
         <CardAction>
           <Badge
             variant="outline"
-            className={`text-[10px] font-semibold ${typeColor}`}
+            className={`text-[10px] font-bold ${typeColor}`}
           >
             {typeLabel}
           </Badge>
@@ -173,50 +151,42 @@ export function WorkoutCard({
         {renderMetadata()}
 
         {workout.description && (
-          <p className="text-xs text-muted-foreground italic">
+          <p className="text-xs text-muted-foreground/80 italic leading-relaxed">
             {workout.description}
           </p>
         )}
 
-        <div className="space-y-1.5">
+        <div className="space-y-1.5 rounded-lg bg-white/[0.02] border border-white/[0.04] p-3">
           {workout.movements.map((mov) => (
             <div
               key={mov.id}
-              className="flex items-center gap-2 text-sm"
+              className="flex items-center gap-2.5 text-sm"
             >
-              <Dumbbell className="size-3.5 shrink-0 text-muted-foreground" />
+              <div className="flex h-5 w-5 items-center justify-center rounded bg-primary/10">
+                <Dumbbell className="size-3 text-primary/70" />
+              </div>
               <span className="flex-1">
                 {mov.prescribedReps && (
-                  <span className="font-mono font-medium text-foreground">
+                  <span className="font-mono font-bold text-foreground">
                     {mov.prescribedReps}{" "}
                   </span>
                 )}
-                <span className="text-foreground/90">
+                <span className="text-foreground/85">
                   {mov.movementName}
                 </span>
                 {(mov.prescribedWeightMale || mov.prescribedWeightFemale) && (
-                  <span className="ml-1 text-muted-foreground">
+                  <span className="ml-1.5 text-xs text-muted-foreground font-mono">
                     ({mov.prescribedWeightMale || "?"}
                     {mov.prescribedWeightFemale && `/${mov.prescribedWeightFemale}`}
                     {" lb"})
                   </span>
                 )}
               </span>
-              {mov.rxStandard && (
-                <span className="text-[10px] text-muted-foreground">
-                  {mov.rxStandard}
-                </span>
-              )}
             </div>
           ))}
         </div>
 
-        {hasScore && (
-          <>
-            <Separator className="opacity-50" />
-            {renderScore()}
-          </>
-        )}
+        {hasScore && renderScore()}
       </CardContent>
 
       <CardFooter className="gap-2">
@@ -224,11 +194,11 @@ export function WorkoutCard({
           <Button
             variant="outline"
             size="sm"
-            className="flex-1"
+            className="flex-1 border-white/[0.08]"
             onClick={() => onLogScore?.(workout.id)}
           >
             <Trophy className="size-3.5" />
-            Update Score
+            Edit Score
           </Button>
         ) : (
           <Button
@@ -236,7 +206,7 @@ export function WorkoutCard({
             className="flex-1"
             onClick={() => onLogScore?.(workout.id)}
           >
-            <Trophy className="size-3.5" />
+            <Flame className="size-3.5" />
             Log Score
           </Button>
         )}
@@ -244,6 +214,7 @@ export function WorkoutCard({
           <Button
             variant="outline"
             size="sm"
+            className="border-white/[0.08]"
             onClick={() => onViewLeaderboard(workout.id)}
           >
             Leaderboard

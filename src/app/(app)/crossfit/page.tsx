@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Calendar, Plus, ClipboardPaste, Wrench } from "lucide-react";
+import { Calendar, Plus, ClipboardPaste, Wrench, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -17,6 +17,8 @@ import type {
   WorkoutBuilderForm,
   ParsedWorkout,
   WorkoutType,
+  ScoreInput,
+  ScoreDisplay,
 } from "@/types/crossfit";
 
 // Demo workout for initial experience
@@ -155,18 +157,19 @@ export default function CrossfitPage() {
 
       {/* Empty state */}
       {dayWorkouts.length === 0 && (
-        <Card className="border-dashed">
-          <CardContent className="flex flex-col items-center gap-3 py-8">
-            <div className="rounded-full bg-muted p-3">
-              <Calendar className="h-6 w-6 text-muted-foreground" />
+        <Card className="border-dashed border-white/[0.06]">
+          <CardContent className="flex flex-col items-center gap-4 py-10">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+              <Zap className="h-6 w-6 text-primary/60" />
             </div>
             <div className="text-center">
-              <p className="font-medium">No workouts for this date</p>
-              <p className="text-sm text-muted-foreground">
+              <p className="font-semibold">No workouts for this date</p>
+              <p className="mt-1 text-sm text-muted-foreground">
                 Add a workout or paste one from your gym
               </p>
             </div>
-            <Button variant="outline" className="mt-2" onClick={() => setShowAddWorkout(true)}>
+            <Button variant="outline" className="mt-1 border-white/[0.08]" onClick={() => setShowAddWorkout(true)}>
+              <Plus className="h-4 w-4" />
               Add Workout
             </Button>
           </CardContent>
@@ -216,7 +219,28 @@ export default function CrossfitPage() {
           workoutType={scoringWorkout.workoutType as WorkoutType}
           timeCapSeconds={scoringWorkout.timeCapSeconds}
           movements={scoringWorkout.movements}
-          onSubmit={() => setScoringWorkout(null)}
+          existingScore={scoringWorkout.score ?? undefined}
+          onSubmit={(scoreInput: ScoreInput) => {
+            const scoreDisplay: ScoreDisplay = {
+              id: scoringWorkout.score?.id ?? `score-${Date.now()}`,
+              division: scoreInput.division,
+              timeSeconds: scoreInput.timeSeconds,
+              rounds: scoreInput.rounds,
+              remainderReps: scoreInput.remainderReps,
+              weightLbs: scoreInput.weightLbs?.toString(),
+              totalReps: scoreInput.totalReps,
+              scoreText: scoreInput.scoreText,
+              hitTimeCap: scoreInput.hitTimeCap,
+              notes: scoreInput.notes,
+              rpe: scoreInput.rpe,
+            };
+            setWorkouts((prev) =>
+              prev.map((w) =>
+                w.id === scoringWorkout.id ? { ...w, score: scoreDisplay } : w
+              )
+            );
+            setScoringWorkout(null);
+          }}
         />
       )}
     </div>

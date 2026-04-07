@@ -226,14 +226,14 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
       {/* Progress bar */}
       <div className="space-y-3">
         <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>
+          <span className="font-medium">
             Step {step + 1} of {STEPS.length}
           </span>
-          <span>{STEPS[step].label}</span>
+          <span className="font-semibold text-foreground">{STEPS[step].label}</span>
         </div>
-        <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-white/[0.06]">
           <div
-            className="h-full bg-primary transition-all duration-300"
+            className="h-full bg-primary transition-all duration-300 drop-shadow-[0_0_6px_oklch(0.85_0.20_130_/_30%)]"
             style={{ width: `${progressPct}%` }}
           />
         </div>
@@ -245,16 +245,16 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
               <div
                 key={s.label}
                 className={`flex flex-col items-center gap-1 ${
-                  i <= step ? "text-primary" : "text-muted-foreground/40"
+                  i <= step ? "text-primary" : "text-muted-foreground/30"
                 }`}
               >
                 <div
-                  className={`flex h-7 w-7 items-center justify-center rounded-full transition-colors ${
+                  className={`flex h-7 w-7 items-center justify-center rounded-lg transition-all duration-200 ${
                     i < step
                       ? "bg-primary text-primary-foreground"
                       : i === step
-                        ? "bg-primary/20 text-primary ring-2 ring-primary"
-                        : "bg-muted text-muted-foreground/40"
+                        ? "bg-primary/15 text-primary ring-2 ring-primary/40 glow-primary-sm"
+                        : "bg-white/[0.04] text-muted-foreground/30"
                   }`}
                 >
                   <Icon className="h-3.5 w-3.5" />

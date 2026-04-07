@@ -61,13 +61,16 @@ export default function HyroxPlanPage() {
 
   if (!plan) {
     return (
-      <div className="flex flex-col items-center gap-3 py-12 text-center">
-        <p className="font-semibold">No Plan Yet</p>
-        <p className="max-w-xs text-sm text-muted-foreground">
+      <div className="flex flex-col items-center gap-4 py-14 text-center">
+        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+          <svg className="h-6 w-6 text-primary/60" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+        </div>
+        <p className="font-bold text-lg">No Plan Yet</p>
+        <p className="max-w-xs text-sm text-muted-foreground leading-relaxed">
           Complete the HYROX onboarding to generate your personalized training plan.
         </p>
         <a href="/hyrox/onboarding">
-          <button className="mt-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
+          <button className="mt-1 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
             Start Setup
           </button>
         </a>
