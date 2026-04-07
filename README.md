@@ -1,36 +1,145 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ShredTrack
 
-## Getting Started
+A mobile-first training app for HYROX and CrossFit athletes. Track workouts, log scores with granular scaling detail, follow periodized HYROX training plans, and compete with your community.
 
-First, run the development server:
+## Tech Stack
+
+- **Framework**: Next.js 15 (App Router)
+- **UI**: Tailwind CSS + shadcn/ui
+- **Database**: PostgreSQL (Supabase) via Drizzle ORM
+- **Auth**: Supabase Auth (email/password + Google OAuth)
+- **Mobile**: Capacitor (iOS + Android) — planned
+
+## Prerequisites
+
+- Node.js 18+
+- Docker Desktop (for local Supabase)
+- [Supabase CLI](https://supabase.com/docs/guides/cli/getting-started)
+
+## Local Development Setup
+
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Start local Supabase
+
+```bash
+supabase start
+```
+
+This spins up a full Supabase stack in Docker (Postgres, Auth, Studio, Mailpit, etc.). On first run it pulls the required Docker images.
+
+### 3. Configure environment
+
+The `.env.local` file should already be configured for local development. If not, copy the values from `supabase status`:
+
+```bash
+supabase status
+```
+
+### 4. Push database schema and seed data
+
+```bash
+npm run db:push       # Push Drizzle schema to local Postgres
+npm run db:seed       # Seed movements, HYROX divisions, reference times
+```
+
+### 5. Run the dev server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000 — you'll be redirected to the login page. Create an account with email/password to get started.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Supabase Commands
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Command | Description |
+|---------|-------------|
+| `supabase start` | Start the local Supabase stack (Postgres, Auth, Studio, etc.) |
+| `supabase stop` | Stop all local Supabase containers |
+| `supabase stop --no-backup` | Stop and discard all local database data |
+| `supabase status` | Show URLs, ports, and API keys for the running stack |
+| `supabase db reset` | Reset local database: re-runs all migrations + seed files |
+| `supabase db diff` | Generate a SQL diff of schema changes (useful before creating a migration) |
+| `supabase db push` | Push local migrations to a remote Supabase project |
+| `supabase db pull` | Pull schema from remote into a local migration file |
+| `supabase migration new <name>` | Create a new empty migration file |
+| `supabase migration list` | List all migrations and their status |
 
-## Learn More
+## Drizzle ORM Commands
 
-To learn more about Next.js, take a look at the following resources:
+| Command | Description |
+|---------|-------------|
+| `npm run db:push` | Push Drizzle schema directly to the database (dev only — no migration files) |
+| `npm run db:generate` | Generate SQL migration files from schema changes |
+| `npm run db:migrate` | Run pending migrations against the database |
+| `npm run db:seed` | Seed the database with movements, divisions, and reference times |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Local Dev URLs
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Service | URL |
+|---------|-----|
+| App | http://localhost:3000 |
+| Supabase Studio | http://127.0.0.1:54323 |
+| Mailpit (email testing) | http://127.0.0.1:54324 |
+| Supabase API | http://127.0.0.1:54321 |
 
-## Deploy on Vercel
+## Database Migration Workflow
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+For local development, `npm run db:push` is the fastest way to iterate on schema changes — it syncs the Drizzle schema directly to the database without migration files.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+For changes that need to go to production:
+
+1. Make schema changes in `src/db/schema.ts`
+2. Generate a migration: `npm run db:generate`
+3. Review the generated SQL in `drizzle/`
+4. Test locally: `npm run db:migrate`
+5. Commit the migration file with your PR
+6. On merge to `main`, run migrations against production
+
+For Supabase-specific migrations (triggers, RLS policies, functions):
+
+1. Create a migration: `supabase migration new my_change`
+2. Write SQL in `supabase/migrations/<timestamp>_my_change.sql`
+3. Test locally: `supabase db reset`
+4. Commit and merge
+
+## Google OAuth Setup (Optional)
+
+Google sign-in works out of the box with Supabase. For local dev:
+
+1. Create a Google Cloud project and OAuth credentials
+2. Set the authorized redirect URI to `http://127.0.0.1:54321/auth/v1/callback`
+3. Add your client ID and secret to `supabase/config.toml` under `[auth.external.google]`
+
+## Project Structure
+
+```
+src/
+├── app/
+│   ├── (app)/           # Authenticated pages (Today, HYROX, History, Profile)
+│   ├── (auth)/          # Login + Signup pages
+│   ├── api/             # API route handlers
+│   └── auth/callback/   # OAuth callback handler
+├── components/
+│   ├── crossfit/        # WOD builder, parser, score entry, leaderboard
+│   ├── hyrox/           # Onboarding wizard, dashboard, plan view, overview
+│   ├── shared/          # Bottom nav, app header
+│   └── ui/              # shadcn/ui components
+├── db/
+│   ├── schema.ts        # Drizzle ORM schema (all tables)
+│   ├── index.ts         # Database connection
+│   └── seed.ts          # Seed script
+├── lib/
+│   ├── supabase/        # Supabase client (server, browser, middleware)
+│   ├── workout-parser.ts # Heuristic WOD text parser
+│   ├── plan-generator.ts # HYROX plan template engine
+│   ├── hyrox-data.ts    # Division specs, reference times
+│   └── session.ts       # Auth session helper
+└── types/
+    └── crossfit.ts      # TypeScript types for CrossFit module
+```
