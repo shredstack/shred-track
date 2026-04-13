@@ -5,6 +5,7 @@ import { ModuleNav } from "@/components/shared/module-nav";
 const hyroxNav = [
   { href: "/hyrox", label: "Dashboard" },
   { href: "/hyrox/plan", label: "Plan" },
+  { href: "/hyrox/scenarios", label: "Scenarios" },
   { href: "/hyrox/benchmarks", label: "Benchmarks" },
   { href: "/hyrox/overview", label: "Overview" },
   { href: "/hyrox/insights", label: "Insights" },

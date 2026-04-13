@@ -1,27 +1,58 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Timer, TrendingUp, Target, Zap } from "lucide-react";
+import { Timer, TrendingUp, Target, Zap, Loader2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Dashboard } from "@/components/hyrox/dashboard";
-import type { GeneratedPlan } from "@/lib/plan-generator";
+import { Badge } from "@/components/ui/badge";
+import { useActivePlan, usePlanStatus } from "@/hooks/useHyroxPlan";
+import { formatLongTime, formatTime } from "@/lib/hyrox-data";
 
 export default function HyroxPage() {
   const router = useRouter();
-  const [plan, setPlan] = useState<GeneratedPlan | null>(null);
+  const { data: plan, isLoading } = useActivePlan();
 
-  useEffect(() => {
-    const stored = localStorage.getItem("hyrox-plan");
-    if (stored) {
-      try {
-        setPlan(JSON.parse(stored));
-      } catch {
-        // ignore bad data
-      }
-    }
-  }, []);
+  // Poll status if plan is generating
+  const isGenerating =
+    plan?.generationStatus === "pending" || plan?.generationStatus === "generating";
+  const { data: statusData } = usePlanStatus(isGenerating ? plan?.id : null);
+
+  const generationStatus = statusData?.generationStatus ?? plan?.generationStatus;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  // Plan is generating — show progress
+  if (plan && (generationStatus === "pending" || generationStatus === "generating")) {
+    return (
+      <div className="flex flex-col gap-6">
+        <Card className="gradient-border overflow-visible">
+          <CardContent className="flex flex-col items-center gap-5 py-10 text-center bg-mesh rounded-xl">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/15">
+              <Loader2 className="h-8 w-8 text-primary animate-spin" />
+            </div>
+            <div>
+              <p className="text-xl font-bold tracking-tight">
+                Generating Your Plan
+              </p>
+              <p className="mt-2 max-w-xs text-sm text-muted-foreground leading-relaxed">
+                Our AI coach is building your personalized HYROX training plan.
+                This usually takes 1-5 minutes.
+              </p>
+            </div>
+            <Badge variant="secondary" className="text-xs">
+              {generationStatus === "pending" ? "Queued..." : "Building your plan..."}
+            </Badge>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   // No plan — show onboarding prompt
   if (!plan) {
@@ -35,8 +66,8 @@ export default function HyroxPage() {
             <div>
               <p className="text-xl font-bold tracking-tight">Get Your Training Plan</p>
               <p className="mt-2 max-w-xs text-sm text-muted-foreground leading-relaxed">
-                Answer a few questions and we&apos;ll generate a personalized HYROX
-                training plan tailored to your fitness level and goals.
+                Answer a few questions and our AI coach will generate a personalized
+                HYROX training plan tailored to your fitness level and goals.
               </p>
             </div>
             <Button size="lg" onClick={() => router.push("/hyrox/onboarding")} className="mt-1">
@@ -70,23 +101,62 @@ export default function HyroxPage() {
     );
   }
 
+  // Plan completed — show dashboard summary
+  const philosophy = plan.trainingPhilosophy as { summary?: string } | null;
+
   return (
     <div className="flex flex-col gap-4">
-      <Dashboard plan={plan} />
+      {/* Hero card */}
+      <Card className="gradient-border overflow-visible">
+        <CardContent className="py-8 text-center bg-mesh rounded-xl">
+          <p className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
+            {plan.title}
+          </p>
+          <p className="mt-2 text-lg font-semibold">
+            {plan.totalWeeks}-Week Training Plan
+          </p>
+          <div className="mt-3 flex items-center justify-center gap-3 text-sm text-muted-foreground">
+            <span>{plan.startDate} → {plan.endDate}</span>
+          </div>
+          {plan.generationStatus === "completed" && (
+            <Badge variant="secondary" className="mt-3 text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
+              Plan Ready
+            </Badge>
+          )}
+        </CardContent>
+      </Card>
 
-      <div className="flex justify-center pt-4">
+      {/* Quick actions */}
+      <div className="grid grid-cols-2 gap-3">
         <Button
-          variant="ghost"
-          size="sm"
-          className="text-xs text-muted-foreground"
-          onClick={() => {
-            localStorage.removeItem("hyrox-plan");
-            setPlan(null);
-          }}
+          variant="outline"
+          className="h-auto py-4 flex-col gap-1"
+          onClick={() => router.push("/hyrox/plan")}
         >
-          Reset Plan
+          <span className="text-sm font-semibold">View Plan</span>
+          <span className="text-[10px] text-muted-foreground">Weekly sessions</span>
+        </Button>
+        <Button
+          variant="outline"
+          className="h-auto py-4 flex-col gap-1"
+          onClick={() => router.push("/hyrox/scenarios")}
+        >
+          <span className="text-sm font-semibold">Race Scenarios</span>
+          <span className="text-[10px] text-muted-foreground">Split strategies</span>
         </Button>
       </div>
+
+      {/* Philosophy summary */}
+      {philosophy?.summary && (
+        <Card>
+          <CardContent className="py-4">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+              Training Philosophy
+            </p>
+            <p className="text-sm leading-relaxed">{philosophy.summary}</p>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

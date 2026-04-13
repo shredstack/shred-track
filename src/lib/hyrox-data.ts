@@ -116,6 +116,37 @@ export const DIVISIONS: Record<DivisionKey, DivisionSpec> = {
 export const DIVISION_KEYS: DivisionKey[] = ["women_open", "women_pro", "men_open", "men_pro"];
 
 // ---------------------------------------------------------------------------
+// Race-history divisions (includes doubles & relay for past-race reporting)
+// ---------------------------------------------------------------------------
+export type RaceDivisionKey =
+  | DivisionKey
+  | "mixed_doubles"
+  | "women_doubles"
+  | "men_doubles"
+  | "relay";
+
+export const RACE_DIVISION_LABELS: Record<RaceDivisionKey, string> = {
+  women_open: "Women Open",
+  women_pro: "Women Pro",
+  men_open: "Men Open",
+  men_pro: "Men Pro",
+  mixed_doubles: "Mixed Doubles",
+  women_doubles: "Women Doubles",
+  men_doubles: "Men Doubles",
+  relay: "Relay",
+};
+
+export const RACE_DIVISION_KEYS: RaceDivisionKey[] = [
+  "women_open", "women_pro", "men_open", "men_pro",
+  "mixed_doubles", "women_doubles", "men_doubles", "relay",
+];
+
+/** Whether a race division involves split station work (doubles/relay) */
+export function isTeamDivision(key: RaceDivisionKey): boolean {
+  return key === "mixed_doubles" || key === "women_doubles" || key === "men_doubles" || key === "relay";
+}
+
+// ---------------------------------------------------------------------------
 // Reference times — seconds [pro, average, slow] per station per division
 // For simplicity we provide Women Open explicitly and scale others.
 // ---------------------------------------------------------------------------

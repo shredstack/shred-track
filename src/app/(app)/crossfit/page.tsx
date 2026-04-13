@@ -1,14 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { Calendar, Plus, ClipboardPaste, Wrench, Zap } from "lucide-react";
+import { Calendar, Plus, ClipboardPaste, Wrench, Zap, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { WorkoutCard } from "@/components/crossfit/workout-card";
-import { WorkoutBuilder } from "@/components/crossfit/workout-builder";
+import { SmartBuilder } from "@/components/crossfit/smart-builder";
 import { WorkoutParser } from "@/components/crossfit/workout-parser";
+import { BenchmarkPicker } from "@/components/crossfit/benchmark-picker";
 import { ScoreEntry } from "@/components/crossfit/score-entry";
 import { DateNavigator } from "@/components/crossfit/date-navigator";
 import type {
@@ -186,11 +187,15 @@ export default function CrossfitPage() {
             <TabsList className="w-full">
               <TabsTrigger value="paste" className="flex-1 gap-1.5">
                 <ClipboardPaste className="h-3.5 w-3.5" />
-                Paste Workout
+                Paste
               </TabsTrigger>
               <TabsTrigger value="build" className="flex-1 gap-1.5">
                 <Wrench className="h-3.5 w-3.5" />
-                Build Manually
+                Smart Builder
+              </TabsTrigger>
+              <TabsTrigger value="benchmark" className="flex-1 gap-1.5">
+                <Trophy className="h-3.5 w-3.5" />
+                Benchmark
               </TabsTrigger>
             </TabsList>
             <TabsContent value="paste" className="mt-4">
@@ -200,9 +205,15 @@ export default function CrossfitPage() {
               />
             </TabsContent>
             <TabsContent value="build" className="mt-4">
-              <WorkoutBuilder
+              <SmartBuilder
                 onSave={handleSaveFromBuilder}
                 onCancel={() => setShowAddWorkout(false)}
+              />
+            </TabsContent>
+            <TabsContent value="benchmark" className="mt-4">
+              <BenchmarkPicker
+                onWorkoutCreated={() => setShowAddWorkout(false)}
+                workoutDate={dateStr}
               />
             </TabsContent>
           </Tabs>

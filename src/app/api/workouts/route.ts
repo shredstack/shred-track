@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { workouts } from "@/db/schema";
+import { workouts, benchmarkWorkouts, benchmarkWorkoutMovements, movements } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 
@@ -46,8 +46,78 @@ export async function POST(req: NextRequest) {
     communityId,
     published,
     source,
+    benchmarkWorkoutId,
     movements: movementsList,
   } = body;
+
+  // When creating from a benchmark, copy fields from the benchmark definition
+  if (benchmarkWorkoutId) {
+    const [benchmark] = await db
+      .select()
+      .from(benchmarkWorkouts)
+      .where(eq(benchmarkWorkouts.id, benchmarkWorkoutId))
+      .limit(1);
+
+    if (!benchmark) {
+      return NextResponse.json({ error: "Benchmark not found" }, { status: 404 });
+    }
+
+    // Get benchmark movements
+    const bmMovements = await db
+      .select({
+        movementId: benchmarkWorkoutMovements.movementId,
+        orderIndex: benchmarkWorkoutMovements.orderIndex,
+        prescribedReps: benchmarkWorkoutMovements.prescribedReps,
+        prescribedWeightMale: benchmarkWorkoutMovements.prescribedWeightMale,
+        prescribedWeightFemale: benchmarkWorkoutMovements.prescribedWeightFemale,
+        rxStandard: benchmarkWorkoutMovements.rxStandard,
+        notes: benchmarkWorkoutMovements.notes,
+      })
+      .from(benchmarkWorkoutMovements)
+      .where(eq(benchmarkWorkoutMovements.benchmarkWorkoutId, benchmarkWorkoutId))
+      .orderBy(benchmarkWorkoutMovements.orderIndex);
+
+    if (!workoutDate) {
+      return NextResponse.json({ error: "workoutDate is required" }, { status: 400 });
+    }
+
+    const { workoutMovements } = await import("@/db/schema");
+
+    const [workout] = await db
+      .insert(workouts)
+      .values({
+        createdBy: user.id,
+        communityId: communityId || null,
+        title: benchmark.name,
+        description: benchmark.description,
+        workoutType: benchmark.workoutType,
+        timeCapSeconds: benchmark.timeCapSeconds,
+        amrapDurationSeconds: benchmark.amrapDurationSeconds,
+        repScheme: benchmark.repScheme,
+        workoutDate,
+        published: published ?? false,
+        source: "benchmark",
+        benchmarkWorkoutId,
+      })
+      .returning();
+
+    if (bmMovements.length > 0) {
+      await db.insert(workoutMovements).values(
+        bmMovements.map((m) => ({
+          workoutId: workout.id,
+          movementId: m.movementId,
+          orderIndex: m.orderIndex,
+          prescribedReps: m.prescribedReps,
+          prescribedWeightMale: m.prescribedWeightMale,
+          prescribedWeightFemale: m.prescribedWeightFemale,
+          rxStandard: m.rxStandard,
+          notes: m.notes,
+        }))
+      );
+    }
+
+    return NextResponse.json(workout, { status: 201 });
+  }
 
   if (!workoutType || !workoutDate) {
     return NextResponse.json({ error: "workoutType and workoutDate are required" }, { status: 400 });
