@@ -96,6 +96,37 @@ export interface ParsedWorkout {
 }
 
 // ============================================
+// Benchmark Workout Types
+// ============================================
+
+export interface BenchmarkWorkout {
+  id: string;
+  name: string;
+  description: string | null;
+  workoutType: WorkoutType;
+  timeCapSeconds: number | null;
+  amrapDurationSeconds: number | null;
+  repScheme: string | null;
+  isSystem: boolean;
+  createdBy: string | null;
+  communityId: string | null;
+  movements: BenchmarkMovement[];
+}
+
+export interface BenchmarkMovement {
+  id: string;
+  movementId: string;
+  movementName: string;
+  orderIndex: number;
+  prescribedReps: string | null;
+  prescribedWeightMale: number | null;
+  prescribedWeightFemale: number | null;
+  rxStandard: string | null;
+}
+
+export type BenchmarkCategory = "system" | "custom" | "community";
+
+// ============================================
 // Workout Display Types
 // ============================================
 
@@ -125,6 +156,7 @@ export interface WorkoutDisplay {
   movements: WorkoutMovementDisplay[];
   createdBy: string;
   createdByName?: string;
+  benchmarkWorkoutId?: string | null;
   score?: ScoreDisplay | null;
 }
 
@@ -247,4 +279,5 @@ export interface MovementOption {
   is1rmApplicable: boolean;
   commonRxWeightMale?: string;
   commonRxWeightFemale?: string;
+  videoUrl?: string | null;
 }

@@ -19,23 +19,19 @@ import {
 } from "@/lib/hyrox-data";
 
 export function OverviewTab() {
-  const [useImperial, setUseImperial] = useState(false);
+  const [useMixed, setUseMixed] = useState(false);
   const [activeDivision, setActiveDivision] = useState<DivisionKey>("women_open");
 
   const division = DIVISIONS[activeDivision];
   const refs = REFERENCE_TIMES[activeDivision];
 
   const convertWeight = (kg: number): string => {
-    if (useImperial) return `${kgToLbs(kg)} lbs`;
+    if (useMixed) return `${kgToLbs(kg)} lbs`;
     return `${kg} kg`;
   };
 
   const convertDistance = (distStr: string): string => {
-    if (!useImperial) return distStr;
-    const m = parseInt(distStr);
-    if (isNaN(m)) return distStr;
-    if (m >= 1000) return `${(m * 3.28084 / 5280).toFixed(2)} mi`;
-    return `${Math.round(m * 3.28084)} ft`;
+    return distStr;
   };
 
   return (
@@ -100,10 +96,10 @@ export function OverviewTab() {
 
       {/* Unit toggle */}
       <div className="flex items-center justify-between rounded-xl bg-white/[0.03] border border-white/[0.06] px-4 py-3">
-        <Label className="text-sm">Show in imperial units</Label>
+        <Label className="text-sm">Show in mixed units (Lbs/M)</Label>
         <Switch
-          checked={useImperial}
-          onCheckedChange={(val) => setUseImperial(val as boolean)}
+          checked={useMixed}
+          onCheckedChange={(val) => setUseMixed(val as boolean)}
         />
       </div>
 
@@ -145,8 +141,8 @@ export function OverviewTab() {
                 {division.stations.map((s) => {
                   const ref = refs[s.name as keyof typeof refs];
                   const spec = s.distance
-                    ? `${convertDistance(s.distance)}${s.weightLabel ? ` @ ${useImperial && s.weightKg ? convertWeight(s.weightKg) : s.weightLabel}` : ""}`
-                    : `${s.reps} reps${s.weightLabel ? ` @ ${useImperial && s.weightKg ? convertWeight(s.weightKg) : s.weightLabel}` : ""}`;
+                    ? `${convertDistance(s.distance)}${s.weightLabel ? ` @ ${useMixed && s.weightKg ? convertWeight(s.weightKg) : s.weightLabel}` : ""}`
+                    : `${s.reps} reps${s.weightLabel ? ` @ ${useMixed && s.weightKg ? convertWeight(s.weightKg) : s.weightLabel}` : ""}`;
 
                   return (
                     <tr key={s.name} className="border-b border-white/[0.04] last:border-0">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   User,
   Flag,
@@ -11,10 +11,11 @@ import {
   ChevronLeft,
   ChevronRight,
   Sparkles,
-  CalendarIcon,
+  Settings2,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -26,42 +27,84 @@ import {
   STATION_ORDER,
   REFERENCE_TIMES,
   CONFIDENCE_LABELS,
+  RACE_DIVISION_LABELS,
+  RACE_DIVISION_KEYS,
+  isTeamDivision,
   formatTime,
   formatLongTime,
   parseTimeToSeconds,
   parseLongTimeToSeconds,
+  kgToLbs,
   type DivisionKey,
+  type RaceDivisionKey,
   type Gender,
   type StationName,
 } from "@/lib/hyrox-data";
-import { generatePlan, type OnboardingData, type GeneratedPlan } from "@/lib/plan-generator";
+import { TimeInput } from "@/components/shared/time-input";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+type EquipmentKey =
+  | "skierg"
+  | "rower"
+  | "sled"
+  | "sandbag"
+  | "wall_ball_target"
+  | "assault_bike"
+  | "farmers_handles";
+
+interface EquipmentItem {
+  key: EquipmentKey;
+  label: string;
+  description: string;
+}
+
+const EQUIPMENT_LIST: EquipmentItem[] = [
+  { key: "skierg", label: "SkiErg", description: "Concept2 SkiErg or equivalent pull-down machine" },
+  { key: "rower", label: "Rower", description: "Concept2 rower or similar rowing ergometer" },
+  { key: "sled", label: "Sled", description: "Push/pull sled with adjustable weight" },
+  { key: "sandbag", label: "Sandbag", description: "Heavy sandbag for lunges (20kg / 10kg typical)" },
+  { key: "wall_ball_target", label: "Wall Ball Target", description: "Wall ball with regulation-height target" },
+  { key: "assault_bike", label: "Assault Bike", description: "Assault/Echo bike or air resistance bike" },
+  { key: "farmers_handles", label: "Farmer's Handles", description: "Farmer's carry handles or heavy dumbbells" },
+];
+
+type TrainingPhilosophy = "conservative" | "moderate" | "aggressive";
+
 interface WizardState {
-  // Step 1
+  // Step 1 — Profile
   name: string;
   gender: Gender;
-  unit: "metric" | "imperial";
-  // Step 2
+  unit: "metric" | "mixed";
+  // Step 2 — Race Details
   raceDate: string;
   division: DivisionKey;
   noRaceYet: boolean;
-  // Step 3
+  goalFinishTime: string;
+  // Step 3 — Running Assessment
   easyPace: string;
   moderatePace: string;
   fastPace: string;
-  // Step 4
+  recent5kTime: string;
+  recent800mRepeat: string;
+  // Step 4 — HYROX Experience
   hasExperience: boolean;
   raceCount: string;
   bestTime: string;
-  bestDivision: DivisionKey;
-  // Step 5
+  bestDivision: RaceDivisionKey;
+  bestTimeNotes: string;
+  // Step 5 — Station Assessment
   stationConfidence: Record<StationName, number>;
   stationCurrentTime: Record<StationName, number>;
   stationGoalTime: Record<StationName, number>;
+  // Step 6 — Training Preferences
+  crossfitDaysPerWeek: number;
+  gymName: string;
+  equipment: Record<EquipmentKey, boolean>;
+  injuryNotes: string;
+  trainingPhilosophy: TrainingPhilosophy;
 }
 
 const STEPS = [
@@ -70,8 +113,14 @@ const STEPS = [
   { label: "Running", icon: Activity },
   { label: "Experience", icon: Trophy },
   { label: "Stations", icon: BarChart3 },
+  { label: "Preferences", icon: Settings2 },
   { label: "Summary", icon: CheckCircle2 },
 ];
+
+/** Convert a kg weight label to lbs, handling "2×16 kg" style labels */
+function convertWeightLabel(label: string): string {
+  return label.replace(/([\d.]+)\s*kg/g, (_, num) => `${kgToLbs(parseFloat(num))} lbs`);
+}
 
 function getInitialStationTimes(division: DivisionKey): {
   current: Record<StationName, number>;
@@ -87,37 +136,209 @@ function getInitialStationTimes(division: DivisionKey): {
   return { current, goal };
 }
 
+function getInitialEquipment(): Record<EquipmentKey, boolean> {
+  return Object.fromEntries(EQUIPMENT_LIST.map((e) => [e.key, false])) as Record<EquipmentKey, boolean>;
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
 interface OnboardingWizardProps {
-  onComplete: (plan: GeneratedPlan) => void;
+  onComplete: (result: { planId: string }) => void;
+}
+
+const WIZARD_STORAGE_KEY = "hyrox-onboarding-draft";
+
+function loadDraft(defaultState: WizardState, defaultStep: number): { state: WizardState; step: number } {
+  if (typeof window === "undefined") return { state: defaultState, step: defaultStep };
+  try {
+    const raw = localStorage.getItem(WIZARD_STORAGE_KEY);
+    if (!raw) return { state: defaultState, step: defaultStep };
+    const saved = JSON.parse(raw);
+    return {
+      state: { ...defaultState, ...saved.state },
+      step: saved.step ?? defaultStep,
+    };
+  } catch {
+    return { state: defaultState, step: defaultStep };
+  }
+}
+
+function saveDraft(state: WizardState, step: number) {
+  try {
+    localStorage.setItem(WIZARD_STORAGE_KEY, JSON.stringify({ state, step }));
+  } catch {
+    // localStorage full or unavailable — silently ignore
+  }
+}
+
+function clearDraft() {
+  try {
+    localStorage.removeItem(WIZARD_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
 }
 
 export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
   const defaultDivision: DivisionKey = "women_open";
   const { current: defCurrent, goal: defGoal } = getInitialStationTimes(defaultDivision);
 
-  const [step, setStep] = useState(0);
-  const [state, setState] = useState<WizardState>({
+  const defaultState: WizardState = {
     name: "",
     gender: "women",
     unit: "metric",
     raceDate: "",
     division: defaultDivision,
     noRaceYet: false,
+    goalFinishTime: "",
     easyPace: "6:00",
     moderatePace: "5:15",
     fastPace: "4:30",
+    recent5kTime: "",
+    recent800mRepeat: "",
     hasExperience: false,
     raceCount: "0",
     bestTime: "",
     bestDivision: defaultDivision,
+    bestTimeNotes: "",
     stationConfidence: Object.fromEntries(STATION_ORDER.map((s) => [s, 3])) as Record<StationName, number>,
     stationCurrentTime: defCurrent,
     stationGoalTime: defGoal,
-  });
+    crossfitDaysPerWeek: 4,
+    gymName: "",
+    equipment: getInitialEquipment(),
+    injuryNotes: "",
+    trainingPhilosophy: "moderate",
+  };
+
+  const [draft] = useState(() => loadDraft(defaultState, 0));
+  const [step, setStep] = useState(draft.step);
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [state, setState] = useState<WizardState>(draft.state);
+  const [profileLoaded, setProfileLoaded] = useState(false);
+
+  // On mount, fetch existing profile from DB and merge into wizard state.
+  // localStorage draft takes priority (user may have edited since last save),
+  // but DB values fill in any fields still at their defaults.
+  useEffect(() => {
+    let cancelled = false;
+    const hasDraft = typeof window !== "undefined" && !!localStorage.getItem(WIZARD_STORAGE_KEY);
+
+    async function loadProfile() {
+      try {
+        const res = await fetch("/api/hyrox/profile");
+        if (!res.ok || cancelled) return;
+        const profile = await res.json();
+        if (!profile || cancelled) return;
+
+        setState((prev) => {
+          // If there's a localStorage draft, only fill in fields still at defaults.
+          // Use JSON comparison so objects/arrays match by value, not reference.
+          const shouldOverride = (currentVal: unknown, defaultVal: unknown) =>
+            !hasDraft ||
+            (typeof currentVal === "object"
+              ? JSON.stringify(currentVal) === JSON.stringify(defaultVal)
+              : currentVal === defaultVal);
+
+          const patch: Partial<WizardState> = {};
+
+          // Step 1 — Profile
+          if (profile.name && shouldOverride(prev.name, defaultState.name))
+            patch.name = profile.name;
+          if (profile.gender && shouldOverride(prev.gender, defaultState.gender))
+            patch.gender = profile.gender as Gender;
+          if (profile.preferredUnits && shouldOverride(prev.unit, defaultState.unit))
+            patch.unit = profile.preferredUnits as "metric" | "mixed";
+
+          // Step 2 — Race Details
+          if (profile.targetDivision && shouldOverride(prev.division, defaultState.division))
+            patch.division = profile.targetDivision as DivisionKey;
+          if (profile.nextRaceDate && shouldOverride(prev.raceDate, defaultState.raceDate))
+            patch.raceDate = profile.nextRaceDate;
+          if (profile.goalFinishTimeSeconds && shouldOverride(prev.goalFinishTime, defaultState.goalFinishTime))
+            patch.goalFinishTime = formatLongTime(profile.goalFinishTimeSeconds);
+
+          // Step 3 — Running Assessment
+          if (profile.easyPaceSecondsPerUnit && shouldOverride(prev.easyPace, defaultState.easyPace))
+            patch.easyPace = formatTime(profile.easyPaceSecondsPerUnit);
+          if (profile.moderatePaceSecondsPerUnit && shouldOverride(prev.moderatePace, defaultState.moderatePace))
+            patch.moderatePace = formatTime(profile.moderatePaceSecondsPerUnit);
+          if (profile.fastPaceSecondsPerUnit && shouldOverride(prev.fastPace, defaultState.fastPace))
+            patch.fastPace = formatTime(profile.fastPaceSecondsPerUnit);
+          if (profile.recent5kTimeSeconds && shouldOverride(prev.recent5kTime, defaultState.recent5kTime))
+            patch.recent5kTime = formatLongTime(profile.recent5kTimeSeconds);
+          if (profile.recent800mRepeatSeconds && shouldOverride(prev.recent800mRepeat, defaultState.recent800mRepeat))
+            patch.recent800mRepeat = formatTime(profile.recent800mRepeatSeconds);
+
+          // Step 4 — HYROX Experience
+          if (profile.previousRaceCount > 0 && shouldOverride(prev.hasExperience, defaultState.hasExperience)) {
+            patch.hasExperience = true;
+            patch.raceCount = String(profile.previousRaceCount);
+          }
+          if (profile.bestFinishTimeSeconds && shouldOverride(prev.bestTime, defaultState.bestTime))
+            patch.bestTime = formatLongTime(profile.bestFinishTimeSeconds);
+          if (profile.bestDivision && shouldOverride(prev.bestDivision, defaultState.bestDivision))
+            patch.bestDivision = profile.bestDivision as RaceDivisionKey;
+          if (profile.bestTimeNotes && shouldOverride(prev.bestTimeNotes, defaultState.bestTimeNotes))
+            patch.bestTimeNotes = profile.bestTimeNotes;
+
+          // Step 5 — Station assessments
+          if (profile.assessments?.length && shouldOverride(prev.stationConfidence, defaultState.stationConfidence)) {
+            const confidence = { ...prev.stationConfidence };
+            const currentTime = { ...prev.stationCurrentTime };
+            const goalTime = { ...prev.stationGoalTime };
+            for (const a of profile.assessments) {
+              const s = a.station as StationName;
+              if (STATION_ORDER.includes(s)) {
+                confidence[s] = a.completionConfidence;
+                if (a.currentTimeSeconds) currentTime[s] = a.currentTimeSeconds;
+                if (a.goalTimeSeconds) goalTime[s] = a.goalTimeSeconds;
+              }
+            }
+            patch.stationConfidence = confidence;
+            patch.stationCurrentTime = currentTime;
+            patch.stationGoalTime = goalTime;
+          }
+
+          // Step 6 — Training Preferences
+          if (profile.crossfitDaysPerWeek != null && shouldOverride(prev.crossfitDaysPerWeek, defaultState.crossfitDaysPerWeek))
+            patch.crossfitDaysPerWeek = profile.crossfitDaysPerWeek;
+          if (profile.crossfitGymName && shouldOverride(prev.gymName, defaultState.gymName))
+            patch.gymName = profile.crossfitGymName;
+          if (profile.injuriesNotes && shouldOverride(prev.injuryNotes, defaultState.injuryNotes))
+            patch.injuryNotes = profile.injuriesNotes;
+          if (profile.trainingPhilosophy && shouldOverride(prev.trainingPhilosophy, defaultState.trainingPhilosophy))
+            patch.trainingPhilosophy = profile.trainingPhilosophy as TrainingPhilosophy;
+          if (profile.availableEquipment?.length && shouldOverride(prev.equipment, defaultState.equipment)) {
+            const eq = { ...prev.equipment };
+            for (const k of profile.availableEquipment) {
+              if (k in eq) eq[k as EquipmentKey] = true;
+            }
+            patch.equipment = eq;
+          }
+
+          if (Object.keys(patch).length === 0) return prev;
+          return { ...prev, ...patch };
+        });
+      } catch {
+        // Fetch failed — user can still fill in manually
+      } finally {
+        if (!cancelled) setProfileLoaded(true);
+      }
+    }
+
+    loadProfile();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist to localStorage whenever state or step changes
+  useEffect(() => {
+    if (profileLoaded) saveDraft(state, step);
+  }, [state, step, profileLoaded]);
 
   const set = useCallback(
     <K extends keyof WizardState>(key: K, value: WizardState[K]) => {
@@ -147,6 +368,13 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
     });
   }, []);
 
+  const toggleEquipment = useCallback((key: EquipmentKey) => {
+    setState((prev) => ({
+      ...prev,
+      equipment: { ...prev.equipment, [key]: !prev.equipment[key] },
+    }));
+  }, []);
+
   // Validation
   const canProceed = (): boolean => {
     switch (step) {
@@ -165,6 +393,8 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
       case 4:
         return true;
       case 5:
+        return true;
+      case 6:
         return true;
       default:
         return true;
@@ -193,25 +423,93 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
     return runTime + stationTime + 16 * 24;
   };
 
-  const handleGenerate = () => {
-    const onboardingData: OnboardingData = {
-      name: state.name,
-      gender: state.gender,
-      unit: state.unit,
-      division: state.division,
-      raceDate: state.noRaceYet ? null : state.raceDate,
-      easyPace: parseTimeToSeconds(state.easyPace),
-      moderatePace: parseTimeToSeconds(state.moderatePace),
-      fastPace: parseTimeToSeconds(state.fastPace),
-      hasExperience: state.hasExperience,
-      raceCount: parseInt(state.raceCount) || 0,
-      bestTime: state.bestTime ? parseLongTimeToSeconds(state.bestTime) : null,
-      stationConfidence: state.stationConfidence,
-      stationCurrentTime: state.stationCurrentTime,
-      stationGoalTime: state.stationGoalTime,
-    };
-    const plan = generatePlan(onboardingData);
-    onComplete(plan);
+  const handleGenerate = async () => {
+    setGenerating(true);
+    setError(null);
+
+    try {
+      // 1. Save profile
+      const profileBody = {
+        name: state.name || null,
+        gender: state.gender || null,
+        preferredUnits: state.unit,
+        targetDivision: state.division,
+        nextRaceDate: state.noRaceYet ? null : state.raceDate,
+        easyPaceSecondsPerUnit: parseTimeToSeconds(state.easyPace),
+        moderatePaceSecondsPerUnit: parseTimeToSeconds(state.moderatePace),
+        fastPaceSecondsPerUnit: parseTimeToSeconds(state.fastPace),
+        recent5kTimeSeconds: state.recent5kTime ? parseLongTimeToSeconds(state.recent5kTime) : null,
+        recent800mRepeatSeconds: state.recent800mRepeat ? parseTimeToSeconds(state.recent800mRepeat) : null,
+        paceUnit: "mile",
+        previousRaceCount: parseInt(state.raceCount) || 0,
+        bestFinishTimeSeconds: state.bestTime ? parseLongTimeToSeconds(state.bestTime) : null,
+        bestDivision: state.hasExperience ? state.bestDivision : null,
+        bestTimeNotes: state.bestTimeNotes || null,
+        goalFinishTimeSeconds: state.goalFinishTime ? parseLongTimeToSeconds(state.goalFinishTime) : null,
+        crossfitDaysPerWeek: state.crossfitDaysPerWeek,
+        crossfitGymName: state.gymName || null,
+        availableEquipment: Object.entries(state.equipment)
+          .filter(([, v]) => v)
+          .map(([k]) => k),
+        injuriesNotes: state.injuryNotes || null,
+        trainingPhilosophy: state.trainingPhilosophy,
+      };
+
+      // Try POST first; if profile already exists (409), fall back to PUT
+      let profileRes = await fetch("/api/hyrox/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profileBody),
+      });
+
+      if (profileRes.status === 409) {
+        profileRes = await fetch("/api/hyrox/profile", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(profileBody),
+        });
+      }
+
+      if (!profileRes.ok) {
+        const data = await profileRes.json().catch(() => null);
+        throw new Error(data?.error ?? "Failed to save profile");
+      }
+
+      const profile = await profileRes.json();
+
+      // 2. Save station assessments
+      const assessments = STATION_ORDER.map((s) => ({
+        profileId: profile.id,
+        station: s,
+        completionConfidence: state.stationConfidence[s],
+        currentTimeSeconds: state.stationCurrentTime[s],
+        goalTimeSeconds: state.stationGoalTime[s],
+      }));
+
+      await fetch("/api/hyrox/profile/assessments", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assessments }),
+      });
+
+      // 3. Generate plan
+      const res = await fetch("/api/hyrox/plan/generate", {
+        method: "POST",
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error ?? `Failed to generate plan (${res.status})`);
+      }
+
+      const { planId } = await res.json();
+      clearDraft();
+      onComplete({ planId });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    } finally {
+      setGenerating(false);
+    }
   };
 
   // ---------------------------------------------------------------------------
@@ -277,11 +575,16 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
           {step === 3 && <StepExperience state={state} set={set} />}
           {step === 4 && <StepStations state={state} setState={setState} />}
           {step === 5 && (
+            <StepPreferences state={state} set={set} toggleEquipment={toggleEquipment} />
+          )}
+          {step === 6 && (
             <StepSummary
               state={state}
               estimatedCurrent={estimatedCurrentTime()}
               estimatedGoal={estimatedGoalTime()}
               onGenerate={handleGenerate}
+              generating={generating}
+              error={error}
             />
           )}
         </CardContent>
@@ -290,7 +593,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
       {/* Navigation */}
       <div className="flex gap-3">
         {step > 0 && (
-          <Button variant="outline" onClick={prev} className="flex-1">
+          <Button variant="outline" onClick={prev} disabled={generating} className="flex-1">
             <ChevronLeft className="mr-1 h-4 w-4" />
             Back
           </Button>
@@ -356,14 +659,14 @@ function StepProfile({
       <div className="space-y-2">
         <Label>Units</Label>
         <div className="flex gap-2">
-          {(["metric", "imperial"] as const).map((u) => (
+          {(["metric", "mixed"] as const).map((u) => (
             <Button
               key={u}
               variant={state.unit === u ? "default" : "outline"}
               onClick={() => set("unit", u)}
               className="flex-1 capitalize"
             >
-              {u === "metric" ? "Metric (kg/m)" : "Imperial (lbs/ft)"}
+              {u === "metric" ? "Metric (Kg/M)" : "Mixed (Lbs/M)"}
             </Button>
           ))}
         </div>
@@ -434,19 +737,37 @@ function StepRace({
         </div>
       </div>
 
+      {/* Goal finish time */}
+      <div className="space-y-1.5">
+        <Label>Goal Finish Time</Label>
+        <p className="text-xs text-muted-foreground">
+          Your target race finish time. This helps the AI calibrate training intensity and progression.
+        </p>
+        <TimeInput
+          mode="hms"
+          value={state.goalFinishTime}
+          onChange={(val) => set("goalFinishTime", val)}
+        />
+      </div>
+
       {/* Station specs for selected division */}
       <div className="space-y-2">
         <Label>Station Specs — {divisionSpecs.label}</Label>
         <div className="space-y-1.5 rounded-lg bg-muted/50 p-3">
-          {divisionSpecs.stations.map((s) => (
-            <div key={s.name} className="flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">{s.shortName}</span>
-              <span className="font-mono">
-                {s.distance ?? `${s.reps} reps`}
-                {s.weightLabel ? ` @ ${s.weightLabel}` : ""}
-              </span>
-            </div>
-          ))}
+          {divisionSpecs.stations.map((s) => {
+            const weight = s.weightLabel && state.unit === "mixed"
+              ? convertWeightLabel(s.weightLabel)
+              : s.weightLabel;
+            return (
+              <div key={s.name} className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">{s.shortName}</span>
+                <span className="font-mono">
+                  {s.distance ?? `${s.reps} reps`}
+                  {weight ? ` @ ${weight}` : ""}
+                </span>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -487,11 +808,10 @@ function StepRunning({
         <div key={key} className="space-y-1.5">
           <Label>{label}</Label>
           <p className="text-xs text-muted-foreground">{hint}</p>
-          <Input
-            placeholder="M:SS"
+          <TimeInput
+            mode="ms"
             value={state[key]}
-            onChange={(e) => set(key, e.target.value)}
-            className="font-mono"
+            onChange={(val) => set(key, val)}
           />
         </div>
       ))}
@@ -504,6 +824,31 @@ function StepRunning({
       {valid && orderOk && (
         <p className="text-xs text-green-500">Paces look good.</p>
       )}
+
+      {/* Optional race times */}
+      <div className="space-y-4 rounded-lg bg-muted/30 p-4">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Optional</p>
+
+        <div className="space-y-1.5">
+          <Label>Recent 5K Time</Label>
+          <p className="text-xs text-muted-foreground">Your most recent 5K run time</p>
+          <TimeInput
+            mode="ms"
+            value={state.recent5kTime}
+            onChange={(val) => set("recent5kTime", val)}
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Recent 800m Repeat Time</Label>
+          <p className="text-xs text-muted-foreground">Your average 800m interval time</p>
+          <TimeInput
+            mode="ms"
+            value={state.recent800mRepeat}
+            onChange={(val) => set("recent800mRepeat", val)}
+          />
+        </div>
+      </div>
     </div>
   );
 }
@@ -547,29 +892,49 @@ function StepExperience({
             />
           </div>
           <div className="space-y-1.5">
-            <Label>Best finish time (HH:MM:SS)</Label>
-            <Input
-              placeholder="1:30:00"
+            <Label>Best finish time</Label>
+            <TimeInput
+              mode="hms"
               value={state.bestTime}
-              onChange={(e) => set("bestTime", e.target.value)}
-              className="font-mono"
+              onChange={(val) => set("bestTime", val)}
             />
           </div>
           <div className="space-y-1.5">
             <Label>Division raced</Label>
-            <div className="flex gap-2">
-              {DIVISION_KEYS.map((d) => (
+            <div className="grid grid-cols-2 gap-1.5">
+              {RACE_DIVISION_KEYS.map((d) => (
                 <Button
                   key={d}
                   variant={state.bestDivision === d ? "default" : "outline"}
                   onClick={() => set("bestDivision", d)}
                   size="sm"
-                  className="flex-1 text-xs"
+                  className="text-xs"
                 >
-                  {DIVISIONS[d].label}
+                  {RACE_DIVISION_LABELS[d]}
                 </Button>
               ))}
             </div>
+            {isTeamDivision(state.bestDivision) && (
+              <div className="rounded-md border border-primary/20 bg-primary/5 p-2.5 text-xs text-muted-foreground">
+                <strong className="text-foreground">Note:</strong> Since you split station work with a
+                partner/team, the AI will adjust its assessment of your individual station capabilities.
+                Your run segments are still considered individual effort.
+              </div>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="best-time-notes">Race notes (optional)</Label>
+            <p className="text-xs text-muted-foreground">
+              Anything the AI should know about this race?
+            </p>
+            <textarea
+              id="best-time-notes"
+              placeholder="e.g., Partner was slower on runs, I bonked at station 6, sled track was wet..."
+              value={state.bestTimeNotes}
+              onChange={(e) => set("bestTimeNotes", e.target.value)}
+              rows={2}
+              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            />
           </div>
         </div>
       )}
@@ -646,7 +1011,7 @@ function StepStations({
           <h3 className="font-semibold">{station}</h3>
           <p className="text-xs text-muted-foreground">
             {divSpec.distance ?? `${divSpec.reps} reps`}
-            {divSpec.weightLabel ? ` @ ${divSpec.weightLabel}` : ""}
+            {divSpec.weightLabel ? ` @ ${state.unit === "mixed" ? convertWeightLabel(divSpec.weightLabel) : divSpec.weightLabel}` : ""}
           </p>
           <div className="mt-1 flex gap-2 text-[10px] text-muted-foreground">
             <span>Pro: {formatTime(refs[0])}</span>
@@ -744,7 +1109,133 @@ function StepStations({
 }
 
 // ---------------------------------------------------------------------------
-// Step 6 — Summary
+// Step 6 — Training Preferences (combines preferences + equipment)
+// ---------------------------------------------------------------------------
+
+function StepPreferences({
+  state,
+  set,
+  toggleEquipment,
+}: {
+  state: WizardState;
+  set: <K extends keyof WizardState>(k: K, v: WizardState[K]) => void;
+  toggleEquipment: (key: EquipmentKey) => void;
+}) {
+  const philosophyOptions: { value: TrainingPhilosophy; label: string; hint: string }[] = [
+    { value: "conservative", label: "Conservative", hint: "Gradual progression, lower injury risk" },
+    { value: "moderate", label: "Moderate", hint: "Balanced intensity and recovery" },
+    { value: "aggressive", label: "Aggressive", hint: "Push hard, faster results" },
+  ];
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-lg font-semibold">Training Preferences</h2>
+        <p className="text-sm text-muted-foreground">
+          Help us tailor your plan to your schedule, gym, and goals.
+        </p>
+      </div>
+
+      {/* CrossFit days per week */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Label>CrossFit Days / Week</Label>
+          <Badge variant="secondary" className="font-mono">
+            {state.crossfitDaysPerWeek}
+          </Badge>
+        </div>
+        <Slider
+          min={3}
+          max={6}
+          step={1}
+          value={[state.crossfitDaysPerWeek]}
+          onValueChange={(val) => set("crossfitDaysPerWeek", Array.isArray(val) ? val[0] : val)}
+        />
+        <div className="flex justify-between text-[10px] text-muted-foreground">
+          <span>3 days</span>
+          <span>6 days</span>
+        </div>
+      </div>
+
+      {/* Gym name */}
+      <div className="space-y-1.5">
+        <Label htmlFor="gym-name">Gym Name</Label>
+        <Input
+          id="gym-name"
+          placeholder="e.g., CrossFit Central"
+          value={state.gymName}
+          onChange={(e) => set("gymName", e.target.value)}
+        />
+      </div>
+
+      {/* Equipment availability */}
+      <div className="space-y-2">
+        <Label>Equipment Availability</Label>
+        <p className="text-xs text-muted-foreground">
+          Check the equipment you have access to at your gym or home.
+        </p>
+        <div className="space-y-2 rounded-lg bg-muted/30 p-3">
+          {EQUIPMENT_LIST.map((item) => (
+            <label
+              key={item.key}
+              className="flex items-start gap-3 cursor-pointer rounded-md p-2 transition-colors hover:bg-muted/50"
+            >
+              <Switch
+                checked={state.equipment[item.key]}
+                onCheckedChange={() => toggleEquipment(item.key)}
+                className="mt-0.5"
+              />
+              <div className="flex-1 min-w-0">
+                <span className="text-sm font-medium">{item.label}</span>
+                <p className="text-xs text-muted-foreground">{item.description}</p>
+              </div>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Injury notes */}
+      <div className="space-y-1.5">
+        <Label htmlFor="injury-notes">Injury Notes</Label>
+        <p className="text-xs text-muted-foreground">
+          Any current injuries, limitations, or areas to be careful with.
+        </p>
+        <textarea
+          id="injury-notes"
+          placeholder="e.g., Recovering from a mild knee sprain, avoid heavy lunges..."
+          value={state.injuryNotes}
+          onChange={(e) => set("injuryNotes", e.target.value)}
+          rows={3}
+          className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        />
+      </div>
+
+      {/* Training philosophy */}
+      <div className="space-y-2">
+        <Label>Training Philosophy</Label>
+        <div className="space-y-1.5">
+          {philosophyOptions.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => set("trainingPhilosophy", opt.value)}
+              className={`w-full rounded-lg p-3 text-left transition-colors ${
+                state.trainingPhilosophy === opt.value
+                  ? "bg-primary/15 ring-2 ring-primary/40"
+                  : "bg-muted/30 hover:bg-muted/50"
+              }`}
+            >
+              <span className="text-sm font-medium">{opt.label}</span>
+              <p className="text-xs text-muted-foreground">{opt.hint}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Step 7 — Summary
 // ---------------------------------------------------------------------------
 
 function StepSummary({
@@ -752,24 +1243,29 @@ function StepSummary({
   estimatedCurrent,
   estimatedGoal,
   onGenerate,
+  generating,
+  error,
 }: {
   state: WizardState;
   estimatedCurrent: number;
   estimatedGoal: number;
   onGenerate: () => void;
+  generating: boolean;
+  error: string | null;
 }) {
   const weeks = state.noRaceYet
     ? 12
     : Math.max(4, Math.min(16, Math.ceil((new Date(state.raceDate).getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000))));
 
   const improvement = estimatedCurrent - estimatedGoal;
+  const availableEquipment = EQUIPMENT_LIST.filter((e) => state.equipment[e.key]);
 
   return (
     <div className="space-y-5">
       <div>
         <h2 className="text-lg font-semibold">Your Plan Summary</h2>
         <p className="text-sm text-muted-foreground">
-          Here is what we have calculated based on your inputs.
+          Review your inputs below. AI will generate your personalized training plan.
         </p>
       </div>
 
@@ -780,7 +1276,9 @@ function StepSummary({
         </div>
         <div className="rounded-lg bg-green-500/10 p-3 text-center">
           <p className="text-xs text-green-400">Goal Time</p>
-          <p className="text-xl font-bold font-mono text-green-400">{formatLongTime(estimatedGoal)}</p>
+          <p className="text-xl font-bold font-mono text-green-400">
+            {state.goalFinishTime ? state.goalFinishTime : formatLongTime(estimatedGoal)}
+          </p>
         </div>
       </div>
 
@@ -798,10 +1296,34 @@ function StepSummary({
           <span className="font-medium text-green-400">-{formatTime(improvement)}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-muted-foreground">Sessions / Week</span>
-          <span className="font-medium">6 (3 runs + 2 stations + 1 class)</span>
+          <span className="text-muted-foreground">CrossFit Days / Week</span>
+          <span className="font-medium">{state.crossfitDaysPerWeek}</span>
         </div>
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Philosophy</span>
+          <span className="font-medium capitalize">{state.trainingPhilosophy}</span>
+        </div>
+        {state.gymName && (
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Gym</span>
+            <span className="font-medium">{state.gymName}</span>
+          </div>
+        )}
       </div>
+
+      {/* Equipment summary */}
+      {availableEquipment.length > 0 && (
+        <div className="space-y-2">
+          <Label>Available Equipment</Label>
+          <div className="flex flex-wrap gap-1.5">
+            {availableEquipment.map((e) => (
+              <Badge key={e.key} variant="secondary" className="text-xs">
+                {e.label}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Station breakdown */}
       <div className="space-y-2">
@@ -820,9 +1342,33 @@ function StepSummary({
         </div>
       </div>
 
-      <Button onClick={onGenerate} className="w-full" size="lg">
-        <Sparkles className="mr-2 h-4 w-4" />
-        Generate My Plan
+      {/* AI generation notice */}
+      <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-center">
+        <Sparkles className="mx-auto mb-1.5 h-5 w-5 text-primary" />
+        <p className="text-sm font-medium">AI-Powered Plan Generation</p>
+        <p className="text-xs text-muted-foreground">
+          Your personalized training plan will be generated using AI based on all the data you provided.
+        </p>
+      </div>
+
+      {error && (
+        <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-3 text-center">
+          <p className="text-sm text-destructive">{error}</p>
+        </div>
+      )}
+
+      <Button onClick={onGenerate} disabled={generating} className="w-full" size="lg">
+        {generating ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Generating Your Plan...
+          </>
+        ) : (
+          <>
+            <Sparkles className="mr-2 h-4 w-4" />
+            Generate My Plan
+          </>
+        )}
       </Button>
     </div>
   );

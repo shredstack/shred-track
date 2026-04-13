@@ -19,7 +19,7 @@ import {
 export interface OnboardingData {
   name: string;
   gender: "women" | "men";
-  unit: "metric" | "imperial";
+  unit: "metric" | "mixed";
   division: DivisionKey;
   raceDate: string | null; // ISO date or null
   easyPace: number;   // seconds per km
