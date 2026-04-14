@@ -1,11 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Timer, TrendingUp, Target, Zap, Loader2 } from "lucide-react";
+import { Timer, TrendingUp, Target, Zap, Loader2, ChevronDown, ChevronUp, Archive } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useActivePlan, usePlanStatus } from "@/hooks/useHyroxPlan";
+import { useActivePlan, usePlanStatus, usePlanHistory } from "@/hooks/useHyroxPlan";
 import { formatLongTime, formatTime } from "@/lib/hyrox-data";
 
 export default function HyroxPage() {
@@ -42,7 +43,7 @@ export default function HyroxPage() {
               </p>
               <p className="mt-2 max-w-xs text-sm text-muted-foreground leading-relaxed">
                 Our AI coach is building your personalized HYROX training plan.
-                This usually takes 1-5 minutes.
+                This usually takes 10-20 minutes.
               </p>
             </div>
             <Badge variant="secondary" className="text-xs">
@@ -146,6 +147,20 @@ export default function HyroxPage() {
         </Button>
       </div>
 
+      {/* New plan action */}
+      <Button
+        variant="ghost"
+        className="w-full h-auto py-3 flex-col gap-0.5 text-muted-foreground"
+        onClick={() => {
+          if (confirm("This will archive your current plan and start fresh. Continue?")) {
+            router.push("/hyrox/onboarding");
+          }
+        }}
+      >
+        <span className="text-xs font-medium">New Race? Update your plan</span>
+        <span className="text-[10px]">Update profile &amp; generate a new training plan</span>
+      </Button>
+
       {/* Philosophy summary */}
       {philosophy?.summary && (
         <Card>
@@ -157,6 +172,85 @@ export default function HyroxPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Plan history */}
+      <PlanHistorySection activePlanId={plan.id} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Plan history section
+// ---------------------------------------------------------------------------
+
+function PlanHistorySection({ activePlanId }: { activePlanId: string }) {
+  const router = useRouter();
+  const [expanded, setExpanded] = useState(false);
+  const { data: plans } = usePlanHistory(expanded);
+
+  const archivedPlans = plans?.filter(
+    (p) => p.id !== activePlanId && p.status === "archived" && p.generationStatus === "completed"
+  );
+
+  if (!expanded) {
+    return (
+      <button
+        onClick={() => setExpanded(true)}
+        className="flex items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <Archive className="h-3 w-3" />
+        View past plans
+        <ChevronDown className="h-3 w-3" />
+      </button>
+    );
+  }
+
+  if (!archivedPlans || archivedPlans.length === 0) {
+    return (
+      <div className="text-center">
+        <button
+          onClick={() => setExpanded(false)}
+          className="flex items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors mx-auto"
+        >
+          <Archive className="h-3 w-3" />
+          Past plans
+          <ChevronUp className="h-3 w-3" />
+        </button>
+        <p className="text-xs text-muted-foreground py-2">No past plans yet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        onClick={() => setExpanded(false)}
+        className="flex items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <Archive className="h-3 w-3" />
+        Past plans
+        <ChevronUp className="h-3 w-3" />
+      </button>
+      {archivedPlans.map((p) => (
+        <Card key={p.id}>
+          <CardContent className="flex items-center justify-between py-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">{p.title}</p>
+              <p className="text-[10px] text-muted-foreground">
+                {p.totalWeeks} weeks &middot; {p.startDate} → {p.endDate}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0 text-xs h-7"
+              onClick={() => router.push(`/hyrox/plan?planId=${p.id}`)}
+            >
+              View
+            </Button>
+          </CardContent>
+        </Card>
+      ))}
     </div>
   );
 }

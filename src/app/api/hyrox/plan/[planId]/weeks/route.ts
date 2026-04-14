@@ -4,6 +4,7 @@ import {
   hyroxTrainingPlans,
   hyroxPlanSessions,
   hyroxPlanPhases,
+  hyroxSessionLogs,
 } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
@@ -34,8 +35,8 @@ export async function GET(
     return NextResponse.json({ error: "Plan not found" }, { status: 404 });
   }
 
-  // Fetch phases and sessions
-  const [phases, sessions] = await Promise.all([
+  // Fetch phases, sessions, and session logs
+  const [phases, sessions, logs] = await Promise.all([
     db
       .select()
       .from(hyroxPlanPhases)
@@ -50,27 +51,56 @@ export async function GET(
         hyroxPlanSessions.dayOfWeek,
         hyroxPlanSessions.orderInDay
       ),
+    db
+      .select()
+      .from(hyroxSessionLogs)
+      .where(eq(hyroxSessionLogs.userId, user.id)),
   ]);
 
-  // Group sessions by week
+  // Index logs by planSessionId for fast lookup
+  const logsBySessionId = new Map(
+    logs
+      .filter((l) => sessions.some((s) => s.id === l.planSessionId))
+      .map((l) => [l.planSessionId, l])
+  );
+
+  // Group sessions by week, attach logs
   const weekMap: Record<
     number,
     {
       weekNumber: number;
       phase: (typeof phases)[number] | null;
-      sessions: (typeof sessions)[number][];
+      sessions: (typeof sessions[number] & { log: (typeof logs)[number] | null })[];
+      completionStatus: { logged: number; total: number; complete: boolean };
     }
   > = {};
 
   for (let w = 1; w <= plan.totalWeeks; w++) {
     const phase = phases.find((p) => w >= p.startWeek && w <= p.endWeek) ?? null;
-    weekMap[w] = { weekNumber: w, phase, sessions: [] };
+    weekMap[w] = {
+      weekNumber: w,
+      phase,
+      sessions: [],
+      completionStatus: { logged: 0, total: 0, complete: false },
+    };
   }
 
   for (const session of sessions) {
     if (weekMap[session.week]) {
-      weekMap[session.week].sessions.push(session);
+      const log = logsBySessionId.get(session.id) ?? null;
+      weekMap[session.week].sessions.push({ ...session, log });
     }
+  }
+
+  // Compute completion stats per week
+  for (const week of Object.values(weekMap)) {
+    const nonRest = week.sessions.filter((s) => s.sessionType !== "rest");
+    const logged = nonRest.filter((s) => s.log !== null).length;
+    week.completionStatus = {
+      logged,
+      total: nonRest.length,
+      complete: nonRest.length > 0 && logged >= nonRest.length,
+    };
   }
 
   return NextResponse.json({

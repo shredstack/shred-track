@@ -1,11 +1,16 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
+import { useState } from "react";
+import { Loader2, BarChart3, Calculator } from "lucide-react";
 import { useActivePlan } from "@/hooks/useHyroxPlan";
 import { ScenariosTab } from "@/components/hyrox/scenarios-tab";
+import { RaceCalculator } from "@/components/hyrox/race-calculator";
+
+type Tab = "scenarios" | "calculator";
 
 export default function HyroxScenariosPage() {
   const { data: plan, isLoading } = useActivePlan();
+  const [activeTab, setActiveTab] = useState<Tab>("scenarios");
 
   if (isLoading) {
     return (
@@ -27,5 +32,40 @@ export default function HyroxScenariosPage() {
     );
   }
 
-  return <ScenariosTab planId={plan.id} />;
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Top-level tab switcher */}
+      <div className="flex rounded-lg bg-white/[0.03] p-1 gap-1">
+        <button
+          onClick={() => setActiveTab("scenarios")}
+          className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium transition-all duration-200 ${
+            activeTab === "scenarios"
+              ? "bg-primary/15 text-primary glow-primary-sm"
+              : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground"
+          }`}
+        >
+          <BarChart3 className="h-3.5 w-3.5" />
+          Scenarios
+        </button>
+        <button
+          onClick={() => setActiveTab("calculator")}
+          className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium transition-all duration-200 ${
+            activeTab === "calculator"
+              ? "bg-primary/15 text-primary glow-primary-sm"
+              : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground"
+          }`}
+        >
+          <Calculator className="h-3.5 w-3.5" />
+          Race Calculator
+        </button>
+      </div>
+
+      {/* Tab content */}
+      {activeTab === "scenarios" ? (
+        <ScenariosTab planId={plan.id} />
+      ) : (
+        <RaceCalculator planId={plan.id} />
+      )}
+    </div>
+  );
 }

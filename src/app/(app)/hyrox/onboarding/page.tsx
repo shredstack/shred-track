@@ -36,7 +36,7 @@ export default function HyroxOnboardingPage() {
             phased periodization, weekly sessions, and race-day scenarios.
           </p>
           <p className="mt-4 text-xs text-muted-foreground">
-            This usually takes 1-5 minutes...
+            This usually takes 10-20 minutes...
           </p>
         </div>
       </div>

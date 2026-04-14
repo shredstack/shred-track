@@ -1,12 +1,21 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { Loader2, AlertTriangle } from "lucide-react";
 import { useActivePlan, useGeneratePlan } from "@/hooks/useHyroxPlan";
 import { PlanViewV2 } from "@/components/hyrox/plan-view-v2";
 
 export default function HyroxPlanPage() {
+  const searchParams = useSearchParams();
+  const overridePlanId = searchParams.get("planId");
+
   const { data: plan, isLoading } = useActivePlan();
   const generatePlan = useGeneratePlan();
+
+  // If a specific planId is in the URL, show that plan (read-only for archived)
+  if (overridePlanId) {
+    return <PlanViewV2 planId={overridePlanId} isReadOnly />;
+  }
 
   if (isLoading) {
     return (
@@ -50,7 +59,7 @@ export default function HyroxPlanPage() {
         </p>
         <p className="max-w-xs text-sm text-muted-foreground leading-relaxed">
           {plan?.generationStatus === "generating" || plan?.generationStatus === "pending"
-            ? "Your plan is being generated. This usually takes a minute or two."
+            ? "Your plan is being generated. This usually takes 10-20 minutes."
             : "Complete the HYROX onboarding to generate your personalized training plan."}
         </p>
         {(plan?.generationStatus === "generating" || plan?.generationStatus === "pending") && (

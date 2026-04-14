@@ -328,8 +328,16 @@ export const hyroxSessionLogs = pgTable(
     userId: uuid("user_id").notNull().references(() => users.id),
     status: text("status").notNull(), // 'completed' | 'skipped' | 'modified'
     actualPace: text("actual_pace"),
+    actualPaceUnit: text("actual_pace_unit"), // 'mi' | 'km'
     actualTimeSeconds: integer("actual_time_seconds"),
     actualReps: integer("actual_reps"),
+    actualDistance: text("actual_distance"),
+    actualDistanceValue: numeric("actual_distance_value", { precision: 8, scale: 2 }),
+    actualDistanceUnit: text("actual_distance_unit"), // 'mi' | 'km'
+    actualWeight: text("actual_weight"),
+    actualWeightValue: numeric("actual_weight_value", { precision: 8, scale: 2 }),
+    actualWeightUnit: text("actual_weight_unit"), // 'kg' | 'lb'
+    movementResults: jsonb("movement_results"), // MovementResult[]
     rpe: integer("rpe"),
     notes: text("notes"),
     loggedAt: timestamp("logged_at", { withTimezone: true }).defaultNow().notNull(),
