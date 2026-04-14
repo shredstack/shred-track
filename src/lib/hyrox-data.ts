@@ -4,7 +4,37 @@
 
 export type Gender = "women" | "men";
 export type Tier = "open" | "pro";
-export type DivisionKey = `${Gender}_${Tier}`;
+
+// Original 4 singles division keys
+export type SinglesDivisionKey = `${Gender}_${Tier}`;
+
+// All division keys in the app
+export type DivisionKey =
+  | SinglesDivisionKey
+  // Elite 15
+  | "elite_15_women" | "elite_15_men"
+  // Doubles
+  | "doubles_women_open" | "doubles_men_open" | "doubles_mixed_open"
+  | "doubles_women_pro" | "doubles_men_pro" | "doubles_mixed_pro"
+  // Elite 15 Doubles
+  | "elite_15_doubles_women" | "elite_15_doubles_men" | "elite_15_doubles_mixed"
+  // Relay
+  | "relay_women" | "relay_men" | "relay_mixed"
+  // Corporate Relay
+  | "corporate_relay_women" | "corporate_relay_men" | "corporate_relay_mixed"
+  // Company Challenge
+  | "company_challenge_women" | "company_challenge_men" | "company_challenge_mixed"
+  // Adaptive
+  | "adaptive_women" | "adaptive_men"
+  // Youngstars
+  | "youngstars_8_9_women" | "youngstars_8_9_men"
+  | "youngstars_10_11_women" | "youngstars_10_11_men"
+  | "youngstars_12_13_women" | "youngstars_12_13_men"
+  | "youngstars_14_15_women" | "youngstars_14_15_men";
+
+export type DivisionCategory =
+  | "single" | "elite" | "double" | "relay"
+  | "corporate_relay" | "adaptive" | "youngstars";
 
 export interface StationSpec {
   name: string;
@@ -18,9 +48,14 @@ export interface StationSpec {
 
 export interface DivisionSpec {
   label: string;
-  gender: Gender;
-  tier: Tier;
+  category: DivisionCategory;
+  athletes: number;           // 1 for singles, 2 for doubles, 4 for relay
+  formatDescription: string;  // Brief description of the format
   stations: StationSpec[];
+  /** Number of run segments (8 for adults, 2-3 for younger Youngstars) */
+  runSegments: number;
+  /** Run distance per segment in meters */
+  runDistanceM: number;
 }
 
 export interface ReferenceTimes {
@@ -29,7 +64,7 @@ export interface ReferenceTimes {
 }
 
 // ---------------------------------------------------------------------------
-// Station order (same for every division — only weights change)
+// Station order (standard adult format — only weights change)
 // ---------------------------------------------------------------------------
 export const STATION_ORDER = [
   "SkiErg",
@@ -44,79 +79,459 @@ export const STATION_ORDER = [
 
 export type StationName = (typeof STATION_ORDER)[number];
 
+// Youngstars have different station names for some age groups
+export const YOUNGSTARS_STATION_ORDER_8_9 = [
+  "SkiErg", "Sled Push", "Sled Drag", "Frogger Jumps",
+  "Rowing", "Farmers Carry", "Lunges", "Wall Ball Squats",
+] as const;
+
+export const YOUNGSTARS_STATION_ORDER_10_11 = [
+  "SkiErg", "Sled Push", "Sled Drag", "Broad Jump Burpees",
+  "Rowing", "Farmers Carry", "Lunges", "Wall Ball Squats",
+] as const;
+
+export const YOUNGSTARS_STATION_ORDER_12_13 = [
+  "SkiErg", "Sled Push", "Sled Pull", "Broad Jump Burpees",
+  "Rowing", "Farmers Carry", "Sandbag Lunges", "Wall Balls",
+] as const;
+
+export const YOUNGSTARS_STATION_ORDER_14_15 = [
+  "SkiErg", "Sled Push", "Sled Pull", "Broad Jump Burpees",
+  "Rowing", "Farmers Carry", "Sandbag Lunges", "Wall Balls",
+] as const;
+
 // ---------------------------------------------------------------------------
-// Helper to build a full division spec
+// Helper to build a full station spec
 // ---------------------------------------------------------------------------
 function mkStation(
-  name: StationName,
+  name: string,
   opts: Partial<Pick<StationSpec, "distance" | "reps" | "weightKg" | "weightLabel">>
 ): StationSpec {
-  const shortNames: Record<StationName, string> = {
+  const shortNames: Record<string, string> = {
     SkiErg: "SkiErg",
     "Sled Push": "Sled Push",
     "Sled Pull": "Sled Pull",
+    "Sled Drag": "Sled Drag",
     "Broad Jump Burpees": "BBJ",
+    "Frogger Jumps": "Frogger",
     Rowing: "Row",
     "Farmers Carry": "Farmers",
     "Sandbag Lunges": "Lunges",
+    Lunges: "Lunges",
     "Wall Balls": "Wall Balls",
+    "Wall Ball Squats": "WB Squats",
   };
-  const icons: Record<StationName, string> = {
+  const icons: Record<string, string> = {
     SkiErg: "wind",
     "Sled Push": "move-horizontal",
     "Sled Pull": "cable",
+    "Sled Drag": "cable",
     "Broad Jump Burpees": "arrow-up",
+    "Frogger Jumps": "arrow-up",
     Rowing: "waves",
     "Farmers Carry": "dumbbell",
     "Sandbag Lunges": "footprints",
+    Lunges: "footprints",
     "Wall Balls": "circle-dot",
+    "Wall Ball Squats": "circle-dot",
   };
-  return { name, shortName: shortNames[name], icon: icons[name], ...opts };
-}
-
-// ---------------------------------------------------------------------------
-// Division definitions
-// ---------------------------------------------------------------------------
-function buildDivision(
-  gender: Gender,
-  tier: Tier,
-  weights: {
-    sledPush: number;
-    sledPull: number;
-    farmersEach: number;
-    sandbag: number;
-    wallBall: number;
-  }
-): DivisionSpec {
-  const label = `${gender === "women" ? "Women" : "Men"} ${tier === "open" ? "Open" : "Pro"}`;
   return {
-    label,
-    gender,
-    tier,
-    stations: [
-      mkStation("SkiErg", { distance: "1000m" }),
-      mkStation("Sled Push", { distance: "50m", weightKg: weights.sledPush, weightLabel: `${weights.sledPush} kg` }),
-      mkStation("Sled Pull", { distance: "50m", weightKg: weights.sledPull, weightLabel: `${weights.sledPull} kg` }),
-      mkStation("Broad Jump Burpees", { distance: "80m" }),
-      mkStation("Rowing", { distance: "1000m" }),
-      mkStation("Farmers Carry", { distance: "200m", weightKg: weights.farmersEach * 2, weightLabel: `2×${weights.farmersEach} kg` }),
-      mkStation("Sandbag Lunges", { distance: "100m", weightKg: weights.sandbag, weightLabel: `${weights.sandbag} kg` }),
-      mkStation("Wall Balls", { reps: 100, weightKg: weights.wallBall, weightLabel: `${weights.wallBall} kg` }),
-    ],
+    name,
+    shortName: shortNames[name] ?? name,
+    icon: icons[name] ?? "circle",
+    ...opts,
   };
 }
 
+// ---------------------------------------------------------------------------
+// Standard adult stations builder (same 8 stations, different weights)
+// ---------------------------------------------------------------------------
+function buildAdultStations(weights: {
+  sledPush: number;
+  sledPull: number;
+  farmersEach: number;
+  sandbag: number;
+  wallBall: number;
+}): StationSpec[] {
+  return [
+    mkStation("SkiErg", { distance: "1000m" }),
+    mkStation("Sled Push", { distance: "50m", weightKg: weights.sledPush, weightLabel: `${weights.sledPush} kg` }),
+    mkStation("Sled Pull", { distance: "50m", weightKg: weights.sledPull, weightLabel: `${weights.sledPull} kg` }),
+    mkStation("Broad Jump Burpees", { distance: "80m" }),
+    mkStation("Rowing", { distance: "1000m" }),
+    mkStation("Farmers Carry", { distance: "200m", weightKg: weights.farmersEach * 2, weightLabel: `2×${weights.farmersEach} kg` }),
+    mkStation("Sandbag Lunges", { distance: "100m", weightKg: weights.sandbag, weightLabel: `${weights.sandbag} kg` }),
+    mkStation("Wall Balls", { reps: 100, weightKg: weights.wallBall, weightLabel: `${weights.wallBall} kg` }),
+  ];
+}
+
+// Weight presets
+const OPEN_WOMEN_WEIGHTS  = { sledPush: 102, sledPull: 78,  farmersEach: 16, sandbag: 10, wallBall: 4 };
+const OPEN_MEN_WEIGHTS    = { sledPush: 152, sledPull: 103, farmersEach: 24, sandbag: 20, wallBall: 6 };
+const PRO_WOMEN_WEIGHTS   = { sledPush: 152, sledPull: 103, farmersEach: 24, sandbag: 20, wallBall: 6 };
+const PRO_MEN_WEIGHTS     = { sledPush: 202, sledPull: 153, farmersEach: 32, sandbag: 30, wallBall: 9 };
+
+// ---------------------------------------------------------------------------
+// Division definitions — ALL divisions
+// ---------------------------------------------------------------------------
 export const DIVISIONS: Record<DivisionKey, DivisionSpec> = {
-  women_open: buildDivision("women", "open", { sledPush: 102, sledPull: 78, farmersEach: 16, sandbag: 10, wallBall: 4 }),
-  women_pro: buildDivision("women", "pro", { sledPush: 152, sledPull: 103, farmersEach: 24, sandbag: 20, wallBall: 6 }),
-  men_open: buildDivision("men", "open", { sledPush: 152, sledPull: 103, farmersEach: 24, sandbag: 20, wallBall: 6 }),
-  men_pro: buildDivision("men", "pro", { sledPush: 202, sledPull: 153, farmersEach: 32, sandbag: 30, wallBall: 9 }),
+  // === Singles ===
+  women_open: {
+    label: "Women Open", category: "single", athletes: 1,
+    formatDescription: "8 × (1 km run + station)",
+    stations: buildAdultStations(OPEN_WOMEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+  women_pro: {
+    label: "Women Pro", category: "single", athletes: 1,
+    formatDescription: "8 × (1 km run + station)",
+    stations: buildAdultStations(PRO_WOMEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+  men_open: {
+    label: "Men Open", category: "single", athletes: 1,
+    formatDescription: "8 × (1 km run + station)",
+    stations: buildAdultStations(OPEN_MEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+  men_pro: {
+    label: "Men Pro", category: "single", athletes: 1,
+    formatDescription: "8 × (1 km run + station)",
+    stations: buildAdultStations(PRO_MEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+
+  // === Elite 15 (same weights as Pro, invitational) ===
+  elite_15_women: {
+    label: "Women Elite 15", category: "elite", athletes: 1,
+    formatDescription: "8 × (1 km run + station) — top 15 invitational, Pro weights",
+    stations: buildAdultStations(PRO_WOMEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+  elite_15_men: {
+    label: "Men Elite 15", category: "elite", athletes: 1,
+    formatDescription: "8 × (1 km run + station) — top 15 invitational, Pro weights",
+    stations: buildAdultStations(PRO_MEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+
+  // === Doubles Open ===
+  doubles_women_open: {
+    label: "Women Doubles Open", category: "double", athletes: 2,
+    formatDescription: "Both athletes run together, split station work — Open weights",
+    stations: buildAdultStations(OPEN_WOMEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+  doubles_men_open: {
+    label: "Men Doubles Open", category: "double", athletes: 2,
+    formatDescription: "Both athletes run together, split station work — Open weights",
+    stations: buildAdultStations(OPEN_MEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+  doubles_mixed_open: {
+    label: "Mixed Doubles Open", category: "double", athletes: 2,
+    formatDescription: "Both athletes run together, split station work — Open men weights",
+    stations: buildAdultStations(OPEN_MEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+
+  // === Doubles Pro ===
+  doubles_women_pro: {
+    label: "Women Doubles Pro", category: "double", athletes: 2,
+    formatDescription: "Both athletes run together, split station work — Pro weights",
+    stations: buildAdultStations(PRO_WOMEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+  doubles_men_pro: {
+    label: "Men Doubles Pro", category: "double", athletes: 2,
+    formatDescription: "Both athletes run together, split station work — Pro weights",
+    stations: buildAdultStations(PRO_MEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+  doubles_mixed_pro: {
+    label: "Mixed Doubles Pro", category: "double", athletes: 2,
+    formatDescription: "Both athletes run together, split station work — Pro men weights",
+    stations: buildAdultStations(PRO_MEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+
+  // === Elite 15 Doubles ===
+  elite_15_doubles_women: {
+    label: "Women Elite 15 Doubles", category: "elite", athletes: 2,
+    formatDescription: "Doubles format, Pro weights, invitational",
+    stations: buildAdultStations(PRO_WOMEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+  elite_15_doubles_men: {
+    label: "Men Elite 15 Doubles", category: "elite", athletes: 2,
+    formatDescription: "Doubles format, Pro weights, invitational",
+    stations: buildAdultStations(PRO_MEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+  elite_15_doubles_mixed: {
+    label: "Mixed Elite 15 Doubles", category: "elite", athletes: 2,
+    formatDescription: "Doubles format, Pro men weights, invitational",
+    stations: buildAdultStations(PRO_MEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+
+  // === Team Relay ===
+  relay_women: {
+    label: "Women Relay", category: "relay", athletes: 4,
+    formatDescription: "4 athletes, each does 2 blocks (1 km run + 1 station)",
+    stations: buildAdultStations(OPEN_WOMEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+  relay_men: {
+    label: "Men Relay", category: "relay", athletes: 4,
+    formatDescription: "4 athletes, each does 2 blocks (1 km run + 1 station)",
+    stations: buildAdultStations(OPEN_MEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+  relay_mixed: {
+    label: "Mixed Relay", category: "relay", athletes: 4,
+    formatDescription: "4 athletes, each does 2 blocks (1 km run + 1 station)",
+    stations: buildAdultStations(OPEN_MEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+
+  // === Corporate Relay ===
+  corporate_relay_women: {
+    label: "Women Corporate Relay", category: "corporate_relay", athletes: 4,
+    formatDescription: "4 athletes, each does 2 blocks — Open weights",
+    stations: buildAdultStations(OPEN_WOMEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+  corporate_relay_men: {
+    label: "Men Corporate Relay", category: "corporate_relay", athletes: 4,
+    formatDescription: "4 athletes, each does 2 blocks — Open weights",
+    stations: buildAdultStations(OPEN_MEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+  corporate_relay_mixed: {
+    label: "Mixed Corporate Relay", category: "corporate_relay", athletes: 4,
+    formatDescription: "4 athletes, each does 2 blocks — Open weights",
+    stations: buildAdultStations(OPEN_MEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+
+  // === Company Challenge (same format as corporate relay) ===
+  company_challenge_women: {
+    label: "Women Company Challenge", category: "corporate_relay", athletes: 4,
+    formatDescription: "4 athletes, each does 2 blocks — Open weights",
+    stations: buildAdultStations(OPEN_WOMEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+  company_challenge_men: {
+    label: "Men Company Challenge", category: "corporate_relay", athletes: 4,
+    formatDescription: "4 athletes, each does 2 blocks — Open weights",
+    stations: buildAdultStations(OPEN_MEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+  company_challenge_mixed: {
+    label: "Mixed Company Challenge", category: "corporate_relay", athletes: 4,
+    formatDescription: "4 athletes, each does 2 blocks — Open weights",
+    stations: buildAdultStations(OPEN_MEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+
+  // === Adaptive (Open weights, movement modifications not weight changes) ===
+  adaptive_women: {
+    label: "Women Adaptive", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (1 km run + station) — modified movements, Open weights",
+    stations: buildAdultStations(OPEN_WOMEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+  adaptive_men: {
+    label: "Men Adaptive", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (1 km run + station) — modified movements, Open weights",
+    stations: buildAdultStations(OPEN_MEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  },
+
+  // === Youngstars 8-9 ===
+  youngstars_8_9_women: {
+    label: "Women Youngstars 8-9", category: "youngstars", athletes: 1,
+    formatDescription: "3 runs with stations grouped between them",
+    runSegments: 3, runDistanceM: 500,
+    stations: [
+      mkStation("SkiErg", { distance: "300m" }),
+      mkStation("Sled Push", { distance: "15m" }),
+      mkStation("Sled Drag", { distance: "15m" }),
+      mkStation("Frogger Jumps", { distance: "20m" }),
+      mkStation("Rowing", { distance: "200m" }),
+      mkStation("Farmers Carry", { distance: "50m", weightKg: 11.4, weightLabel: "2×5.7 kg" }),
+      mkStation("Lunges", { distance: "20m" }),
+      mkStation("Wall Ball Squats", { reps: 30, weightKg: 1, weightLabel: "1 kg / 2m target" }),
+    ],
+  },
+  youngstars_8_9_men: {
+    label: "Men Youngstars 8-9", category: "youngstars", athletes: 1,
+    formatDescription: "3 runs with stations grouped between them",
+    runSegments: 3, runDistanceM: 500,
+    stations: [
+      mkStation("SkiErg", { distance: "300m" }),
+      mkStation("Sled Push", { distance: "15m" }),
+      mkStation("Sled Drag", { distance: "15m" }),
+      mkStation("Frogger Jumps", { distance: "20m" }),
+      mkStation("Rowing", { distance: "200m" }),
+      mkStation("Farmers Carry", { distance: "50m", weightKg: 11.4, weightLabel: "2×5.7 kg" }),
+      mkStation("Lunges", { distance: "20m" }),
+      mkStation("Wall Ball Squats", { reps: 30, weightKg: 1, weightLabel: "1 kg / 2m target" }),
+    ],
+  },
+
+  // === Youngstars 10-11 ===
+  youngstars_10_11_women: {
+    label: "Women Youngstars 10-11", category: "youngstars", athletes: 1,
+    formatDescription: "3 runs with stations grouped between them",
+    runSegments: 3, runDistanceM: 500,
+    stations: [
+      mkStation("SkiErg", { distance: "400m" }),
+      mkStation("Sled Push", { distance: "15m" }),
+      mkStation("Sled Drag", { distance: "15m" }),
+      mkStation("Broad Jump Burpees", { distance: "20m" }),
+      mkStation("Rowing", { distance: "300m" }),
+      mkStation("Farmers Carry", { distance: "50m", weightKg: 11.4, weightLabel: "2×5.7 kg" }),
+      mkStation("Lunges", { distance: "20m" }),
+      mkStation("Wall Ball Squats", { reps: 40, weightKg: 2, weightLabel: "2 kg / 2m target" }),
+    ],
+  },
+  youngstars_10_11_men: {
+    label: "Men Youngstars 10-11", category: "youngstars", athletes: 1,
+    formatDescription: "3 runs with stations grouped between them",
+    runSegments: 3, runDistanceM: 500,
+    stations: [
+      mkStation("SkiErg", { distance: "400m" }),
+      mkStation("Sled Push", { distance: "15m" }),
+      mkStation("Sled Drag", { distance: "15m" }),
+      mkStation("Broad Jump Burpees", { distance: "20m" }),
+      mkStation("Rowing", { distance: "300m" }),
+      mkStation("Farmers Carry", { distance: "50m", weightKg: 11.4, weightLabel: "2×5.7 kg" }),
+      mkStation("Lunges", { distance: "20m" }),
+      mkStation("Wall Ball Squats", { reps: 40, weightKg: 2, weightLabel: "2 kg / 2m target" }),
+    ],
+  },
+
+  // === Youngstars 12-13 ===
+  youngstars_12_13_women: {
+    label: "Women Youngstars 12-13", category: "youngstars", athletes: 1,
+    formatDescription: "2 runs with stations grouped between them",
+    runSegments: 2, runDistanceM: 750,
+    stations: [
+      mkStation("SkiErg", { distance: "500m" }),
+      mkStation("Sled Push", { distance: "30m" }),
+      mkStation("Sled Pull", { distance: "30m" }),
+      mkStation("Broad Jump Burpees", { distance: "40m" }),
+      mkStation("Rowing", { distance: "400m" }),
+      mkStation("Farmers Carry", { distance: "100m", weightKg: 18.2, weightLabel: "2×9.1 kg" }),
+      mkStation("Sandbag Lunges", { distance: "40m" }),
+      mkStation("Wall Balls", { reps: 50, weightKg: 2, weightLabel: "2 kg / 2.5m target" }),
+    ],
+  },
+  youngstars_12_13_men: {
+    label: "Men Youngstars 12-13", category: "youngstars", athletes: 1,
+    formatDescription: "2 runs with stations grouped between them",
+    runSegments: 2, runDistanceM: 750,
+    stations: [
+      mkStation("SkiErg", { distance: "500m" }),
+      mkStation("Sled Push", { distance: "30m" }),
+      mkStation("Sled Pull", { distance: "30m" }),
+      mkStation("Broad Jump Burpees", { distance: "40m" }),
+      mkStation("Rowing", { distance: "400m" }),
+      mkStation("Farmers Carry", { distance: "100m", weightKg: 18.2, weightLabel: "2×9.1 kg" }),
+      mkStation("Sandbag Lunges", { distance: "40m" }),
+      mkStation("Wall Balls", { reps: 50, weightKg: 2, weightLabel: "2 kg / 2.5m target" }),
+    ],
+  },
+
+  // === Youngstars 14-15 (near-adult format) ===
+  youngstars_14_15_women: {
+    label: "Women Youngstars 14-15", category: "youngstars", athletes: 1,
+    formatDescription: "8 × (run + station) — near-adult format",
+    runSegments: 8, runDistanceM: 1000,
+    stations: [
+      mkStation("SkiErg", { distance: "600m" }),
+      mkStation("Sled Push", { distance: "30m" }),
+      mkStation("Sled Pull", { distance: "30m" }),
+      mkStation("Broad Jump Burpees", { distance: "40m" }),
+      mkStation("Rowing", { distance: "500m" }),
+      mkStation("Farmers Carry", { distance: "100m", weightKg: 22.8, weightLabel: "2×11.4 kg" }),
+      mkStation("Sandbag Lunges", { distance: "40m" }),
+      mkStation("Wall Balls", { reps: 50, weightKg: 4, weightLabel: "4 kg / 2.5m target" }),
+    ],
+  },
+  youngstars_14_15_men: {
+    label: "Men Youngstars 14-15", category: "youngstars", athletes: 1,
+    formatDescription: "8 × (run + station) — near-adult format",
+    runSegments: 8, runDistanceM: 1000,
+    stations: [
+      mkStation("SkiErg", { distance: "600m" }),
+      mkStation("Sled Push", { distance: "30m" }),
+      mkStation("Sled Pull", { distance: "30m" }),
+      mkStation("Broad Jump Burpees", { distance: "40m" }),
+      mkStation("Rowing", { distance: "500m" }),
+      mkStation("Farmers Carry", { distance: "100m", weightKg: 22.8, weightLabel: "2×11.4 kg" }),
+      mkStation("Sandbag Lunges", { distance: "40m" }),
+      mkStation("Wall Balls", { reps: 50, weightKg: 4, weightLabel: "4 kg / 2.5m target" }),
+    ],
+  },
 };
 
-export const DIVISION_KEYS: DivisionKey[] = ["women_open", "women_pro", "men_open", "men_pro"];
+// ---------------------------------------------------------------------------
+// Division key arrays for different use cases
+// ---------------------------------------------------------------------------
+
+/** Original 4 singles — used by training plans that only support singles */
+export const SINGLES_DIVISION_KEYS: SinglesDivisionKey[] = [
+  "women_open", "women_pro", "men_open", "men_pro",
+];
+
+/** All division keys */
+export const ALL_DIVISION_KEYS = Object.keys(DIVISIONS) as DivisionKey[];
+
+/** Backwards compat: same as SINGLES_DIVISION_KEYS */
+export const DIVISION_KEYS = SINGLES_DIVISION_KEYS;
 
 // ---------------------------------------------------------------------------
-// Race-history divisions (includes doubles & relay for past-race reporting)
+// Division categories for the overview page
+// ---------------------------------------------------------------------------
+export interface DivisionCategoryGroup {
+  label: string;
+  description: string;
+  keys: DivisionKey[];
+}
+
+export const DIVISION_CATEGORIES: DivisionCategoryGroup[] = [
+  {
+    label: "Singles",
+    description: "1 athlete — 8 × (1 km run + station)",
+    keys: ["women_open", "women_pro", "men_open", "men_pro"],
+  },
+  {
+    label: "Elite 15",
+    description: "Top 15 invitational — Pro weights",
+    keys: ["elite_15_women", "elite_15_men"],
+  },
+  {
+    label: "Doubles",
+    description: "2 athletes run together, split station work",
+    keys: [
+      "doubles_women_open", "doubles_mixed_open", "doubles_men_open",
+      "doubles_women_pro", "doubles_mixed_pro", "doubles_men_pro",
+    ],
+  },
+  {
+    label: "Elite 15 Doubles",
+    description: "Doubles format, Pro weights, invitational",
+    keys: ["elite_15_doubles_women", "elite_15_doubles_mixed", "elite_15_doubles_men"],
+  },
+  {
+    label: "Team Relay",
+    description: "4 athletes — each does 2 blocks (1 km run + 1 station)",
+    keys: ["relay_women", "relay_mixed", "relay_men"],
+  },
+  {
+    label: "Corporate Relay",
+    description: "4 athletes — same as Team Relay, Open weights",
+    keys: [
+      "corporate_relay_women", "corporate_relay_mixed", "corporate_relay_men",
+      "company_challenge_women", "company_challenge_mixed", "company_challenge_men",
+    ],
+  },
+  {
+    label: "Adaptive",
+    description: "Modified movements, Open weights — 6 impairment categories",
+    keys: ["adaptive_women", "adaptive_men"],
+  },
+  {
+    label: "Youngstars",
+    description: "Youth divisions with age-appropriate distances and weights",
+    keys: [
+      "youngstars_8_9_women", "youngstars_8_9_men",
+      "youngstars_10_11_women", "youngstars_10_11_men",
+      "youngstars_12_13_women", "youngstars_12_13_men",
+      "youngstars_14_15_women", "youngstars_14_15_men",
+    ],
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Race-history divisions (legacy compat — maps old keys to new ones)
 // ---------------------------------------------------------------------------
 export type RaceDivisionKey =
   | DivisionKey
@@ -126,10 +541,9 @@ export type RaceDivisionKey =
   | "relay";
 
 export const RACE_DIVISION_LABELS: Record<RaceDivisionKey, string> = {
-  women_open: "Women Open",
-  women_pro: "Women Pro",
-  men_open: "Men Open",
-  men_pro: "Men Pro",
+  // All new division keys
+  ...Object.fromEntries(ALL_DIVISION_KEYS.map(k => [k, DIVISIONS[k].label])) as Record<DivisionKey, string>,
+  // Legacy keys for backwards compat
   mixed_doubles: "Mixed Doubles",
   women_doubles: "Women Doubles",
   men_doubles: "Men Doubles",
@@ -137,20 +551,22 @@ export const RACE_DIVISION_LABELS: Record<RaceDivisionKey, string> = {
 };
 
 export const RACE_DIVISION_KEYS: RaceDivisionKey[] = [
-  "women_open", "women_pro", "men_open", "men_pro",
+  ...ALL_DIVISION_KEYS,
   "mixed_doubles", "women_doubles", "men_doubles", "relay",
 ];
 
 /** Whether a race division involves split station work (doubles/relay) */
 export function isTeamDivision(key: RaceDivisionKey): boolean {
+  const div = DIVISIONS[key as DivisionKey];
+  if (div) return div.athletes > 1;
+  // Legacy keys
   return key === "mixed_doubles" || key === "women_doubles" || key === "men_doubles" || key === "relay";
 }
 
 // ---------------------------------------------------------------------------
 // Reference times — seconds [pro, average, slow] per station per division
-// Explicit per-division data sourced from aggregated HYROX race results
-// (HyroxDataLab, RoxLyfe, AnabelAvila, HYRESULT London 2024, etc.)
-// Pro tier = top ~10% Open finishers, Average = 50th percentile, Slow = first-timer
+// Only available for the 4 original singles divisions.
+// Other divisions will build reference data from scraped results over time.
 // ---------------------------------------------------------------------------
 
 /** Parse "m:ss" to seconds */
@@ -207,7 +623,7 @@ const MEN_PRO_REFS: Record<StationName, [number, number, number]> = {
   "Wall Balls":          [ts(3, 30), ts(6, 15), ts(9, 30)],
 };
 
-export const REFERENCE_TIMES: Record<DivisionKey, Record<StationName, [number, number, number]>> = {
+export const REFERENCE_TIMES: Partial<Record<DivisionKey, Record<StationName, [number, number, number]>>> = {
   women_open: WOMEN_OPEN_REFS,
   women_pro: WOMEN_PRO_REFS,
   men_open: MEN_OPEN_REFS,
@@ -221,7 +637,7 @@ export const RUN_SEGMENTS = 8;
 export const RUN_DISTANCE_KM = 1; // each segment
 
 /** Reference 1 km run splits in seconds [pro, average, slow] */
-export const RUN_REFERENCE: Record<DivisionKey, [number, number, number]> = {
+export const RUN_REFERENCE: Partial<Record<DivisionKey, [number, number, number]>> = {
   women_open: [ts(4, 30), ts(5, 30), ts(7, 0)],
   women_pro: [ts(4, 0), ts(5, 0), ts(6, 30)],
   men_open: [ts(3, 45), ts(5, 0), ts(6, 30)],

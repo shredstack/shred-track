@@ -417,3 +417,120 @@ export const hyroxStationReferenceTimes = pgTable(
   },
   (table) => [uniqueIndex("reference_times_unique").on(table.divisionId, table.station)]
 );
+
+// ============================================
+// HYROX: Public Data (scraped race results)
+// ============================================
+
+export const hyroxPublicEvents = pgTable(
+  "hyrox_public_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    externalId: text("external_id").unique().notNull(),
+    name: text("name").notNull(),
+    city: text("city").notNull(),
+    country: text("country").notNull(),
+    region: text("region").notNull(),
+    eventDate: date("event_date").notNull(),
+    season: text("season").notNull(),
+    sourceUrl: text("source_url"),
+    scrapedAt: timestamp("scraped_at", { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_hyrox_public_events_date").on(table.eventDate),
+    index("idx_hyrox_public_events_country_date").on(table.country, table.eventDate),
+  ]
+);
+
+export const hyroxPublicResults = pgTable(
+  "hyrox_public_results",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    eventId: uuid("event_id").notNull().references(() => hyroxPublicEvents.id, { onDelete: "cascade" }),
+    externalResultId: text("external_result_id").notNull(),
+    externalAthleteHash: text("external_athlete_hash").notNull(),
+    divisionKey: text("division_key").notNull(),
+    ageGroup: text("age_group"),
+    finishTimeSeconds: integer("finish_time_seconds").notNull(),
+    overallRank: integer("overall_rank").notNull(),
+    divisionRank: integer("division_rank").notNull(),
+    fieldSizeDivision: integer("field_size_division").notNull(),
+    percentile: numeric("percentile", { precision: 5, scale: 2 }).notNull(),
+    isDnf: boolean("is_dnf").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("hyrox_public_results_event_ext").on(table.eventId, table.externalResultId),
+    index("idx_hyrox_public_results_division_event").on(table.divisionKey, table.eventId),
+    index("idx_hyrox_public_results_division_time").on(table.divisionKey, table.finishTimeSeconds),
+    index("idx_hyrox_public_results_athlete").on(table.externalAthleteHash),
+  ]
+);
+
+export const hyroxPublicSplits = pgTable(
+  "hyrox_public_splits",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    resultId: uuid("result_id").notNull().references(() => hyroxPublicResults.id, { onDelete: "cascade" }),
+    segmentOrder: integer("segment_order").notNull(),
+    segmentType: text("segment_type").notNull(),
+    segmentLabel: text("segment_label").notNull(),
+    stationName: text("station_name"),
+    runNumber: integer("run_number"),
+    timeSeconds: integer("time_seconds").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("hyrox_public_splits_result_order").on(table.resultId, table.segmentOrder),
+    index("idx_hyrox_public_splits_result").on(table.resultId),
+    index("idx_hyrox_public_splits_station").on(table.segmentType, table.stationName),
+    index("idx_hyrox_public_splits_run").on(table.segmentType, table.runNumber),
+  ]
+);
+
+// Materialized view `hyrox_public_division_aggregates` is defined in the SQL migration.
+// Query it with db.execute(sql`SELECT ... FROM hyrox_public_division_aggregates ...`).
+
+// ============================================
+// HYROX: Predictor Models & User Predictions
+// ============================================
+
+export const hyroxPredictorModels = pgTable(
+  "hyrox_predictor_models",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    divisionKey: text("division_key").notNull(),
+    modelType: text("model_type").notNull(),
+    trainedAt: timestamp("trained_at", { withTimezone: true }).defaultNow().notNull(),
+    trainingN: integer("training_n").notNull(),
+    metrics: jsonb("metrics").notNull().default({}),
+    featureImportances: jsonb("feature_importances").notNull().default([]),
+    artifactUrl: text("artifact_url").notNull(),
+    isActive: boolean("is_active").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_hyrox_predictor_models_active").on(table.divisionKey, table.modelType),
+  ]
+);
+
+export const hyroxUserPredictions = pgTable("hyrox_user_predictions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").unique().notNull().references(() => users.id, { onDelete: "cascade" }),
+  divisionKey: text("division_key").notNull(),
+  predictedFinishSeconds: integer("predicted_finish_seconds").notNull(),
+  predictedFinishLow: integer("predicted_finish_low").notNull(),
+  predictedFinishHigh: integer("predicted_finish_high").notNull(),
+  predictedPercentile: numeric("predicted_percentile", { precision: 5, scale: 2 }).notNull(),
+  confidence: numeric("confidence", { precision: 3, scale: 2 }).notNull(),
+  contributingSignals: jsonb("contributing_signals").notNull().default({}),
+  bottleneckStation: text("bottleneck_station"),
+  bottleneckSavingsSeconds: integer("bottleneck_savings_seconds"),
+  modelVersion: text("model_version"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});

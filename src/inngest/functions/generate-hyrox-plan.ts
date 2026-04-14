@@ -50,7 +50,7 @@ function buildAthleteContext(snapshot: AthleteSnapshot): string {
   let stationSummary = "";
   for (const assessment of snapshot.stationAssessments) {
     const station = assessment.station as (typeof STATION_ORDER)[number];
-    const ref = refs[station];
+    const ref = refs?.[station] ?? [240, 300, 420];
     stationSummary += `- ${station}: Current ${formatTime(assessment.currentTimeSeconds ?? ref[1])}, Goal ${formatTime(assessment.goalTimeSeconds ?? ref[0])}, Confidence ${assessment.completionConfidence}/5\n`;
   }
 
