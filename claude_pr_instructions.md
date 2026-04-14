@@ -137,6 +137,7 @@ Before flagging an issue, verify it's a real problem:
 1. **Check for existing fallback handling**: If code has a fallback path, don't flag the fallback as "fragile" if the primary approach is solid.
 2. **On-demand initialization is often intentional**: For client-side SDKs, lazy initialization during user actions is a valid pattern.
 3. **SDK error codes**: Flag only if there's no error handling at all, not just because error codes "might change."
+4. **RLS policies on ALTER TABLE migrations**: When a migration only adds columns to an existing table (e.g. `ALTER TABLE ... ADD COLUMN`), do NOT flag missing RLS policies. RLS is set at the table level, not the column level — if the table already has RLS enabled and policies defined (check `supabase/migrations/20260405000000_initial_schema.sql`), column additions are automatically covered. Only flag RLS issues when a migration creates a **new table** without enabling RLS or defining policies.
 
 ### What to Actually Flag
 
