@@ -46,7 +46,7 @@ function getStationProportions(division: DivisionKey): Record<StationName, numbe
   const proportions = {} as Record<StationName, number>;
   let total = 0;
   for (const station of STATION_ORDER) {
-    const avgSeconds = refs[station][1]; // [pro, average, slow] → index 1
+    const avgSeconds = refs?.[station]?.[1] ?? 300; // [pro, average, slow] → index 1
     proportions[station] = avgSeconds;
     total += avgSeconds;
   }
@@ -59,7 +59,7 @@ function getStationProportions(division: DivisionKey): Record<StationName, numbe
 
 /** Get average run pace (seconds per km) for a division */
 function getDefaultRunPace(division: DivisionKey): number {
-  return RUN_REFERENCE[division][1]; // average tier
+  return RUN_REFERENCE[division]?.[1] ?? 300; // average tier
 }
 
 /** Format seconds as pace string M:SS */

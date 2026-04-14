@@ -1,0 +1,22 @@
+[project]
+name = "shredtrack-scripts"
+version = "0.1.0"
+description = "ShredTrack data scripts — HYROX scraper and model training"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31",
+    "beautifulsoup4>=4.12",
+    "psycopg[binary]>=3.1",
+    "pydantic>=2.5",
+    "click>=8.1",
+    "python-dotenv>=1.0",
+    "lightgbm>=4.3",
+    "scikit-learn>=1.4",
+    "pandas>=2.2",
+    "numpy>=1.26",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0",
+]

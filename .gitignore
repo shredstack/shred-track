@@ -41,5 +41,12 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# python
+__pycache__/
+*.pyc
+.venv/
+scripts/logs/
+scripts/models/
+
 # claude code instructions (specs are local-only)
 claude_code_instructions/*

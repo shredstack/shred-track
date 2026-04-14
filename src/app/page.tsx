@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { PublicLanding } from "@/components/public-landing";
 
 export default async function HomePage() {
   const supabase = await createClient();
@@ -7,7 +8,7 @@ export default async function HomePage() {
 
   if (user) {
     redirect("/crossfit");
-  } else {
-    redirect("/login");
   }
+
+  return <PublicLanding />;
 }

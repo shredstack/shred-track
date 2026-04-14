@@ -185,7 +185,7 @@ function buildStationSession(
   stationIndex: number,
 ): PlanSession {
   const stationName = STATION_ORDER[stationIndex % STATION_ORDER.length];
-  const refs = REFERENCE_TIMES[data.division][stationName];
+  const refs = REFERENCE_TIMES[data.division]?.[stationName] ?? [240, 300, 420];
   const confidence = data.stationConfidence[stationName] ?? 3;
   const currentTime = data.stationCurrentTime[stationName] ?? refs[1];
   const goalTime = data.stationGoalTime[stationName] ?? refs[1];
@@ -288,8 +288,8 @@ export function generatePlan(data: OnboardingData): GeneratedPlan {
   let totalCurrentStationTime = 0;
   let totalGoalStationTime = 0;
   for (const station of STATION_ORDER) {
-    totalCurrentStationTime += data.stationCurrentTime[station] ?? REFERENCE_TIMES[data.division][station][1];
-    totalGoalStationTime += data.stationGoalTime[station] ?? REFERENCE_TIMES[data.division][station][0];
+    totalCurrentStationTime += data.stationCurrentTime[station] ?? REFERENCE_TIMES[data.division]?.[station]?.[1] ?? 300;
+    totalGoalStationTime += data.stationGoalTime[station] ?? REFERENCE_TIMES[data.division]?.[station]?.[0] ?? 240;
   }
 
   // Transition time estimate (30s between each of 16 transitions)

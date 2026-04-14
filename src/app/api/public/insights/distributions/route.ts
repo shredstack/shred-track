@@ -1,0 +1,33 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getDistributions } from "@/lib/insights/queries";
+import { divisionSchema, segmentTypeSchema, eventIdSchema } from "@/lib/insights/validation";
+
+export const revalidate = 3600;
+
+export async function GET(request: NextRequest) {
+  const params = request.nextUrl.searchParams;
+
+  const divisionResult = divisionSchema.safeParse(params.get("division"));
+  if (!divisionResult.success) {
+    return NextResponse.json(
+      { error: "Invalid division. Must be one of: men_open, women_open, men_pro, women_pro" },
+      { status: 400 },
+    );
+  }
+
+  const segmentResult = segmentTypeSchema.safeParse(params.get("segmentType"));
+  if (!segmentResult.success) {
+    return NextResponse.json(
+      { error: "Invalid segmentType. Must be one of: run, station, roxzone" },
+      { status: 400 },
+    );
+  }
+
+  const eventIdResult = eventIdSchema.safeParse(params.get("eventId") || undefined);
+  if (!eventIdResult.success) {
+    return NextResponse.json({ error: "Invalid eventId format" }, { status: 400 });
+  }
+
+  const data = await getDistributions(divisionResult.data, segmentResult.data, eventIdResult.data);
+  return NextResponse.json(data);
+}

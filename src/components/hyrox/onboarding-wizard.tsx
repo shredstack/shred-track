@@ -23,12 +23,12 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import {
   DIVISIONS,
-  DIVISION_KEYS,
   STATION_ORDER,
   REFERENCE_TIMES,
   CONFIDENCE_LABELS,
   RACE_DIVISION_LABELS,
   RACE_DIVISION_KEYS,
+  DIVISION_CATEGORIES,
   isTeamDivision,
   formatTime,
   formatLongTime,
@@ -130,8 +130,9 @@ function getInitialStationTimes(division: DivisionKey): {
   const current = {} as Record<StationName, number>;
   const goal = {} as Record<StationName, number>;
   for (const s of STATION_ORDER) {
-    current[s] = refs[s][1]; // average
-    goal[s] = Math.round((refs[s][0] + refs[s][1]) / 2); // between pro and avg
+    const r = refs?.[s];
+    current[s] = r ? r[1] : 300; // average (fallback 5min)
+    goal[s] = r ? Math.round((r[0] + r[1]) / 2) : 240; // between pro and avg
   }
   return { current, goal };
 }
@@ -690,8 +691,6 @@ function StepRace({
   setDivision: (d: DivisionKey) => void;
   divisionSpecs: (typeof DIVISIONS)[DivisionKey];
 }) {
-  const genderDivisions = DIVISION_KEYS.filter((k) => k.startsWith(state.gender));
-
   return (
     <div className="space-y-5">
       <div>
@@ -723,17 +722,42 @@ function StepRace({
 
       <div className="space-y-2">
         <Label>Division</Label>
-        <div className="flex gap-2">
-          {genderDivisions.map((d) => (
-            <Button
-              key={d}
-              variant={state.division === d ? "default" : "outline"}
-              onClick={() => setDivision(d)}
-              className="flex-1"
-            >
-              {d.includes("open") ? "Open" : "Pro"}
-            </Button>
-          ))}
+        <div className="space-y-2">
+          {DIVISION_CATEGORIES.map((cat) => {
+            // Filter to divisions matching the user's gender where applicable
+            const relevantKeys = cat.keys.filter((k) => {
+              if (state.gender === "women") return k.includes("women") || k.includes("mixed");
+              if (state.gender === "men") return k.includes("men") || k.includes("mixed");
+              return true;
+            });
+            if (relevantKeys.length === 0) return null;
+
+            return (
+              <div key={cat.label}>
+                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mb-1">
+                  {cat.label}
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {relevantKeys.map((d) => {
+                    const label = DIVISIONS[d].label
+                      .replace(/^(Women|Men|Mixed)\s+/, "")
+                      .replace(cat.label + " ", "");
+                    return (
+                      <Button
+                        key={d}
+                        variant={state.division === d ? "default" : "outline"}
+                        onClick={() => setDivision(d)}
+                        size="sm"
+                        className="text-xs"
+                      >
+                        {label}
+                      </Button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -956,7 +980,7 @@ function StepStations({
   const [activeStation, setActiveStation] = useState(0);
   const station = STATION_ORDER[activeStation];
   const divSpec = DIVISIONS[state.division].stations[activeStation];
-  const refs = REFERENCE_TIMES[state.division][station];
+  const refs = REFERENCE_TIMES[state.division]?.[station] ?? [240, 300, 420];
 
   const setConfidence = (val: number) => {
     setState((prev) => ({
