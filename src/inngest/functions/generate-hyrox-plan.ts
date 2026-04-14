@@ -366,7 +366,63 @@ ${planOverviewSchema()}`;
       return records;
     });
 
-    // Step 2: Generate weeks in batches of 4
+    // Start scenario generation in parallel with week batches (scenarios
+    // only depend on the athlete snapshot, not the week-by-week detail).
+    const scenariosPromise = step.run("generate-scenarios", async () => {
+      // Determine transition time based on athlete level
+      const isProLevel =
+        snapshot.division === "men_pro" ||
+        snapshot.division === "women_pro" ||
+        (snapshot.goalFinishTimeSeconds != null && snapshot.goalFinishTimeSeconds <= 3600);
+      const transitionMinutes = isProLevel ? 3 : 5;
+      const transitionPerStation = isProLevel ? "~20-25 seconds" : "~35-45 seconds";
+
+      const prompt = `${athleteContext}
+
+## Task
+Generate 2-3 race-day scenarios for this athlete. The scenarios should represent:
+1. **Aspirational** — goal station times achieved after training, comfortable run paces
+2. **Current Fitness** — today's station times, possibly faster runs to compensate
+3. **Conservative** (optional, include if plan is 12+ weeks) — moderate improvement, safe pacing
+
+Each scenario must include all 16 segments (8 runs alternating with 8 stations in HYROX order):
+Run 1 → SkiErg → Run 2 → Sled Push → Run 3 → Sled Pull → Run 4 → Burpee Broad Jumps → Run 5 → Rowing → Run 6 → Farmers Carry → Run 7 → Sandbag Lunges → Run 8 → Wall Balls
+
+## Transition Time
+Add ~${transitionMinutes}:00 total transition time (${transitionPerStation} × 8 transitions) to the final cumulative time. ${isProLevel ? "This athlete is at or targeting a pro/elite level, so transitions are assumed to be fast and efficient." : "This athlete is at a recreational/competitive level, so transitions include time for moving between stations, catching breath, and getting set up."}
+
+In each scenario's "description" field, explicitly state how much total transition time was added (e.g., "Includes ${transitionMinutes}:00 of transition time across 8 stations").
+
+Include an "analysis" field for each scenario that identifies the biggest time gaps and specific improvement levers (like the "Where to Find Time" section in a race plan).
+
+${snapshot.goalFinishTimeSeconds ? `The athlete's goal is to finish in ${formatLongTime(snapshot.goalFinishTimeSeconds)}. Calculate buffer_seconds as the difference between the goal and estimated finish.` : "No specific time goal — focus scenarios on pacing strategy."}
+
+Respond with JSON matching this schema (an array of scenarios):
+${scenarioSchema()}`;
+
+      const raw = await callClaude(systemPrompt, prompt);
+      const scenarios = parseJSON<RaceScenario[]>(raw);
+
+      if (scenarios.length > 0) {
+        await db.insert(hyroxRaceScenarios).values(
+          scenarios.map((s) => ({
+            planId,
+            scenarioLabel: s.scenarioLabel,
+            description: s.description,
+            estimatedFinishSeconds: s.estimatedFinishSeconds,
+            bufferSeconds: s.bufferSeconds,
+            runStrategy: s.runStrategy,
+            splits: s.splits,
+            analysis: s.analysis,
+            sortOrder: s.sortOrder,
+          }))
+        );
+      }
+    });
+
+    // Generate weeks in batches of 4 (sequential — each batch gets context
+    // from the previous batch for continuity in progressive overload,
+    // station rotation, and pacing).
     const batchSize = 4;
     const batches: number[][] = [];
     for (let w = 1; w <= totalWeeks; w += batchSize) {
@@ -377,10 +433,12 @@ ${planOverviewSchema()}`;
       batches.push(batch);
     }
 
+    let previousWeeksSummary = "";
+
     for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
       const weekNums = batches[batchIdx];
 
-      await step.run(`generate-weeks-${weekNums[0]}-${weekNums[weekNums.length - 1]}`, async () => {
+      const batchSummary = await step.run(`generate-weeks-${weekNums[0]}-${weekNums[weekNums.length - 1]}`, async () => {
         // Find which phase each week belongs to
         const weekPhaseMap: Record<number, { phase: PlanPhase; phaseId: string }> = {};
         for (const wk of weekNums) {
@@ -404,6 +462,10 @@ ${planOverviewSchema()}`;
           })
           .join("\n");
 
+        const continuityContext = previousWeeksSummary
+          ? `\n## Previous Weeks (for continuity)\n${previousWeeksSummary}\n\nBuild on the progression above. Avoid repeating the same station pairings from the most recent 2 weeks. Continue progressive overload on run distances and paces.`
+          : "\nThis is the first batch — establish the baseline for progressive overload.";
+
         const prompt = `${athleteContext}
 
 ## Plan Context
@@ -414,6 +476,7 @@ ${overview.phases.map((p: PlanPhase) => `- Phase ${p.phaseNumber}: ${p.name} (We
 ## Current Batch
 Generate detailed sessions for weeks ${weekNums.join(", ")}:
 ${phaseContext}
+${continuityContext}
 
 ## Weekly Structure
 Each week MUST have exactly these sessions:
@@ -464,59 +527,26 @@ ${weekBatchSchema()}`;
         if (sessionValues.length > 0) {
           await db.insert(hyroxPlanSessions).values(sessionValues);
         }
+
+        // Return a compact summary for the next batch's context
+        const summary = batch.weeks.map((week) => {
+          const stations = week.sessions
+            .filter((s) => s.sessionType === "station_skills")
+            .flatMap((s) => s.equipmentRequired)
+            .filter(Boolean);
+          const runSession = week.sessions.find((s) => s.sessionType === "run" && s.dayOfWeek === 1);
+          const tempoSession = week.sessions.find((s) => s.sessionType === "run" && s.dayOfWeek === 3);
+          return `Week ${week.weekNumber}: Stations [${stations.join(", ")}], Easy Run ${runSession?.targetPace ?? "N/A"} ${runSession?.durationMinutes ?? "?"}min, Tempo ${tempoSession?.targetPace ?? "N/A"} ${tempoSession?.durationMinutes ?? "?"}min`;
+        }).join("\n");
+
+        return summary;
       });
+
+      previousWeeksSummary += (previousWeeksSummary ? "\n" : "") + batchSummary;
     }
 
-    // Step 3: Generate race-day scenarios
-    await step.run("generate-scenarios", async () => {
-      const stationSummary = snapshot.stationAssessments
-        .map(
-          (a) =>
-            `${a.station}: Current ${formatTime(a.currentTimeSeconds ?? 0)}, Goal ${formatTime(a.goalTimeSeconds ?? 0)}`
-        )
-        .join("\n");
-
-      const paceLabel = snapshot.paceUnit === "mile" ? "/mile" : "/km";
-
-      const prompt = `${athleteContext}
-
-## Task
-Generate 2-3 race-day scenarios for this athlete. The scenarios should represent:
-1. **Aspirational** — goal station times achieved after training, comfortable run paces
-2. **Current Fitness** — today's station times, possibly faster runs to compensate
-3. **Conservative** (optional, include if plan is 12+ weeks) — moderate improvement, safe pacing
-
-Each scenario must include all 16 segments (8 runs alternating with 8 stations in HYROX order):
-Run 1 → SkiErg → Run 2 → Sled Push → Run 3 → Sled Pull → Run 4 → Burpee Broad Jumps → Run 5 → Rowing → Run 6 → Farmers Carry → Run 7 → Sandbag Lunges → Run 8 → Wall Balls
-
-Add ~2:30 total transition time (15-20 seconds × 8 transitions) to the final cumulative time.
-
-Include an "analysis" field for each scenario that identifies the biggest time gaps and specific improvement levers (like the "Where to Find Time" section in a race plan).
-
-${snapshot.goalFinishTimeSeconds ? `The athlete's goal is to finish in ${formatLongTime(snapshot.goalFinishTimeSeconds)}. Calculate buffer_seconds as the difference between the goal and estimated finish.` : "No specific time goal — focus scenarios on pacing strategy."}
-
-Respond with JSON matching this schema (an array of scenarios):
-${scenarioSchema()}`;
-
-      const raw = await callClaude(systemPrompt, prompt);
-      const scenarios = parseJSON<RaceScenario[]>(raw);
-
-      if (scenarios.length > 0) {
-        await db.insert(hyroxRaceScenarios).values(
-          scenarios.map((s) => ({
-            planId,
-            scenarioLabel: s.scenarioLabel,
-            description: s.description,
-            estimatedFinishSeconds: s.estimatedFinishSeconds,
-            bufferSeconds: s.bufferSeconds,
-            runStrategy: s.runStrategy,
-            splits: s.splits,
-            analysis: s.analysis,
-            sortOrder: s.sortOrder,
-          }))
-        );
-      }
-    });
+    // Await scenario generation (may already be done)
+    await scenariosPromise;
 
     // Mark plan as completed
     await step.run("mark-completed", async () => {

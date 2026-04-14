@@ -148,7 +148,9 @@ export function isTeamDivision(key: RaceDivisionKey): boolean {
 
 // ---------------------------------------------------------------------------
 // Reference times — seconds [pro, average, slow] per station per division
-// For simplicity we provide Women Open explicitly and scale others.
+// Explicit per-division data sourced from aggregated HYROX race results
+// (HyroxDataLab, RoxLyfe, AnabelAvila, HYRESULT London 2024, etc.)
+// Pro tier = top ~10% Open finishers, Average = 50th percentile, Slow = first-timer
 // ---------------------------------------------------------------------------
 
 /** Parse "m:ss" to seconds */
@@ -156,40 +158,60 @@ function ts(m: number, s: number): number {
   return m * 60 + s;
 }
 
+// Women Open — 102kg sled push, 78kg sled pull, 2×16kg farmers, 10kg sandbag, 4kg wall ball
 const WOMEN_OPEN_REFS: Record<StationName, [number, number, number]> = {
-  SkiErg: [ts(3, 15), ts(5, 0), ts(7, 0)],
-  "Sled Push": [ts(1, 0), ts(2, 30), ts(5, 0)],
-  "Sled Pull": [ts(1, 0), ts(2, 30), ts(5, 0)],
-  "Broad Jump Burpees": [ts(2, 0), ts(3, 30), ts(6, 0)],
-  Rowing: [ts(3, 30), ts(4, 30), ts(6, 0)],
-  "Farmers Carry": [ts(1, 15), ts(2, 0), ts(3, 30)],
-  "Sandbag Lunges": [ts(2, 0), ts(3, 30), ts(6, 0)],
-  "Wall Balls": [ts(2, 30), ts(4, 0), ts(7, 0)],
+  SkiErg:                [ts(4, 15), ts(5,  5), ts(7,  0)],
+  "Sled Push":           [ts(1, 40), ts(2, 35), ts(4, 30)],
+  "Sled Pull":           [ts(3, 30), ts(5, 30), ts(7, 30)],
+  "Broad Jump Burpees":  [ts(4,  0), ts(6, 15), ts(9, 30)],
+  Rowing:                [ts(4,  0), ts(5,  5), ts(7,  0)],
+  "Farmers Carry":       [ts(1, 15), ts(2, 10), ts(3, 30)],
+  "Sandbag Lunges":      [ts(3,  0), ts(4, 45), ts(7, 30)],
+  "Wall Balls":          [ts(3, 15), ts(5, 30), ts(8, 30)],
 };
 
-// Scale factors relative to Women Open (approximate)
-const SCALE: Record<DivisionKey, number> = {
-  women_open: 1.0,
-  women_pro: 1.15,
-  men_open: 0.9,
-  men_pro: 1.05,
+// Men Open — 152kg sled push, 103kg sled pull, 2×24kg farmers, 20kg sandbag, 6kg wall ball
+const MEN_OPEN_REFS: Record<StationName, [number, number, number]> = {
+  SkiErg:                [ts(3, 30), ts(4, 25), ts(6,  0)],
+  "Sled Push":           [ts(2,  0), ts(2, 40), ts(4, 30)],
+  "Sled Pull":           [ts(3, 15), ts(5, 10), ts(7, 30)],
+  "Broad Jump Burpees":  [ts(3, 30), ts(5, 30), ts(8, 30)],
+  Rowing:                [ts(3, 30), ts(4, 45), ts(6, 30)],
+  "Farmers Carry":       [ts(1, 15), ts(2,  5), ts(3, 30)],
+  "Sandbag Lunges":      [ts(3, 30), ts(5, 25), ts(8,  0)],
+  "Wall Balls":          [ts(3, 30), ts(6,  0), ts(9,  0)],
 };
 
-function scaleRefs(key: DivisionKey): Record<StationName, [number, number, number]> {
-  const s = SCALE[key];
-  const result = {} as Record<StationName, [number, number, number]>;
-  for (const station of STATION_ORDER) {
-    const [pro, avg, slow] = WOMEN_OPEN_REFS[station];
-    result[station] = [Math.round(pro * s), Math.round(avg * s), Math.round(slow * s)];
-  }
-  return result;
-}
+// Women Pro — 152kg sled push, 103kg sled pull, 2×24kg farmers, 20kg sandbag, 6kg wall ball
+// Same weights as Men Open but faster overall athletes
+const WOMEN_PRO_REFS: Record<StationName, [number, number, number]> = {
+  SkiErg:                [ts(3, 30), ts(4, 30), ts(6,  0)],
+  "Sled Push":           [ts(1, 30), ts(2, 20), ts(4,  0)],
+  "Sled Pull":           [ts(3,  0), ts(4, 45), ts(7,  0)],
+  "Broad Jump Burpees":  [ts(3,  0), ts(5,  0), ts(7, 30)],
+  Rowing:                [ts(3, 30), ts(4, 30), ts(6,  0)],
+  "Farmers Carry":       [ts(1,  0), ts(1, 45), ts(3,  0)],
+  "Sandbag Lunges":      [ts(2, 30), ts(4, 15), ts(6, 30)],
+  "Wall Balls":          [ts(3,  0), ts(5,  0), ts(7, 30)],
+};
+
+// Men Pro — 202kg sled push, 153kg sled pull, 2×32kg farmers, 30kg sandbag, 9kg wall ball
+const MEN_PRO_REFS: Record<StationName, [number, number, number]> = {
+  SkiErg:                [ts(3, 10), ts(4,  0), ts(5, 30)],
+  "Sled Push":           [ts(2,  0), ts(3,  0), ts(5,  0)],
+  "Sled Pull":           [ts(3, 30), ts(5, 30), ts(8,  0)],
+  "Broad Jump Burpees":  [ts(3,  0), ts(4, 45), ts(7,  0)],
+  Rowing:                [ts(3, 15), ts(4, 15), ts(5, 45)],
+  "Farmers Carry":       [ts(1, 15), ts(2, 15), ts(3, 45)],
+  "Sandbag Lunges":      [ts(3, 15), ts(5, 30), ts(8, 30)],
+  "Wall Balls":          [ts(3, 30), ts(6, 15), ts(9, 30)],
+};
 
 export const REFERENCE_TIMES: Record<DivisionKey, Record<StationName, [number, number, number]>> = {
   women_open: WOMEN_OPEN_REFS,
-  women_pro: scaleRefs("women_pro"),
-  men_open: scaleRefs("men_open"),
-  men_pro: scaleRefs("men_pro"),
+  women_pro: WOMEN_PRO_REFS,
+  men_open: MEN_OPEN_REFS,
+  men_pro: MEN_PRO_REFS,
 };
 
 // ---------------------------------------------------------------------------

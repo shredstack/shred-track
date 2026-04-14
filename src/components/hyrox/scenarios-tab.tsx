@@ -192,7 +192,7 @@ function SplitTable({ splits }: SplitTableProps) {
                     <td className="py-2 pr-2 text-right font-mono text-muted-foreground">
                       {split.paceDisplay}
                     </td>
-                    <td className="py-2 pr-2 text-muted-foreground max-w-[120px] truncate">
+                    <td className="py-2 pr-2 text-muted-foreground min-w-[140px]">
                       {split.strategy}
                     </td>
                     <td className="py-2 text-right font-mono">
