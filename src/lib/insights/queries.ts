@@ -38,7 +38,7 @@ export async function getAverages(
     ? sql`AND event_id = ${eventId}::uuid`
     : sql`AND event_id IS NULL`;
 
-  const rows = await db.execute<SegmentAggregate>(sql`
+  const rows = await db.execute(sql`
     SELECT
       division_key AS "divisionKey",
       event_id AS "eventId",
@@ -72,7 +72,7 @@ export async function getDistributions(
     ? sql`AND event_id = ${eventId}::uuid`
     : sql`AND event_id IS NULL`;
 
-  const rows = await db.execute<SegmentAggregate>(sql`
+  const rows = await db.execute(sql`
     SELECT
       division_key AS "divisionKey",
       event_id AS "eventId",

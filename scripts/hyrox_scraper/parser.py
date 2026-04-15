@@ -303,6 +303,36 @@ def _parse_total_pages(soup: BeautifulSoup) -> int:
 # Athlete detail / splits parsing
 # ---------------------------------------------------------------------------
 
+def _parse_members_name(soup: BeautifulSoup) -> tuple[str, str]:
+    """
+    Extract team name and nationality from a doubles/relay "Members" table.
+
+    Doubles detail pages don't have td.f-__fullname. Instead they have a
+    Members section with <td class="last"> cells like "Wells, Sydney (USA)".
+
+    Returns (joined_name, nationality) — e.g. ("Wells, Sydney & Griffith, Lauren", "USA").
+    """
+    members: list[str] = []
+    nationalities: list[str] = []
+    for td in soup.select("td.last"):
+        text = td.get_text(strip=True)
+        if not text:
+            continue
+        # Extract nationality from parenthetical suffix, e.g. "Wells, Sydney (USA)"
+        nat_match = re.search(r"\(([A-Z]{2,3})\)\s*$", text)
+        if nat_match:
+            nationalities.append(nat_match.group(1))
+            text = text[:nat_match.start()].strip()
+        members.append(text)
+
+    if not members:
+        return "", ""
+
+    joined = " & ".join(members)
+    nationality = nationalities[0] if nationalities else ""
+    return joined, nationality
+
+
 def parse_athlete_detail(html: str, segment_map: list[dict] | None = None) -> dict | None:
     """
     Parse an athlete detail page for all split times.
@@ -324,11 +354,16 @@ def parse_athlete_detail(html: str, segment_map: list[dict] | None = None) -> di
     """
     soup = BeautifulSoup(html, "html.parser")
 
-    # Name
+    # Name — singles use td.f-__fullname, doubles/relay use a "Members" table
     name_el = soup.select_one(sel.SEL_DETAIL_NAME)
-    if not name_el:
-        return None
-    name = name_el.get_text(strip=True)
+    if name_el:
+        name = name_el.get_text(strip=True)
+        nat_el = soup.select_one(sel.SEL_DETAIL_NATIONALITY)
+        nationality = nat_el.get_text(strip=True) if nat_el else ""
+    else:
+        name, nationality = _parse_members_name(soup)
+        if not name:
+            return None
 
     # Bib
     bib_el = soup.select_one(sel.SEL_DETAIL_BIB)
@@ -337,10 +372,6 @@ def parse_athlete_detail(html: str, segment_map: list[dict] | None = None) -> di
     # Age group
     ag_el = soup.select_one(sel.SEL_DETAIL_AGE_GROUP)
     age_group = ag_el.get_text(strip=True) if ag_el else None
-
-    # Nationality
-    nat_el = soup.select_one(sel.SEL_DETAIL_NATIONALITY)
-    nationality = nat_el.get_text(strip=True) if nat_el else ""
 
     # Race info
     race_el = soup.select_one(sel.SEL_DETAIL_RACE)
