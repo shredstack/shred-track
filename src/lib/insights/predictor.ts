@@ -347,7 +347,7 @@ export async function generatePrediction(userId: string): Promise<PredictionResu
     WHERE division_key = ${features.divisionKey}
     AND is_dnf = false
   `);
-  const percentile = (percentileRows.rows as Array<{ percentile: number }>)[0]?.percentile ?? 50;
+  const percentile = (percentileRows as unknown as Array<{ percentile: number }>)[0]?.percentile ?? 50;
 
   // Bottleneck
   const bottleneck = await findBottleneck(features);
