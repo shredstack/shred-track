@@ -3,7 +3,7 @@ import { getComparisons } from "@/lib/insights/queries";
 import { divisionSchema } from "@/lib/insights/validation";
 import { z } from "zod";
 
-export const revalidate = 3600;
+export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;

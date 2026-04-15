@@ -546,7 +546,7 @@ class HyroxScraper:
 @click.command()
 @click.option("--since", required=True, type=click.DateTime(formats=["%Y-%m-%d"]),
               help="Scrape events from this date forward (YYYY-MM-DD)")
-@click.option("--divisions", default="men_open,women_open,men_pro,women_pro",
+@click.option("--divisions", default="all",
               help="Comma-separated division keys to scrape, or 'all' for everything")
 @click.option("--events", default=None,
               help="Comma-separated event name filters (e.g. 'London,Berlin')")

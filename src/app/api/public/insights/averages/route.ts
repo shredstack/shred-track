@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAverages } from "@/lib/insights/queries";
 import { divisionSchema, eventIdSchema } from "@/lib/insights/validation";
 
-export const revalidate = 3600; // Cache for 1 hour
+export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;

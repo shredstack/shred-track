@@ -225,7 +225,7 @@ async function findBottleneck(
   `);
 
   const p25Map = new Map<string, number>();
-  for (const row of rows.rows as Array<{ segment_label: string; p25: number }>) {
+  for (const row of rows as unknown as Array<{ segment_label: string; p25: number }>) {
     p25Map.set(row.segment_label, row.p25);
   }
 
@@ -347,7 +347,7 @@ export async function generatePrediction(userId: string): Promise<PredictionResu
     WHERE division_key = ${features.divisionKey}
     AND is_dnf = false
   `);
-  const percentile = (percentileRows.rows as Array<{ percentile: number }>)[0]?.percentile ?? 50;
+  const percentile = (percentileRows as unknown as Array<{ percentile: number }>)[0]?.percentile ?? 50;
 
   // Bottleneck
   const bottleneck = await findBottleneck(features);

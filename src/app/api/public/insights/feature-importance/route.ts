@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getFeatureImportance } from "@/lib/insights/queries";
 import { divisionSchema } from "@/lib/insights/validation";
 
-export const revalidate = 3600;
+export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;

@@ -132,7 +132,7 @@ SEL_RESULT_ROW = "li.list-group-item.row"
 # Fields within a result row
 SEL_ROW_RANK_PRIMARY = "div.list-field.type-place.place-primary"
 SEL_ROW_RANK_SECONDARY = "div.list-field.type-place.place-secondary"
-SEL_ROW_NAME_LINK = "h4.list-field.type-fullname > a"
+SEL_ROW_NAME_LINK = "h4.list-field > a"
 SEL_ROW_NATIONALITY = "div.list-field.type-nation_flag span.nation__abbr"
 SEL_ROW_AGE_CLASS = "div.list-field.type-age_class"
 SEL_ROW_TIME = "div.list-field.type-time"
