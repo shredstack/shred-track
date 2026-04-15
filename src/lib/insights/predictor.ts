@@ -225,7 +225,7 @@ async function findBottleneck(
   `);
 
   const p25Map = new Map<string, number>();
-  for (const row of rows.rows as Array<{ segment_label: string; p25: number }>) {
+  for (const row of rows as unknown as Array<{ segment_label: string; p25: number }>) {
     p25Map.set(row.segment_label, row.p25);
   }
 

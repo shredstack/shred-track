@@ -57,7 +57,7 @@ export async function getAverages(
     ${eventCondition}
     ORDER BY segment_label
   `);
-  return rows.rows as unknown as SegmentAggregate[];
+  return rows as unknown as SegmentAggregate[];
 }
 
 /**
@@ -92,7 +92,7 @@ export async function getDistributions(
     ${eventCondition}
     ORDER BY segment_label
   `);
-  return rows.rows as unknown as SegmentAggregate[];
+  return rows as unknown as SegmentAggregate[];
 }
 
 /**
@@ -141,8 +141,8 @@ export async function getComparisons(
   `);
 
   return {
-    top20: top20Rows.rows as unknown as SegmentAggregate[],
-    bottom20: bottom20Rows.rows as unknown as SegmentAggregate[],
+    top20: top20Rows as unknown as SegmentAggregate[],
+    bottom20: bottom20Rows as unknown as SegmentAggregate[],
     average,
   };
 }
@@ -169,7 +169,7 @@ export async function getFeatureImportance(
     LIMIT 1
   `);
 
-  const row = (rows.rows as unknown as Array<{
+  const row = (rows as unknown as Array<{
     featureImportances: Array<{ feature: string; importance: number }>;
     trainingN: number;
     metrics: Record<string, number>;
