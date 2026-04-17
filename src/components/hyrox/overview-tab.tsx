@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import {
   Info,
   Activity,
@@ -15,12 +15,14 @@ import { Label } from "@/components/ui/label";
 import {
   DIVISIONS,
   DIVISION_CATEGORIES,
+  DIVISION_REF_DATA,
   STATION_ORDER,
-  REFERENCE_TIMES,
   formatTime,
   kgToLbs,
   type DivisionKey,
   type DivisionCategoryGroup,
+  type RefDistribution,
+  type StationName,
 } from "@/lib/hyrox-data";
 
 export function OverviewTab() {
@@ -29,8 +31,8 @@ export function OverviewTab() {
   const [expandedCategory, setExpandedCategory] = useState<string>("Singles");
 
   const division = DIVISIONS[activeDivision];
-  const refs = REFERENCE_TIMES[activeDivision] ?? {};
-  const hasRefs = Object.keys(refs).length > 0;
+  const refData = DIVISION_REF_DATA[activeDivision];
+  const hasRefs = !!refData;
 
   const convertWeight = (kg: number): string => {
     if (useMixed) return `${kgToLbs(kg)} lbs`;
@@ -238,44 +240,57 @@ export function OverviewTab() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-white/[0.06] text-muted-foreground">
-                  <th className="pb-2.5 pr-3 text-left font-medium">Station</th>
+                  <th className="pb-2.5 pr-3 text-left font-medium">Segment</th>
                   <th className="pb-2.5 pr-3 text-left font-medium">Spec</th>
                   {hasRefs && (
                     <>
-                      <th className="pb-2.5 pr-1 text-right font-medium">Pro</th>
-                      <th className="pb-2.5 pr-1 text-right font-medium">Avg</th>
-                      <th className="pb-2.5 text-right font-medium">Slow</th>
+                      <th className="pb-2.5 pr-1 text-right font-medium text-emerald-400">Fast</th>
+                      <th className="pb-2.5 pr-1 text-right font-medium text-emerald-400">p10</th>
+                      <th className="pb-2.5 pr-1 text-right font-medium text-green-300">p25</th>
+                      <th className="pb-2.5 pr-1 text-right font-medium text-yellow-300">p50</th>
+                      <th className="pb-2.5 pr-1 text-right font-medium text-orange-300">p75</th>
+                      <th className="pb-2.5 pr-1 text-right font-medium text-orange-400">p90</th>
+                      <th className="pb-2.5 text-right font-medium text-red-400">Slow</th>
                     </>
                   )}
                 </tr>
               </thead>
               <tbody>
-                {division.stations.map((s) => {
-                  const ref = refs[s.name as keyof typeof refs];
+                {division.stations.map((s, i) => {
+                  const runLabel = `Run ${i + 1}`;
+                  const runDist = refData?.runs[runLabel];
+                  const runRange = refData?.runRanges[runLabel];
+                  const stationDist = refData?.stations[s.name as StationName];
+                  const stationRange = refData?.stationRanges[s.name as StationName];
                   const spec = s.distance
                     ? `${convertDistance(s.distance)}${s.weightLabel ? ` @ ${useMixed && s.weightKg ? convertWeight(s.weightKg) : s.weightLabel}` : ""}`
                     : `${s.reps} reps${s.weightLabel ? ` @ ${useMixed && s.weightKg ? convertWeight(s.weightKg) : s.weightLabel}` : ""}`;
 
                   return (
-                    <tr key={s.name} className="border-b border-white/[0.04] last:border-0">
-                      <td className="py-2.5 pr-3 font-medium">{s.shortName}</td>
-                      <td className="py-2.5 pr-3 text-muted-foreground font-mono">{spec}</td>
-                      {hasRefs && (
-                        <>
-                          <td className="py-2.5 pr-1 text-right font-mono text-emerald-400">
-                            {ref ? formatTime(ref[0]) : "—"}
-                          </td>
-                          <td className="py-2.5 pr-1 text-right font-mono">
-                            {ref ? formatTime(ref[1]) : "—"}
-                          </td>
-                          <td className="py-2.5 text-right font-mono text-muted-foreground">
-                            {ref ? formatTime(ref[2]) : "—"}
-                          </td>
-                        </>
-                      )}
-                    </tr>
+                    <React.Fragment key={s.name}>
+                      {/* Run row */}
+                      <tr className="border-b border-white/[0.04]">
+                        <td className="py-2 pr-3 font-medium text-muted-foreground">{runLabel}</td>
+                        <td className="py-2 pr-3 text-muted-foreground font-mono">{division.runDistanceM >= 1000 ? `${division.runDistanceM / 1000} km` : `${division.runDistanceM}m`}</td>
+                        {hasRefs && <DistCells dist={runDist} range={runRange} />}
+                      </tr>
+                      {/* Station row */}
+                      <tr className="border-b border-white/[0.04]">
+                        <td className="py-2.5 pr-3 font-medium">{s.shortName}</td>
+                        <td className="py-2.5 pr-3 text-muted-foreground font-mono">{spec}</td>
+                        {hasRefs && <DistCells dist={stationDist} range={stationRange} />}
+                      </tr>
+                    </React.Fragment>
                   );
                 })}
+                {/* Roxzone total */}
+                {hasRefs && refData?.roxzone && (
+                  <tr className="border-t border-white/[0.08]">
+                    <td className="py-2.5 pr-3 font-medium text-muted-foreground">Roxzone</td>
+                    <td className="py-2.5 pr-3 text-muted-foreground font-mono text-[10px]">total transitions</td>
+                    <DistCells dist={refData.roxzone} range={refData.roxzoneRange} />
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -290,6 +305,28 @@ export function OverviewTab() {
   );
 }
 
+
+// ---------------------------------------------------------------------------
+// Percentile distribution cells — renders 5 <td> elements for [p10..p90]
+// ---------------------------------------------------------------------------
+
+function DistCells({ dist, range }: { dist?: RefDistribution; range?: [number, number] }) {
+  const dash = <td className="py-2 pr-1 text-right font-mono text-muted-foreground">—</td>;
+  if (!dist) {
+    return <>{dash}{dash}{dash}{dash}{dash}{dash}{dash}</>;
+  }
+  return (
+    <>
+      <td className="py-2 pr-1 text-right font-mono text-emerald-400">{range ? formatTime(range[0]) : "—"}</td>
+      <td className="py-2 pr-1 text-right font-mono text-emerald-400">{formatTime(dist[0])}</td>
+      <td className="py-2 pr-1 text-right font-mono text-green-300">{formatTime(dist[1])}</td>
+      <td className="py-2 pr-1 text-right font-mono text-yellow-300">{formatTime(dist[2])}</td>
+      <td className="py-2 pr-1 text-right font-mono text-orange-300">{formatTime(dist[3])}</td>
+      <td className="py-2 pr-1 text-right font-mono text-orange-400">{formatTime(dist[4])}</td>
+      <td className="py-2 text-right font-mono text-red-400">{range ? formatTime(range[1]) : "—"}</td>
+    </>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Category accordion selector

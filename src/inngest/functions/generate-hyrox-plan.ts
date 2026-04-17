@@ -23,7 +23,9 @@ import {
   formatLongTime,
 } from "@/lib/hyrox-data";
 
-const AI_MODEL = "claude-sonnet-4-6";
+const AI_MODEL = process.env.HYROX_TEST_MODE === "true"
+  ? "claude-haiku-4-5-20251001"
+  : "claude-sonnet-4-6";
 
 function buildSystemPrompt(): string {
   return `You are an elite HYROX training coach creating personalized training plans. You understand periodization, running physiology, and HYROX race strategy deeply.

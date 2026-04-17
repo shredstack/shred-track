@@ -158,7 +158,7 @@ export const STATION_SUBSTITUTIONS: Record<string, Substitution[]> = {
     { name: "Assault Bike", prescription: "50 cal for time" },
     { name: "SkiErg", prescription: "1,000m for time" },
   ],
-  "Broad Jump Burpees": [
+  "Burpee Broad Jumps": [
     { name: "Box Jump Overs", prescription: "30 reps for time" },
     { name: "Burpees", prescription: "25 reps for time" },
   ],

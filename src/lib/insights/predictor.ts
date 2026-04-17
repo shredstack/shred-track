@@ -17,7 +17,7 @@ import {
   hyroxUserPredictions,
 } from "@/db/schema";
 import { eq, and, desc, sql, count } from "drizzle-orm";
-import { STATION_ORDER, type DivisionKey, REFERENCE_TIMES, RUN_REFERENCE } from "@/lib/hyrox-data";
+import { STATION_ORDER, type DivisionKey, REFERENCE_TIMES, RUN_REFERENCE, ROXZONE_REFERENCE, RUN_REFERENCES_BY_SEGMENT } from "@/lib/hyrox-data";
 import { predict, loadModel } from "./tree-predictor";
 
 // Fade factors: average run slowdown from Run 1 → Run k, derived from public data.
@@ -29,8 +29,8 @@ const FADE_FACTORS: Partial<Record<DivisionKey, number[]>> = {
   women_pro:  [1.00, 1.01, 1.03, 1.05, 1.07, 1.09, 1.12, 1.16],
 };
 
-// Transition allowance: 6 × 20s (roxzones) + 2 × 30s (longer transitions)
-const TRANSITION_SECONDS = 6 * 20 + 2 * 30;
+// Fallback transition allowance when no scraped roxzone data is available
+const DEFAULT_TRANSITION_SECONDS = 6 * 20 + 2 * 30;
 
 interface UserFeatures {
   stationTimes: Map<string, number>;
@@ -130,24 +130,31 @@ export async function gatherUserFeatures(userId: string): Promise<UserFeatures |
  */
 function computeSyntheticFinish(features: UserFeatures): number {
   const refTimes = REFERENCE_TIMES[features.divisionKey];
+  const perRunRefs = RUN_REFERENCES_BY_SEGMENT[features.divisionKey];
   const fadeFactors = FADE_FACTORS[features.divisionKey] ?? [1, 1.02, 1.04, 1.06, 1.08, 1.10, 1.13, 1.18];
   const runRef = RUN_REFERENCE[features.divisionKey] ?? [240, 300, 420];
+  const transitionSeconds = ROXZONE_REFERENCE[features.divisionKey]?.[1] ?? DEFAULT_TRANSITION_SECONDS;
 
-  // Station times: use user's benchmark or division average (index 1 = average)
+  // Station times: use user's benchmark or division median (index 1)
   let stationTotal = 0;
   for (const station of STATION_ORDER) {
     const userTime = features.stationTimes.get(station);
-    stationTotal += userTime ?? refTimes?.[station]?.[1] ?? 300; // fallback to average
+    stationTotal += userTime ?? refTimes?.[station]?.[1] ?? 300;
   }
 
-  // Run times: base pace × fade factor per run
-  const basePace = features.runPaceSecsPerKm ?? runRef[1]; // fallback to average
+  // Run times: prefer per-run medians when user has no pace, else apply fade to user pace
+  const basePace = features.runPaceSecsPerKm;
   let runTotal = 0;
   for (let i = 0; i < 8; i++) {
-    runTotal += Math.round(basePace * fadeFactors[i]);
+    if (basePace) {
+      runTotal += Math.round(basePace * fadeFactors[i]);
+    } else {
+      const runLabel = `Run ${i + 1}`;
+      runTotal += perRunRefs?.[runLabel]?.[1] ?? Math.round((runRef[1]) * fadeFactors[i]);
+    }
   }
 
-  return stationTotal + runTotal + TRANSITION_SECONDS;
+  return stationTotal + runTotal + transitionSeconds;
 }
 
 /**
@@ -176,22 +183,27 @@ function computeConfidence(features: UserFeatures): number {
  */
 function buildFeatureVector(features: UserFeatures): number[] {
   const refTimes = REFERENCE_TIMES[features.divisionKey];
+  const perRunRefs = RUN_REFERENCES_BY_SEGMENT[features.divisionKey];
   const runRef = RUN_REFERENCE[features.divisionKey] ?? [240, 300, 420];
   const fadeFactors = FADE_FACTORS[features.divisionKey] ?? [1, 1.02, 1.04, 1.06, 1.08, 1.10, 1.13, 1.18];
-  const basePace = features.runPaceSecsPerKm ?? runRef[1];
+  const basePace = features.runPaceSecsPerKm;
 
   // 8 station times
   const stationFeats = STATION_ORDER.map((s) =>
     features.stationTimes.get(s) ?? refTimes?.[s]?.[1] ?? 300,
   );
 
-  // 8 run times
-  const runFeats = fadeFactors.map((f) => Math.round(basePace * f));
+  // 8 run times — use per-run medians when no user pace available
+  const runFeats = fadeFactors.map((f, i) => {
+    if (basePace) return Math.round(basePace * f);
+    const runLabel = `Run ${i + 1}`;
+    return perRunRefs?.[runLabel]?.[1] ?? Math.round(runRef[1] * f);
+  });
 
   // 5 derived ratios
   const sledPush = stationFeats[1]; // Sled Push
   const sledPull = stationFeats[2]; // Sled Pull
-  const burpees = stationFeats[3];  // Broad Jump Burpees
+  const burpees = stationFeats[3];  // Burpee Broad Jumps
   const wallBalls = stationFeats[7]; // Wall Balls
   const skiErg = stationFeats[0];   // SkiErg
   const rowing = stationFeats[4];   // Rowing

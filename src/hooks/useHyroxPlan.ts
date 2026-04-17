@@ -47,18 +47,23 @@ export function useGeneratePlan() {
 // Poll generation status
 // ---------------------------------------------------------------------------
 
+export interface PlanStatus {
+  id: string;
+  title: string;
+  generationStatus: string;
+  totalWeeks: number;
+  createdAt: string;
+  sessionsGenerated: number;
+  expectedSessions: number;
+}
+
 export function usePlanStatus(planId: string | null) {
   return useQuery({
     queryKey: ["hyrox-plan-status", planId],
     queryFn: async () => {
       const response = await fetch(`/api/hyrox/plan/${planId}/status`);
       if (!response.ok) throw new Error("Failed to fetch plan status");
-      return response.json() as Promise<{
-        id: string;
-        title: string;
-        generationStatus: string;
-        totalWeeks: number;
-      }>;
+      return response.json() as Promise<PlanStatus>;
     },
     enabled: !!planId,
     refetchInterval: (query) => {

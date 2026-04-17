@@ -57,7 +57,7 @@ export function ComparisonsCard({ division, eventId }: ComparisonsCardProps) {
 
     return Array.from(map.entries())
       .map(([label, vals]) => ({
-        label: label.replace("Broad Jump Burpees", "BBJ"),
+        label: label.replace("Burpee Broad Jumps", "BBJ"),
         ...vals,
       }))
       .sort((a, b) => a.label.localeCompare(b.label));

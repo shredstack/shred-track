@@ -10,7 +10,7 @@ ShredTrack is a mobile-first web application for HYROX and CrossFit athletes to 
 
 - **Next.js 16** (App Router) with TypeScript
 - **React 19** with Server Components
-- **Drizzle ORM** with PostgreSQL (via Supabase locally, Neon in production)
+- **Drizzle ORM** with PostgreSQL (via Supabase locally and in production)
 - **Supabase Auth** (email/password + Google OAuth)
 - **TanStack React Query** for client-side data fetching
 - **Tailwind CSS 4** + **shadcn/ui** for styling

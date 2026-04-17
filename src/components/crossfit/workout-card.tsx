@@ -16,6 +16,7 @@ import {
   Trophy,
   CheckCircle2,
   Flame,
+  Trash2,
 } from "lucide-react";
 import type { WorkoutDisplay } from "@/types/crossfit";
 import {
@@ -27,12 +28,14 @@ import { formatTime } from "@/lib/workout-parser";
 interface WorkoutCardProps {
   workout: WorkoutDisplay;
   onLogScore?: (workoutId: string) => void;
+  onDelete?: (workoutId: string) => void;
   onViewLeaderboard?: (workoutId: string) => void;
 }
 
 export function WorkoutCard({
   workout,
   onLogScore,
+  onDelete,
   onViewLeaderboard,
 }: WorkoutCardProps) {
   const typeLabel = WORKOUT_TYPE_LABELS[workout.workoutType];
@@ -218,6 +221,20 @@ export function WorkoutCard({
             onClick={() => onViewLeaderboard(workout.id)}
           >
             Leaderboard
+          </Button>
+        )}
+        {onDelete && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-white/[0.08] text-muted-foreground hover:text-destructive hover:border-destructive/30"
+            onClick={() => {
+              if (window.confirm("Delete this workout?")) {
+                onDelete(workout.id);
+              }
+            }}
+          >
+            <Trash2 className="size-3.5" />
           </Button>
         )}
       </CardFooter>

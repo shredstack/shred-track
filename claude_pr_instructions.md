@@ -105,7 +105,7 @@ Choose one:
 
 ### Tech Stack
 - Next.js 16 (App Router) with React 19
-- Drizzle ORM with PostgreSQL (Supabase locally, Neon in production)
+- Drizzle ORM with PostgreSQL (Supabase locally and in production)
 - Supabase Auth (email/password + Google OAuth)
 - TanStack React Query for client-side data fetching
 - Tailwind CSS 4 + shadcn/ui

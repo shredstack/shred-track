@@ -25,6 +25,9 @@ import {
   DIVISIONS,
   STATION_ORDER,
   REFERENCE_TIMES,
+  DIVISION_REF_DATA,
+  estimatePercentile,
+  formatPercentile,
   CONFIDENCE_LABELS,
   RACE_DIVISION_LABELS,
   RACE_DIVISION_KEYS,
@@ -567,7 +570,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
 
       {/* Step content */}
       <Card>
-        <CardContent className="pt-2">
+        <CardContent className="max-h-[60vh] overflow-y-auto pt-2">
           {step === 0 && <StepProfile state={state} set={set} setGender={setGender} />}
           {step === 1 && (
             <StepRace state={state} set={set} setDivision={setDivision} divisionSpecs={divisionSpecs} />
@@ -722,43 +725,7 @@ function StepRace({
 
       <div className="space-y-2">
         <Label>Division</Label>
-        <div className="space-y-2">
-          {DIVISION_CATEGORIES.map((cat) => {
-            // Filter to divisions matching the user's gender where applicable
-            const relevantKeys = cat.keys.filter((k) => {
-              if (state.gender === "women") return k.includes("women") || k.includes("mixed");
-              if (state.gender === "men") return k.includes("men") || k.includes("mixed");
-              return true;
-            });
-            if (relevantKeys.length === 0) return null;
-
-            return (
-              <div key={cat.label}>
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mb-1">
-                  {cat.label}
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {relevantKeys.map((d) => {
-                    const label = DIVISIONS[d].label
-                      .replace(/^(Women|Men|Mixed)\s+/, "")
-                      .replace(cat.label + " ", "");
-                    return (
-                      <Button
-                        key={d}
-                        variant={state.division === d ? "default" : "outline"}
-                        onClick={() => setDivision(d)}
-                        size="sm"
-                        className="text-xs"
-                      >
-                        {label}
-                      </Button>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <DivisionPicker gender={state.gender} value={state.division} onChange={setDivision} />
       </div>
 
       {/* Goal finish time */}
@@ -878,6 +845,57 @@ function StepRunning({
 }
 
 // ---------------------------------------------------------------------------
+// Shared — Division picker
+// ---------------------------------------------------------------------------
+
+function DivisionPicker({
+  gender,
+  value,
+  onChange,
+}: {
+  gender: Gender;
+  value: DivisionKey | RaceDivisionKey;
+  onChange: (d: DivisionKey) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      {DIVISION_CATEGORIES.map((cat) => {
+        const relevantKeys = cat.keys.filter((k) => {
+          if (gender === "women") return k.includes("women") || k.includes("mixed");
+          if (gender === "men") return k.includes("men") || k.includes("mixed");
+          return true;
+        });
+        if (relevantKeys.length === 0) return null;
+        return (
+          <div key={cat.label}>
+            <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mb-1">
+              {cat.label}
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {relevantKeys.map((d) => {
+                const label = DIVISIONS[d].label
+                  .replace(/^(Women|Men)\s+/, "")
+                  .replace(cat.label + " ", "");
+                return (
+                  <Button
+                    key={d}
+                    variant={value === d ? "default" : "outline"}
+                    onClick={() => onChange(d)}
+                    size="sm"
+                    className="text-xs"
+                  >
+                    {label}
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // Step 4 — Experience
 // ---------------------------------------------------------------------------
 
@@ -925,19 +943,7 @@ function StepExperience({
           </div>
           <div className="space-y-1.5">
             <Label>Division raced</Label>
-            <div className="grid grid-cols-2 gap-1.5">
-              {RACE_DIVISION_KEYS.map((d) => (
-                <Button
-                  key={d}
-                  variant={state.bestDivision === d ? "default" : "outline"}
-                  onClick={() => set("bestDivision", d)}
-                  size="sm"
-                  className="text-xs"
-                >
-                  {RACE_DIVISION_LABELS[d]}
-                </Button>
-              ))}
-            </div>
+            <DivisionPicker gender={state.gender} value={state.bestDivision} onChange={(d) => set("bestDivision", d)} />
             {isTeamDivision(state.bestDivision) && (
               <div className="rounded-md border border-primary/20 bg-primary/5 p-2.5 text-xs text-muted-foreground">
                 <strong className="text-foreground">Note:</strong> Since you split station work with a
@@ -981,6 +987,10 @@ function StepStations({
   const station = STATION_ORDER[activeStation];
   const divSpec = DIVISIONS[state.division].stations[activeStation];
   const refs = REFERENCE_TIMES[state.division]?.[station] ?? [240, 300, 420];
+  const dist = DIVISION_REF_DATA[state.division]?.stations[station];
+  const range = DIVISION_REF_DATA[state.division]?.stationRanges[station];
+  const sliderMin = range?.[0] ?? Math.round(refs[0] * 0.5);
+  const sliderMax = range?.[1] ?? Math.round(refs[2] * 1.5);
 
   const setConfidence = (val: number) => {
     setState((prev) => ({
@@ -1013,12 +1023,12 @@ function StepStations({
       </div>
 
       {/* Station selector */}
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
         {STATION_ORDER.map((s, i) => (
           <button
             key={s}
             onClick={() => setActiveStation(i)}
-            className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+            className={`shrink-0 rounded-md px-2 py-1 text-xs font-medium whitespace-nowrap transition-colors ${
               i === activeStation
                 ? "bg-primary text-primary-foreground"
                 : "bg-muted text-muted-foreground hover:text-foreground"
@@ -1038,8 +1048,8 @@ function StepStations({
             {divSpec.weightLabel ? ` @ ${state.unit === "mixed" ? convertWeightLabel(divSpec.weightLabel) : divSpec.weightLabel}` : ""}
           </p>
           <div className="mt-1 flex gap-2 text-[10px] text-muted-foreground">
-            <span>Pro: {formatTime(refs[0])}</span>
-            <span>Avg: {formatTime(refs[1])}</span>
+            <span>Fast: {formatTime(refs[0])}</span>
+            <span>Median: {formatTime(refs[1])}</span>
             <span>Slow: {formatTime(refs[2])}</span>
           </div>
         </div>
@@ -1069,36 +1079,50 @@ function StepStations({
 
         {/* Current time slider */}
         <div className="space-y-2">
-          <div className="flex justify-between">
+          <div className="flex justify-between items-center">
             <Label>Current Time</Label>
-            <span className="font-mono text-sm text-primary">{formatTime(state.stationCurrentTime[station])}</span>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-sm text-primary">{formatTime(state.stationCurrentTime[station])}</span>
+              {dist && (
+                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  {formatPercentile(estimatePercentile(state.stationCurrentTime[station], dist))}
+                </span>
+              )}
+            </div>
           </div>
           <Slider
-            min={refs[0]}
-            max={refs[2]}
+            min={sliderMin}
+            max={sliderMax}
             value={[state.stationCurrentTime[station]]}
             onValueChange={(val) => setCurrentTime(Array.isArray(val) ? val[0] : val)}
           />
           <div className="flex justify-between text-[10px] text-muted-foreground">
-            <span>Pro {formatTime(refs[0])}</span>
-            <span>Slow {formatTime(refs[2])}</span>
+            <span>{formatTime(sliderMin)}</span>
+            <span>{formatTime(sliderMax)}</span>
           </div>
         </div>
 
         {/* Goal time slider */}
         <div className="space-y-2">
-          <div className="flex justify-between">
+          <div className="flex justify-between items-center">
             <Label>Goal Time</Label>
-            <span className="font-mono text-sm text-green-500">{formatTime(state.stationGoalTime[station])}</span>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-sm text-green-500">{formatTime(state.stationGoalTime[station])}</span>
+              {dist && (
+                <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-medium text-green-500">
+                  {formatPercentile(estimatePercentile(state.stationGoalTime[station], dist))}
+                </span>
+              )}
+            </div>
           </div>
           <Slider
-            min={refs[0]}
+            min={sliderMin}
             max={state.stationCurrentTime[station]}
             value={[state.stationGoalTime[station]]}
             onValueChange={(val) => setGoalTime(Array.isArray(val) ? val[0] : val)}
           />
           <div className="flex justify-between text-[10px] text-muted-foreground">
-            <span>Pro {formatTime(refs[0])}</span>
+            <span>{formatTime(sliderMin)}</span>
             <span>Current {formatTime(state.stationCurrentTime[station])}</span>
           </div>
         </div>

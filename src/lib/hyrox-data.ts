@@ -70,7 +70,7 @@ export const STATION_ORDER = [
   "SkiErg",
   "Sled Push",
   "Sled Pull",
-  "Broad Jump Burpees",
+  "Burpee Broad Jumps",
   "Rowing",
   "Farmers Carry",
   "Sandbag Lunges",
@@ -86,17 +86,17 @@ export const YOUNGSTARS_STATION_ORDER_8_9 = [
 ] as const;
 
 export const YOUNGSTARS_STATION_ORDER_10_11 = [
-  "SkiErg", "Sled Push", "Sled Drag", "Broad Jump Burpees",
+  "SkiErg", "Sled Push", "Sled Drag", "Burpee Broad Jumps",
   "Rowing", "Farmers Carry", "Lunges", "Wall Ball Squats",
 ] as const;
 
 export const YOUNGSTARS_STATION_ORDER_12_13 = [
-  "SkiErg", "Sled Push", "Sled Pull", "Broad Jump Burpees",
+  "SkiErg", "Sled Push", "Sled Pull", "Burpee Broad Jumps",
   "Rowing", "Farmers Carry", "Sandbag Lunges", "Wall Balls",
 ] as const;
 
 export const YOUNGSTARS_STATION_ORDER_14_15 = [
-  "SkiErg", "Sled Push", "Sled Pull", "Broad Jump Burpees",
+  "SkiErg", "Sled Push", "Sled Pull", "Burpee Broad Jumps",
   "Rowing", "Farmers Carry", "Sandbag Lunges", "Wall Balls",
 ] as const;
 
@@ -112,7 +112,7 @@ function mkStation(
     "Sled Push": "Sled Push",
     "Sled Pull": "Sled Pull",
     "Sled Drag": "Sled Drag",
-    "Broad Jump Burpees": "BBJ",
+    "Burpee Broad Jumps": "BBJ",
     "Frogger Jumps": "Frogger",
     Rowing: "Row",
     "Farmers Carry": "Farmers",
@@ -126,7 +126,7 @@ function mkStation(
     "Sled Push": "move-horizontal",
     "Sled Pull": "cable",
     "Sled Drag": "cable",
-    "Broad Jump Burpees": "arrow-up",
+    "Burpee Broad Jumps": "arrow-up",
     "Frogger Jumps": "arrow-up",
     Rowing: "waves",
     "Farmers Carry": "dumbbell",
@@ -157,7 +157,7 @@ function buildAdultStations(weights: {
     mkStation("SkiErg", { distance: "1000m" }),
     mkStation("Sled Push", { distance: "50m", weightKg: weights.sledPush, weightLabel: `${weights.sledPush} kg` }),
     mkStation("Sled Pull", { distance: "50m", weightKg: weights.sledPull, weightLabel: `${weights.sledPull} kg` }),
-    mkStation("Broad Jump Burpees", { distance: "80m" }),
+    mkStation("Burpee Broad Jumps", { distance: "80m" }),
     mkStation("Rowing", { distance: "1000m" }),
     mkStation("Farmers Carry", { distance: "200m", weightKg: weights.farmersEach * 2, weightLabel: `2×${weights.farmersEach} kg` }),
     mkStation("Sandbag Lunges", { distance: "100m", weightKg: weights.sandbag, weightLabel: `${weights.sandbag} kg` }),
@@ -364,7 +364,7 @@ export const DIVISIONS: Record<DivisionKey, DivisionSpec> = {
       mkStation("SkiErg", { distance: "400m" }),
       mkStation("Sled Push", { distance: "15m" }),
       mkStation("Sled Drag", { distance: "15m" }),
-      mkStation("Broad Jump Burpees", { distance: "20m" }),
+      mkStation("Burpee Broad Jumps", { distance: "20m" }),
       mkStation("Rowing", { distance: "300m" }),
       mkStation("Farmers Carry", { distance: "50m", weightKg: 11.4, weightLabel: "2×5.7 kg" }),
       mkStation("Lunges", { distance: "20m" }),
@@ -379,7 +379,7 @@ export const DIVISIONS: Record<DivisionKey, DivisionSpec> = {
       mkStation("SkiErg", { distance: "400m" }),
       mkStation("Sled Push", { distance: "15m" }),
       mkStation("Sled Drag", { distance: "15m" }),
-      mkStation("Broad Jump Burpees", { distance: "20m" }),
+      mkStation("Burpee Broad Jumps", { distance: "20m" }),
       mkStation("Rowing", { distance: "300m" }),
       mkStation("Farmers Carry", { distance: "50m", weightKg: 11.4, weightLabel: "2×5.7 kg" }),
       mkStation("Lunges", { distance: "20m" }),
@@ -396,7 +396,7 @@ export const DIVISIONS: Record<DivisionKey, DivisionSpec> = {
       mkStation("SkiErg", { distance: "500m" }),
       mkStation("Sled Push", { distance: "30m" }),
       mkStation("Sled Pull", { distance: "30m" }),
-      mkStation("Broad Jump Burpees", { distance: "40m" }),
+      mkStation("Burpee Broad Jumps", { distance: "40m" }),
       mkStation("Rowing", { distance: "400m" }),
       mkStation("Farmers Carry", { distance: "100m", weightKg: 18.2, weightLabel: "2×9.1 kg" }),
       mkStation("Sandbag Lunges", { distance: "40m" }),
@@ -411,7 +411,7 @@ export const DIVISIONS: Record<DivisionKey, DivisionSpec> = {
       mkStation("SkiErg", { distance: "500m" }),
       mkStation("Sled Push", { distance: "30m" }),
       mkStation("Sled Pull", { distance: "30m" }),
-      mkStation("Broad Jump Burpees", { distance: "40m" }),
+      mkStation("Burpee Broad Jumps", { distance: "40m" }),
       mkStation("Rowing", { distance: "400m" }),
       mkStation("Farmers Carry", { distance: "100m", weightKg: 18.2, weightLabel: "2×9.1 kg" }),
       mkStation("Sandbag Lunges", { distance: "40m" }),
@@ -428,7 +428,7 @@ export const DIVISIONS: Record<DivisionKey, DivisionSpec> = {
       mkStation("SkiErg", { distance: "600m" }),
       mkStation("Sled Push", { distance: "30m" }),
       mkStation("Sled Pull", { distance: "30m" }),
-      mkStation("Broad Jump Burpees", { distance: "40m" }),
+      mkStation("Burpee Broad Jumps", { distance: "40m" }),
       mkStation("Rowing", { distance: "500m" }),
       mkStation("Farmers Carry", { distance: "100m", weightKg: 22.8, weightLabel: "2×11.4 kg" }),
       mkStation("Sandbag Lunges", { distance: "40m" }),
@@ -443,7 +443,7 @@ export const DIVISIONS: Record<DivisionKey, DivisionSpec> = {
       mkStation("SkiErg", { distance: "600m" }),
       mkStation("Sled Push", { distance: "30m" }),
       mkStation("Sled Pull", { distance: "30m" }),
-      mkStation("Broad Jump Burpees", { distance: "40m" }),
+      mkStation("Burpee Broad Jumps", { distance: "40m" }),
       mkStation("Rowing", { distance: "500m" }),
       mkStation("Farmers Carry", { distance: "100m", weightKg: 22.8, weightLabel: "2×11.4 kg" }),
       mkStation("Sandbag Lunges", { distance: "40m" }),
@@ -568,67 +568,459 @@ export function isTeamDivision(key: RaceDivisionKey): boolean {
 // Only available for the 4 original singles divisions.
 // Other divisions will build reference data from scraped results over time.
 // ---------------------------------------------------------------------------
+// Reference times — derived from scraped race data
+//
+// Each distribution is [p10, p25, p50, p75, p90] in seconds.
+//   p10 = top 10%  (fast)
+//   p25 = top 25%
+//   p50 = median
+//   p75 = bottom 25%
+//   p90 = bottom 10% (slow)
+//
+// Source: hyrox_division_stats.csv generated from hyrox_public_splits
+// ---------------------------------------------------------------------------
 
-/** Parse "m:ss" to seconds */
-function ts(m: number, s: number): number {
-  return m * 60 + s;
+/** 5-point percentile distribution [p10, p25, p50, p75, p90] in seconds */
+export type RefDistribution = [number, number, number, number, number];
+
+/** Convenience alias — [fast, median, slow] extracted from RefDistribution */
+export type RefTuple = [number, number, number];
+
+// -- Women Open (n ≈ 3700) ---------------------------------------------------
+const WOMEN_OPEN_STATION_REFS: Record<StationName, RefDistribution> = {
+  SkiErg:               [287, 299, 315, 337, 361],
+  "Sled Push":          [135, 151, 173, 200, 230],
+  "Sled Pull":          [265, 295, 341, 399, 470],
+  "Burpee Broad Jumps": [278, 324, 391, 489, 617],
+  Rowing:               [297, 308, 325, 348, 374],
+  "Farmers Carry":      [108, 118, 130, 149, 177],
+  "Sandbag Lunges":     [207, 251, 301, 374, 459],
+  "Wall Balls":         [285, 329, 398, 514, 651],
+};
+const WOMEN_OPEN_RUN_REFS: Record<string, RefDistribution> = {
+  "Run 1": [196, 225, 262, 299, 335],
+  "Run 2": [281, 305, 338, 382, 434],
+  "Run 3": [295, 320, 357, 403, 461],
+  "Run 4": [294, 320, 359, 405, 471],
+  "Run 5": [299, 326, 365, 418, 486],
+  "Run 6": [294, 323, 361, 414, 482],
+  "Run 7": [292, 319, 359, 411, 477],
+  "Run 8": [295, 326, 371, 437, 530],
+};
+const WOMEN_OPEN_ROXZONE_REF: RefDistribution = [375, 423, 497, 606, 727];
+
+// -- Men Open (n ≈ 3400) -----------------------------------------------------
+const MEN_OPEN_STATION_REFS: Record<StationName, RefDistribution> = {
+  SkiErg:               [250, 260, 274, 290, 308],
+  "Sled Push":          [147, 169, 194, 224, 270],
+  "Sled Pull":          [227, 253, 293, 341, 399],
+  "Burpee Broad Jumps": [235, 275, 333, 410, 497],
+  Rowing:               [266, 276, 292, 312, 335],
+  "Farmers Carry":      [ 97, 110, 125, 146, 174],
+  "Sandbag Lunges":     [219, 263, 314, 381, 473],
+  "Wall Balls":         [298, 355, 428, 544, 709],
+};
+const MEN_OPEN_RUN_REFS: Record<string, RefDistribution> = {
+  "Run 1": [176, 200, 228, 258, 299],
+  "Run 2": [246, 268, 299, 339, 381],
+  "Run 3": [266, 292, 324, 368, 419],
+  "Run 4": [265, 290, 324, 368, 421],
+  "Run 5": [268, 296, 332, 381, 445],
+  "Run 6": [264, 290, 328, 375, 439],
+  "Run 7": [263, 289, 325, 375, 443],
+  "Run 8": [269, 301, 346, 410, 522],
+};
+const MEN_OPEN_ROXZONE_REF: RefDistribution = [345, 394, 477, 588, 721];
+
+// -- Women Pro (n ≈ 509) ------------------------------------------------------
+const WOMEN_PRO_STATION_REFS: Record<StationName, RefDistribution> = {
+  SkiErg:               [272, 283, 295, 309, 324],
+  "Sled Push":          [193, 218, 256, 302, 357],
+  "Sled Pull":          [268, 299, 363, 437, 528],
+  "Burpee Broad Jumps": [228, 264, 318, 392, 484],
+  Rowing:               [281, 291, 306, 322, 342],
+  "Farmers Carry":      [108, 125, 147, 181, 216],
+  "Sandbag Lunges":     [212, 255, 308, 367, 437],
+  "Wall Balls":         [271, 317, 392, 503, 628],
+};
+const WOMEN_PRO_RUN_REFS: Record<string, RefDistribution> = {
+  "Run 1": [166, 186, 222, 266, 304],
+  "Run 2": [243, 264, 291, 327, 369],
+  "Run 3": [258, 282, 315, 356, 404],
+  "Run 4": [258, 283, 314, 355, 401],
+  "Run 5": [260, 286, 318, 357, 415],
+  "Run 6": [258, 282, 313, 354, 406],
+  "Run 7": [260, 285, 319, 358, 412],
+  "Run 8": [264, 290, 324, 374, 456],
+};
+const WOMEN_PRO_ROXZONE_REF: RefDistribution = [317, 361, 434, 533, 651];
+
+// -- Men Pro (n ≈ 812) --------------------------------------------------------
+const MEN_PRO_STATION_REFS: Record<StationName, RefDistribution> = {
+  SkiErg:               [242, 248, 258, 270, 282],
+  "Sled Push":          [179, 208, 248, 296, 358],
+  "Sled Pull":          [257, 292, 346, 424, 525],
+  "Burpee Broad Jumps": [194, 221, 264, 318, 368],
+  Rowing:               [253, 260, 272, 287, 306],
+  "Farmers Carry":      [ 96, 106, 123, 150, 181],
+  "Sandbag Lunges":     [210, 251, 294, 347, 429],
+  "Wall Balls":         [286, 334, 404, 515, 647],
+};
+const MEN_PRO_RUN_REFS: Record<string, RefDistribution> = {
+  "Run 1": [153, 170, 202, 223, 247],
+  "Run 2": [223, 238, 258, 287, 318],
+  "Run 3": [237, 258, 284, 319, 361],
+  "Run 4": [241, 260, 287, 321, 357],
+  "Run 5": [242, 261, 288, 328, 366],
+  "Run 6": [237, 256, 283, 320, 362],
+  "Run 7": [241, 259, 287, 324, 364],
+  "Run 8": [246, 265, 297, 342, 400],
+};
+const MEN_PRO_ROXZONE_REF: RefDistribution = [300, 334, 395, 478, 580];
+
+// -- Doubles Mixed Open (n ≈ 5050) --------------------------------------------
+const DOUBLES_MIXED_OPEN_STATION_REFS: Record<StationName, RefDistribution> = {
+  SkiErg:               [246, 260, 280, 302, 321],
+  "Sled Push":          [106, 118, 135, 157, 182],
+  "Sled Pull":          [187, 211, 243, 281, 324],
+  "Burpee Broad Jumps": [154, 180, 218, 267, 330],
+  Rowing:               [265, 282, 302, 324, 346],
+  "Farmers Carry":      [ 88,  97, 108, 122, 133],
+  "Sandbag Lunges":     [172, 195, 229, 272, 326],
+  "Wall Balls":         [226, 245, 275, 321, 390],
+};
+const DOUBLES_MIXED_OPEN_RUN_REFS: Record<string, RefDistribution> = {
+  "Run 1": [185, 210, 239, 272, 305],
+  "Run 2": [289, 322, 363, 410, 463],
+  "Run 3": [306, 340, 385, 431, 492],
+  "Run 4": [307, 341, 386, 435, 497],
+  "Run 5": [313, 348, 393, 451, 524],
+  "Run 6": [308, 344, 391, 448, 518],
+  "Run 7": [311, 344, 392, 451, 521],
+  "Run 8": [309, 345, 399, 468, 558],
+};
+const DOUBLES_MIXED_OPEN_ROXZONE_REF: RefDistribution = [363, 420, 500, 597, 702];
+
+// -- Doubles Mixed Pro (n ≈ 584) ----------------------------------------------
+const DOUBLES_MIXED_PRO_STATION_REFS: Record<StationName, RefDistribution> = {
+  SkiErg:               [228, 237, 252, 270, 286],
+  "Sled Push":          [123, 137, 153, 179, 205],
+  "Sled Pull":          [205, 223, 253, 291, 343],
+  "Burpee Broad Jumps": [128, 146, 168, 200, 235],
+  Rowing:               [242, 255, 273, 292, 313],
+  "Farmers Carry":      [ 87,  94, 104, 115, 126],
+  "Sandbag Lunges":     [165, 184, 209, 244, 287],
+  "Wall Balls":         [218, 231, 259, 297, 367],
+};
+const DOUBLES_MIXED_PRO_RUN_REFS: Record<string, RefDistribution> = {
+  "Run 1": [153, 166, 187, 216, 242],
+  "Run 2": [242, 262, 297, 334, 377],
+  "Run 3": [258, 284, 323, 360, 403],
+  "Run 4": [258, 283, 319, 361, 403],
+  "Run 5": [261, 289, 328, 371, 412],
+  "Run 6": [259, 284, 322, 366, 410],
+  "Run 7": [264, 289, 325, 371, 419],
+  "Run 8": [263, 290, 327, 374, 441],
+};
+const DOUBLES_MIXED_PRO_ROXZONE_REF: RefDistribution = [296, 334, 388, 472, 555];
+
+// -- Relay Mixed (n ≈ 529) ----------------------------------------------------
+const RELAY_MIXED_STATION_REFS: Record<StationName, RefDistribution> = {
+  SkiErg:               [265, 291, 317, 352, 383],
+  "Sled Push":          [126, 147, 176, 206, 256],
+  "Sled Pull":          [199, 230, 276, 334, 404],
+  "Burpee Broad Jumps": [183, 226, 288, 382, 465],
+  Rowing:               [263, 285, 314, 343, 372],
+  "Farmers Carry":      [ 90, 102, 117, 131, 155],
+  "Sandbag Lunges":     [195, 240, 285, 359, 426],
+  "Wall Balls":         [233, 270, 332, 442, 577],
+};
+const RELAY_MIXED_RUN_REFS: Record<string, RefDistribution> = {
+  "Run 1": [150, 168, 195, 223, 257],
+  "Run 2": [260, 286, 321, 366, 429],
+  "Run 3": [260, 289, 324, 377, 443],
+  "Run 4": [259, 286, 321, 367, 423],
+  "Run 5": [268, 295, 338, 388, 455],
+  "Run 6": [275, 308, 344, 391, 452],
+  "Run 7": [267, 299, 338, 382, 432],
+  "Run 8": [271, 301, 340, 386, 442],
+};
+const RELAY_MIXED_ROXZONE_REF: RefDistribution = [343, 390, 460, 532, 599];
+
+// -- Adaptive Men (n = 4, limited data) ----------------------------------------
+const ADAPTIVE_MEN_STATION_REFS: Record<StationName, RefDistribution> = {
+  SkiErg:               [229, 243, 276, 300, 301],
+  "Sled Push":          [ 88, 138, 216, 291, 336],
+  "Sled Pull":          [141, 167, 256, 330, 331],
+  "Burpee Broad Jumps": [280, 294, 325, 389, 462],
+  Rowing:               [276, 278, 310, 341, 343],
+  "Farmers Carry":      [ 93,  96, 124, 168, 202],
+  "Sandbag Lunges":     [319, 324, 340, 358, 369],
+  "Wall Balls":         [206, 218, 259, 367, 499],
+};
+const ADAPTIVE_MEN_RUN_REFS: Record<string, RefDistribution> = {
+  "Run 1": [ 92, 149, 185, 201, 221],
+  "Run 2": [216, 275, 312, 330, 352],
+  "Run 3": [222, 289, 342, 367, 383],
+  "Run 4": [223, 294, 344, 362, 378],
+  "Run 5": [225, 302, 352, 371, 394],
+  "Run 6": [224, 294, 340, 361, 384],
+  "Run 7": [224, 296, 350, 372, 388],
+  "Run 8": [240, 312, 358, 376, 396],
+};
+const ADAPTIVE_MEN_ROXZONE_REF: RefDistribution = [410, 479, 562, 638, 697];
+
+// -- Assembled reference lookup -----------------------------------------------
+
+export interface DivisionRefData {
+  stations: Record<StationName, RefDistribution>;
+  runs: Record<string, RefDistribution>;
+  roxzone: RefDistribution;
 }
 
-// Women Open — 102kg sled push, 78kg sled pull, 2×16kg farmers, 10kg sandbag, 4kg wall ball
-const WOMEN_OPEN_REFS: Record<StationName, [number, number, number]> = {
-  SkiErg:                [ts(4, 15), ts(5,  5), ts(7,  0)],
-  "Sled Push":           [ts(1, 40), ts(2, 35), ts(4, 30)],
-  "Sled Pull":           [ts(3, 30), ts(5, 30), ts(7, 30)],
-  "Broad Jump Burpees":  [ts(4,  0), ts(6, 15), ts(9, 30)],
-  Rowing:                [ts(4,  0), ts(5,  5), ts(7,  0)],
-  "Farmers Carry":       [ts(1, 15), ts(2, 10), ts(3, 30)],
-  "Sandbag Lunges":      [ts(3,  0), ts(4, 45), ts(7, 30)],
-  "Wall Balls":          [ts(3, 15), ts(5, 30), ts(8, 30)],
+// ---------------------------------------------------------------------------
+// Observed min/max from scraped data (fastest & slowest per segment)
+// Source: hyrox_division_stats.csv — update after running cleanup_outliers.sql
+// ---------------------------------------------------------------------------
+
+type StationRanges = Record<StationName, [number, number]>;
+type RunRanges = Record<string, [number, number]>;
+
+// -- Women Open ranges --------------------------------------------------------
+const WOMEN_OPEN_STATION_RANGES: StationRanges = {
+  SkiErg:               [256, 606],
+  "Sled Push":          [ 84, 626],
+  "Sled Pull":          [193, 1064],
+  "Burpee Broad Jumps": [148, 1200],
+  Rowing:               [184, 606],
+  "Farmers Carry":      [ 73, 697],
+  "Sandbag Lunges":     [ 89, 1200],
+  "Wall Balls":         [193, 1200],
+};
+const WOMEN_OPEN_RUN_RANGES: RunRanges = {
+  "Run 1": [147, 708], "Run 2": [181, 859], "Run 3": [235, 900], "Run 4": [237, 882],
+  "Run 5": [235, 900], "Run 6": [237, 900], "Run 7": [137, 900], "Run 8": [195, 900],
+};
+const WOMEN_OPEN_ROXZONE_RANGE: [number, number] = [256, 1800];
+
+// -- Men Open ranges ----------------------------------------------------------
+const MEN_OPEN_STATION_RANGES: StationRanges = {
+  SkiErg:               [150, 401],
+  "Sled Push":          [ 93, 1200],
+  "Sled Pull":          [139, 1200],
+  "Burpee Broad Jumps": [134, 1200],
+  Rowing:               [235, 511],
+  "Farmers Carry":      [ 66, 689],
+  "Sandbag Lunges":     [ 99, 1200],
+  "Wall Balls":         [201, 1200],
+};
+const MEN_OPEN_RUN_RANGES: RunRanges = {
+  "Run 1": [129, 643], "Run 2": [166, 900], "Run 3": [209, 900], "Run 4": [91, 900],
+  "Run 5": [201, 900], "Run 6": [212, 900], "Run 7": [216, 900], "Run 8": [215, 900],
+};
+const MEN_OPEN_ROXZONE_RANGE: [number, number] = [253, 1800];
+
+// -- Women Pro ranges ---------------------------------------------------------
+const WOMEN_PRO_STATION_RANGES: StationRanges = {
+  SkiErg:               [250, 366],
+  "Sled Push":          [140, 616],
+  "Sled Pull":          [214, 813],
+  "Burpee Broad Jumps": [148, 1128],
+  Rowing:               [184, 459],
+  "Farmers Carry":      [ 78, 411],
+  "Sandbag Lunges":     [100, 836],
+  "Wall Balls":         [196, 1200],
+};
+const WOMEN_PRO_RUN_RANGES: RunRanges = {
+  "Run 1": [141, 697], "Run 2": [207, 608], "Run 3": [222, 670], "Run 4": [223, 900],
+  "Run 5": [136, 900], "Run 6": [125, 900], "Run 7": [138, 900], "Run 8": [150, 900],
+};
+const WOMEN_PRO_ROXZONE_RANGE: [number, number] = [258, 1800];
+
+// -- Men Pro ranges -----------------------------------------------------------
+const MEN_PRO_STATION_RANGES: StationRanges = {
+  SkiErg:               [224, 402],
+  "Sled Push":          [133, 906],
+  "Sled Pull":          [187, 1193],
+  "Burpee Broad Jumps": [129, 1092],
+  Rowing:               [232, 871],
+  "Farmers Carry":      [ 75, 900],
+  "Sandbag Lunges":     [108, 1134],
+  "Wall Balls":         [186, 1200],
+};
+const MEN_PRO_RUN_RANGES: RunRanges = {
+  "Run 1": [135, 444], "Run 2": [198, 840], "Run 3": [116, 739], "Run 4": [132, 759],
+  "Run 5": [124, 586], "Run 6": [126, 741], "Run 7": [122, 708], "Run 8": [207, 900],
+};
+const MEN_PRO_ROXZONE_RANGE: [number, number] = [238, 1800];
+
+// -- Doubles Mixed Open ranges ------------------------------------------------
+const DOUBLES_MIXED_OPEN_STATION_RANGES: StationRanges = {
+  SkiErg:               [148, 438],
+  "Sled Push":          [ 73, 736],
+  "Sled Pull":          [116, 1200],
+  "Burpee Broad Jumps": [ 84, 1200],
+  Rowing:               [165, 561],
+  "Farmers Carry":      [ 43, 689],
+  "Sandbag Lunges":     [115, 1200],
+  "Wall Balls":         [184, 1200],
+};
+const DOUBLES_MIXED_OPEN_RUN_RANGES: RunRanges = {
+  "Run 1": [125, 774], "Run 2": [123, 900], "Run 3": [167, 900], "Run 4": [179, 900],
+  "Run 5": [149, 900], "Run 6": [108, 900], "Run 7": [193, 900], "Run 8": [180, 900],
+};
+const DOUBLES_MIXED_OPEN_ROXZONE_RANGE: [number, number] = [221, 1800];
+
+// -- Doubles Mixed Pro ranges -------------------------------------------------
+const DOUBLES_MIXED_PRO_STATION_RANGES: StationRanges = {
+  SkiErg:               [201, 370],
+  "Sled Push":          [ 87, 525],
+  "Sled Pull":          [151, 1078],
+  "Burpee Broad Jumps": [ 91, 641],
+  Rowing:               [165, 406],
+  "Farmers Carry":      [ 66, 379],
+  "Sandbag Lunges":     [123, 799],
+  "Wall Balls":         [194, 1200],
+};
+const DOUBLES_MIXED_PRO_RUN_RANGES: RunRanges = {
+  "Run 1": [126, 500], "Run 2": [196, 656], "Run 3": [205, 797], "Run 4": [205, 900],
+  "Run 5": [210, 900], "Run 6": [210, 830], "Run 7": [216, 809], "Run 8": [149, 900],
+};
+const DOUBLES_MIXED_PRO_ROXZONE_RANGE: [number, number] = [219, 1034];
+
+// -- Relay Mixed ranges -------------------------------------------------------
+const RELAY_MIXED_STATION_RANGES: StationRanges = {
+  SkiErg:               [228, 513],
+  "Sled Push":          [ 85, 563],
+  "Sled Pull":          [138, 763],
+  "Burpee Broad Jumps": [109, 1184],
+  Rowing:               [163, 528],
+  "Farmers Carry":      [ 71, 275],
+  "Sandbag Lunges":     [132, 1200],
+  "Wall Balls":         [142, 1200],
+};
+const RELAY_MIXED_RUN_RANGES: RunRanges = {
+  "Run 1": [120, 696], "Run 2": [169, 900], "Run 3": [198, 900], "Run 4": [204, 900],
+  "Run 5": [218, 900], "Run 6": [216, 900], "Run 7": [228, 900], "Run 8": [215, 900],
+};
+const RELAY_MIXED_ROXZONE_RANGE: [number, number] = [263, 1800];
+
+// -- Adaptive Men ranges ------------------------------------------------------
+const ADAPTIVE_MEN_STATION_RANGES: StationRanges = {
+  SkiErg:               [219, 302],
+  "Sled Push":          [ 55, 366],
+  "Sled Pull":          [124, 331],
+  "Burpee Broad Jumps": [271, 511],
+  Rowing:               [274, 344],
+  "Farmers Carry":      [ 91, 224],
+  "Sandbag Lunges":     [316, 376],
+  "Wall Balls":         [199, 587],
+};
+const ADAPTIVE_MEN_RUN_RANGES: RunRanges = {
+  "Run 1": [ 55, 234], "Run 2": [177, 367], "Run 3": [178, 394], "Run 4": [176, 388],
+  "Run 5": [174, 410], "Run 6": [178, 399], "Run 7": [175, 399], "Run 8": [193, 410],
+};
+const ADAPTIVE_MEN_ROXZONE_RANGE: [number, number] = [364, 736];
+
+// ---------------------------------------------------------------------------
+
+export interface DivisionRefDataFull extends DivisionRefData {
+  stationRanges: StationRanges;
+  runRanges: RunRanges;
+  roxzoneRange: [number, number];
+}
+
+export const DIVISION_REF_DATA: Partial<Record<DivisionKey, DivisionRefDataFull>> = {
+  women_open: {
+    stations: WOMEN_OPEN_STATION_REFS, runs: WOMEN_OPEN_RUN_REFS, roxzone: WOMEN_OPEN_ROXZONE_REF,
+    stationRanges: WOMEN_OPEN_STATION_RANGES, runRanges: WOMEN_OPEN_RUN_RANGES, roxzoneRange: WOMEN_OPEN_ROXZONE_RANGE,
+  },
+  women_pro: {
+    stations: WOMEN_PRO_STATION_REFS, runs: WOMEN_PRO_RUN_REFS, roxzone: WOMEN_PRO_ROXZONE_REF,
+    stationRanges: WOMEN_PRO_STATION_RANGES, runRanges: WOMEN_PRO_RUN_RANGES, roxzoneRange: WOMEN_PRO_ROXZONE_RANGE,
+  },
+  men_open: {
+    stations: MEN_OPEN_STATION_REFS, runs: MEN_OPEN_RUN_REFS, roxzone: MEN_OPEN_ROXZONE_REF,
+    stationRanges: MEN_OPEN_STATION_RANGES, runRanges: MEN_OPEN_RUN_RANGES, roxzoneRange: MEN_OPEN_ROXZONE_RANGE,
+  },
+  men_pro: {
+    stations: MEN_PRO_STATION_REFS, runs: MEN_PRO_RUN_REFS, roxzone: MEN_PRO_ROXZONE_REF,
+    stationRanges: MEN_PRO_STATION_RANGES, runRanges: MEN_PRO_RUN_RANGES, roxzoneRange: MEN_PRO_ROXZONE_RANGE,
+  },
+  doubles_mixed_open: {
+    stations: DOUBLES_MIXED_OPEN_STATION_REFS, runs: DOUBLES_MIXED_OPEN_RUN_REFS, roxzone: DOUBLES_MIXED_OPEN_ROXZONE_REF,
+    stationRanges: DOUBLES_MIXED_OPEN_STATION_RANGES, runRanges: DOUBLES_MIXED_OPEN_RUN_RANGES, roxzoneRange: DOUBLES_MIXED_OPEN_ROXZONE_RANGE,
+  },
+  doubles_mixed_pro: {
+    stations: DOUBLES_MIXED_PRO_STATION_REFS, runs: DOUBLES_MIXED_PRO_RUN_REFS, roxzone: DOUBLES_MIXED_PRO_ROXZONE_REF,
+    stationRanges: DOUBLES_MIXED_PRO_STATION_RANGES, runRanges: DOUBLES_MIXED_PRO_RUN_RANGES, roxzoneRange: DOUBLES_MIXED_PRO_ROXZONE_RANGE,
+  },
+  relay_mixed: {
+    stations: RELAY_MIXED_STATION_REFS, runs: RELAY_MIXED_RUN_REFS, roxzone: RELAY_MIXED_ROXZONE_REF,
+    stationRanges: RELAY_MIXED_STATION_RANGES, runRanges: RELAY_MIXED_RUN_RANGES, roxzoneRange: RELAY_MIXED_ROXZONE_RANGE,
+  },
+  adaptive_men: {
+    stations: ADAPTIVE_MEN_STATION_REFS, runs: ADAPTIVE_MEN_RUN_REFS, roxzone: ADAPTIVE_MEN_ROXZONE_REF,
+    stationRanges: ADAPTIVE_MEN_STATION_RANGES, runRanges: ADAPTIVE_MEN_RUN_RANGES, roxzoneRange: ADAPTIVE_MEN_ROXZONE_RANGE,
+  },
 };
 
-// Men Open — 152kg sled push, 103kg sled pull, 2×24kg farmers, 20kg sandbag, 6kg wall ball
-const MEN_OPEN_REFS: Record<StationName, [number, number, number]> = {
-  SkiErg:                [ts(3, 30), ts(4, 25), ts(6,  0)],
-  "Sled Push":           [ts(2,  0), ts(2, 40), ts(4, 30)],
-  "Sled Pull":           [ts(3, 15), ts(5, 10), ts(7, 30)],
-  "Broad Jump Burpees":  [ts(3, 30), ts(5, 30), ts(8, 30)],
-  Rowing:                [ts(3, 30), ts(4, 45), ts(6, 30)],
-  "Farmers Carry":       [ts(1, 15), ts(2,  5), ts(3, 30)],
-  "Sandbag Lunges":      [ts(3, 30), ts(5, 25), ts(8,  0)],
-  "Wall Balls":          [ts(3, 30), ts(6,  0), ts(9,  0)],
-};
+// ---------------------------------------------------------------------------
+// Percentile estimation — interpolate between known quantile points
+// ---------------------------------------------------------------------------
 
-// Women Pro — 152kg sled push, 103kg sled pull, 2×24kg farmers, 20kg sandbag, 6kg wall ball
-// Same weights as Men Open but faster overall athletes
-const WOMEN_PRO_REFS: Record<StationName, [number, number, number]> = {
-  SkiErg:                [ts(3, 30), ts(4, 30), ts(6,  0)],
-  "Sled Push":           [ts(1, 30), ts(2, 20), ts(4,  0)],
-  "Sled Pull":           [ts(3,  0), ts(4, 45), ts(7,  0)],
-  "Broad Jump Burpees":  [ts(3,  0), ts(5,  0), ts(7, 30)],
-  Rowing:                [ts(3, 30), ts(4, 30), ts(6,  0)],
-  "Farmers Carry":       [ts(1,  0), ts(1, 45), ts(3,  0)],
-  "Sandbag Lunges":      [ts(2, 30), ts(4, 15), ts(6, 30)],
-  "Wall Balls":          [ts(3,  0), ts(5,  0), ts(7, 30)],
-};
+const KNOWN_PERCENTILES = [10, 25, 50, 75, 90] as const;
 
-// Men Pro — 202kg sled push, 153kg sled pull, 2×32kg farmers, 30kg sandbag, 9kg wall ball
-const MEN_PRO_REFS: Record<StationName, [number, number, number]> = {
-  SkiErg:                [ts(3, 10), ts(4,  0), ts(5, 30)],
-  "Sled Push":           [ts(2,  0), ts(3,  0), ts(5,  0)],
-  "Sled Pull":           [ts(3, 30), ts(5, 30), ts(8,  0)],
-  "Broad Jump Burpees":  [ts(3,  0), ts(4, 45), ts(7,  0)],
-  Rowing:                [ts(3, 15), ts(4, 15), ts(5, 45)],
-  "Farmers Carry":       [ts(1, 15), ts(2, 15), ts(3, 45)],
-  "Sandbag Lunges":      [ts(3, 15), ts(5, 30), ts(8, 30)],
-  "Wall Balls":          [ts(3, 30), ts(6, 15), ts(9, 30)],
-};
+/**
+ * Estimate what percentile a given time falls in for a segment.
+ * Returns 1–99 (lower = faster/better). Returns null if no distribution available.
+ *
+ * Note: percentile here means "% of athletes who were SLOWER than you",
+ * so a lower time → lower percentile number → better performance.
+ * We invert at display time to show "Top X%".
+ */
+export function estimatePercentile(timeSeconds: number, dist: RefDistribution): number {
+  // Faster than p10 → extrapolate toward 1
+  if (timeSeconds <= dist[0]) {
+    return Math.max(1, Math.round(10 * (timeSeconds / dist[0])));
+  }
+  // Slower than p90 → extrapolate toward 99
+  if (timeSeconds >= dist[4]) {
+    const ratio = (timeSeconds - dist[4]) / (dist[4] - dist[2]); // how far past p90
+    return Math.min(99, Math.round(90 + 10 * Math.min(ratio, 1)));
+  }
+  // Interpolate between adjacent known points
+  for (let i = 0; i < KNOWN_PERCENTILES.length - 1; i++) {
+    if (timeSeconds <= dist[i + 1]) {
+      const pLow = KNOWN_PERCENTILES[i];
+      const pHigh = KNOWN_PERCENTILES[i + 1];
+      const fraction = (timeSeconds - dist[i]) / (dist[i + 1] - dist[i]);
+      return Math.round(pLow + fraction * (pHigh - pLow));
+    }
+  }
+  return 50;
+}
 
-export const REFERENCE_TIMES: Partial<Record<DivisionKey, Record<StationName, [number, number, number]>>> = {
-  women_open: WOMEN_OPEN_REFS,
-  women_pro: WOMEN_PRO_REFS,
-  men_open: MEN_OPEN_REFS,
-  men_pro: MEN_PRO_REFS,
-};
+/** Format a percentile as "Top X%" for display */
+export function formatPercentile(percentile: number): string {
+  return `Top ${percentile}%`;
+}
+
+// ---------------------------------------------------------------------------
+// Backwards-compatible accessors — extract [p10, p50, p90] as RefTuple
+// ---------------------------------------------------------------------------
+
+function toRefTuple(d: RefDistribution): RefTuple {
+  return [d[0], d[2], d[4]];
+}
+
+// Station-only [fast, median, slow]
+export const REFERENCE_TIMES: Partial<Record<DivisionKey, Record<StationName, RefTuple>>> = Object.fromEntries(
+  Object.entries(DIVISION_REF_DATA).map(([k, v]) => [
+    k,
+    Object.fromEntries(Object.entries(v.stations).map(([s, d]) => [s, toRefTuple(d)])),
+  ])
+) as Partial<Record<DivisionKey, Record<StationName, RefTuple>>>;
 
 // ---------------------------------------------------------------------------
 // Running reference (8 × 1 km runs between stations)
@@ -636,13 +1028,27 @@ export const REFERENCE_TIMES: Partial<Record<DivisionKey, Record<StationName, [n
 export const RUN_SEGMENTS = 8;
 export const RUN_DISTANCE_KM = 1; // each segment
 
-/** Reference 1 km run splits in seconds [pro, average, slow] */
-export const RUN_REFERENCE: Partial<Record<DivisionKey, [number, number, number]>> = {
-  women_open: [ts(4, 30), ts(5, 30), ts(7, 0)],
-  women_pro: [ts(4, 0), ts(5, 0), ts(6, 30)],
-  men_open: [ts(3, 45), ts(5, 0), ts(6, 30)],
-  men_pro: [ts(3, 30), ts(4, 30), ts(6, 0)],
-};
+/** Average run reference across all 8 runs [fast, median, slow] */
+export const RUN_REFERENCE: Partial<Record<DivisionKey, RefTuple>> = Object.fromEntries(
+  Object.entries(DIVISION_REF_DATA).map(([divKey, data]) => {
+    const runs = Object.values(data.runs);
+    const avg = (idx: 0 | 2 | 4) => Math.round(runs.reduce((sum, r) => sum + r[idx], 0) / runs.length);
+    return [divKey, [avg(0), avg(2), avg(4)] as RefTuple];
+  })
+) as Partial<Record<DivisionKey, RefTuple>>;
+
+/** Per-run reference times [fast, median, slow] by run label ("Run 1" .. "Run 8") */
+export const RUN_REFERENCES_BY_SEGMENT: Partial<Record<DivisionKey, Record<string, RefTuple>>> = Object.fromEntries(
+  Object.entries(DIVISION_REF_DATA).map(([k, v]) => [
+    k,
+    Object.fromEntries(Object.entries(v.runs).map(([r, d]) => [r, toRefTuple(d)])),
+  ])
+) as Partial<Record<DivisionKey, Record<string, RefTuple>>>;
+
+/** Roxzone (transition) total reference times [fast, median, slow] */
+export const ROXZONE_REFERENCE: Partial<Record<DivisionKey, RefTuple>> = Object.fromEntries(
+  Object.entries(DIVISION_REF_DATA).map(([k, v]) => [k, toRefTuple(v.roxzone)])
+) as Partial<Record<DivisionKey, RefTuple>>;
 
 // ---------------------------------------------------------------------------
 // Helpers
