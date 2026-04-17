@@ -182,6 +182,8 @@ async function callClaude(
     max_tokens: maxTokens,
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
+  }, {
+    timeout: 240_000, // 4 minutes — stay well under Vercel's 300s limit
   });
 
   const textBlock = response.content.find((b) => b.type === "text");
@@ -288,11 +290,13 @@ export const generateHyroxPlan = inngest.createFunction(
     id: "hyrox-generate-plan",
     retries: 2,
     triggers: [{ event: "hyrox/plan.requested" }],
-    onFailure: async ({ event }) => {
+    onFailure: async ({ event, error }) => {
       const { planId } = event.data.event.data as { planId: string };
       if (!planId) return;
-      // Keep status "active" so the UI can show the failure state and offer retry.
-      // The generate route archives existing active plans before creating a new one.
+
+      const errorMessage = error?.message ?? "Unknown error during plan generation";
+      console.error(`[hyrox-generate-plan] Plan ${planId} failed:`, errorMessage);
+
       await db
         .update(hyroxTrainingPlans)
         .set({ generationStatus: "failed" })
@@ -422,10 +426,11 @@ ${scenarioSchema()}`;
       }
     });
 
-    // Generate weeks in batches of 4 (sequential — each batch gets context
+    // Generate weeks in batches of 2 (sequential — each batch gets context
     // from the previous batch for continuity in progressive overload,
-    // station rotation, and pacing).
-    const batchSize = 4;
+    // station rotation, and pacing). Smaller batches keep each Claude API
+    // call under Vercel's 300s function timeout.
+    const batchSize = 2;
     const batches: number[][] = [];
     for (let w = 1; w <= totalWeeks; w += batchSize) {
       const batch: number[] = [];
@@ -499,7 +504,7 @@ For HYROX Days, progress from intervals with light station work → half simulat
 Respond with JSON matching this schema:
 ${weekBatchSchema()}`;
 
-        const raw = await callClaude(systemPrompt, prompt, 16384);
+        const raw = await callClaude(systemPrompt, prompt, 8192);
         const batch = parseJSON<AIWeekBatch>(raw);
 
         // Save sessions to DB

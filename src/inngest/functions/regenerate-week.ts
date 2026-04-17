@@ -137,6 +137,8 @@ Generate the week with JSON matching this schema:
         max_tokens: 4096,
         system: systemPrompt,
         messages: [{ role: "user", content: prompt }],
+      }, {
+        timeout: 240_000,
       });
 
       const textBlock = response.content.find((b) => b.type === "text");
