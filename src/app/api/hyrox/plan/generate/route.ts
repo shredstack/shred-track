@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
       status: "active",
       paceScaleFactor: "1.0",
       generationStatus: "pending",
-      aiModel: "claude-sonnet-4-6",
+      aiModel: process.env.HYROX_TEST_MODE === "true" ? "claude-haiku-4-5-20251001" : "claude-sonnet-4-6",
       athleteSnapshot: snapshot,
     })
     .returning();

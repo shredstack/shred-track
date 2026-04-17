@@ -147,18 +147,20 @@ export default function HyroxPage() {
         </Button>
       </div>
 
-      {/* New plan action */}
+      {/* Redo onboarding / new plan action */}
       <Button
         variant="ghost"
         className="w-full h-auto py-3 flex-col gap-0.5 text-muted-foreground"
         onClick={() => {
-          if (confirm("This will archive your current plan and start fresh. Continue?")) {
+          if (confirm("This will walk you through onboarding again with your current values pre-filled. Your current plan will be archived and a new one generated. Continue?")) {
+            // Clear any stale localStorage draft so DB profile values take priority
+            try { localStorage.removeItem("hyrox-onboarding-draft"); } catch {}
             router.push("/hyrox/onboarding");
           }
         }}
       >
-        <span className="text-xs font-medium">New Race? Update your plan</span>
-        <span className="text-[10px]">Update profile &amp; generate a new training plan</span>
+        <span className="text-xs font-medium">Redo Onboarding</span>
+        <span className="text-[10px]">Review &amp; update your profile, then generate a new plan</span>
       </Button>
 
       {/* Philosophy summary */}

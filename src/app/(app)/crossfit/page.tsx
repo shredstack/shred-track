@@ -22,38 +22,6 @@ import type {
   ScoreDisplay,
 } from "@/types/crossfit";
 
-// Demo workout for initial experience
-const demoWorkout: WorkoutDisplay = {
-  id: "demo-1",
-  title: "Fran",
-  workoutType: "for_time",
-  workoutDate: new Date().toISOString().split("T")[0],
-  timeCapSeconds: 600,
-  createdBy: "demo-user",
-  movements: [
-    {
-      id: "m1",
-      movementId: "thruster",
-      movementName: "Thruster",
-      category: "barbell",
-      isWeighted: true,
-      prescribedReps: "21-15-9",
-      prescribedWeightMale: "95",
-      prescribedWeightFemale: "65",
-      orderIndex: 0,
-    },
-    {
-      id: "m2",
-      movementId: "pull-up",
-      movementName: "Pull-Up",
-      category: "gymnastics",
-      isWeighted: false,
-      prescribedReps: "21-15-9",
-      orderIndex: 1,
-    },
-  ],
-};
-
 function builderFormToWorkout(form: WorkoutBuilderForm, date: string): WorkoutDisplay {
   const movements: WorkoutMovementDisplay[] = form.movements.map((m, i) => ({
     id: m.tempId,
@@ -113,7 +81,7 @@ function toDateString(d: Date) {
 
 export default function CrossfitPage() {
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [workouts, setWorkouts] = useState<WorkoutDisplay[]>([demoWorkout]);
+  const [workouts, setWorkouts] = useState<WorkoutDisplay[]>([]);
   const [showAddWorkout, setShowAddWorkout] = useState(false);
   const [scoringWorkout, setScoringWorkout] = useState<WorkoutDisplay | null>(null);
 
@@ -128,6 +96,10 @@ export default function CrossfitPage() {
   const handleSaveFromParser = (parsed: ParsedWorkout) => {
     setWorkouts([parsedToWorkout(parsed, dateStr), ...workouts]);
     setShowAddWorkout(false);
+  };
+
+  const handleDeleteWorkout = (workoutId: string) => {
+    setWorkouts((prev) => prev.filter((w) => w.id !== workoutId));
   };
 
   return (
@@ -153,6 +125,7 @@ export default function CrossfitPage() {
           key={workout.id}
           workout={workout}
           onLogScore={() => setScoringWorkout(workout)}
+          onDelete={handleDeleteWorkout}
         />
       ))}
 

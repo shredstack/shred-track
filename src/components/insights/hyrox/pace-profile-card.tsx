@@ -34,7 +34,7 @@ export function PaceProfileCard({ division, eventId, userOverlay }: PaceProfileC
         // Natural sort: Run 1, SkiErg, Run 2, Sled Push, ...
         const ORDER = [
           "Run 1", "SkiErg", "Run 2", "Sled Push", "Run 3", "Sled Pull",
-          "Run 4", "Broad Jump Burpees", "Run 5", "Rowing", "Run 6",
+          "Run 4", "Burpee Broad Jumps", "Run 5", "Rowing", "Run 6",
           "Farmers Carry", "Run 7", "Sandbag Lunges", "Run 8", "Wall Balls",
         ];
         return ORDER.indexOf(a.segmentLabel) - ORDER.indexOf(b.segmentLabel);
@@ -46,7 +46,7 @@ export function PaceProfileCard({ division, eventId, userOverlay }: PaceProfileC
       )?.timeSeconds;
 
       return {
-        label: seg.segmentLabel.replace("Broad Jump Burpees", "BBJ"),
+        label: seg.segmentLabel.replace("Burpee Broad Jumps", "BBJ"),
         avgSeconds: Math.round(seg.meanSeconds),
         type: seg.segmentType,
         userSeconds: userTime ?? null,

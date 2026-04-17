@@ -64,7 +64,7 @@ def setup_logging(env: str) -> Path:
     return log_file
 
 STATION_ORDER = [
-    "SkiErg", "Sled Push", "Sled Pull", "Broad Jump Burpees",
+    "SkiErg", "Sled Push", "Sled Pull", "Burpee Broad Jumps",
     "Rowing", "Farmers Carry", "Sandbag Lunges", "Wall Balls",
 ]
 

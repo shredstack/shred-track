@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { hyroxTrainingPlans } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { hyroxTrainingPlans, hyroxPlanSessions } from "@/db/schema";
+import { eq, and, count } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 
 // GET /api/hyrox/plan/[planId]/status — poll generation status
@@ -20,6 +20,7 @@ export async function GET(
       title: hyroxTrainingPlans.title,
       generationStatus: hyroxTrainingPlans.generationStatus,
       totalWeeks: hyroxTrainingPlans.totalWeeks,
+      createdAt: hyroxTrainingPlans.createdAt,
     })
     .from(hyroxTrainingPlans)
     .where(
@@ -34,5 +35,22 @@ export async function GET(
     return NextResponse.json({ error: "Plan not found" }, { status: 404 });
   }
 
-  return NextResponse.json(plan);
+  // Include session count so the client can show generation progress
+  let sessionsGenerated = 0;
+  if (plan.generationStatus === "generating" || plan.generationStatus === "completed") {
+    const [result] = await db
+      .select({ count: count() })
+      .from(hyroxPlanSessions)
+      .where(eq(hyroxPlanSessions.planId, planId));
+    sessionsGenerated = result?.count ?? 0;
+  }
+
+  // Expected ~7 sessions per week
+  const expectedSessions = plan.totalWeeks ? plan.totalWeeks * 7 : 0;
+
+  return NextResponse.json({
+    ...plan,
+    sessionsGenerated,
+    expectedSessions,
+  });
 }

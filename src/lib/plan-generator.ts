@@ -8,6 +8,7 @@ import {
   STATION_ORDER,
   REFERENCE_TIMES,
   RUN_REFERENCE,
+  ROXZONE_REFERENCE,
   RUN_SEGMENTS,
   formatTime,
 } from "./hyrox-data";
@@ -202,7 +203,7 @@ function buildStationSession(
     SkiErg: ["Drive with hips, not arms", "Keep core tight", "Full extension each pull"],
     "Sled Push": ["Stay low, drive through legs", "Short choppy steps", "Keep arms locked out"],
     "Sled Pull": ["Sit back into your hips", "Hand over hand, steady rhythm", "Brace your core"],
-    "Broad Jump Burpees": ["Land soft, explode forward", "Minimize ground contact time", "Use arm swing for momentum"],
+    "Burpee Broad Jumps": ["Land soft, explode forward", "Minimize ground contact time", "Use arm swing for momentum"],
     Rowing: ["Legs-back-arms sequence", "Drive through heels", "Keep stroke rate 26-30"],
     "Farmers Carry": ["Shoulders packed down", "Short quick steps", "Grip hard, core tight"],
     "Sandbag Lunges": ["Keep torso upright", "Knee tracks over toes", "Breathe every rep"],
@@ -292,8 +293,9 @@ export function generatePlan(data: OnboardingData): GeneratedPlan {
     totalGoalStationTime += data.stationGoalTime[station] ?? REFERENCE_TIMES[data.division]?.[station]?.[0] ?? 240;
   }
 
-  // Transition time estimate (30s between each of 16 transitions)
-  const transitionTime = 16 * 30;
+  // Transition time from scraped roxzone data (median), fallback to 8 min estimate
+  const roxzoneRef = ROXZONE_REFERENCE[data.division];
+  const transitionTime = roxzoneRef?.[1] ?? 16 * 30;
   const estimatedCurrentTime = totalCurrentRunTime + totalCurrentStationTime + transitionTime;
   const goalTime = totalGoalRunTime + totalGoalStationTime + Math.round(transitionTime * 0.8);
 
