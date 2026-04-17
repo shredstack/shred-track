@@ -10,6 +10,8 @@ import { getSessionUser } from "@/lib/session";
 import { inngest } from "@/inngest/client";
 import type { AthleteSnapshot } from "@/types/hyrox-plan";
 
+export const maxDuration = 60;
+
 // POST /api/hyrox/plan/generate — kick off AI plan generation
 export async function POST(req: NextRequest) {
   const user = await getSessionUser();
