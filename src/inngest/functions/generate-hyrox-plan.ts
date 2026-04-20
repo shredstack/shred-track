@@ -27,6 +27,11 @@ const AI_MODEL = process.env.HYROX_TEST_MODE === "true"
   ? "claude-haiku-4-5-20251001"
   : "claude-sonnet-4-6";
 
+// Vercel Pro allows 300s per function invocation. Set the Claude SDK timeout
+// to 240s so that we get a clean SDK error (retryable by Inngest) instead of
+// a hard FUNCTION_INVOCATION_TIMEOUT from Vercel.
+const CLAUDE_TIMEOUT_MS = 240_000;
+
 function buildSystemPrompt(): string {
   return `You are an elite HYROX training coach creating personalized training plans. You understand periodization, running physiology, and HYROX race strategy deeply.
 
@@ -105,42 +110,38 @@ function planOverviewSchema(): string {
 }`;
 }
 
-function weekBatchSchema(): string {
+function weekSchema(): string {
   return `{
-  "weeks": [
+  "weekNumber": "integer",
+  "sessions": [
     {
-      "weekNumber": "integer",
-      "sessions": [
-        {
-          "dayOfWeek": "integer — 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun",
-          "sessionType": "string — one of: 'station_skills', 'run', 'hyrox_day', 'rest'",
-          "title": "string — e.g. 'Easy Run', 'SkiErg + Sled Push Skills'",
-          "description": "string — 1-2 sentences",
-          "targetPace": "string or null — e.g. '8:00/mile' for runs",
-          "durationMinutes": "integer — estimated total duration",
-          "equipmentRequired": ["string — e.g. 'skierg', 'sled'"],
-          "detail": {
-            "warmup": "string or null",
-            "blocks": [
+      "dayOfWeek": "integer — 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun",
+      "sessionType": "string — one of: 'station_skills', 'run', 'hyrox_day', 'rest'",
+      "title": "string — e.g. 'Easy Run', 'SkiErg + Sled Push Skills'",
+      "description": "string — 1-2 sentences",
+      "targetPace": "string or null — e.g. '8:00/mile' for runs",
+      "durationMinutes": "integer — estimated total duration",
+      "equipmentRequired": ["string — e.g. 'skierg', 'sled'"],
+      "detail": {
+        "warmup": "string or null",
+        "blocks": [
+          {
+            "label": "string — e.g. 'Main Set', 'Station Work'",
+            "movements": [
               {
-                "label": "string — e.g. 'Main Set', 'Station Work'",
-                "movements": [
-                  {
-                    "name": "string — movement name",
-                    "prescription": "string — e.g. '3 × 500m @ 2:10/500m pace'",
-                    "rest": "string or null — e.g. '45 sec between sets'",
-                    "notes": "string or null — technique cues",
-                    "equipmentNeeded": "string or null"
-                  }
-                ]
+                "name": "string — movement name",
+                "prescription": "string — e.g. '3 × 500m @ 2:10/500m pace'",
+                "rest": "string or null — e.g. '45 sec between sets'",
+                "notes": "string or null — technique cues",
+                "equipmentNeeded": "string or null"
               }
-            ],
-            "cooldown": "string or null",
-            "coachNotes": "string or null — why this session matters in the context of the plan",
-            "estimatedDuration": "integer — minutes"
+            ]
           }
-        }
-      ]
+        ],
+        "cooldown": "string or null",
+        "coachNotes": "string or null — why this session matters in the context of the plan",
+        "estimatedDuration": "integer — minutes"
+      }
     }
   ]
 }`;
@@ -174,17 +175,29 @@ function scenarioSchema(): string {
 async function callClaude(
   systemPrompt: string,
   userPrompt: string,
-  maxTokens: number = 8192
+  maxTokens: number = 4096,
+  label: string = "unknown"
 ): Promise<string> {
-  const client = new Anthropic();
+  const start = Date.now();
+  console.log(`[hyrox-plan] Claude call started: ${label} (model=${AI_MODEL}, maxTokens=${maxTokens})`);
+
+  // Disable the SDK's built-in retries. The default is maxRetries=2, which
+  // means a timed-out request (240s) gets retried immediately — pushing total
+  // time to 480s and blowing past Vercel's 300s function limit. Inngest
+  // already handles retries at the step level, so SDK-level retries are
+  // redundant and harmful here.
+  const client = new Anthropic({ maxRetries: 0 });
   const response = await client.messages.create({
     model: AI_MODEL,
     max_tokens: maxTokens,
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
   }, {
-    timeout: 240_000, // 4 minutes — stay well under Vercel's 300s limit
+    timeout: CLAUDE_TIMEOUT_MS,
   });
+
+  const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+  console.log(`[hyrox-plan] Claude call completed: ${label} (${elapsed}s, input=${response.usage.input_tokens}, output=${response.usage.output_tokens})`);
 
   const textBlock = response.content.find((b) => b.type === "text");
   if (!textBlock || textBlock.type !== "text") {
@@ -281,6 +294,42 @@ function repairTruncatedJSON(json: string): string {
   return repaired;
 }
 
+/**
+ * Build a deterministic station rotation for a given week number. This allows
+ * parallel week generation (each week is independent) while still ensuring
+ * stations are covered evenly and weak stations get extra attention.
+ *
+ * Returns { monday: [station, station], wednesday: [station, station] }
+ */
+function getStationRotation(
+  weekNumber: number,
+  snapshot: AthleteSnapshot,
+): { monday: string[]; wednesday: string[] } {
+  const stations = [...STATION_ORDER];
+
+  // Sort by confidence (weakest first) for prioritisation
+  const confidenceMap = new Map(
+    snapshot.stationAssessments.map((a) => [a.station, a.completionConfidence ?? 3])
+  );
+  const sortedByWeakness = [...stations].sort(
+    (a, b) => (confidenceMap.get(a) ?? 3) - (confidenceMap.get(b) ?? 3)
+  );
+
+  // 8 stations, 4 per week (2 Mon + 2 Wed). Full rotation every 2 weeks.
+  // Even weeks: first 4 stations, odd weeks: last 4 stations.
+  // Use weakness-sorted order so weaker stations appear more frequently
+  // (they're at the front of the list, appearing in week 1, 3, 5, …).
+  const parity = (weekNumber - 1) % 2;
+  const weekStations = parity === 0
+    ? sortedByWeakness.slice(0, 4)
+    : sortedByWeakness.slice(4, 8);
+
+  return {
+    monday: weekStations.slice(0, 2),
+    wednesday: weekStations.slice(2, 4),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Main Inngest function
 // ---------------------------------------------------------------------------
@@ -339,7 +388,7 @@ Divide it into appropriate phases (4-6 phases depending on plan length). For pla
 Respond with JSON matching this schema:
 ${planOverviewSchema()}`;
 
-      const raw = await callClaude(systemPrompt, prompt);
+      const raw = await callClaude(systemPrompt, prompt, 4096, "plan-overview");
       return parseJSON<AIPlanOverview>(raw);
     });
 
@@ -372,10 +421,24 @@ ${planOverviewSchema()}`;
       return records;
     });
 
-    // Start scenario generation in parallel with week batches (scenarios
-    // only depend on the athlete snapshot, not the week-by-week detail).
+    // -----------------------------------------------------------------------
+    // Generate ALL weeks in parallel + scenarios.
+    //
+    // Each week is an independent Inngest step (= separate Vercel invocation).
+    // Inngest detects un-awaited step.run() promises and executes them
+    // concurrently, so a 20-week plan generates ~20 weeks at once instead
+    // of sequentially. Total wall-clock time ≈ slowest single week, not
+    // the sum of all weeks.
+    //
+    // To maintain quality without sequential context, each week gets:
+    // - Full athlete profile + phase descriptions
+    // - Its position in the plan (week X of Y, % through phase)
+    // - Deterministic station rotation (computed from week number)
+    // - Progression guidance based on phase position
+    // -----------------------------------------------------------------------
+
+    // Kick off scenario generation (independent of weeks)
     const scenariosPromise = step.run("generate-scenarios", async () => {
-      // Determine transition time based on athlete level
       const isProLevel =
         snapshot.division === "men_pro" ||
         snapshot.division === "women_pro" ||
@@ -406,7 +469,7 @@ ${snapshot.goalFinishTimeSeconds ? `The athlete's goal is to finish in ${formatL
 Respond with JSON matching this schema (an array of scenarios):
 ${scenarioSchema()}`;
 
-      const raw = await callClaude(systemPrompt, prompt);
+      const raw = await callClaude(systemPrompt, prompt, 4096, "race-scenarios");
       const scenarios = parseJSON<RaceScenario[]>(raw);
 
       if (scenarios.length > 0) {
@@ -426,134 +489,92 @@ ${scenarioSchema()}`;
       }
     });
 
-    // Generate weeks in batches of 2 (sequential — each batch gets context
-    // from the previous batch for continuity in progressive overload,
-    // station rotation, and pacing). Smaller batches keep each Claude API
-    // call under Vercel's 300s function timeout.
-    const batchSize = 2;
-    const batches: number[][] = [];
-    for (let w = 1; w <= totalWeeks; w += batchSize) {
-      const batch: number[] = [];
-      for (let i = w; i < w + batchSize && i <= totalWeeks; i++) {
-        batch.push(i);
-      }
-      batches.push(batch);
-    }
+    // Kick off ALL week generation steps in parallel (not awaited individually)
+    const weekPromises = Array.from({ length: totalWeeks }, (_, i) => {
+      const weekNumber = i + 1;
+      return step.run(`generate-week-${weekNumber}`, async () => {
+        // Find which phase this week belongs to
+        const phase = overview.phases.find(
+          (p: PlanPhase) => weekNumber >= p.startWeek && weekNumber <= p.endWeek
+        );
+        const phaseRecord = phaseRecords.find(
+          (r: { phaseNumber: number }) => r.phaseNumber === phase?.phaseNumber
+        );
 
-    let previousWeeksSummary = "";
+        // Compute where we are in the plan and phase for progression guidance
+        const planProgress = weekNumber / totalWeeks; // 0..1
+        const phaseProgress = phase
+          ? (weekNumber - phase.startWeek) / (phase.endWeek - phase.startWeek + 1)
+          : 0;
+        const phasePosition = phaseProgress < 0.33 ? "early" : phaseProgress < 0.67 ? "mid" : "late";
 
-    for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
-      const weekNums = batches[batchIdx];
-
-      const batchSummary = await step.run(`generate-weeks-${weekNums[0]}-${weekNums[weekNums.length - 1]}`, async () => {
-        // Find which phase each week belongs to
-        const weekPhaseMap: Record<number, { phase: PlanPhase; phaseId: string }> = {};
-        for (const wk of weekNums) {
-          const phase = overview.phases.find(
-            (p: PlanPhase) => wk >= p.startWeek && wk <= p.endWeek
-          );
-          const phaseRecord = phaseRecords.find(
-            (r: { phaseNumber: number }) => r.phaseNumber === phase?.phaseNumber
-          );
-          if (phase && phaseRecord) {
-            weekPhaseMap[wk] = { phase, phaseId: phaseRecord.id };
-          }
-        }
-
-        const phaseContext = weekNums
-          .map((wk) => {
-            const entry = weekPhaseMap[wk];
-            return entry
-              ? `Week ${wk}: Phase "${entry.phase.name}" — ${entry.phase.description}`
-              : `Week ${wk}`;
-          })
-          .join("\n");
-
-        const continuityContext = previousWeeksSummary
-          ? `\n## Previous Weeks (for continuity)\n${previousWeeksSummary}\n\nBuild on the progression above. Avoid repeating the same station pairings from the most recent 2 weeks. Continue progressive overload on run distances and paces.`
-          : "\nThis is the first batch — establish the baseline for progressive overload.";
+        // Deterministic station rotation
+        const rotation = getStationRotation(weekNumber, snapshot);
 
         const prompt = `${athleteContext}
 
 ## Plan Context
-Total weeks: ${totalWeeks}
-Phases:
-${overview.phases.map((p: PlanPhase) => `- Phase ${p.phaseNumber}: ${p.name} (Weeks ${p.startWeek}-${p.endWeek}) — ${p.description}`).join("\n")}
+${totalWeeks}-week plan. Phases: ${overview.phases.map((p: PlanPhase) => `${p.name} (W${p.startWeek}-${p.endWeek})`).join(", ")}
 
-## Current Batch
-Generate detailed sessions for weeks ${weekNums.join(", ")}:
-${phaseContext}
-${continuityContext}
+## Week ${weekNumber} of ${totalWeeks}
+Phase: "${phase?.name ?? "Unknown"}" — ${phase?.description ?? ""}
+Position: ${phasePosition} in phase (week ${phase ? weekNumber - phase.startWeek + 1 : "?"} of ${phase ? phase.endWeek - phase.startWeek + 1 : "?"})
+Overall progress: ${Math.round(planProgress * 100)}% through plan
 
-## Weekly Structure
-Each week MUST have exactly these sessions:
-- Day 0 (Mon): Station Skills — 5-10 min post-CrossFit add-on, 2 stations
-- Day 1 (Tue): Easy Run — aerobic base building
-- Day 2 (Wed): Station Skills — 5-10 min post-CrossFit add-on, 2 different stations from Monday
-- Day 3 (Thu): Tempo/Race Pace Run — sustained effort
+## Station Rotation This Week
+- Monday: ${rotation.monday.join(" + ")}
+- Wednesday: ${rotation.wednesday.join(" + ")}
+${weekNumber <= totalWeeks - 2 ? "" : "This is a taper week — reduce station volume, keep movements crisp."}
+
+## Progression Guidance
+- Easy run distance: ${planProgress < 0.3 ? "3-4 miles (building base)" : planProgress < 0.7 ? "4-6 miles (building endurance)" : planProgress < 0.85 ? "5-7 miles (peak volume)" : "3-4 miles (taper)"}
+- Tempo intensity: ${planProgress < 0.3 ? "moderate pace, shorter intervals" : planProgress < 0.7 ? "tempo pace, longer sustained efforts" : planProgress < 0.85 ? "race pace, race-specific intervals" : "short race-pace sharpeners"}
+- Saturday HYROX Day: ${planProgress < 0.3 ? "intervals with station technique focus" : planProgress < 0.5 ? "longer intervals, partial station circuits" : planProgress < 0.8 ? "half or full race simulations" : "short shakeout simulation, stay fresh"}
+
+## Weekly Structure (7 sessions)
+- Day 0 (Mon): Station Skills — 5-10 min post-CrossFit, focus on ${rotation.monday.join(" + ")}
+- Day 1 (Tue): Easy Run
+- Day 2 (Wed): Station Skills — 5-10 min post-CrossFit, focus on ${rotation.wednesday.join(" + ")}
+- Day 3 (Thu): Tempo/Race Pace Run
 - Day 4 (Fri): Rest or optional light station skills (3-5 min)
-- Day 5 (Sat): HYROX Day — intervals + station work, half/full sims in later phases
+- Day 5 (Sat): HYROX Day — ${planProgress < 0.5 ? "intervals + station work (45-60 min)" : planProgress < 0.85 ? "simulation day (60-90 min)" : "taper shakeout (30-45 min)"}
 - Day 6 (Sun): Rest / Active Recovery
 
-For station skills days, rotate through all 8 stations across 2-week blocks. Prioritize the athlete's lowest-confidence stations with extra volume.
-
-For runs, progress paces and distances through the phases. Easy runs should be truly easy. Tempo runs progress from moderate to race pace.
-
-For HYROX Days, progress from intervals with light station work → half simulations → full race simulations → taper shakeouts.
-
 Respond with JSON matching this schema:
-${weekBatchSchema()}`;
+${weekSchema()}`;
 
-        const raw = await callClaude(systemPrompt, prompt, 8192);
-        const batch = parseJSON<AIWeekBatch>(raw);
+        const raw = await callClaude(systemPrompt, prompt, 4096, `week-${weekNumber}`);
+        // The response is a single week object (not wrapped in { weeks: [] })
+        // but we also accept the batch format for robustness.
+        const parsed = parseJSON<AIWeekBatch["weeks"][0] | AIWeekBatch>(raw);
+        const week = "sessions" in parsed ? parsed : (parsed as AIWeekBatch).weeks[0];
 
-        // Save sessions to DB
-        const sessionValues = batch.weeks.flatMap((week) =>
-          week.sessions.map((session) => {
-            const entry = weekPhaseMap[week.weekNumber];
-            return {
-              planId,
-              week: week.weekNumber,
-              dayOfWeek: session.dayOfWeek,
-              sessionType: session.sessionType,
-              title: session.title,
-              description: session.description,
-              targetPace: session.targetPace ?? null,
-              durationMinutes: session.durationMinutes ?? null,
-              phase: entry?.phase.name ?? "Unknown",
-              orderInDay: 1,
-              phaseId: entry?.phaseId ?? null,
-              aiGenerated: true,
-              athleteModified: false,
-              sessionDetail: session.detail,
-              equipmentRequired: session.equipmentRequired,
-            };
-          })
-        );
+        const sessionValues = week.sessions.map((session) => ({
+          planId,
+          week: weekNumber,
+          dayOfWeek: session.dayOfWeek,
+          sessionType: session.sessionType,
+          title: session.title,
+          description: session.description,
+          targetPace: session.targetPace ?? null,
+          durationMinutes: session.durationMinutes ?? null,
+          phase: phase?.name ?? "Unknown",
+          orderInDay: 1,
+          phaseId: phaseRecord?.id ?? null,
+          aiGenerated: true,
+          athleteModified: false,
+          sessionDetail: session.detail,
+          equipmentRequired: session.equipmentRequired,
+        }));
 
         if (sessionValues.length > 0) {
           await db.insert(hyroxPlanSessions).values(sessionValues);
         }
-
-        // Return a compact summary for the next batch's context
-        const summary = batch.weeks.map((week) => {
-          const stations = week.sessions
-            .filter((s) => s.sessionType === "station_skills")
-            .flatMap((s) => s.equipmentRequired)
-            .filter(Boolean);
-          const runSession = week.sessions.find((s) => s.sessionType === "run" && s.dayOfWeek === 1);
-          const tempoSession = week.sessions.find((s) => s.sessionType === "run" && s.dayOfWeek === 3);
-          return `Week ${week.weekNumber}: Stations [${stations.join(", ")}], Easy Run ${runSession?.targetPace ?? "N/A"} ${runSession?.durationMinutes ?? "?"}min, Tempo ${tempoSession?.targetPace ?? "N/A"} ${tempoSession?.durationMinutes ?? "?"}min`;
-        }).join("\n");
-
-        return summary;
       });
+    });
 
-      previousWeeksSummary += (previousWeeksSummary ? "\n" : "") + batchSummary;
-    }
-
-    // Await scenario generation (may already be done)
-    await scenariosPromise;
+    // Wait for all weeks + scenarios to finish
+    await Promise.all([...weekPromises, scenariosPromise]);
 
     // Mark plan as completed
     await step.run("mark-completed", async () => {
