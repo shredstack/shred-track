@@ -105,13 +105,28 @@ export async function POST(req: NextRequest) {
     .returning();
 
   // Fire Inngest event
-  await inngest.send({
-    name: "hyrox/plan.requested",
-    data: {
-      planId: plan.id,
-      snapshot,
-    },
-  });
+  try {
+    console.log(`[plan/generate] Sending inngest event for plan ${plan.id}`);
+    await inngest.send({
+      name: "hyrox/plan.requested",
+      data: {
+        planId: plan.id,
+        snapshot,
+      },
+    });
+    console.log(`[plan/generate] Inngest event sent successfully for plan ${plan.id}`);
+  } catch (error) {
+    console.error(`[plan/generate] Failed to send inngest event for plan ${plan.id}:`, error);
+    // Plan record exists — mark it failed so the user can retry
+    await db
+      .update(hyroxTrainingPlans)
+      .set({ generationStatus: "failed" })
+      .where(eq(hyroxTrainingPlans.id, plan.id));
+    return NextResponse.json(
+      { error: "Failed to start plan generation. Please try again." },
+      { status: 500 }
+    );
+  }
 
   return NextResponse.json(
     { planId: plan.id, generationStatus: "pending" },

@@ -84,7 +84,7 @@ export const regenerateWeek = inngest.createFunction(
 
     // Generate new week
     await step.run("generate-week", async () => {
-      const client = new Anthropic();
+      const client = new Anthropic({ maxRetries: 0 });
       const systemPrompt = buildSystemPrompt();
       const athleteContext = buildAthleteContext(snapshot);
 
@@ -138,7 +138,7 @@ Generate the week with JSON matching this schema:
         system: systemPrompt,
         messages: [{ role: "user", content: prompt }],
       }, {
-        timeout: 240_000,
+        timeout: 240_000, // Must finish within Vercel Pro's 300s function limit
       });
 
       const textBlock = response.content.find((b) => b.type === "text");
