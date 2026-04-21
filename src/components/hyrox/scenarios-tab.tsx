@@ -155,7 +155,8 @@ function SplitTable({ splits }: SplitTableProps) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="overflow-x-auto -mx-4 px-4">
+        <div className="overflow-x-auto -mx-4">
+          <div className="px-4 w-fit min-w-full">
           <table className="w-full text-xs min-w-[520px]">
             <thead>
               <tr className="border-b border-white/[0.06] text-muted-foreground">
@@ -224,6 +225,7 @@ function SplitTable({ splits }: SplitTableProps) {
               </tr>
             </tfoot>
           </table>
+          </div>
         </div>
       </CardContent>
     </Card>
@@ -281,49 +283,51 @@ function ComparisonView({ scenarios }: ComparisonViewProps) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="overflow-x-auto -mx-4 px-4">
-          <table className="w-full text-xs min-w-[380px]">
-            <thead>
-              <tr className="border-b border-white/[0.06] text-muted-foreground">
-                <th className="pb-2.5 pr-3 text-left font-medium">Scenario</th>
-                <th className="pb-2.5 pr-3 text-right font-medium">Finish</th>
-                <th className="pb-2.5 pr-3 text-right font-medium">Buffer</th>
-                <th className="pb-2.5 text-left font-medium">Run Strategy</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((sc) => {
-                const bufferColor =
-                  sc.bufferSeconds !== null && sc.bufferSeconds >= 0
-                    ? "text-emerald-400"
-                    : "text-red-400";
+        <div className="overflow-x-auto -mx-4">
+          <div className="px-4 w-fit min-w-full">
+            <table className="w-full text-xs min-w-[380px]">
+              <thead>
+                <tr className="border-b border-white/[0.06] text-muted-foreground">
+                  <th className="pb-2.5 pr-3 text-left font-medium">Scenario</th>
+                  <th className="pb-2.5 pr-3 text-right font-medium">Finish</th>
+                  <th className="pb-2.5 pr-3 text-right font-medium">Buffer</th>
+                  <th className="pb-2.5 text-left font-medium">Run Strategy</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((sc) => {
+                  const bufferColor =
+                    sc.bufferSeconds !== null && sc.bufferSeconds >= 0
+                      ? "text-emerald-400"
+                      : "text-red-400";
 
-                return (
-                  <tr
-                    key={sc.scenarioLabel}
-                    className="border-b border-white/[0.04] last:border-0"
-                  >
-                    <td className="py-2.5 pr-3 font-medium">
-                      {sc.scenarioLabel}
-                    </td>
-                    <td className="py-2.5 pr-3 text-right font-mono font-bold">
-                      {formatLongTime(sc.estimatedFinishSeconds)}
-                    </td>
-                    <td
-                      className={`py-2.5 pr-3 text-right font-mono ${bufferColor}`}
+                  return (
+                    <tr
+                      key={sc.scenarioLabel}
+                      className="border-b border-white/[0.04] last:border-0"
                     >
-                      {sc.bufferSeconds !== null
-                        ? `${sc.bufferSeconds >= 0 ? "+" : ""}${formatTime(Math.abs(sc.bufferSeconds))}`
-                        : "--"}
-                    </td>
-                    <td className="py-2.5 text-muted-foreground">
-                      {sc.runStrategy}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      <td className="py-2.5 pr-3 font-medium">
+                        {sc.scenarioLabel}
+                      </td>
+                      <td className="py-2.5 pr-3 text-right font-mono font-bold">
+                        {formatLongTime(sc.estimatedFinishSeconds)}
+                      </td>
+                      <td
+                        className={`py-2.5 pr-3 text-right font-mono ${bufferColor}`}
+                      >
+                        {sc.bufferSeconds !== null
+                          ? `${sc.bufferSeconds >= 0 ? "+" : ""}${formatTime(Math.abs(sc.bufferSeconds))}`
+                          : "--"}
+                      </td>
+                      <td className="py-2.5 text-muted-foreground">
+                        {sc.runStrategy}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       </CardContent>
     </Card>

@@ -24,8 +24,20 @@ export type DivisionKey =
   | "corporate_relay_women" | "corporate_relay_men" | "corporate_relay_mixed"
   // Company Challenge
   | "company_challenge_women" | "company_challenge_men" | "company_challenge_mixed"
-  // Adaptive
-  | "adaptive_women" | "adaptive_men"
+  // Adaptive (13 subdivisions × 2 genders)
+  | "adaptive_ll_minor_women" | "adaptive_ll_minor_men"
+  | "adaptive_ll_major_women" | "adaptive_ll_major_men"
+  | "adaptive_ul_minor_women" | "adaptive_ul_minor_men"
+  | "adaptive_ul_major_women" | "adaptive_ul_major_men"
+  | "adaptive_short_stature_women" | "adaptive_short_stature_men"
+  | "adaptive_visual_women" | "adaptive_visual_men"
+  | "adaptive_deaf_women" | "adaptive_deaf_men"
+  | "adaptive_neuro_minor_women" | "adaptive_neuro_minor_men"
+  | "adaptive_neuro_moderate_women" | "adaptive_neuro_moderate_men"
+  | "adaptive_neuro_major_women" | "adaptive_neuro_major_men"
+  | "adaptive_swhf_women" | "adaptive_swhf_men"
+  | "adaptive_swohf_women" | "adaptive_swohf_men"
+  | "adaptive_swoc_women" | "adaptive_swoc_men"
   // Youngstars
   | "youngstars_8_9_women" | "youngstars_8_9_men"
   | "youngstars_10_11_women" | "youngstars_10_11_men"
@@ -44,6 +56,7 @@ export interface StationSpec {
   weightKg?: number;   // total sled / sandbag / ball weight
   weightLabel?: string; // display string e.g. "2×16 kg"
   icon: string;        // lucide icon name hint
+  adaptation?: string; // movement adaptation for adaptive divisions
 }
 
 export interface DivisionSpec {
@@ -105,7 +118,7 @@ export const YOUNGSTARS_STATION_ORDER_14_15 = [
 // ---------------------------------------------------------------------------
 function mkStation(
   name: string,
-  opts: Partial<Pick<StationSpec, "distance" | "reps" | "weightKg" | "weightLabel">>
+  opts: Partial<Pick<StationSpec, "distance" | "reps" | "weightKg" | "weightLabel" | "adaptation">>
 ): StationSpec {
   const shortNames: Record<string, string> = {
     SkiErg: "SkiErg",
@@ -311,143 +324,547 @@ export const DIVISIONS: Record<DivisionKey, DivisionSpec> = {
     stations: buildAdultStations(OPEN_MEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
   },
 
-  // === Adaptive (Open weights, movement modifications not weight changes) ===
-  adaptive_women: {
-    label: "Women Adaptive", category: "adaptive", athletes: 1,
-    formatDescription: "8 × (1 km run + station) — modified movements, Open weights",
-    stations: buildAdultStations(OPEN_WOMEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  // === Adaptive — Lower Limb Minor ===
+  adaptive_ll_minor_women: {
+    label: "Women Adaptive — Lower Limb Minor", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (1 km run + station) — below-knee amputation / joint instability",
+    runSegments: 8, runDistanceM: 1000,
+    stations: [
+      mkStation("SkiErg", { distance: "1000m" }),
+      mkStation("Sled Push", { distance: "50m", weightKg: 102, weightLabel: "102 kg" }),
+      mkStation("Sled Pull", { distance: "25m", weightKg: 78, weightLabel: "78 kg" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m" }),
+      mkStation("Rowing", { distance: "1000m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 32, weightLabel: "2×16 kg" }),
+      mkStation("Sandbag Lunges", { distance: "100m", weightKg: 10, weightLabel: "10 kg" }),
+      mkStation("Wall Balls", { reps: 100, weightKg: 4, weightLabel: "4 kg / 2.7m target" }),
+    ],
   },
-  adaptive_men: {
-    label: "Men Adaptive", category: "adaptive", athletes: 1,
-    formatDescription: "8 × (1 km run + station) — modified movements, Open weights",
-    stations: buildAdultStations(OPEN_MEN_WEIGHTS), runSegments: 8, runDistanceM: 1000,
+  adaptive_ll_minor_men: {
+    label: "Men Adaptive — Lower Limb Minor", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (1 km run + station) — below-knee amputation / joint instability",
+    runSegments: 8, runDistanceM: 1000,
+    stations: [
+      mkStation("SkiErg", { distance: "1000m" }),
+      mkStation("Sled Push", { distance: "50m", weightKg: 152, weightLabel: "152 kg" }),
+      mkStation("Sled Pull", { distance: "25m", weightKg: 103, weightLabel: "103 kg" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m" }),
+      mkStation("Rowing", { distance: "1000m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 48, weightLabel: "2×24 kg" }),
+      mkStation("Sandbag Lunges", { distance: "100m", weightKg: 20, weightLabel: "20 kg" }),
+      mkStation("Wall Balls", { reps: 100, weightKg: 6, weightLabel: "6 kg / 3.0m target" }),
+    ],
   },
 
-  // === Youngstars 8-9 ===
+  // === Adaptive — Lower Limb Major ===
+  adaptive_ll_major_women: {
+    label: "Women Adaptive — Lower Limb Major", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (1 km run + station) — above-knee amputation / severe mobility impairment",
+    runSegments: 8, runDistanceM: 1000,
+    stations: [
+      mkStation("SkiErg", { distance: "1000m" }),
+      mkStation("Sled Push", { distance: "25m", weightKg: 102, weightLabel: "102 kg" }),
+      mkStation("Sled Pull", { distance: "25m", weightKg: 53, weightLabel: "53 kg" }),
+      mkStation("Burpee Broad Jumps", { distance: "40m", adaptation: "Adapted: walkouts + crutch steps" }),
+      mkStation("Rowing", { distance: "1000m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 24, weightLabel: "2×12 kg" }),
+      mkStation("Sandbag Lunges", { distance: "100m", weightKg: 5, weightLabel: "5 kg" }),
+      mkStation("Wall Balls", { reps: 100, weightKg: 2, weightLabel: "2 kg / 2.7m target" }),
+    ],
+  },
+  adaptive_ll_major_men: {
+    label: "Men Adaptive — Lower Limb Major", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (1 km run + station) — above-knee amputation / severe mobility impairment",
+    runSegments: 8, runDistanceM: 1000,
+    stations: [
+      mkStation("SkiErg", { distance: "1000m" }),
+      mkStation("Sled Push", { distance: "25m", weightKg: 152, weightLabel: "152 kg" }),
+      mkStation("Sled Pull", { distance: "25m", weightKg: 78, weightLabel: "78 kg" }),
+      mkStation("Burpee Broad Jumps", { distance: "40m", adaptation: "Adapted: walkouts + crutch steps" }),
+      mkStation("Rowing", { distance: "1000m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 32, weightLabel: "2×16 kg" }),
+      mkStation("Sandbag Lunges", { distance: "100m", weightKg: 10, weightLabel: "10 kg" }),
+      mkStation("Wall Balls", { reps: 100, weightKg: 4, weightLabel: "4 kg / 3.0m target" }),
+    ],
+  },
+
+  // === Adaptive — Upper Limb Minor ===
+  adaptive_ul_minor_women: {
+    label: "Women Adaptive — Upper Limb Minor", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (1 km run + station) — below-elbow / partial upper limb loss",
+    runSegments: 8, runDistanceM: 1000,
+    stations: [
+      mkStation("SkiErg", { distance: "1000m" }),
+      mkStation("Sled Push", { distance: "50m", weightKg: 102, weightLabel: "102 kg" }),
+      mkStation("Sled Pull", { distance: "25m", weightKg: 78, weightLabel: "78 kg" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m" }),
+      mkStation("Rowing", { distance: "1000m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 16, weightLabel: "1×16 kg" }),
+      mkStation("Sandbag Lunges", { distance: "100m", weightKg: 10, weightLabel: "10 kg" }),
+      mkStation("Wall Balls", { reps: 100, weightKg: 2, weightLabel: "2 kg / 2.7m target" }),
+    ],
+  },
+  adaptive_ul_minor_men: {
+    label: "Men Adaptive — Upper Limb Minor", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (1 km run + station) — below-elbow / partial upper limb loss",
+    runSegments: 8, runDistanceM: 1000,
+    stations: [
+      mkStation("SkiErg", { distance: "1000m" }),
+      mkStation("Sled Push", { distance: "50m", weightKg: 152, weightLabel: "152 kg" }),
+      mkStation("Sled Pull", { distance: "25m", weightKg: 103, weightLabel: "103 kg" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m" }),
+      mkStation("Rowing", { distance: "1000m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 24, weightLabel: "1×24 kg" }),
+      mkStation("Sandbag Lunges", { distance: "100m", weightKg: 20, weightLabel: "20 kg" }),
+      mkStation("Wall Balls", { reps: 100, weightKg: 4, weightLabel: "4 kg / 3.0m target" }),
+    ],
+  },
+
+  // === Adaptive — Upper Limb Major ===
+  adaptive_ul_major_women: {
+    label: "Women Adaptive — Upper Limb Major", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (750m run + station) — above-elbow / major upper limb loss",
+    runSegments: 8, runDistanceM: 750,
+    stations: [
+      mkStation("SkiErg", { distance: "750m" }),
+      mkStation("Sled Push", { distance: "25m", weightKg: 102, weightLabel: "102 kg" }),
+      mkStation("Sled Pull", { distance: "25m", weightKg: 53, weightLabel: "53 kg" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m" }),
+      mkStation("Rowing", { distance: "750m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 12, weightLabel: "1×12 kg" }),
+      mkStation("Sandbag Lunges", { distance: "100m", weightKg: 10, weightLabel: "10 kg" }),
+      mkStation("Wall Balls", { reps: 100, weightKg: 2, weightLabel: "2 kg / 2.7m target" }),
+    ],
+  },
+  adaptive_ul_major_men: {
+    label: "Men Adaptive — Upper Limb Major", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (750m run + station) — above-elbow / major upper limb loss",
+    runSegments: 8, runDistanceM: 750,
+    stations: [
+      mkStation("SkiErg", { distance: "750m" }),
+      mkStation("Sled Push", { distance: "25m", weightKg: 152, weightLabel: "152 kg" }),
+      mkStation("Sled Pull", { distance: "25m", weightKg: 78, weightLabel: "78 kg" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m" }),
+      mkStation("Rowing", { distance: "750m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 16, weightLabel: "1×16 kg" }),
+      mkStation("Sandbag Lunges", { distance: "100m", weightKg: 20, weightLabel: "20 kg" }),
+      mkStation("Wall Balls", { reps: 100, weightKg: 4, weightLabel: "4 kg / 3.0m target" }),
+    ],
+  },
+
+  // === Adaptive — Short Stature ===
+  adaptive_short_stature_women: {
+    label: "Women Adaptive — Short Stature", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (500m run + station) — skeletal dysplasia / growth conditions",
+    runSegments: 8, runDistanceM: 500,
+    stations: [
+      mkStation("SkiErg", { distance: "500m" }),
+      mkStation("Sled Push", { distance: "25m", weightKg: 77, weightLabel: "77 kg" }),
+      mkStation("Sled Pull", { distance: "25m", weightKg: 53, weightLabel: "53 kg" }),
+      mkStation("Burpee Broad Jumps", { distance: "40m" }),
+      mkStation("Rowing", { distance: "500m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 24, weightLabel: "2×12 kg" }),
+      mkStation("Sandbag Lunges", { distance: "100m", weightKg: 5, weightLabel: "5 kg" }),
+      mkStation("Wall Balls", { reps: 50, weightKg: 2, weightLabel: "2 kg / 2.0m target" }),
+    ],
+  },
+  adaptive_short_stature_men: {
+    label: "Men Adaptive — Short Stature", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (500m run + station) — skeletal dysplasia / growth conditions",
+    runSegments: 8, runDistanceM: 500,
+    stations: [
+      mkStation("SkiErg", { distance: "500m" }),
+      mkStation("Sled Push", { distance: "25m", weightKg: 102, weightLabel: "102 kg" }),
+      mkStation("Sled Pull", { distance: "25m", weightKg: 78, weightLabel: "78 kg" }),
+      mkStation("Burpee Broad Jumps", { distance: "40m" }),
+      mkStation("Rowing", { distance: "500m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 32, weightLabel: "2×16 kg" }),
+      mkStation("Sandbag Lunges", { distance: "100m", weightKg: 10, weightLabel: "10 kg" }),
+      mkStation("Wall Balls", { reps: 50, weightKg: 4, weightLabel: "4 kg / 2.2m target" }),
+    ],
+  },
+
+  // === Adaptive — Visual Impairment ===
+  adaptive_visual_women: {
+    label: "Women Adaptive — Visual Impairment", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (1 km run + station) — partial or complete vision loss, guide runner",
+    runSegments: 8, runDistanceM: 1000,
+    stations: [
+      mkStation("SkiErg", { distance: "1000m" }),
+      mkStation("Sled Push", { distance: "50m", weightKg: 102, weightLabel: "102 kg" }),
+      mkStation("Sled Pull", { distance: "50m", weightKg: 78, weightLabel: "78 kg" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m" }),
+      mkStation("Rowing", { distance: "1000m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 32, weightLabel: "2×16 kg" }),
+      mkStation("Sandbag Lunges", { distance: "100m", weightKg: 10, weightLabel: "10 kg" }),
+      mkStation("Wall Balls", { reps: 100, weightKg: 4, weightLabel: "4 kg / 2.7m target" }),
+    ],
+  },
+  adaptive_visual_men: {
+    label: "Men Adaptive — Visual Impairment", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (1 km run + station) — partial or complete vision loss, guide runner",
+    runSegments: 8, runDistanceM: 1000,
+    stations: [
+      mkStation("SkiErg", { distance: "1000m" }),
+      mkStation("Sled Push", { distance: "50m", weightKg: 152, weightLabel: "152 kg" }),
+      mkStation("Sled Pull", { distance: "50m", weightKg: 103, weightLabel: "103 kg" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m" }),
+      mkStation("Rowing", { distance: "1000m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 48, weightLabel: "2×24 kg" }),
+      mkStation("Sandbag Lunges", { distance: "100m", weightKg: 20, weightLabel: "20 kg" }),
+      mkStation("Wall Balls", { reps: 100, weightKg: 6, weightLabel: "6 kg / 3.0m target" }),
+    ],
+  },
+
+  // === Adaptive — Deaf or Hard of Hearing ===
+  adaptive_deaf_women: {
+    label: "Women Adaptive — Deaf / Hard of Hearing", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (1 km run + station) — partial or complete hearing loss",
+    runSegments: 8, runDistanceM: 1000,
+    stations: [
+      mkStation("SkiErg", { distance: "1000m" }),
+      mkStation("Sled Push", { distance: "50m", weightKg: 102, weightLabel: "102 kg" }),
+      mkStation("Sled Pull", { distance: "50m", weightKg: 78, weightLabel: "78 kg" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m" }),
+      mkStation("Rowing", { distance: "1000m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 32, weightLabel: "2×16 kg" }),
+      mkStation("Sandbag Lunges", { distance: "100m", weightKg: 10, weightLabel: "10 kg" }),
+      mkStation("Wall Balls", { reps: 100, weightKg: 4, weightLabel: "4 kg / 2.7m target" }),
+    ],
+  },
+  adaptive_deaf_men: {
+    label: "Men Adaptive — Deaf / Hard of Hearing", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (1 km run + station) — partial or complete hearing loss",
+    runSegments: 8, runDistanceM: 1000,
+    stations: [
+      mkStation("SkiErg", { distance: "1000m" }),
+      mkStation("Sled Push", { distance: "50m", weightKg: 152, weightLabel: "152 kg" }),
+      mkStation("Sled Pull", { distance: "50m", weightKg: 103, weightLabel: "103 kg" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m" }),
+      mkStation("Rowing", { distance: "1000m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 48, weightLabel: "2×24 kg" }),
+      mkStation("Sandbag Lunges", { distance: "100m", weightKg: 20, weightLabel: "20 kg" }),
+      mkStation("Wall Balls", { reps: 100, weightKg: 6, weightLabel: "6 kg / 3.0m target" }),
+    ],
+  },
+
+  // === Adaptive — Neurological Minor ===
+  adaptive_neuro_minor_women: {
+    label: "Women Adaptive — Neuro Minor", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (1 km run + station) — mild neurological impairment, single extremity",
+    runSegments: 8, runDistanceM: 1000,
+    stations: [
+      mkStation("SkiErg", { distance: "1000m" }),
+      mkStation("Sled Push", { distance: "50m", weightKg: 77, weightLabel: "77 kg" }),
+      mkStation("Sled Pull", { distance: "50m", weightKg: 53, weightLabel: "53 kg" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m" }),
+      mkStation("Rowing", { distance: "1000m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 32, weightLabel: "2×16 kg" }),
+      mkStation("Sandbag Lunges", { distance: "50m", weightKg: 5, weightLabel: "5 kg" }),
+      mkStation("Wall Balls", { reps: 100, weightKg: 4, weightLabel: "4 kg / 2.7m target" }),
+    ],
+  },
+  adaptive_neuro_minor_men: {
+    label: "Men Adaptive — Neuro Minor", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (1 km run + station) — mild neurological impairment, single extremity",
+    runSegments: 8, runDistanceM: 1000,
+    stations: [
+      mkStation("SkiErg", { distance: "1000m" }),
+      mkStation("Sled Push", { distance: "50m", weightKg: 102, weightLabel: "102 kg" }),
+      mkStation("Sled Pull", { distance: "50m", weightKg: 78, weightLabel: "78 kg" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m" }),
+      mkStation("Rowing", { distance: "1000m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 48, weightLabel: "2×24 kg" }),
+      mkStation("Sandbag Lunges", { distance: "50m", weightKg: 10, weightLabel: "10 kg" }),
+      mkStation("Wall Balls", { reps: 100, weightKg: 6, weightLabel: "6 kg / 3.0m target" }),
+    ],
+  },
+
+  // === Adaptive — Neurological Moderate ===
+  adaptive_neuro_moderate_women: {
+    label: "Women Adaptive — Neuro Moderate", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (750m run + station) — moderate neurological impairment, hemiplegia",
+    runSegments: 8, runDistanceM: 750,
+    stations: [
+      mkStation("SkiErg", { distance: "750m" }),
+      mkStation("Sled Push", { distance: "25m", weightKg: 77, weightLabel: "77 kg" }),
+      mkStation("Sled Pull", { distance: "25m", weightKg: 25, weightLabel: "25 kg (sled only)" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m" }),
+      mkStation("Rowing", { distance: "750m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 24, weightLabel: "2×12 kg" }),
+      mkStation("Sandbag Lunges", { distance: "50m", weightKg: 5, weightLabel: "5 kg" }),
+      mkStation("Wall Balls", { reps: 100, weightKg: 4, weightLabel: "4 kg / 2.7m target" }),
+    ],
+  },
+  adaptive_neuro_moderate_men: {
+    label: "Men Adaptive — Neuro Moderate", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (750m run + station) — moderate neurological impairment, hemiplegia",
+    runSegments: 8, runDistanceM: 750,
+    stations: [
+      mkStation("SkiErg", { distance: "750m" }),
+      mkStation("Sled Push", { distance: "25m", weightKg: 102, weightLabel: "102 kg" }),
+      mkStation("Sled Pull", { distance: "25m", weightKg: 53, weightLabel: "53 kg" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m" }),
+      mkStation("Rowing", { distance: "750m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 32, weightLabel: "2×16 kg" }),
+      mkStation("Sandbag Lunges", { distance: "50m", weightKg: 10, weightLabel: "10 kg" }),
+      mkStation("Wall Balls", { reps: 100, weightKg: 6, weightLabel: "6 kg / 3.0m target" }),
+    ],
+  },
+
+  // === Adaptive — Neurological Major ===
+  adaptive_neuro_major_women: {
+    label: "Women Adaptive — Neuro Major", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (500m run + station) — severe neurological impairment, paraplegia",
+    runSegments: 8, runDistanceM: 500,
+    stations: [
+      mkStation("SkiErg", { distance: "500m" }),
+      mkStation("Sled Push", { distance: "25m", weightKg: 50, weightLabel: "50 kg (sled only)" }),
+      mkStation("Sled Pull", { distance: "25m", weightKg: 25, weightLabel: "25 kg (sled only)" }),
+      mkStation("Burpee Broad Jumps", { distance: "40m", adaptation: "Adapted: walkouts + crutch steps" }),
+      mkStation("Rowing", { distance: "500m" }),
+      mkStation("Farmers Carry", { distance: "100m", weightKg: 24, weightLabel: "2×12 kg" }),
+      mkStation("Sandbag Lunges", { distance: "50m", weightKg: 5, weightLabel: "5 kg" }),
+      mkStation("Wall Balls", { reps: 100, weightKg: 2, weightLabel: "2 kg / 2.0m target" }),
+    ],
+  },
+  adaptive_neuro_major_men: {
+    label: "Men Adaptive — Neuro Major", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (500m run + station) — severe neurological impairment, paraplegia",
+    runSegments: 8, runDistanceM: 500,
+    stations: [
+      mkStation("SkiErg", { distance: "500m" }),
+      mkStation("Sled Push", { distance: "25m", weightKg: 77, weightLabel: "77 kg" }),
+      mkStation("Sled Pull", { distance: "25m", weightKg: 53, weightLabel: "53 kg" }),
+      mkStation("Burpee Broad Jumps", { distance: "40m", adaptation: "Adapted: walkouts + crutch steps" }),
+      mkStation("Rowing", { distance: "500m" }),
+      mkStation("Farmers Carry", { distance: "100m", weightKg: 32, weightLabel: "2×16 kg" }),
+      mkStation("Sandbag Lunges", { distance: "50m", weightKg: 10, weightLabel: "10 kg" }),
+      mkStation("Wall Balls", { reps: 100, weightKg: 4, weightLabel: "4 kg / 2.2m target" }),
+    ],
+  },
+
+  // === Adaptive — Seated with Hip Function (SWHF) ===
+  adaptive_swhf_women: {
+    label: "Women Adaptive — Seated (SWHF)", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (1 km push + station) — wheelchair, retains hip function",
+    runSegments: 8, runDistanceM: 1000,
+    stations: [
+      mkStation("SkiErg", { distance: "1000m" }),
+      mkStation("Sled Push", { distance: "25m", weightKg: 77, weightLabel: "77 kg", adaptation: "Sled attached to chair, athlete drags" }),
+      mkStation("Sled Pull", { distance: "25m", weightKg: 78, weightLabel: "78 kg", adaptation: "Sled attached to chair, athlete drags" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m", adaptation: "1 Front-Chair Dip + 2 Wheel-Length Pushes" }),
+      mkStation("Rowing", { distance: "1000m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 16, weightLabel: "1×16 kg", adaptation: "1 KB on lap" }),
+      mkStation("Sandbag Lunges", { distance: "50m", weightKg: 10, weightLabel: "10 kg", adaptation: "Side Sandbag Lift & Turnaround" }),
+      mkStation("Wall Balls", { reps: 85, weightKg: 2, weightLabel: "2 kg / 2.0m target", adaptation: "Seated throw from lap" }),
+    ],
+  },
+  adaptive_swhf_men: {
+    label: "Men Adaptive — Seated (SWHF)", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (1 km push + station) — wheelchair, retains hip function",
+    runSegments: 8, runDistanceM: 1000,
+    stations: [
+      mkStation("SkiErg", { distance: "1000m" }),
+      mkStation("Sled Push", { distance: "50m", weightKg: 77, weightLabel: "77 kg", adaptation: "Sled attached to chair, athlete drags" }),
+      mkStation("Sled Pull", { distance: "50m", weightKg: 78, weightLabel: "78 kg", adaptation: "Sled attached to chair, athlete drags" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m", adaptation: "1 Front-Chair Dip + 2 Wheel-Length Pushes" }),
+      mkStation("Rowing", { distance: "1000m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 24, weightLabel: "1×24 kg", adaptation: "1 KB on lap" }),
+      mkStation("Sandbag Lunges", { distance: "50m", weightKg: 20, weightLabel: "20 kg", adaptation: "Side Sandbag Lift & Turnaround" }),
+      mkStation("Wall Balls", { reps: 85, weightKg: 4, weightLabel: "4 kg / 2.2m target", adaptation: "Seated throw from lap" }),
+    ],
+  },
+
+  // === Adaptive — Seated without Hip Function (SWOHF) ===
+  adaptive_swohf_women: {
+    label: "Women Adaptive — Seated (SWOHF)", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (750m push + station) — wheelchair, no hip function",
+    runSegments: 8, runDistanceM: 750,
+    stations: [
+      mkStation("SkiErg", { distance: "750m" }),
+      mkStation("Sled Push", { distance: "25m", weightKg: 77, weightLabel: "77 kg", adaptation: "Sled attached to chair, athlete drags" }),
+      mkStation("Sled Pull", { distance: "25m", weightKg: 53, weightLabel: "53 kg", adaptation: "Sled attached to chair, athlete drags" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m", adaptation: "2 In-Chair Dips + 1 Wheel-Length Push" }),
+      mkStation("Rowing", { distance: "750m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 16, weightLabel: "1×16 kg", adaptation: "1 KB on lap" }),
+      mkStation("Sandbag Lunges", { distance: "50m", weightKg: 10, weightLabel: "10 kg", adaptation: "Side Sandbag Lift & Turnaround" }),
+      mkStation("Wall Balls", { reps: 75, weightKg: 2, weightLabel: "2 kg / 2.0m target", adaptation: "Seated throw from lap" }),
+    ],
+  },
+  adaptive_swohf_men: {
+    label: "Men Adaptive — Seated (SWOHF)", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (750m push + station) — wheelchair, no hip function",
+    runSegments: 8, runDistanceM: 750,
+    stations: [
+      mkStation("SkiErg", { distance: "750m" }),
+      mkStation("Sled Push", { distance: "50m", weightKg: 77, weightLabel: "77 kg", adaptation: "Sled attached to chair, athlete drags" }),
+      mkStation("Sled Pull", { distance: "50m", weightKg: 53, weightLabel: "53 kg", adaptation: "Sled attached to chair, athlete drags" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m", adaptation: "2 In-Chair Dips + 1 Wheel-Length Push" }),
+      mkStation("Rowing", { distance: "750m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 24, weightLabel: "1×24 kg", adaptation: "1 KB on lap" }),
+      mkStation("Sandbag Lunges", { distance: "50m", weightKg: 20, weightLabel: "20 kg", adaptation: "Side Sandbag Lift & Turnaround" }),
+      mkStation("Wall Balls", { reps: 75, weightKg: 4, weightLabel: "4 kg / 2.2m target", adaptation: "Seated throw from lap" }),
+    ],
+  },
+
+  // === Adaptive — Seated without Core Function (SWOC) ===
+  adaptive_swoc_women: {
+    label: "Women Adaptive — Seated (SWOC)", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (500m push + station) — wheelchair, no hip or core function",
+    runSegments: 8, runDistanceM: 500,
+    stations: [
+      mkStation("SkiErg", { distance: "500m" }),
+      mkStation("Sled Push", { distance: "25m", weightKg: 50, weightLabel: "50 kg (sled only)", adaptation: "Sled attached to chair, athlete drags" }),
+      mkStation("Sled Pull", { distance: "25m", weightKg: 25, weightLabel: "25 kg (sled only)", adaptation: "Sled attached to chair, athlete drags" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m", adaptation: "2 In-Chair Dips + 1 Wheel-Length Push" }),
+      mkStation("Rowing", { distance: "500m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 12, weightLabel: "1×12 kg", adaptation: "1 KB on lap" }),
+      mkStation("Sandbag Lunges", { distance: "50m", weightKg: 5, weightLabel: "5 kg", adaptation: "Side Sandbag Lift & Turnaround" }),
+      mkStation("Wall Balls", { reps: 65, weightKg: 2, weightLabel: "2 kg / 2.0m target", adaptation: "Seated throw from lap" }),
+    ],
+  },
+  adaptive_swoc_men: {
+    label: "Men Adaptive — Seated (SWOC)", category: "adaptive", athletes: 1,
+    formatDescription: "8 × (500m push + station) — wheelchair, no hip or core function",
+    runSegments: 8, runDistanceM: 500,
+    stations: [
+      mkStation("SkiErg", { distance: "500m" }),
+      mkStation("Sled Push", { distance: "50m", weightKg: 50, weightLabel: "50 kg (sled only)", adaptation: "Sled attached to chair, athlete drags" }),
+      mkStation("Sled Pull", { distance: "50m", weightKg: 25, weightLabel: "25 kg (sled only)", adaptation: "Sled attached to chair, athlete drags" }),
+      mkStation("Burpee Broad Jumps", { distance: "80m", adaptation: "2 In-Chair Dips + 1 Wheel-Length Push" }),
+      mkStation("Rowing", { distance: "500m" }),
+      mkStation("Farmers Carry", { distance: "200m", weightKg: 16, weightLabel: "1×16 kg", adaptation: "1 KB on lap" }),
+      mkStation("Sandbag Lunges", { distance: "50m", weightKg: 10, weightLabel: "10 kg", adaptation: "Side Sandbag Lift & Turnaround" }),
+      mkStation("Wall Balls", { reps: 65, weightKg: 4, weightLabel: "4 kg / 2.2m target", adaptation: "Seated throw from lap" }),
+    ],
+  },
+
+  // === Youngstars 8-9 (same weights for girls & boys) ===
   youngstars_8_9_women: {
-    label: "Women Youngstars 8-9", category: "youngstars", athletes: 1,
-    formatDescription: "3 runs with stations grouped between them",
-    runSegments: 3, runDistanceM: 500,
+    label: "Girls Youngstars 8-9", category: "youngstars", athletes: 1,
+    formatDescription: "3 × 1 lap (200-275m) with 8 stations grouped between runs",
+    runSegments: 3, runDistanceM: 250,
     stations: [
       mkStation("SkiErg", { distance: "300m" }),
-      mkStation("Sled Push", { distance: "15m" }),
-      mkStation("Sled Drag", { distance: "15m" }),
+      mkStation("Sled Push", { distance: "15m", weightKg: 35, weightLabel: "35 kg" }),
+      mkStation("Sled Drag", { distance: "15m", weightKg: 25, weightLabel: "25 kg" }),
       mkStation("Frogger Jumps", { distance: "20m" }),
       mkStation("Rowing", { distance: "200m" }),
-      mkStation("Farmers Carry", { distance: "50m", weightKg: 11.4, weightLabel: "2×5.7 kg" }),
+      mkStation("Farmers Carry", { distance: "50m", weightKg: 8, weightLabel: "2×4 kg" }),
       mkStation("Lunges", { distance: "20m" }),
-      mkStation("Wall Ball Squats", { reps: 30, weightKg: 1, weightLabel: "1 kg / 2m target" }),
+      mkStation("Wall Ball Squats", { reps: 50, weightKg: 1, weightLabel: "1 kg ball" }),
     ],
   },
   youngstars_8_9_men: {
-    label: "Men Youngstars 8-9", category: "youngstars", athletes: 1,
-    formatDescription: "3 runs with stations grouped between them",
-    runSegments: 3, runDistanceM: 500,
+    label: "Boys Youngstars 8-9", category: "youngstars", athletes: 1,
+    formatDescription: "3 × 1 lap (200-275m) with 8 stations grouped between runs",
+    runSegments: 3, runDistanceM: 250,
     stations: [
       mkStation("SkiErg", { distance: "300m" }),
-      mkStation("Sled Push", { distance: "15m" }),
-      mkStation("Sled Drag", { distance: "15m" }),
+      mkStation("Sled Push", { distance: "15m", weightKg: 35, weightLabel: "35 kg" }),
+      mkStation("Sled Drag", { distance: "15m", weightKg: 25, weightLabel: "25 kg" }),
       mkStation("Frogger Jumps", { distance: "20m" }),
       mkStation("Rowing", { distance: "200m" }),
-      mkStation("Farmers Carry", { distance: "50m", weightKg: 11.4, weightLabel: "2×5.7 kg" }),
+      mkStation("Farmers Carry", { distance: "50m", weightKg: 8, weightLabel: "2×4 kg" }),
       mkStation("Lunges", { distance: "20m" }),
-      mkStation("Wall Ball Squats", { reps: 30, weightKg: 1, weightLabel: "1 kg / 2m target" }),
+      mkStation("Wall Ball Squats", { reps: 50, weightKg: 1, weightLabel: "1 kg ball" }),
     ],
   },
 
-  // === Youngstars 10-11 ===
+  // === Youngstars 10-11 (same weights for girls & boys) ===
   youngstars_10_11_women: {
-    label: "Women Youngstars 10-11", category: "youngstars", athletes: 1,
-    formatDescription: "3 runs with stations grouped between them",
-    runSegments: 3, runDistanceM: 500,
+    label: "Girls Youngstars 10-11", category: "youngstars", athletes: 1,
+    formatDescription: "3 × 1 lap (200-275m) with 8 stations grouped between runs",
+    runSegments: 3, runDistanceM: 250,
     stations: [
       mkStation("SkiErg", { distance: "400m" }),
-      mkStation("Sled Push", { distance: "15m" }),
-      mkStation("Sled Drag", { distance: "15m" }),
+      mkStation("Sled Push", { distance: "15m", weightKg: 50, weightLabel: "50 kg" }),
+      mkStation("Sled Drag", { distance: "15m", weightKg: 40, weightLabel: "40 kg" }),
       mkStation("Burpee Broad Jumps", { distance: "20m" }),
       mkStation("Rowing", { distance: "300m" }),
-      mkStation("Farmers Carry", { distance: "50m", weightKg: 11.4, weightLabel: "2×5.7 kg" }),
+      mkStation("Farmers Carry", { distance: "50m", weightKg: 12, weightLabel: "2×6 kg" }),
       mkStation("Lunges", { distance: "20m" }),
-      mkStation("Wall Ball Squats", { reps: 40, weightKg: 2, weightLabel: "2 kg / 2m target" }),
+      mkStation("Wall Ball Squats", { reps: 50, weightKg: 2, weightLabel: "2 kg ball" }),
     ],
   },
   youngstars_10_11_men: {
-    label: "Men Youngstars 10-11", category: "youngstars", athletes: 1,
-    formatDescription: "3 runs with stations grouped between them",
-    runSegments: 3, runDistanceM: 500,
+    label: "Boys Youngstars 10-11", category: "youngstars", athletes: 1,
+    formatDescription: "3 × 1 lap (200-275m) with 8 stations grouped between runs",
+    runSegments: 3, runDistanceM: 250,
     stations: [
       mkStation("SkiErg", { distance: "400m" }),
-      mkStation("Sled Push", { distance: "15m" }),
-      mkStation("Sled Drag", { distance: "15m" }),
+      mkStation("Sled Push", { distance: "15m", weightKg: 50, weightLabel: "50 kg" }),
+      mkStation("Sled Drag", { distance: "15m", weightKg: 40, weightLabel: "40 kg" }),
       mkStation("Burpee Broad Jumps", { distance: "20m" }),
       mkStation("Rowing", { distance: "300m" }),
-      mkStation("Farmers Carry", { distance: "50m", weightKg: 11.4, weightLabel: "2×5.7 kg" }),
+      mkStation("Farmers Carry", { distance: "50m", weightKg: 12, weightLabel: "2×6 kg" }),
       mkStation("Lunges", { distance: "20m" }),
-      mkStation("Wall Ball Squats", { reps: 40, weightKg: 2, weightLabel: "2 kg / 2m target" }),
+      mkStation("Wall Ball Squats", { reps: 50, weightKg: 2, weightLabel: "2 kg ball" }),
     ],
   },
 
-  // === Youngstars 12-13 ===
+  // === Youngstars 12-13 (girls & boys have different weights) ===
   youngstars_12_13_women: {
-    label: "Women Youngstars 12-13", category: "youngstars", athletes: 1,
-    formatDescription: "2 runs with stations grouped between them",
-    runSegments: 2, runDistanceM: 750,
+    label: "Girls Youngstars 12-13", category: "youngstars", athletes: 1,
+    formatDescription: "2 × 2 laps (200-275m each) with 8 stations grouped between runs",
+    runSegments: 2, runDistanceM: 500,
     stations: [
       mkStation("SkiErg", { distance: "500m" }),
-      mkStation("Sled Push", { distance: "30m" }),
-      mkStation("Sled Pull", { distance: "30m" }),
+      mkStation("Sled Push", { distance: "30m", weightKg: 60, weightLabel: "60 kg" }),
+      mkStation("Sled Pull", { distance: "30m", weightKg: 25, weightLabel: "25 kg" }),
       mkStation("Burpee Broad Jumps", { distance: "40m" }),
       mkStation("Rowing", { distance: "400m" }),
-      mkStation("Farmers Carry", { distance: "100m", weightKg: 18.2, weightLabel: "2×9.1 kg" }),
-      mkStation("Sandbag Lunges", { distance: "40m" }),
-      mkStation("Wall Balls", { reps: 50, weightKg: 2, weightLabel: "2 kg / 2.5m target" }),
+      mkStation("Farmers Carry", { distance: "100m", weightKg: 16, weightLabel: "2×8 kg" }),
+      mkStation("Sandbag Lunges", { distance: "40m", weightKg: 5, weightLabel: "5 kg" }),
+      mkStation("Wall Balls", { reps: 50, weightKg: 2, weightLabel: "2 kg / 2.4m target" }),
     ],
   },
   youngstars_12_13_men: {
-    label: "Men Youngstars 12-13", category: "youngstars", athletes: 1,
-    formatDescription: "2 runs with stations grouped between them",
-    runSegments: 2, runDistanceM: 750,
+    label: "Boys Youngstars 12-13", category: "youngstars", athletes: 1,
+    formatDescription: "2 × 2 laps (200-275m each) with 8 stations grouped between runs",
+    runSegments: 2, runDistanceM: 500,
     stations: [
       mkStation("SkiErg", { distance: "500m" }),
-      mkStation("Sled Push", { distance: "30m" }),
-      mkStation("Sled Pull", { distance: "30m" }),
+      mkStation("Sled Push", { distance: "30m", weightKg: 70, weightLabel: "70 kg" }),
+      mkStation("Sled Pull", { distance: "30m", weightKg: 50, weightLabel: "50 kg" }),
       mkStation("Burpee Broad Jumps", { distance: "40m" }),
       mkStation("Rowing", { distance: "400m" }),
-      mkStation("Farmers Carry", { distance: "100m", weightKg: 18.2, weightLabel: "2×9.1 kg" }),
-      mkStation("Sandbag Lunges", { distance: "40m" }),
-      mkStation("Wall Balls", { reps: 50, weightKg: 2, weightLabel: "2 kg / 2.5m target" }),
+      mkStation("Farmers Carry", { distance: "100m", weightKg: 24, weightLabel: "2×12 kg" }),
+      mkStation("Sandbag Lunges", { distance: "40m", weightKg: 7.5, weightLabel: "7.5 kg" }),
+      mkStation("Wall Balls", { reps: 50, weightKg: 3, weightLabel: "3 kg / 2.4m target" }),
     ],
   },
 
-  // === Youngstars 14-15 (near-adult format) ===
+  // === Youngstars 14-15 (girls & boys have different weights) ===
   youngstars_14_15_women: {
-    label: "Women Youngstars 14-15", category: "youngstars", athletes: 1,
-    formatDescription: "8 × (run + station) — near-adult format",
-    runSegments: 8, runDistanceM: 1000,
+    label: "Girls Youngstars 14-15", category: "youngstars", athletes: 1,
+    formatDescription: "8 × (1 lap 200-275m + station)",
+    runSegments: 8, runDistanceM: 250,
     stations: [
       mkStation("SkiErg", { distance: "600m" }),
-      mkStation("Sled Push", { distance: "30m" }),
-      mkStation("Sled Pull", { distance: "30m" }),
+      mkStation("Sled Push", { distance: "30m", weightKg: 70, weightLabel: "70 kg" }),
+      mkStation("Sled Pull", { distance: "30m", weightKg: 50, weightLabel: "50 kg" }),
       mkStation("Burpee Broad Jumps", { distance: "40m" }),
       mkStation("Rowing", { distance: "500m" }),
-      mkStation("Farmers Carry", { distance: "100m", weightKg: 22.8, weightLabel: "2×11.4 kg" }),
-      mkStation("Sandbag Lunges", { distance: "40m" }),
-      mkStation("Wall Balls", { reps: 50, weightKg: 4, weightLabel: "4 kg / 2.5m target" }),
+      mkStation("Farmers Carry", { distance: "100m", weightKg: 24, weightLabel: "2×12 kg" }),
+      mkStation("Sandbag Lunges", { distance: "40m", weightKg: 7.5, weightLabel: "7.5 kg" }),
+      mkStation("Wall Balls", { reps: 50, weightKg: 3, weightLabel: "3 kg / 2.4m target" }),
     ],
   },
   youngstars_14_15_men: {
-    label: "Men Youngstars 14-15", category: "youngstars", athletes: 1,
-    formatDescription: "8 × (run + station) — near-adult format",
-    runSegments: 8, runDistanceM: 1000,
+    label: "Boys Youngstars 14-15", category: "youngstars", athletes: 1,
+    formatDescription: "8 × (1 lap 200-275m + station)",
+    runSegments: 8, runDistanceM: 250,
     stations: [
       mkStation("SkiErg", { distance: "600m" }),
-      mkStation("Sled Push", { distance: "30m" }),
-      mkStation("Sled Pull", { distance: "30m" }),
+      mkStation("Sled Push", { distance: "30m", weightKg: 102, weightLabel: "102 kg" }),
+      mkStation("Sled Pull", { distance: "30m", weightKg: 78, weightLabel: "78 kg" }),
       mkStation("Burpee Broad Jumps", { distance: "40m" }),
       mkStation("Rowing", { distance: "500m" }),
-      mkStation("Farmers Carry", { distance: "100m", weightKg: 22.8, weightLabel: "2×11.4 kg" }),
-      mkStation("Sandbag Lunges", { distance: "40m" }),
-      mkStation("Wall Balls", { reps: 50, weightKg: 4, weightLabel: "4 kg / 2.5m target" }),
+      mkStation("Farmers Carry", { distance: "100m", weightKg: 32, weightLabel: "2×16 kg" }),
+      mkStation("Sandbag Lunges", { distance: "40m", weightKg: 10, weightLabel: "10 kg" }),
+      mkStation("Wall Balls", { reps: 50, weightKg: 4, weightLabel: "4 kg / 2.7m target" }),
     ],
   },
 };
@@ -514,9 +931,41 @@ export const DIVISION_CATEGORIES: DivisionCategoryGroup[] = [
     ],
   },
   {
-    label: "Adaptive",
-    description: "Modified movements, Open weights — 6 impairment categories",
-    keys: ["adaptive_women", "adaptive_men"],
+    label: "Adaptive — Lower Limb",
+    description: "Below/above-knee amputation, joint instability",
+    keys: [
+      "adaptive_ll_minor_women", "adaptive_ll_minor_men",
+      "adaptive_ll_major_women", "adaptive_ll_major_men",
+    ],
+  },
+  {
+    label: "Adaptive — Upper Limb",
+    description: "Below/above-elbow amputation, loss of function",
+    keys: [
+      "adaptive_ul_minor_women", "adaptive_ul_minor_men",
+      "adaptive_ul_major_women", "adaptive_ul_major_men",
+    ],
+  },
+  {
+    label: "Adaptive — Other Standing",
+    description: "Short stature, visual, deaf, neurological impairments",
+    keys: [
+      "adaptive_short_stature_women", "adaptive_short_stature_men",
+      "adaptive_visual_women", "adaptive_visual_men",
+      "adaptive_deaf_women", "adaptive_deaf_men",
+      "adaptive_neuro_minor_women", "adaptive_neuro_minor_men",
+      "adaptive_neuro_moderate_women", "adaptive_neuro_moderate_men",
+      "adaptive_neuro_major_women", "adaptive_neuro_major_men",
+    ],
+  },
+  {
+    label: "Adaptive — Seated",
+    description: "Wheelchair divisions — SWHF, SWOHF, SWOC",
+    keys: [
+      "adaptive_swhf_women", "adaptive_swhf_men",
+      "adaptive_swohf_women", "adaptive_swohf_men",
+      "adaptive_swoc_women", "adaptive_swoc_men",
+    ],
   },
   {
     label: "Youngstars",
@@ -959,7 +1408,9 @@ export const DIVISION_REF_DATA: Partial<Record<DivisionKey, DivisionRefDataFull>
     stations: RELAY_MIXED_STATION_REFS, runs: RELAY_MIXED_RUN_REFS, roxzone: RELAY_MIXED_ROXZONE_REF,
     stationRanges: RELAY_MIXED_STATION_RANGES, runRanges: RELAY_MIXED_RUN_RANGES, roxzoneRange: RELAY_MIXED_ROXZONE_RANGE,
   },
-  adaptive_men: {
+  // Adaptive ref data — originally from n=4 combined "adaptive_men" division.
+  // Mapped to Neuro Minor Men as the closest subdivision match for now.
+  adaptive_neuro_minor_men: {
     stations: ADAPTIVE_MEN_STATION_REFS, runs: ADAPTIVE_MEN_RUN_REFS, roxzone: ADAPTIVE_MEN_ROXZONE_REF,
     stationRanges: ADAPTIVE_MEN_STATION_RANGES, runRanges: ADAPTIVE_MEN_RUN_RANGES, roxzoneRange: ADAPTIVE_MEN_ROXZONE_RANGE,
   },
