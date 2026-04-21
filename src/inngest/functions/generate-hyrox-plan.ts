@@ -22,6 +22,10 @@ import {
   formatTime,
   formatLongTime,
 } from "@/lib/hyrox-data";
+import {
+  computeScenarioSplits,
+  type NumericScenario,
+} from "@/lib/hyrox-scenario-compute";
 
 const AI_MODEL = process.env.HYROX_TEST_MODE === "true"
   ? "claude-haiku-4-5-20251001"
@@ -46,6 +50,13 @@ Key constraints for every plan:
 - Station skills should rotate through all 8 stations every 2 weeks, with extra attention to the athlete's weakest stations.
 - In later phases, include full and half race simulations on Saturdays.
 - Taper properly in the final 2-4 weeks: reduce volume, maintain intensity, keep station patterns fresh.
+
+Equipment constraints (CRITICAL — follow strictly):
+- The athlete's profile lists which equipment they have access to. NEVER program exercises that require equipment the athlete does not have.
+- If the athlete is missing HYROX station equipment (e.g., no sled), you MUST substitute with equivalent exercises using only equipment they DO have. For example: replace sled push with heavy dumbbell walking lunges, burpee broad jumps, or assault bike sprints — but only if they have those items.
+- Choose substitutions that target the same muscle groups and energy systems as the original HYROX station movement.
+- When listing equipmentRequired for a session, only include equipment the athlete actually has.
+- If the athlete has very limited equipment, get creative with bodyweight alternatives and whatever they do have available.
 
 Always respond with valid JSON matching the requested schema. No markdown, no explanation — just the JSON object.`;
 }
@@ -81,7 +92,15 @@ function buildAthleteContext(snapshot: AthleteSnapshot): string {
 
 ## CrossFit Schedule
 - ${snapshot.crossfitDaysPerWeek} days/week${snapshot.crossfitGymName ? ` at ${snapshot.crossfitGymName}` : ""}
-- Available equipment: ${snapshot.availableEquipment.length > 0 ? snapshot.availableEquipment.join(", ") : "All standard HYROX equipment"}
+
+## Equipment
+- Available: ${snapshot.availableEquipment.length > 0 ? snapshot.availableEquipment.join(", ") : "All standard HYROX equipment"}
+- NOT available (do NOT program these): ${(() => {
+    const allHyroxEquipment = ["skierg", "rower", "sled", "sandbag", "wall_ball_target", "assault_bike", "farmers_handles"];
+    const missing = allHyroxEquipment.filter((e) => !snapshot.availableEquipment.includes(e));
+    return missing.length > 0 ? missing.join(", ") : "None — athlete has all HYROX station equipment";
+  })()}
+- For any missing HYROX equipment above, substitute with equivalent exercises using ONLY the athlete's available equipment.
 
 ## Injuries/Limitations
 ${snapshot.injuriesNotes || "None reported"}
@@ -147,27 +166,15 @@ function weekSchema(): string {
 }`;
 }
 
-function scenarioSchema(): string {
+/** Schema for AI-generated qualitative text (no numeric fields). */
+function scenarioTextSchema(): string {
   return `[
   {
-    "scenarioLabel": "string — e.g. 'Scenario A: Aspirational'",
-    "description": "string — 1-2 sentence summary",
-    "estimatedFinishSeconds": "integer — total estimated time in seconds",
-    "bufferSeconds": "integer or null — seconds of buffer under goal time",
-    "runStrategy": "string — e.g. 'negative split', 'even split'",
-    "splits": [
-      {
-        "segmentNumber": "integer — 1-16 (alternating run/station)",
-        "segmentType": "string — 'run' or 'station'",
-        "segmentName": "string — e.g. 'Run 1 (1km)', 'SkiErg — 1,000m'",
-        "targetSeconds": "integer",
-        "paceDisplay": "string — e.g. '6:26/mile' or '1:45/500m'",
-        "strategy": "string — brief strategy note",
-        "cumulativeSeconds": "integer — running total"
-      }
-    ],
-    "analysis": "string — paragraph analyzing where to find time, biggest gaps, and improvement levers",
-    "sortOrder": "integer — 0 for primary scenario"
+    "scenarioLabel": "string — must match one of the provided scenario labels exactly",
+    "description": "string — 1-2 sentence summary of this scenario's pacing approach and what it assumes about the athlete's improvement",
+    "runStrategy": "string — e.g. 'natural pacing', 'negative split', 'even effort'",
+    "analysis": "string — paragraph analyzing where to find time, biggest gaps between current and target, and specific improvement levers",
+    "splitStrategies": ["string — 16 entries, one brief strategy note per segment in order (e.g. 'settle in, find rhythm', 'push through fatigue')"]
   }
 ]`;
 }
@@ -438,40 +445,81 @@ ${planOverviewSchema()}`;
     // -----------------------------------------------------------------------
 
     // Kick off scenario generation (independent of weeks)
+    // Numeric splits are computed deterministically from real HYROX percentile
+    // data; AI only generates qualitative text (strategy notes, analysis).
     const scenariosPromise = step.run("generate-scenarios", async () => {
-      const isProLevel =
-        snapshot.division === "men_pro" ||
-        snapshot.division === "women_pro" ||
-        (snapshot.goalFinishTimeSeconds != null && snapshot.goalFinishTimeSeconds <= 3600);
-      const transitionMinutes = isProLevel ? 3 : 5;
-      const transitionPerStation = isProLevel ? "~20-25 seconds" : "~35-45 seconds";
+      // 1. Compute numeric splits from athlete data + real distributions
+      const numericScenarios = computeScenarioSplits(snapshot, totalWeeks);
 
+      // 2. Build a summary of the computed splits for the AI prompt
+      const splitsForPrompt = numericScenarios.map((sc) => ({
+        scenarioLabel: sc.scenarioLabel,
+        estimatedFinish: formatLongTime(sc.estimatedFinishSeconds),
+        bufferSeconds: sc.bufferSeconds,
+        splits: sc.splits.map((s) => ({
+          segmentName: s.segmentName,
+          segmentType: s.segmentType,
+          targetTime: formatTime(s.targetSeconds),
+          pace: s.paceDisplay,
+        })),
+      }));
+
+      // 3. Ask AI for qualitative text only — no arithmetic
       const prompt = `${athleteContext}
 
 ## Task
-Generate 2-3 race-day scenarios for this athlete. The scenarios should represent:
-1. **Aspirational** — goal station times achieved after training, comfortable run paces
-2. **Current Fitness** — today's station times, possibly faster runs to compensate
-3. **Conservative** (optional, include if plan is 12+ weeks) — moderate improvement, safe pacing
+Below are pre-computed race-day scenarios for this athlete. The times were calculated from real HYROX percentile data and the athlete's current fitness.
 
-Each scenario must include all 16 segments (8 runs alternating with 8 stations in HYROX order):
-Run 1 → SkiErg → Run 2 → Sled Push → Run 3 → Sled Pull → Run 4 → Burpee Broad Jumps → Run 5 → Rowing → Run 6 → Farmers Carry → Run 7 → Sandbag Lunges → Run 8 → Wall Balls
+${JSON.stringify(splitsForPrompt, null, 2)}
 
-## Transition Time
-Add ~${transitionMinutes}:00 total transition time (${transitionPerStation} × 8 transitions) to the final cumulative time. ${isProLevel ? "This athlete is at or targeting a pro/elite level, so transitions are assumed to be fast and efficient." : "This athlete is at a recreational/competitive level, so transitions include time for moving between stations, catching breath, and getting set up."}
+For each scenario, generate ONLY the qualitative text:
+1. A 1-2 sentence **description** summarizing the pacing approach and what improvement the scenario assumes
+2. A **runStrategy** label (e.g. "natural pacing", "negative split", "even effort")
+3. An **analysis** paragraph identifying the biggest time gaps between current and target, specific stations or runs where time can be gained, and tactical advice for race day
+4. **splitStrategies**: an array of exactly ${numericScenarios[0]?.splits.length ?? 16} brief strategy notes, one per segment in order (e.g. "settle in, find rhythm", "push through fatigue after sled pull", "empty the tank on the final km")
 
-In each scenario's "description" field, explicitly state how much total transition time was added (e.g., "Includes ${transitionMinutes}:00 of transition time across 8 stations").
+${snapshot.goalFinishTimeSeconds ? `The athlete's goal is to finish in ${formatLongTime(snapshot.goalFinishTimeSeconds)}.` : "No specific time goal — focus on pacing strategy."}
 
-Include an "analysis" field for each scenario that identifies the biggest time gaps and specific improvement levers (like the "Where to Find Time" section in a race plan).
+Respond with JSON matching this schema:
+${scenarioTextSchema()}`;
 
-${snapshot.goalFinishTimeSeconds ? `The athlete's goal is to finish in ${formatLongTime(snapshot.goalFinishTimeSeconds)}. Calculate buffer_seconds as the difference between the goal and estimated finish.` : "No specific time goal — focus scenarios on pacing strategy."}
+      interface ScenarioText {
+        scenarioLabel: string;
+        description: string;
+        runStrategy: string;
+        analysis: string;
+        splitStrategies: string[];
+      }
 
-Respond with JSON matching this schema (an array of scenarios):
-${scenarioSchema()}`;
+      let qualitative: ScenarioText[] = [];
+      try {
+        const raw = await callClaude(systemPrompt, prompt, 2048, "race-scenario-text");
+        qualitative = parseJSON<ScenarioText[]>(raw);
+      } catch (err) {
+        // If AI text generation fails, we still persist the scenarios with
+        // correct numeric data — just with empty strategy text.
+        console.warn("[hyrox-plan] Scenario text generation failed, using empty text:", err);
+      }
 
-      const raw = await callClaude(systemPrompt, prompt, 4096, "race-scenarios");
-      const scenarios = parseJSON<RaceScenario[]>(raw);
+      // 4. Merge numeric + qualitative
+      const scenarios: RaceScenario[] = numericScenarios.map((numeric) => {
+        const text = qualitative.find((q) => q.scenarioLabel === numeric.scenarioLabel);
+        return {
+          scenarioLabel: numeric.scenarioLabel,
+          description: text?.description ?? `${numeric.scenarioLabel} scenario`,
+          estimatedFinishSeconds: numeric.estimatedFinishSeconds,
+          bufferSeconds: numeric.bufferSeconds,
+          runStrategy: text?.runStrategy ?? "natural pacing",
+          splits: numeric.splits.map((split, i) => ({
+            ...split,
+            strategy: text?.splitStrategies[i] ?? "",
+          })),
+          analysis: text?.analysis ?? null,
+          sortOrder: numeric.sortOrder,
+        };
+      });
 
+      // 5. Persist
       if (scenarios.length > 0) {
         await db.insert(hyroxRaceScenarios).values(
           scenarios.map((s) => ({
@@ -540,10 +588,12 @@ ${weekNumber <= totalWeeks - 2 ? "" : "This is a taper week — reduce station v
 - Day 5 (Sat): HYROX Day — ${planProgress < 0.5 ? "intervals + station work (45-60 min)" : planProgress < 0.85 ? "simulation day (60-90 min)" : "taper shakeout (30-45 min)"}
 - Day 6 (Sun): Rest / Active Recovery
 
+REMINDER: Only use equipment the athlete has. For any station the athlete lacks equipment for, substitute with an equivalent movement using their available gear. Do NOT include sled work if they don't have a sled, SkiErg work if they don't have a SkiErg, etc.
+
 Respond with JSON matching this schema:
 ${weekSchema()}`;
 
-        const raw = await callClaude(systemPrompt, prompt, 4096, `week-${weekNumber}`);
+        const raw = await callClaude(systemPrompt, prompt, 8192, `week-${weekNumber}`);
         // The response is a single week object (not wrapped in { weeks: [] })
         // but we also accept the batch format for robustness.
         const parsed = parseJSON<AIWeekBatch["weeks"][0] | AIWeekBatch>(raw);

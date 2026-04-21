@@ -416,7 +416,8 @@ export function RaceCalculator({ planId }: RaceCalculatorProps) {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="overflow-x-auto -mx-4 px-4">
+              <div className="overflow-x-auto -mx-4">
+                <div className="px-4 w-fit min-w-full">
                 <table className="w-full text-xs min-w-[420px]">
                   <thead>
                     <tr className="border-b border-white/[0.06] text-muted-foreground">
@@ -476,6 +477,7 @@ export function RaceCalculator({ planId }: RaceCalculatorProps) {
                     </tr>
                   </tfoot>
                 </table>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -487,7 +489,7 @@ export function RaceCalculator({ planId }: RaceCalculatorProps) {
                 Station Time Distribution
               </CardTitle>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Based on average {division.includes("women") ? "Women" : "Men"} Open proportions
+                Based on average {division.includes("youngstars") ? (division.includes("women") ? "Girls" : "Boys") : division.includes("women") ? "Women" : "Men"} Open proportions
               </p>
             </CardHeader>
             <CardContent>

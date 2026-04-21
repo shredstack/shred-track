@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { hyroxTrainingPlans, hyroxPlanSessions } from "@/db/schema";
+import { hyroxTrainingPlans } from "@/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 
-// GET /api/hyrox/plan — get active training plan
+// GET /api/hyrox/plan — get active training plan (metadata only, no sessions)
 export async function GET(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -20,13 +20,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(null);
   }
 
-  const sessions = await db
-    .select()
-    .from(hyroxPlanSessions)
-    .where(eq(hyroxPlanSessions.planId, plan.id))
-    .orderBy(hyroxPlanSessions.week, hyroxPlanSessions.dayOfWeek, hyroxPlanSessions.orderInDay);
-
-  return NextResponse.json({ ...plan, sessions });
+  return NextResponse.json(plan);
 }
 
 // POST /api/hyrox/plan — generate a new training plan

@@ -59,18 +59,20 @@ export function OverviewTab() {
 
     if (d.runSegments === 3) {
       // Youngstars 8-9, 10-11: Run → [4 stations] → Run → [3 stations] → Run → [Wall Balls]
+      const distLabel = `${d.runDistanceM}m`;
       return [
-        { runLabel: "Run 1", stations: stationNames.slice(0, 4) },
-        { runLabel: "Run 2", stations: stationNames.slice(4, 7) },
-        { runLabel: "Run 3", stations: stationNames.slice(7, 8) },
+        { runLabel: `Run 1 — ${distLabel}`, stations: stationNames.slice(0, 4) },
+        { runLabel: `Run 2 — ${distLabel}`, stations: stationNames.slice(4, 7) },
+        { runLabel: `Run 3 — ${distLabel}`, stations: stationNames.slice(7, 8) },
       ];
     }
 
     if (d.runSegments === 2) {
-      // Youngstars 12-13: Run → [7 stations] → Run → [Wall Balls]
+      // Youngstars 12-13: 2 laps each run → [7 stations] → 2 laps → [Wall Balls]
+      const distLabel = `${d.runDistanceM}m (2 laps)`;
       return [
-        { runLabel: "Run 1", stations: stationNames.slice(0, 7) },
-        { runLabel: "Run 2", stations: stationNames.slice(7, 8) },
+        { runLabel: `Run 1 — ${distLabel}`, stations: stationNames.slice(0, 7) },
+        { runLabel: `Run 2 — ${distLabel}`, stations: stationNames.slice(7, 8) },
       ];
     }
 
@@ -78,6 +80,15 @@ export function OverviewTab() {
   }, [activeDivision]);
 
   const isGroupedFormat = division.runSegments < 8;
+
+  // Determine where run rows should appear in the station details table
+  const runPositions = useMemo(() => {
+    const d = DIVISIONS[activeDivision];
+    if (d.runSegments === 8) return [0, 1, 2, 3, 4, 5, 6, 7];
+    if (d.runSegments === 3) return [0, 4, 7]; // Run → [4 stations] → Run → [3 stations] → Run → [1 station]
+    if (d.runSegments === 2) return [0, 7];     // Run → [7 stations] → Run → [1 station]
+    return [];
+  }, [activeDivision]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -236,63 +247,76 @@ export function OverviewTab() {
           <CardTitle className="text-sm font-bold">{division.label} — Station Details</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-white/[0.06] text-muted-foreground">
-                  <th className="pb-2.5 pr-3 text-left font-medium">Segment</th>
-                  <th className="pb-2.5 pr-3 text-left font-medium">Spec</th>
-                  {hasRefs && (
-                    <>
-                      <th className="pb-2.5 pr-1 text-right font-medium text-emerald-400">Fast</th>
-                      <th className="pb-2.5 pr-1 text-right font-medium text-emerald-400">p10</th>
-                      <th className="pb-2.5 pr-1 text-right font-medium text-green-300">p25</th>
-                      <th className="pb-2.5 pr-1 text-right font-medium text-yellow-300">p50</th>
-                      <th className="pb-2.5 pr-1 text-right font-medium text-orange-300">p75</th>
-                      <th className="pb-2.5 pr-1 text-right font-medium text-orange-400">p90</th>
-                      <th className="pb-2.5 text-right font-medium text-red-400">Slow</th>
-                    </>
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {division.stations.map((s, i) => {
-                  const runLabel = `Run ${i + 1}`;
-                  const runDist = refData?.runs[runLabel];
-                  const runRange = refData?.runRanges[runLabel];
-                  const stationDist = refData?.stations[s.name as StationName];
-                  const stationRange = refData?.stationRanges[s.name as StationName];
-                  const spec = s.distance
-                    ? `${convertDistance(s.distance)}${s.weightLabel ? ` @ ${useMixed && s.weightKg ? convertWeight(s.weightKg) : s.weightLabel}` : ""}`
-                    : `${s.reps} reps${s.weightLabel ? ` @ ${useMixed && s.weightKg ? convertWeight(s.weightKg) : s.weightLabel}` : ""}`;
-
-                  return (
-                    <React.Fragment key={s.name}>
-                      {/* Run row */}
-                      <tr className="border-b border-white/[0.04]">
-                        <td className="py-2 pr-3 font-medium text-muted-foreground">{runLabel}</td>
-                        <td className="py-2 pr-3 text-muted-foreground font-mono">{division.runDistanceM >= 1000 ? `${division.runDistanceM / 1000} km` : `${division.runDistanceM}m`}</td>
-                        {hasRefs && <DistCells dist={runDist} range={runRange} />}
-                      </tr>
-                      {/* Station row */}
-                      <tr className="border-b border-white/[0.04]">
-                        <td className="py-2.5 pr-3 font-medium">{s.shortName}</td>
-                        <td className="py-2.5 pr-3 text-muted-foreground font-mono">{spec}</td>
-                        {hasRefs && <DistCells dist={stationDist} range={stationRange} />}
-                      </tr>
-                    </React.Fragment>
-                  );
-                })}
-                {/* Roxzone total */}
-                {hasRefs && refData?.roxzone && (
-                  <tr className="border-t border-white/[0.08]">
-                    <td className="py-2.5 pr-3 font-medium text-muted-foreground">Roxzone</td>
-                    <td className="py-2.5 pr-3 text-muted-foreground font-mono text-[10px]">total transitions</td>
-                    <DistCells dist={refData.roxzone} range={refData.roxzoneRange} />
+          <div className="overflow-x-auto -mx-4">
+            <div className="px-4 w-fit min-w-full">
+              <table className="w-full text-xs min-w-[340px]">
+                <thead>
+                  <tr className="border-b border-white/[0.06] text-muted-foreground">
+                    <th className="pb-2.5 pr-3 text-left font-medium">Segment</th>
+                    <th className="pb-2.5 pr-3 text-left font-medium">Spec</th>
+                    {hasRefs && (
+                      <>
+                        <th className="pb-2.5 pr-1 text-right font-medium text-emerald-400">Fast</th>
+                        <th className="pb-2.5 pr-1 text-right font-medium text-emerald-400">p10</th>
+                        <th className="pb-2.5 pr-1 text-right font-medium text-green-300">p25</th>
+                        <th className="pb-2.5 pr-1 text-right font-medium text-yellow-300">p50</th>
+                        <th className="pb-2.5 pr-1 text-right font-medium text-orange-300">p75</th>
+                        <th className="pb-2.5 pr-1 text-right font-medium text-orange-400">p90</th>
+                        <th className="pb-2.5 text-right font-medium text-red-400">Slow</th>
+                      </>
+                    )}
                   </tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {division.stations.map((s, i) => {
+                    const runIdx = runPositions.indexOf(i);
+                    const showRun = runIdx !== -1;
+                    const runLabel = showRun ? `Run ${runIdx + 1}` : null;
+                    const runDist = runLabel ? refData?.runs[runLabel] : undefined;
+                    const runRange = runLabel ? refData?.runRanges[runLabel] : undefined;
+                    const stationDist = refData?.stations[s.name as StationName];
+                    const stationRange = refData?.stationRanges[s.name as StationName];
+                    const spec = s.distance
+                      ? `${convertDistance(s.distance)}${s.weightLabel ? ` @ ${useMixed && s.weightKg ? convertWeight(s.weightKg) : s.weightLabel}` : ""}`
+                      : `${s.reps} reps${s.weightLabel ? ` @ ${useMixed && s.weightKg ? convertWeight(s.weightKg) : s.weightLabel}` : ""}`;
+
+                    return (
+                      <React.Fragment key={s.name}>
+                        {/* Run row — only shown at correct positions */}
+                        {showRun && (
+                          <tr className="border-b border-white/[0.04]">
+                            <td className="py-2 pr-3 font-medium text-muted-foreground">{runLabel}</td>
+                            <td className="py-2 pr-3 text-muted-foreground font-mono">{division.runDistanceM >= 1000 ? `${division.runDistanceM / 1000} km` : `${division.runDistanceM}m`}</td>
+                            {hasRefs && <DistCells dist={runDist} range={runRange} />}
+                          </tr>
+                        )}
+                        {/* Station row */}
+                        <tr className="border-b border-white/[0.04]">
+                          <td className="py-2.5 pr-3 font-medium">
+                            {s.shortName}
+                            {s.adaptation && (
+                              <span className="block text-[10px] text-muted-foreground font-normal mt-0.5">
+                                {s.adaptation}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 pr-3 text-muted-foreground font-mono">{spec}</td>
+                          {hasRefs && <DistCells dist={stationDist} range={stationRange} />}
+                        </tr>
+                      </React.Fragment>
+                    );
+                  })}
+                  {/* Roxzone total */}
+                  {hasRefs && refData?.roxzone && (
+                    <tr className="border-t border-white/[0.08]">
+                      <td className="py-2.5 pr-3 font-medium text-muted-foreground">Roxzone</td>
+                      <td className="py-2.5 pr-3 text-muted-foreground font-mono text-[10px]">total transitions</td>
+                      <DistCells dist={refData.roxzone} range={refData.roxzoneRange} />
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
           {!hasRefs && (
             <p className="mt-3 text-xs text-muted-foreground italic">
@@ -376,7 +400,7 @@ function CategorySelector({
             const div = DIVISIONS[key];
             // Shorten label for buttons (remove category prefix if obvious)
             const shortLabel = div.label
-              .replace(/^(Women|Men|Mixed)\s+/, "$1 ")
+              .replace(/^(Women|Men|Girls|Boys|Mixed)\s+/, "$1 ")
               .replace(category.label + " ", "");
 
             return (

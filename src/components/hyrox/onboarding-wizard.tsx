@@ -50,28 +50,51 @@ import { TimeInput } from "@/components/shared/time-input";
 // ---------------------------------------------------------------------------
 
 type EquipmentKey =
+  // HYROX station equipment
   | "skierg"
   | "rower"
   | "sled"
   | "sandbag"
   | "wall_ball_target"
   | "assault_bike"
-  | "farmers_handles";
+  | "farmers_handles"
+  // General gym equipment (useful for substitutions)
+  | "dumbbells"
+  | "barbells"
+  | "kettlebells"
+  | "plyo_box"
+  | "pull_up_bar"
+  | "resistance_bands"
+  | "medicine_ball"
+  | "jump_rope"
+  | "treadmill";
 
 interface EquipmentItem {
   key: EquipmentKey;
   label: string;
   description: string;
+  category: "hyrox" | "general";
 }
 
 const EQUIPMENT_LIST: EquipmentItem[] = [
-  { key: "skierg", label: "SkiErg", description: "Concept2 SkiErg or equivalent pull-down machine" },
-  { key: "rower", label: "Rower", description: "Concept2 rower or similar rowing ergometer" },
-  { key: "sled", label: "Sled", description: "Push/pull sled with adjustable weight" },
-  { key: "sandbag", label: "Sandbag", description: "Heavy sandbag for lunges (20kg / 10kg typical)" },
-  { key: "wall_ball_target", label: "Wall Ball Target", description: "Wall ball with regulation-height target" },
-  { key: "assault_bike", label: "Assault Bike", description: "Assault/Echo bike or air resistance bike" },
-  { key: "farmers_handles", label: "Farmer's Handles", description: "Farmer's carry handles or heavy dumbbells" },
+  // HYROX station equipment
+  { key: "skierg", label: "SkiErg", description: "Concept2 SkiErg or equivalent pull-down machine", category: "hyrox" },
+  { key: "rower", label: "Rower", description: "Concept2 rower or similar rowing ergometer", category: "hyrox" },
+  { key: "sled", label: "Sled", description: "Push/pull sled with adjustable weight", category: "hyrox" },
+  { key: "sandbag", label: "Sandbag", description: "Heavy sandbag for lunges (20kg / 10kg typical)", category: "hyrox" },
+  { key: "wall_ball_target", label: "Wall Ball Target", description: "Wall ball with regulation-height target", category: "hyrox" },
+  { key: "assault_bike", label: "Assault Bike", description: "Assault/Echo bike or air resistance bike", category: "hyrox" },
+  { key: "farmers_handles", label: "Farmer's Handles", description: "Farmer's carry handles or heavy dumbbells", category: "hyrox" },
+  // General gym equipment
+  { key: "dumbbells", label: "Dumbbells", description: "Adjustable or fixed-weight dumbbells", category: "general" },
+  { key: "barbells", label: "Barbells", description: "Barbell with weight plates", category: "general" },
+  { key: "kettlebells", label: "Kettlebells", description: "Kettlebells (various weights)", category: "general" },
+  { key: "plyo_box", label: "Plyo Box", description: "Box for jumps, step-ups, and elevated movements", category: "general" },
+  { key: "pull_up_bar", label: "Pull-Up Bar", description: "Pull-up bar or rig", category: "general" },
+  { key: "resistance_bands", label: "Resistance Bands", description: "Looped or handled resistance bands", category: "general" },
+  { key: "medicine_ball", label: "Medicine Ball", description: "Weighted ball for throws and slams", category: "general" },
+  { key: "jump_rope", label: "Jump Rope", description: "Speed rope or weighted jump rope", category: "general" },
+  { key: "treadmill", label: "Treadmill", description: "Treadmill for indoor running sessions", category: "general" },
 ];
 
 type TrainingPhilosophy = "conservative" | "moderate" | "aggressive";
@@ -1220,25 +1243,53 @@ function StepPreferences({
       <div className="space-y-2">
         <Label>Equipment Availability</Label>
         <p className="text-xs text-muted-foreground">
-          Check the equipment you have access to at your gym or home.
+          Check the equipment you have access to. This helps us create substitutions when you&apos;re missing HYROX station gear.
         </p>
-        <div className="space-y-2 rounded-lg bg-muted/30 p-3">
-          {EQUIPMENT_LIST.map((item) => (
-            <label
-              key={item.key}
-              className="flex items-start gap-3 cursor-pointer rounded-md p-2 transition-colors hover:bg-muted/50"
-            >
-              <Switch
-                checked={state.equipment[item.key]}
-                onCheckedChange={() => toggleEquipment(item.key)}
-                className="mt-0.5"
-              />
-              <div className="flex-1 min-w-0">
-                <span className="text-sm font-medium">{item.label}</span>
-                <p className="text-xs text-muted-foreground">{item.description}</p>
-              </div>
-            </label>
-          ))}
+
+        {/* HYROX station equipment */}
+        <div className="space-y-1">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">HYROX Station Equipment</span>
+          <div className="space-y-2 rounded-lg bg-muted/30 p-3">
+            {EQUIPMENT_LIST.filter((item) => item.category === "hyrox").map((item) => (
+              <label
+                key={item.key}
+                className="flex items-start gap-3 cursor-pointer rounded-md p-2 transition-colors hover:bg-muted/50"
+              >
+                <Switch
+                  checked={state.equipment[item.key]}
+                  onCheckedChange={() => toggleEquipment(item.key)}
+                  className="mt-0.5"
+                />
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-medium">{item.label}</span>
+                  <p className="text-xs text-muted-foreground">{item.description}</p>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* General gym equipment */}
+        <div className="space-y-1">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">General Gym Equipment</span>
+          <div className="space-y-2 rounded-lg bg-muted/30 p-3">
+            {EQUIPMENT_LIST.filter((item) => item.category === "general").map((item) => (
+              <label
+                key={item.key}
+                className="flex items-start gap-3 cursor-pointer rounded-md p-2 transition-colors hover:bg-muted/50"
+              >
+                <Switch
+                  checked={state.equipment[item.key]}
+                  onCheckedChange={() => toggleEquipment(item.key)}
+                  className="mt-0.5"
+                />
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-medium">{item.label}</span>
+                  <p className="text-xs text-muted-foreground">{item.description}</p>
+                </div>
+              </label>
+            ))}
+          </div>
         </div>
       </div>
 
