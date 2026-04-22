@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Dumbbell, Trophy, Clock, User } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useIsRacing } from "@/hooks/useRaceMode";
 
 const tabs = [
   { href: "/crossfit", label: "CrossFit", icon: Dumbbell },
@@ -14,6 +15,9 @@ const tabs = [
 
 export function BottomNav() {
   const pathname = usePathname();
+  const isRacing = useIsRacing();
+
+  if (isRacing) return null;
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 glass border-t border-white/[0.06]">
