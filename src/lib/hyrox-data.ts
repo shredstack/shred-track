@@ -92,6 +92,58 @@ export const STATION_ORDER = [
 
 export type StationName = (typeof STATION_ORDER)[number];
 
+/**
+ * How to display pace for each station type.
+ * - "per500m": show pace/500m (SkiErg, Rowing — matches machine display)
+ * - "perRep": show seconds/rep (Wall Balls)
+ * - "total": just show total time (Sled Push/Pull, BBJ, Farmers, Lunges — short or bodyweight)
+ */
+export type StationPaceType = "per500m" | "perRep" | "total";
+
+export const STATION_PACE_TYPE: Record<string, StationPaceType> = {
+  SkiErg: "per500m",
+  "Sled Push": "total",
+  "Sled Pull": "total",
+  "Burpee Broad Jumps": "total",
+  Rowing: "per500m",
+  "Farmers Carry": "total",
+  "Sandbag Lunges": "total",
+  "Wall Balls": "perRep",
+  // Youngstars variants
+  "Sled Drag": "total",
+  "Frogger Jumps": "total",
+  Lunges: "total",
+  "Wall Ball Squats": "perRep",
+};
+
+/**
+ * Format a meaningful pace string for a station given its total time in seconds.
+ * Returns null if pace display doesn't add value (i.e. "total" type — same as the time).
+ */
+export function formatStationPace(
+  stationName: string,
+  totalSeconds: number,
+  distanceM?: number,
+  reps?: number,
+): string | null {
+  const paceType = STATION_PACE_TYPE[stationName] ?? "total";
+
+  if (paceType === "per500m" && distanceM && distanceM > 0) {
+    const pacePer500 = (totalSeconds / distanceM) * 500;
+    const m = Math.floor(pacePer500 / 60);
+    const s = Math.round(pacePer500 % 60);
+    return `${m}:${s.toString().padStart(2, "0")}/500m`;
+  }
+
+  if (paceType === "perRep" && reps && reps > 0) {
+    const secPerRep = totalSeconds / reps;
+    return `${secPerRep.toFixed(1)}s/rep`;
+  }
+
+  // "total" type — no separate pace to show
+  return null;
+}
+
 // Youngstars have different station names for some age groups
 export const YOUNGSTARS_STATION_ORDER_8_9 = [
   "SkiErg", "Sled Push", "Sled Drag", "Frogger Jumps",
@@ -1544,6 +1596,37 @@ export function parseLongTimeToSeconds(str: string): number {
 /** Convert kg to lbs */
 export function kgToLbs(kg: number): number {
   return Math.round(kg * 2.20462);
+}
+
+/**
+ * Convert a weight label to mixed units, preserving multiplier prefixes.
+ * "2×16 kg" → "2 × 35 lbs"
+ * "102 kg"  → "225 lbs"
+ * "1×16 kg" → "1 × 35 lbs"
+ * If useMixed is false, returns the original label unchanged.
+ */
+export function convertWeightLabel(
+  weightLabel: string | undefined,
+  weightKg: number | undefined,
+  useMixed: boolean,
+): string {
+  if (!weightLabel) return "";
+  if (!useMixed) return weightLabel;
+
+  // Match patterns like "2×16 kg" or "1×24 kg"
+  const multiplierMatch = weightLabel.match(/^(\d+)\s*×\s*(\d+(?:\.\d+)?)\s*kg/);
+  if (multiplierMatch) {
+    const count = multiplierMatch[1];
+    const perUnit = parseFloat(multiplierMatch[2]);
+    return `${count} × ${kgToLbs(perUnit)} lbs`;
+  }
+
+  // Fall back to converting total weightKg
+  if (weightKg !== undefined) {
+    return `${kgToLbs(weightKg)} lbs`;
+  }
+
+  return weightLabel;
 }
 
 /** Convert meters to feet */

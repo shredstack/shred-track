@@ -1,8 +1,9 @@
 "use client";
 
 import { useInsightsEvents } from "@/hooks/useInsights";
-import { DIVISIONS, type DivisionKey } from "@/lib/hyrox-data";
+import { type DivisionKey } from "@/lib/hyrox-data";
 import { AlertCircle } from "lucide-react";
+import { DivisionPicker } from "@/components/shared/division-picker";
 
 interface InsightsFilterBarProps {
   division: DivisionKey;
@@ -11,7 +12,12 @@ interface InsightsFilterBarProps {
   onEventChange: (id: string | undefined) => void;
 }
 
-const DIVISION_KEYS: DivisionKey[] = ["men_open", "women_open", "men_pro", "women_pro"];
+const INSIGHTS_DIVISION_KEYS: DivisionKey[] = [
+  "men_open",
+  "women_open",
+  "men_pro",
+  "women_pro",
+];
 
 export function InsightsFilterBar({
   division,
@@ -23,24 +29,18 @@ export function InsightsFilterBar({
 
   return (
     <div className="sticky top-0 z-10 flex flex-col gap-3 rounded-xl bg-background/80 backdrop-blur-md p-3 border border-white/[0.06]">
-      {/* Division pills */}
-      <div className="flex gap-1.5 overflow-x-auto">
-        {DIVISION_KEYS.map((key) => (
-          <button
-            key={key}
-            onClick={() => onDivisionChange(key)}
-            className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
-              division === key
-                ? "bg-primary/15 text-primary glow-primary-sm"
-                : "bg-white/[0.06] text-muted-foreground hover:bg-white/[0.1] hover:text-foreground"
-            }`}
-          >
-            {DIVISIONS[key].label}
-          </button>
-        ))}
+      {/* Division picker — inline pills since ≤6 keys */}
+      <div className="flex items-center gap-2">
+        <div className="flex-1">
+          <DivisionPicker
+            value={division}
+            onChange={onDivisionChange}
+            allowedKeys={INSIGHTS_DIVISION_KEYS}
+          />
+        </div>
 
         {/* Disclaimer pill */}
-        <div className="ml-auto flex items-center gap-1 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-[10px] text-amber-400 whitespace-nowrap">
+        <div className="flex items-center gap-1 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-[10px] text-amber-400 whitespace-nowrap shrink-0">
           <AlertCircle className="h-3 w-3 shrink-0" />
           <span>Growing dataset</span>
         </div>

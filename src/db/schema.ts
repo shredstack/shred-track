@@ -534,3 +534,42 @@ export const hyroxUserPredictions = pgTable("hyrox_user_predictions", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+// ============================================
+// HYROX: Practice Race Timer
+// ============================================
+
+export const hyroxPracticeRaces = pgTable(
+  "hyrox_practice_races",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    title: text("title"),
+    divisionKey: text("division_key"),
+    template: text("template").notNull().default("full"),
+    totalTimeSeconds: numeric("total_time_seconds", { precision: 10, scale: 1 }).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }).notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("practice_races_user").on(table.userId)],
+);
+
+export const hyroxPracticeRaceSplits = pgTable(
+  "hyrox_practice_race_splits",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    raceId: uuid("race_id").notNull().references(() => hyroxPracticeRaces.id, { onDelete: "cascade" }),
+    segmentOrder: integer("segment_order").notNull(),
+    segmentType: text("segment_type").notNull(),
+    segmentLabel: text("segment_label").notNull(),
+    distanceMeters: integer("distance_meters"),
+    reps: integer("reps"),
+    timeSeconds: numeric("time_seconds", { precision: 10, scale: 1 }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("practice_splits_unique").on(table.raceId, table.segmentOrder),
+    index("practice_splits_race").on(table.raceId),
+  ],
+);

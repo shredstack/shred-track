@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BarChart3, Target, ChevronRight } from "lucide-react";
+import { Activity, BarChart3, Target, Timer, ChevronRight } from "lucide-react";
 
 export function PublicLanding() {
   return (
@@ -12,9 +12,6 @@ export function PublicLanding() {
             ShredTrack
           </span>
           <nav className="flex items-center gap-3 text-xs">
-            <a href="/insights/hyrox" className="text-muted-foreground hover:text-foreground transition-colors">
-              Insights
-            </a>
             <a
               href="/login"
               className="rounded-lg bg-primary/15 px-3 py-1.5 font-medium text-primary hover:bg-primary/25 transition-colors"
@@ -28,12 +25,12 @@ export function PublicLanding() {
       {/* Hero */}
       <section className="mx-auto flex w-full max-w-3xl flex-col items-center px-4 pt-16 pb-12 text-center">
         <h1 className="text-3xl font-bold leading-tight sm:text-4xl">
-          Train smarter for{" "}
-          <span className="text-gradient-primary">HYROX</span>
+          Train smarter.{" "}
+          <span className="text-gradient-primary">Compete harder.</span>
         </h1>
         <p className="mt-3 max-w-md text-sm text-muted-foreground leading-relaxed">
-          Track workouts, follow personalized training plans, benchmark your stations,
-          and see how you compare to thousands of real race finishers.
+          Track workouts, follow personalized training plans, benchmark your performance,
+          and see how you compare — whether you race HYROX, CrossFit, or both.
         </p>
         <div className="mt-6 flex items-center gap-3">
           <a
@@ -42,41 +39,35 @@ export function PublicLanding() {
           >
             Get started free
           </a>
-          <a
-            href="/insights/hyrox"
-            className="rounded-lg border border-white/[0.1] px-5 py-2.5 text-sm font-medium text-foreground hover:bg-white/[0.05] transition-colors"
-          >
-            Explore race data
-          </a>
         </div>
       </section>
 
-      {/* Live insights preview */}
+      {/* Free HYROX Tools preview */}
       <section className="mx-auto w-full max-w-3xl px-4 pb-12">
         <a
-          href="/insights/hyrox"
+          href="/insights/hyrox/timer"
           className="group block rounded-xl gradient-border overflow-hidden"
         >
           <div className="bg-white/[0.02] p-5">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <Activity className="h-4 w-4 text-primary" />
-                <span className="text-sm font-bold">HYROX Field Insights</span>
+                <Timer className="h-4 w-4 text-primary" />
+                <span className="text-sm font-bold">Free HYROX Tools</span>
               </div>
               <span className="flex items-center text-[10px] text-primary group-hover:gap-1.5 transition-all gap-1">
-                Explore <ChevronRight className="h-3 w-3" />
+                Try now <ChevronRight className="h-3 w-3" />
               </span>
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Pace profiles, station distributions, and what separates top finishers —
-              powered by real race data across Men Open, Women Open, Men Pro, and Women Pro.
+              Practice race timer, field insights, and race data analysis — no
+              account required. Time your practice race, explore pace profiles,
+              and see what separates top finishers.
             </p>
-            <div className="mt-4 grid grid-cols-4 gap-2">
+            <div className="mt-4 grid grid-cols-3 gap-2">
               {[
-                { label: "Races analyzed", value: "50+" },
-                { label: "Finishers", value: "25K+" },
-                { label: "Divisions", value: "4" },
-                { label: "Stations", value: "8" },
+                { label: "Race Timer", value: "FREE" },
+                { label: "Field Insights", value: "FREE" },
+                { label: "Divisions", value: "60+" },
               ].map((stat) => (
                 <div key={stat.label} className="rounded-lg bg-white/[0.03] p-2.5 text-center">
                   <div className="text-sm font-bold tabular-nums text-primary">
@@ -136,8 +127,8 @@ export function PublicLanding() {
         <div className="mx-auto max-w-3xl px-4 flex items-center justify-between text-[10px] text-muted-foreground">
           <span>&copy; {new Date().getFullYear()} ShredTrack</span>
           <div className="flex gap-4">
-            <a href="/insights/hyrox" className="hover:text-foreground transition-colors">
-              Insights
+            <a href="/insights/hyrox/timer" className="hover:text-foreground transition-colors">
+              HYROX Tools
             </a>
             <a href="mailto:shredstacksarah@gmail.com" className="hover:text-foreground transition-colors">
               Contact

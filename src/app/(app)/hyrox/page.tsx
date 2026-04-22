@@ -140,10 +140,10 @@ export default function HyroxPage() {
         <Button
           variant="outline"
           className="h-auto py-4 flex-col gap-1"
-          onClick={() => router.push("/hyrox/scenarios")}
+          onClick={() => router.push("/hyrox/race-tools")}
         >
-          <span className="text-sm font-semibold">Race Scenarios</span>
-          <span className="text-[10px] text-muted-foreground">Split strategies</span>
+          <span className="text-sm font-semibold">Race Tools</span>
+          <span className="text-[10px] text-muted-foreground">Timer, scenarios &amp; calculator</span>
         </Button>
       </div>
 

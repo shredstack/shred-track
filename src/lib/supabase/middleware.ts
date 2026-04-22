@@ -37,12 +37,13 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith("/login") ||
     request.nextUrl.pathname.startsWith("/signup");
 
-  // Redirect unauthenticated users to login (except auth pages and API routes)
+  // Redirect unauthenticated users to login (except auth pages, API routes, and public pages)
   if (
     !user &&
     !isAuthPage &&
     !request.nextUrl.pathname.startsWith("/api") &&
     !request.nextUrl.pathname.startsWith("/auth") &&
+    !request.nextUrl.pathname.startsWith("/insights") &&
     request.nextUrl.pathname !== "/"
   ) {
     const url = request.nextUrl.clone();
