@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Pause, Play, Square, ChevronRight } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
+import { setRaceMode } from "@/hooks/useRaceMode";
 import type { RaceSegment, TimerStatus } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -77,6 +78,27 @@ export function TimerActive({
   const accentColor = isRun ? "text-blue-400" : "text-orange-400";
   const accentBg = isRun ? "bg-blue-500" : "bg-orange-500";
 
+  // Lock to portrait while racing. Unsupported on iOS Safari browser mode —
+  // fails silently there. Works in Android Chrome and in installed PWAs.
+  useEffect(() => {
+    const orientation = screen.orientation as ScreenOrientation & {
+      lock?: (o: "portrait" | "landscape" | "any") => Promise<void>;
+    };
+    orientation.lock?.("portrait").catch(() => {});
+    return () => {
+      try {
+        screen.orientation?.unlock?.();
+      } catch {}
+    };
+  }, []);
+
+  // Hide the app's bottom nav while the race is running so it can't be tapped
+  // accidentally and doesn't cover the pause / end race controls.
+  useEffect(() => {
+    setRaceMode(true);
+    return () => setRaceMode(false);
+  }, []);
+
   const handleEndRace = useCallback(() => {
     if (showEndConfirm) {
       onEndRace();
@@ -89,9 +111,16 @@ export function TimerActive({
   const isPaused = status === "paused";
 
   return (
-    <div className="flex flex-col min-h-[100dvh] bg-background select-none">
+    <div className="fixed inset-0 z-50 flex flex-col bg-background select-none overflow-y-auto">
+     <div
+       className="mx-auto flex w-full max-w-lg flex-1 flex-col"
+       style={{
+         paddingTop: "env(safe-area-inset-top)",
+         paddingBottom: "env(safe-area-inset-bottom)",
+       }}
+     >
       {/* Top bar — segment counter */}
-      <div className="flex items-center justify-between px-4 pt-4 pb-2">
+      <div className="flex items-center justify-between px-4 pt-3 pb-2">
         <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
           Segment {completedCount + 1} of {totalSegments}
         </span>
@@ -117,18 +146,18 @@ export function TimerActive({
       </div>
 
       {/* Main time display */}
-      <div className="flex-1 flex flex-col items-center justify-center px-6 -mt-4">
+      <div className="flex-1 flex flex-col items-center justify-center px-6 -mt-4 landscape:mt-0">
         {/* Segment time — primary */}
         <div className="text-center">
-          <span className="text-[64px] leading-none font-mono font-bold tracking-tight tabular-nums">
+          <span className="text-[64px] landscape:text-[44px] leading-none font-mono font-bold tracking-tight tabular-nums">
             {formatMs(segmentElapsedMs)}
           </span>
           <p className="text-xs text-muted-foreground mt-1">segment time</p>
         </div>
 
         {/* Total elapsed — secondary */}
-        <div className="mt-4 text-center">
-          <span className="text-2xl font-mono font-medium text-muted-foreground tabular-nums">
+        <div className="mt-4 landscape:mt-2 text-center">
+          <span className="text-2xl landscape:text-xl font-mono font-medium text-muted-foreground tabular-nums">
             {formatMsLong(totalElapsedMs)}
           </span>
           <p className="text-[10px] text-muted-foreground mt-0.5">
@@ -162,7 +191,7 @@ export function TimerActive({
         <div className="px-4 mb-3">
           <button
             onClick={onSplit}
-            className={`w-full rounded-2xl py-6 text-xl font-bold text-white shadow-lg active:scale-[0.97] transition-all duration-100 ${accentBg} ${
+            className={`w-full rounded-2xl py-6 landscape:py-4 text-xl landscape:text-lg font-bold text-white shadow-lg active:scale-[0.97] transition-all duration-100 ${accentBg} ${
               isLastSegment ? "shadow-orange-500/25" : "shadow-blue-500/25"
             }`}
           >
@@ -176,7 +205,7 @@ export function TimerActive({
         <div className="px-4 mb-3">
           <button
             onClick={onResume}
-            className="w-full rounded-2xl bg-emerald-600 py-6 text-xl font-bold text-white shadow-lg shadow-emerald-500/25 active:scale-[0.97] transition-all duration-100"
+            className="w-full rounded-2xl bg-emerald-600 py-6 landscape:py-4 text-xl landscape:text-lg font-bold text-white shadow-lg shadow-emerald-500/25 active:scale-[0.97] transition-all duration-100"
           >
             <span className="flex items-center justify-center gap-2">
               <Play className="h-6 w-6" />
@@ -216,7 +245,7 @@ export function TimerActive({
       </div>
 
       {/* Progress bar */}
-      <div className="px-4 pb-6">
+      <div className="px-4 pb-4">
         <Progress value={progressPercent} className="h-2" />
         <div className="flex items-center justify-between mt-1.5 text-[10px] text-muted-foreground">
           <span>
@@ -225,6 +254,7 @@ export function TimerActive({
           <span>{Math.round(progressPercent)}%</span>
         </div>
       </div>
+     </div>
     </div>
   );
 }
