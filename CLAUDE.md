@@ -34,6 +34,28 @@ When adding features that appear in multiple places, create a shared component i
 
 Before writing new UI code, check if similar functionality already exists that could be extracted into a reusable component.
 
+**Key shared components to use (do NOT re-implement these):**
+
+- **`DivisionPicker`** (`src/components/shared/division-picker.tsx`) — For selecting a HYROX division. Supports `genderFilter`, `allowedKeys` (renders inline pills for ≤6 keys, dropdown with search for more), and category accordion grouping. Use this everywhere a division needs to be selected.
+
+- **`UnitToggle`** (`src/components/shared/unit-toggle.tsx`) — Compact Kg/Lbs toggle that reads/writes the global unit preference. Place this wherever weights are displayed so users can switch units.
+
+- **`useUnits`** hook (`src/hooks/useUnits.ts`) — Global unit preference (metric/mixed) backed by localStorage. Returns `{ mode, isMixed, toggle, setMode }`. Use `isMixed` to decide whether to convert weights. **Never** create local `useMixed` state — always use this hook so the preference stays in sync across the app.
+
+- **`convertWeightLabel()`** (`src/lib/hyrox-data.ts`) — Converts weight labels preserving multiplier prefixes (e.g., `"2×16 kg"` → `"2 × 35 lbs"`). Always use this instead of raw `kgToLbs()` for display strings.
+
+- **`formatStationPace()`** (`src/lib/hyrox-data.ts`) — Returns a meaningful pace string for a station (e.g., `/500m` for SkiErg/Rowing, `s/rep` for Wall Balls, `null` for stations where pace doesn't add value like Sled Push).
+
+- **`SplitCard`** (`src/components/hyrox/split-card.tsx`) — Card for displaying a single race split with segment name, time, cumulative, and meaningful pace. Use instead of table rows for mobile-friendly split display.
+
+### Units & Weight Display
+
+- Weights display in **metric (kg)** by default. Users toggle to **mixed (lbs)** via `UnitToggle`.
+- "Mixed" means kg → lbs but distances stay in meters (HYROX uses meters natively).
+- Always show the unit suffix (e.g., "102 kg" not just "102").
+- For equipment with multipliers (e.g., Farmers Carry kettlebells), always show the per-unit weight: "2 × 16 kg" not "32 kg".
+- When mixed mode is on, show both: "2×16 kg / 2 × 35 lbs".
+
 ### Drizzle ORM Usage
 
 All database access goes through Drizzle ORM. Never write raw SQL in API routes or lib files - use Drizzle's query builder.

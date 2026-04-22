@@ -1,7 +1,5 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { OverviewTab } from "@/components/hyrox/overview-tab";
-
-export default function HyroxOverviewPage() {
-  return <OverviewTab />;
+export default function HyroxOverviewRedirect() {
+  redirect("/hyrox/explore");
 }

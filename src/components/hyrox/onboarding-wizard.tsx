@@ -31,7 +31,6 @@ import {
   CONFIDENCE_LABELS,
   RACE_DIVISION_LABELS,
   RACE_DIVISION_KEYS,
-  DIVISION_CATEGORIES,
   isTeamDivision,
   formatTime,
   formatLongTime,
@@ -44,6 +43,7 @@ import {
   type StationName,
 } from "@/lib/hyrox-data";
 import { TimeInput } from "@/components/shared/time-input";
+import { DivisionPicker as SharedDivisionPicker } from "@/components/shared/division-picker";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -748,7 +748,7 @@ function StepRace({
 
       <div className="space-y-2">
         <Label>Division</Label>
-        <DivisionPicker gender={state.gender} value={state.division} onChange={setDivision} />
+        <SharedDivisionPicker value={state.division as DivisionKey} onChange={setDivision} genderFilter={state.gender} />
       </div>
 
       {/* Goal finish time */}
@@ -867,58 +867,6 @@ function StepRunning({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Shared — Division picker
-// ---------------------------------------------------------------------------
-
-function DivisionPicker({
-  gender,
-  value,
-  onChange,
-}: {
-  gender: Gender;
-  value: DivisionKey | RaceDivisionKey;
-  onChange: (d: DivisionKey) => void;
-}) {
-  return (
-    <div className="space-y-2">
-      {DIVISION_CATEGORIES.map((cat) => {
-        const relevantKeys = cat.keys.filter((k) => {
-          if (gender === "women") return k.includes("women") || k.includes("mixed");
-          if (gender === "men") return k.includes("men") || k.includes("mixed");
-          return true;
-        });
-        if (relevantKeys.length === 0) return null;
-        return (
-          <div key={cat.label}>
-            <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mb-1">
-              {cat.label}
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {relevantKeys.map((d) => {
-                const label = DIVISIONS[d].label
-                  .replace(/^(Women|Men)\s+/, "")
-                  .replace(cat.label + " ", "");
-                return (
-                  <Button
-                    key={d}
-                    variant={value === d ? "default" : "outline"}
-                    onClick={() => onChange(d)}
-                    size="sm"
-                    className="text-xs"
-                  >
-                    {label}
-                  </Button>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 // Step 4 — Experience
 // ---------------------------------------------------------------------------
 
@@ -966,7 +914,7 @@ function StepExperience({
           </div>
           <div className="space-y-1.5">
             <Label>Division raced</Label>
-            <DivisionPicker gender={state.gender} value={state.bestDivision} onChange={(d) => set("bestDivision", d)} />
+            <SharedDivisionPicker value={state.bestDivision as DivisionKey} onChange={(d) => set("bestDivision", d)} genderFilter={state.gender} />
             {isTeamDivision(state.bestDivision) && (
               <div className="rounded-md border border-primary/20 bg-primary/5 p-2.5 text-xs text-muted-foreground">
                 <strong className="text-foreground">Note:</strong> Since you split station work with a

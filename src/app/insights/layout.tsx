@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { InsightsNav } from "@/components/insights/insights-nav";
 
 export const metadata: Metadata = {
   title: "HYROX Race Insights — ShredTrack",
@@ -16,9 +17,6 @@ export default function InsightsLayout({ children }: { children: React.ReactNode
             ShredTrack
           </a>
           <nav className="flex items-center gap-3 text-xs">
-            <a href="/insights/hyrox" className="text-primary font-medium">
-              Insights
-            </a>
             <a
               href="/login"
               className="rounded-lg bg-primary/15 px-3 py-1.5 font-medium text-primary hover:bg-primary/25 transition-colors"
@@ -26,6 +24,10 @@ export default function InsightsLayout({ children }: { children: React.ReactNode
               Sign in
             </a>
           </nav>
+        </div>
+        {/* Tab navigation */}
+        <div className="mx-auto max-w-lg px-4 pb-2">
+          <InsightsNav />
         </div>
       </header>
       <main className="mx-auto flex w-full max-w-lg flex-1 flex-col px-4 pb-12 pt-4">

@@ -8,21 +8,29 @@ import {
   ArrowRightLeft,
   Download,
   RotateCcw,
+  ArrowUpDown,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { TimeInput } from "@/components/shared/time-input";
+import { DivisionPicker } from "@/components/shared/division-picker";
+import { UnitToggle } from "@/components/shared/unit-toggle";
+import { StationTimeEditor } from "@/components/hyrox/station-time-editor";
+import { SplitCard } from "@/components/hyrox/split-card";
+import { useUnits } from "@/hooks/useUnits";
 import { useHyroxProfile, usePlanScenarios } from "@/hooks/useHyroxPlan";
 import {
   STATION_ORDER,
+  DIVISIONS,
   REFERENCE_TIMES,
   RUN_REFERENCE,
   formatTime,
   formatLongTime,
   parseTimeToSeconds,
   parseLongTimeToSeconds,
+  convertWeightLabel,
   type DivisionKey,
   type StationName,
 } from "@/lib/hyrox-data";
@@ -33,76 +41,87 @@ import type { RaceScenario } from "@/types/hyrox-plan";
 // ---------------------------------------------------------------------------
 
 const NUM_RUNS = 8;
-const NUM_TRANSITIONS = 16; // transitions between each run/station pair
-const DEFAULT_TRANSITION_SECONDS = 15; // per transition
+const NUM_TRANSITIONS = 16;
+const DEFAULT_TRANSITION_SECONDS = 15;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Get average station reference times for a division */
 function getStationProportions(division: DivisionKey): Record<StationName, number> {
   const refs = REFERENCE_TIMES[division];
   const proportions = {} as Record<StationName, number>;
   let total = 0;
   for (const station of STATION_ORDER) {
-    const avgSeconds = refs?.[station]?.[1] ?? 300; // [pro, average, slow] → index 1
+    const avgSeconds = refs?.[station]?.[1] ?? 300;
     proportions[station] = avgSeconds;
     total += avgSeconds;
   }
-  // Normalize to ratios
   for (const station of STATION_ORDER) {
     proportions[station] = proportions[station] / total;
   }
   return proportions;
 }
 
-/** Get average run pace (seconds per km) for a division */
 function getDefaultRunPace(division: DivisionKey): number {
-  return RUN_REFERENCE[division]?.[1] ?? 300; // average tier
+  return RUN_REFERENCE[division]?.[1] ?? 300;
 }
 
-/** Format seconds as pace string M:SS */
 function secondsToPace(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.round(seconds % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function secondsToHMS(totalSeconds: number): string {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.round(totalSeconds % 60);
+  return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+}
+
+// ---------------------------------------------------------------------------
+// Calc modes
+// ---------------------------------------------------------------------------
+
+type CalcMode = "finish_to_stations" | "stations_to_finish";
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
 interface RaceCalculatorProps {
-  planId: string;
+  planId?: string;
 }
 
 export function RaceCalculator({ planId }: RaceCalculatorProps) {
   const { data: profile } = useHyroxProfile();
-  const { data: scenariosData } = usePlanScenarios(planId);
+  const { data: scenariosData } = usePlanScenarios(planId ?? null);
+  const { isMixed } = useUnits();
+  const hasPlan = !!planId;
 
-  const division: DivisionKey = (profile?.targetDivision as DivisionKey) ?? "women_open";
+  const profileDivision = (profile?.targetDivision as DivisionKey) ?? "women_open";
+  const [selectedDivision, setSelectedDivision] = useState<DivisionKey>(profileDivision);
+  const division = hasPlan ? profileDivision : selectedDivision;
+
   const stationProportions = useMemo(() => getStationProportions(division), [division]);
+  const divSpec = DIVISIONS[division];
 
   // ---------------------------------------------------------------------------
-  // State — inputs
+  // State
   // ---------------------------------------------------------------------------
 
-  const defaultFinishSeconds = profile?.goalFinishTimeSeconds ?? 3600; // 1:00:00 fallback
+  const defaultFinishSeconds = profile?.goalFinishTimeSeconds ?? 3600;
   const defaultRunPace = getDefaultRunPace(division);
 
-  const [finishTimeStr, setFinishTimeStr] = useState(() => {
-    const h = Math.floor(defaultFinishSeconds / 3600);
-    const m = Math.floor((defaultFinishSeconds % 3600) / 60);
-    const s = defaultFinishSeconds % 60;
-    return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-  });
-
+  const [calcMode, setCalcMode] = useState<CalcMode>("finish_to_stations");
+  const [finishTimeStr, setFinishTimeStr] = useState(() => secondsToHMS(defaultFinishSeconds));
   const [runPaceStr, setRunPaceStr] = useState(() => secondsToPace(defaultRunPace));
   const [transitionSeconds, setTransitionSeconds] = useState(DEFAULT_TRANSITION_SECONDS);
+  const [stationOverrides, setStationOverrides] = useState<Record<string, string>>({});
 
   // ---------------------------------------------------------------------------
-  // Derived values
+  // Parsed values
   // ---------------------------------------------------------------------------
 
   const finishSeconds = useMemo(() => {
@@ -118,68 +137,121 @@ export function RaceCalculator({ planId }: RaceCalculatorProps) {
   const totalRunSeconds = runPaceSeconds !== null ? runPaceSeconds * NUM_RUNS : null;
   const totalTransitionSeconds = transitionSeconds * NUM_TRANSITIONS;
 
-  const stationTimeAvailable = useMemo(() => {
-    if (finishSeconds === null || totalRunSeconds === null) return null;
-    const available = finishSeconds - totalRunSeconds - totalTransitionSeconds;
-    return available > 0 ? available : null;
-  }, [finishSeconds, totalRunSeconds, totalTransitionSeconds]);
+  // ---------------------------------------------------------------------------
+  // Station times
+  // ---------------------------------------------------------------------------
 
-  // Distribute station time proportionally
-  const stationSplits = useMemo(() => {
-    if (stationTimeAvailable === null) return null;
-    return STATION_ORDER.map((station) => ({
-      station,
-      seconds: Math.round(stationTimeAvailable * stationProportions[station]),
-    }));
-  }, [stationTimeAvailable, stationProportions]);
+  const proportionalStationTimes = useMemo(() => {
+    const result = {} as Record<StationName, number>;
 
-  // Build the full split table (alternating run/station)
+    if (calcMode === "finish_to_stations") {
+      if (finishSeconds === null || totalRunSeconds === null) {
+        for (const station of STATION_ORDER) {
+          result[station] = REFERENCE_TIMES[division]?.[station]?.[1] ?? 300;
+        }
+        return result;
+      }
+      const available = finishSeconds - totalRunSeconds - totalTransitionSeconds;
+      if (available <= 0) {
+        for (const station of STATION_ORDER) result[station] = 0;
+        return result;
+      }
+      for (const station of STATION_ORDER) {
+        result[station] = Math.round(available * stationProportions[station]);
+      }
+    } else {
+      for (const station of STATION_ORDER) {
+        result[station] = REFERENCE_TIMES[division]?.[station]?.[1] ?? 300;
+      }
+    }
+    return result;
+  }, [calcMode, finishSeconds, totalRunSeconds, totalTransitionSeconds, division, stationProportions]);
+
+  const effectiveStationTimes = useMemo(() => {
+    return STATION_ORDER.map((station) => {
+      const override = stationOverrides[station];
+      if (override) {
+        const parsed = parseTimeToSeconds(override);
+        if (!isNaN(parsed) && parsed > 0) return { station, seconds: parsed };
+      }
+      return { station, seconds: proportionalStationTimes[station] };
+    });
+  }, [proportionalStationTimes, stationOverrides]);
+
+  const totalStationSeconds = effectiveStationTimes.reduce((sum, t) => sum + t.seconds, 0);
+
+  const derivedFinishSeconds =
+    calcMode === "stations_to_finish" && totalRunSeconds !== null
+      ? totalRunSeconds + totalStationSeconds + totalTransitionSeconds
+      : null;
+
+  const displayFinishSeconds =
+    calcMode === "stations_to_finish" ? derivedFinishSeconds : finishSeconds;
+
+  // ---------------------------------------------------------------------------
+  // Build splits
+  // ---------------------------------------------------------------------------
+
   const fullSplits = useMemo(() => {
-    if (runPaceSeconds === null || stationSplits === null) return null;
+    if (runPaceSeconds === null) return null;
+    if (effectiveStationTimes.some((t) => t.seconds <= 0)) return null;
+
     const splits: {
       segmentNumber: number;
       segmentType: "run" | "station";
       segmentName: string;
       targetSeconds: number;
-      paceDisplay: string;
       cumulativeSeconds: number;
+      isEdited: boolean;
     }[] = [];
     let cumulative = 0;
     for (let i = 0; i < NUM_RUNS; i++) {
-      // Run segment
-      cumulative += runPaceSeconds + transitionSeconds; // transition before station
+      cumulative += runPaceSeconds + transitionSeconds;
       splits.push({
         segmentNumber: i + 1,
         segmentType: "run",
         segmentName: `Run ${i + 1} (1km)`,
         targetSeconds: runPaceSeconds,
-        paceDisplay: `${secondsToPace(runPaceSeconds)}/km`,
         cumulativeSeconds: cumulative,
+        isEdited: false,
       });
-      // Station segment
-      const stationTime = stationSplits[i].seconds;
-      cumulative += stationTime + transitionSeconds; // transition after station
+      const stationTime = effectiveStationTimes[i].seconds;
+      cumulative += stationTime + transitionSeconds;
       splits.push({
         segmentNumber: i + 1,
         segmentType: "station",
         segmentName: STATION_ORDER[i],
         targetSeconds: stationTime,
-        paceDisplay: formatTime(stationTime),
         cumulativeSeconds: cumulative,
+        isEdited: !!stationOverrides[STATION_ORDER[i]],
       });
     }
     return splits;
-  }, [runPaceSeconds, stationSplits, transitionSeconds]);
+  }, [runPaceSeconds, effectiveStationTimes, transitionSeconds, stationOverrides]);
 
-  // Summary stats
-  const totalStationSeconds = stationSplits?.reduce((sum, s) => sum + s.seconds, 0) ?? 0;
+  // ---------------------------------------------------------------------------
+  // Validation
+  // ---------------------------------------------------------------------------
+
+  const isValid =
+    displayFinishSeconds !== null &&
+    displayFinishSeconds > 0 &&
+    runPaceSeconds !== null &&
+    fullSplits !== null;
+
+  const isOverBudget =
+    calcMode === "finish_to_stations" &&
+    finishSeconds !== null &&
+    totalRunSeconds !== null &&
+    totalRunSeconds + totalTransitionSeconds >= finishSeconds;
+
   const goalBufferSeconds =
-    finishSeconds !== null && profile?.goalFinishTimeSeconds
-      ? profile.goalFinishTimeSeconds - finishSeconds
+    displayFinishSeconds !== null && profile?.goalFinishTimeSeconds
+      ? profile.goalFinishTimeSeconds - displayFinishSeconds
       : null;
 
   // ---------------------------------------------------------------------------
-  // Load from scenario
+  // Scenarios
   // ---------------------------------------------------------------------------
 
   const scenarios: RaceScenario[] = useMemo(() => {
@@ -187,48 +259,56 @@ export function RaceCalculator({ planId }: RaceCalculatorProps) {
     return [...(scenariosData as RaceScenario[])].sort((a, b) => a.sortOrder - b.sortOrder);
   }, [scenariosData]);
 
-  const loadFromScenario = useCallback(
-    (scenario: RaceScenario) => {
-      // Set finish time
-      const h = Math.floor(scenario.estimatedFinishSeconds / 3600);
-      const m = Math.floor((scenario.estimatedFinishSeconds % 3600) / 60);
-      const s = scenario.estimatedFinishSeconds % 60;
-      setFinishTimeStr(`${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`);
-
-      // Calculate average run pace from scenario splits
-      const runSplits = scenario.splits.filter((sp) => sp.segmentType === "run");
-      if (runSplits.length > 0) {
-        const avgRunSeconds = Math.round(
-          runSplits.reduce((sum, sp) => sum + sp.targetSeconds, 0) / runSplits.length,
-        );
-        setRunPaceStr(secondsToPace(avgRunSeconds));
-      }
-    },
-    [],
-  );
+  const loadFromScenario = useCallback((scenario: RaceScenario) => {
+    setCalcMode("finish_to_stations");
+    setStationOverrides({});
+    setFinishTimeStr(secondsToHMS(scenario.estimatedFinishSeconds));
+    const runSplits = scenario.splits.filter((sp) => sp.segmentType === "run");
+    if (runSplits.length > 0) {
+      const avg = Math.round(
+        runSplits.reduce((sum, sp) => sum + sp.targetSeconds, 0) / runSplits.length,
+      );
+      setRunPaceStr(secondsToPace(avg));
+    }
+  }, []);
 
   // ---------------------------------------------------------------------------
-  // Reset
+  // Actions
   // ---------------------------------------------------------------------------
+
+  const handleOverrideChange = useCallback((station: string, value: string) => {
+    setStationOverrides((prev) => ({ ...prev, [station]: value }));
+  }, []);
+
+  const handleResetOverrides = useCallback(() => {
+    setStationOverrides({});
+  }, []);
 
   const reset = useCallback(() => {
-    const h = Math.floor(defaultFinishSeconds / 3600);
-    const m = Math.floor((defaultFinishSeconds % 3600) / 60);
-    const s = defaultFinishSeconds % 60;
-    setFinishTimeStr(`${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`);
+    setFinishTimeStr(secondsToHMS(defaultFinishSeconds));
     setRunPaceStr(secondsToPace(defaultRunPace));
     setTransitionSeconds(DEFAULT_TRANSITION_SECONDS);
+    setStationOverrides({});
+    setCalcMode("finish_to_stations");
   }, [defaultFinishSeconds, defaultRunPace]);
 
-  // ---------------------------------------------------------------------------
-  // Validation
-  // ---------------------------------------------------------------------------
+  const toggleMode = useCallback(() => {
+    setCalcMode((prev) =>
+      prev === "finish_to_stations" ? "stations_to_finish" : "finish_to_stations",
+    );
+    setStationOverrides({});
+  }, []);
 
-  const isValid = finishSeconds !== null && runPaceSeconds !== null && stationTimeAvailable !== null;
-  const isOverBudget =
-    finishSeconds !== null &&
-    totalRunSeconds !== null &&
-    totalRunSeconds + totalTransitionSeconds >= finishSeconds;
+  // Station weight specs for display
+  const stationWeightSpecs = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const s of divSpec.stations) {
+      if (s.weightLabel) {
+        map[s.name] = convertWeightLabel(s.weightLabel, s.weightKg, isMixed);
+      }
+    }
+    return map;
+  }, [divSpec, isMixed]);
 
   // ---------------------------------------------------------------------------
   // Render
@@ -243,17 +323,29 @@ export function RaceCalculator({ planId }: RaceCalculatorProps) {
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500/10">
               <Calculator className="h-5 w-5 text-violet-400" />
             </div>
-            <div>
+            <div className="flex-1">
               <p className="text-sm font-bold">Race Calculator</p>
               <p className="text-xs text-muted-foreground">
-                Set your finish time and run pace — station times distribute automatically
+                {calcMode === "finish_to_stations"
+                  ? "Set your finish time — station times distribute automatically"
+                  : "Set your station times — finish time calculates automatically"}
               </p>
             </div>
+            <UnitToggle />
           </div>
         </CardContent>
       </Card>
 
-      {/* Load from scenario */}
+      {/* Division selector (when no plan) */}
+      {!hasPlan && (
+        <DivisionPicker
+          value={selectedDivision}
+          onChange={setSelectedDivision}
+          label="Division"
+        />
+      )}
+
+      {/* Load from scenario (when plan exists) */}
       {scenarios.length > 0 && (
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-muted-foreground">Load from:</span>
@@ -276,6 +368,17 @@ export function RaceCalculator({ planId }: RaceCalculatorProps) {
         </div>
       )}
 
+      {/* Mode toggle */}
+      <button
+        onClick={toggleMode}
+        className="flex items-center justify-center gap-2 rounded-lg bg-white/[0.03] border border-white/[0.06] px-3 py-2.5 text-xs font-medium text-muted-foreground hover:bg-white/[0.05] hover:text-foreground transition-colors"
+      >
+        <ArrowUpDown className="h-3.5 w-3.5" />
+        {calcMode === "finish_to_stations"
+          ? "Switch to: Set station times → calculate finish"
+          : "Switch to: Set finish time → calculate stations"}
+      </button>
+
       {/* Inputs */}
       <Card>
         <CardHeader className="pb-3">
@@ -286,13 +389,23 @@ export function RaceCalculator({ planId }: RaceCalculatorProps) {
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
               <Timer className="h-3.5 w-3.5" />
-              Target Finish Time
+              {calcMode === "finish_to_stations" ? "Target Finish Time" : "Calculated Finish Time"}
             </label>
-            <TimeInput mode="hms" value={finishTimeStr} onChange={setFinishTimeStr} />
-            {finishSeconds !== null && (
-              <span className="text-[11px] text-muted-foreground">
-                {formatLongTime(finishSeconds)}
-              </span>
+            {calcMode === "finish_to_stations" ? (
+              <>
+                <TimeInput mode="hms" value={finishTimeStr} onChange={setFinishTimeStr} />
+                {finishSeconds !== null && (
+                  <span className="text-[11px] text-muted-foreground">
+                    {formatLongTime(finishSeconds)}
+                  </span>
+                )}
+              </>
+            ) : (
+              <div className="text-2xl font-bold font-mono tracking-tight">
+                {derivedFinishSeconds !== null
+                  ? formatLongTime(derivedFinishSeconds)
+                  : "--:--:--"}
+              </div>
             )}
           </div>
 
@@ -328,6 +441,14 @@ export function RaceCalculator({ planId }: RaceCalculatorProps) {
               {formatTime(totalTransitionSeconds)} total transition time
             </span>
           </div>
+
+          {/* Station time overrides */}
+          <StationTimeEditor
+            proportionalTimes={proportionalStationTimes}
+            overrides={stationOverrides}
+            onOverrideChange={handleOverrideChange}
+            onReset={handleResetOverrides}
+          />
         </CardContent>
       </Card>
 
@@ -336,24 +457,28 @@ export function RaceCalculator({ planId }: RaceCalculatorProps) {
         <Card className="border-red-500/30">
           <CardContent className="py-4">
             <p className="text-sm text-red-400 font-medium">
-              Running + transitions exceed your finish time. Increase finish time or speed up your
-              run pace.
+              Running + transitions exceed your finish time. Increase finish time
+              or speed up your run pace.
             </p>
           </CardContent>
         </Card>
       )}
 
       {/* Results */}
-      {isValid && fullSplits && (
+      {isValid && fullSplits && displayFinishSeconds && (
         <>
           {/* Summary */}
           <Card>
             <CardContent className="py-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex flex-col">
-                  <span className="text-xs text-muted-foreground mb-0.5">Calculated Finish</span>
+                  <span className="text-xs text-muted-foreground mb-0.5">
+                    {calcMode === "stations_to_finish"
+                      ? "Projected Finish"
+                      : "Target Finish"}
+                  </span>
                   <span className="text-2xl font-bold font-mono tracking-tight">
-                    {formatLongTime(finishSeconds!)}
+                    {formatLongTime(displayFinishSeconds)}
                   </span>
                 </div>
                 <div className="flex flex-col items-end gap-1">
@@ -374,146 +499,74 @@ export function RaceCalculator({ planId }: RaceCalculatorProps) {
                 <div
                   className="bg-blue-500"
                   style={{
-                    width: `${((totalRunSeconds ?? 0) / finishSeconds!) * 100}%`,
+                    width: `${((totalRunSeconds ?? 0) / displayFinishSeconds) * 100}%`,
                   }}
                 />
                 <div
                   className="bg-orange-500"
                   style={{
-                    width: `${(totalStationSeconds / finishSeconds!) * 100}%`,
+                    width: `${(totalStationSeconds / displayFinishSeconds) * 100}%`,
                   }}
                 />
                 <div
                   className="bg-white/10"
                   style={{
-                    width: `${(totalTransitionSeconds / finishSeconds!) * 100}%`,
+                    width: `${(totalTransitionSeconds / displayFinishSeconds) * 100}%`,
                   }}
                 />
               </div>
               <div className="mt-1.5 flex justify-between text-[10px] text-muted-foreground">
                 <span className="text-blue-400">
-                  Run: {formatTime(totalRunSeconds ?? 0)} (
-                  {Math.round(((totalRunSeconds ?? 0) / finishSeconds!) * 100)}%)
+                  Run {formatTime(totalRunSeconds ?? 0)}
                 </span>
                 <span className="text-orange-400">
-                  Stations: {formatTime(totalStationSeconds)} (
-                  {Math.round((totalStationSeconds / finishSeconds!) * 100)}%)
+                  Stations {formatTime(totalStationSeconds)}
                 </span>
                 <span>
-                  Trans: {formatTime(totalTransitionSeconds)} (
-                  {Math.round((totalTransitionSeconds / finishSeconds!) * 100)}%)
+                  Trans {formatTime(totalTransitionSeconds)}
                 </span>
               </div>
             </CardContent>
           </Card>
 
-          {/* Split table */}
+          {/* Splits — card-based layout */}
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-bold flex items-center gap-2">
                 <Timer className="h-3.5 w-3.5 text-muted-foreground" />
-                Calculated Splits
+                Race Splits
               </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto -mx-4">
-                <div className="px-4 w-fit min-w-full">
-                <table className="w-full text-xs min-w-[420px]">
-                  <thead>
-                    <tr className="border-b border-white/[0.06] text-muted-foreground">
-                      <th className="pb-2.5 pr-2 text-left font-medium w-6">#</th>
-                      <th className="pb-2.5 pr-2 text-left font-medium">Segment</th>
-                      <th className="pb-2.5 pr-2 text-right font-medium">Target</th>
-                      <th className="pb-2.5 pr-2 text-right font-medium">Pace</th>
-                      <th className="pb-2.5 text-right font-medium">Cumul.</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {fullSplits.map((split) => {
-                      const isRun = split.segmentType === "run";
-                      const rowBg = isRun ? "bg-blue-500/[0.06]" : "bg-orange-500/[0.06]";
-                      const numColor = isRun ? "text-blue-400" : "text-orange-400";
-
-                      return (
-                        <tr
-                          key={`${split.segmentType}-${split.segmentNumber}`}
-                          className={`${rowBg} border-b border-white/[0.04] last:border-0`}
-                        >
-                          <td className={`py-2 pr-2 font-bold ${numColor}`}>
-                            {split.segmentNumber}
-                          </td>
-                          <td className="py-2 pr-2 font-medium whitespace-nowrap">
-                            {split.segmentName}
-                          </td>
-                          <td className="py-2 pr-2 text-right font-mono">
-                            {formatTime(split.targetSeconds)}
-                          </td>
-                          <td className="py-2 pr-2 text-right font-mono text-muted-foreground">
-                            {split.paceDisplay}
-                          </td>
-                          <td className="py-2 text-right font-mono">
-                            {formatTime(split.cumulativeSeconds)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                  <tfoot>
-                    <tr className="border-t-2 border-white/[0.08] font-medium">
-                      <td colSpan={2} className="py-2.5 pr-2">
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-blue-400">
-                            Run: {formatTime(totalRunSeconds ?? 0)}
-                          </span>
-                          <span className="text-orange-400">
-                            Stations: {formatTime(totalStationSeconds)}
-                          </span>
-                          <span className="text-muted-foreground">
-                            Transitions: {formatTime(totalTransitionSeconds)}
-                          </span>
-                        </div>
-                      </td>
-                      <td colSpan={3} />
-                    </tr>
-                  </tfoot>
-                </table>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Station breakdown */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-bold">
-                Station Time Distribution
-              </CardTitle>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Based on average {division.includes("youngstars") ? (division.includes("women") ? "Girls" : "Boys") : division.includes("women") ? "Women" : "Men"} Open proportions
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                Time · Cumulative
               </p>
             </CardHeader>
             <CardContent>
-              <div className="flex flex-col gap-2">
-                {stationSplits!.map((split) => {
-                  const pct = Math.round(split.seconds / totalStationSeconds * 100);
-                  return (
-                    <div key={split.station} className="flex items-center gap-3">
-                      <span className="text-xs w-28 truncate">{split.station}</span>
-                      <div className="flex-1 h-2 bg-white/[0.04] rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-orange-500/60 rounded-full"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                      <span className="text-xs font-mono w-12 text-right">
-                        {formatTime(split.seconds)}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground w-8 text-right">
-                        {pct}%
-                      </span>
-                    </div>
-                  );
-                })}
+              <div className="flex flex-col gap-1.5">
+                {fullSplits.map((split) => (
+                  <SplitCard
+                    key={`${split.segmentType}-${split.segmentNumber}`}
+                    segmentNumber={split.segmentNumber}
+                    segmentType={split.segmentType}
+                    segmentName={split.segmentName}
+                    targetSeconds={split.targetSeconds}
+                    cumulativeSeconds={split.cumulativeSeconds}
+                    isEdited={split.isEdited}
+                    divisionKey={division}
+                  />
+                ))}
+              </div>
+
+              {/* Totals */}
+              <div className="mt-3 pt-2.5 border-t border-white/[0.08] flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                <span className="text-blue-400 font-medium">
+                  Running: {formatTime(totalRunSeconds ?? 0)}
+                </span>
+                <span className="text-orange-400 font-medium">
+                  Stations: {formatTime(totalStationSeconds)}
+                </span>
+                <span className="text-muted-foreground">
+                  Transitions: {formatTime(totalTransitionSeconds)}
+                </span>
               </div>
             </CardContent>
           </Card>
