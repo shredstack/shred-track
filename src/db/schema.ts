@@ -242,6 +242,9 @@ export const hyroxProfiles = pgTable("hyrox_profiles", {
   injuriesNotes: text("injuries_notes"),
   trainingPhilosophy: text("training_philosophy").default("moderate"), // 'conservative' | 'moderate' | 'aggressive'
   onboardingVersion: integer("onboarding_version").default(1),
+  paceTier: text("pace_tier"), // 'beginner' | 'intermediate' | 'advanced' | 'elite' — populated only for free-flow users
+  planTier: text("plan_tier").default("free").notNull(), // 'free' | 'personalized'
+  disclaimerAcceptedAt: timestamp("disclaimer_accepted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -376,6 +379,70 @@ export const hyroxRaceScenarios = pgTable("hyrox_race_scenarios", {
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+// ============================================
+// HYROX: Generic Plan Templates (free-flow source of truth)
+// ============================================
+
+export const hyroxGenericPlanTemplates = pgTable(
+  "hyrox_generic_plan_templates",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    templateKey: text("template_key").notNull(), // e.g. 'women_singles_intermediate'
+    gender: text("gender").notNull(), // 'women' | 'men'
+    raceFormat: text("race_format").notNull(), // 'singles' | 'doubles' | 'relay'
+    paceTier: text("pace_tier").notNull(), // 'beginner' | 'intermediate' | 'advanced' | 'elite'
+    weightTier: text("weight_tier").notNull(), // 'open' | 'pro' — relay is always 'open'
+    totalWeeks: integer("total_weeks").default(18).notNull(),
+    title: text("title").notNull(),
+    trainingPhilosophy: text("training_philosophy").notNull(),
+    version: integer("version").default(1).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("generic_plan_templates_key_weight").on(table.templateKey, table.weightTier),
+    index("idx_generic_plan_templates_lookup").on(table.gender, table.raceFormat, table.paceTier, table.weightTier),
+  ]
+);
+
+export const hyroxGenericPlanTemplatePhases = pgTable(
+  "hyrox_generic_plan_template_phases",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    templateId: uuid("template_id").notNull().references(() => hyroxGenericPlanTemplates.id, { onDelete: "cascade" }),
+    phaseNumber: integer("phase_number").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    startWeek: integer("start_week").notNull(),
+    endWeek: integer("end_week").notNull(),
+    focusAreas: text("focus_areas").array().default([]).notNull(),
+  },
+  (table) => [uniqueIndex("generic_plan_template_phases_unique").on(table.templateId, table.phaseNumber)]
+);
+
+export const hyroxGenericPlanTemplateSessions = pgTable(
+  "hyrox_generic_plan_template_sessions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    templateId: uuid("template_id").notNull().references(() => hyroxGenericPlanTemplates.id, { onDelete: "cascade" }),
+    week: integer("week").notNull(),
+    dayOfWeek: integer("day_of_week").notNull(),
+    orderInDay: integer("order_in_day").default(1).notNull(),
+    sessionType: text("session_type").notNull(), // 'station_skills' | 'run' | 'hyrox_day' | 'rest'
+    title: text("title").notNull(),
+    description: text("description").notNull(),
+    paceSpec: jsonb("pace_spec"), // PaceSpec | null
+    durationMinutes: integer("duration_minutes"),
+    sessionDetail: jsonb("session_detail").notNull(),
+    equipmentRequired: text("equipment_required").array().default([]).notNull(),
+    phaseNumber: integer("phase_number").notNull(),
+  },
+  (table) => [
+    uniqueIndex("generic_plan_template_sessions_unique").on(table.templateId, table.week, table.dayOfWeek, table.orderInDay),
+    index("idx_generic_plan_sessions_template_week").on(table.templateId, table.week),
+  ]
+);
 
 // ============================================
 // HYROX: Division Reference Data
@@ -534,6 +601,30 @@ export const hyroxUserPredictions = pgTable("hyrox_user_predictions", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+// ============================================
+// HYROX: Entitlements (RevenueCat mirror)
+// ============================================
+
+export const hyroxEntitlements = pgTable(
+  "hyrox_entitlements",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    entitlementKey: text("entitlement_key").notNull(), // 'hyrox_personalized_plan'
+    active: boolean("active").default(false).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    productId: text("product_id"),
+    periodType: text("period_type"), // 'normal' | 'trial' | 'intro'
+    lastEventAt: timestamp("last_event_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("hyrox_entitlements_user_key").on(table.userId, table.entitlementKey),
+    index("idx_hyrox_entitlements_user_active").on(table.userId, table.active),
+  ]
+);
 
 // ============================================
 // HYROX: Practice Race Timer

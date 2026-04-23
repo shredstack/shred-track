@@ -46,8 +46,33 @@ import { PaceInput } from "@/components/shared/pace-input";
 import { DistanceInput } from "@/components/shared/distance-input";
 import { WeightInput } from "@/components/shared/weight-input";
 import { TimeInput } from "@/components/shared/time-input";
+import { UnitToggle } from "@/components/shared/unit-toggle";
 import { usePlanWeeks, useReorderSessions, useLogSession, type MovementResult } from "@/hooks/useHyroxPlan";
+import { useUnits } from "@/hooks/useUnits";
+import { formatMovementPrescription, type FormatUnits } from "@/lib/hyrox-data";
 import type { SessionDetail, SessionBlock, SessionMovement } from "@/types/hyrox-plan";
+
+// ---------------------------------------------------------------------------
+// Unit-aware prescription rendering
+//
+// Movements in free-plan templates and (eventually) AI-personalized plans
+// carry structured fields (weightKg, paceSpec, distanceMeters). We render
+// them through formatMovementPrescription so the global Kg/Lbs toggle flows
+// through to session detail. Legacy plans with only a free-text
+// `prescription` fall through unchanged.
+// ---------------------------------------------------------------------------
+
+function unitsFromMode(isMixed: boolean): FormatUnits {
+  return {
+    paceUnit: isMixed ? "mi" : "km",
+    weightUnit: isMixed ? "lb" : "kg",
+  };
+}
+
+function renderPrescription(movement: SessionMovement | undefined, isMixed: boolean): string {
+  if (!movement) return "";
+  return formatMovementPrescription(movement, unitsFromMode(isMixed));
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -502,6 +527,7 @@ function SessionLogForm({
   const logMutation = useLogSession();
   const existingLog = session.log;
   const detail = session.sessionDetail as SessionDetail | null;
+  const { isMixed } = useUnits();
 
   const isRun = session.sessionType === "run";
   const isStation = session.sessionType === "station_skills";
@@ -535,7 +561,7 @@ function SessionLogForm({
       block.movements.forEach((mov, mIdx) => {
         const key = `${bIdx}-${mIdx}`;
         const prev = existingMap.get(key);
-        const setCount = parseSetCount(mov.prescription);
+        const setCount = parseSetCount(mov.prescription ?? "");
 
         const setTimes: string[] = prev?.setTimesSeconds
           ? prev.setTimesSeconds.map(secsToTimeStr)
@@ -695,7 +721,7 @@ function SessionLogForm({
                     >
                       <p className="text-sm font-medium">{mov.movementName}</p>
                       <p className="text-[11px] text-muted-foreground">
-                        {block.movements[mov.movementIndex]?.prescription}
+                        {renderPrescription(block.movements[mov.movementIndex], isMixed)}
                       </p>
 
                       {/* Per-set time inputs */}
@@ -1090,6 +1116,7 @@ function SessionDetailPanel({
   const [showLogForm, setShowLogForm] = useState(false);
   const isRest = session.sessionType === "rest";
   const hasLog = session.log !== null;
+  const { isMixed } = useUnits();
 
   return (
     <div className="flex flex-col gap-4">
@@ -1131,9 +1158,9 @@ function SessionDetailPanel({
         </CardContent>
       </Card>
 
-      {/* Duration + pace */}
-      {(session.durationMinutes || session.targetPace) && (
-        <div className="flex gap-3">
+      {/* Duration + pace + unit toggle */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex gap-3 min-w-0">
           {session.durationMinutes && (
             <Badge variant="secondary" className="gap-1">
               <Clock className="h-3 w-3" />
@@ -1147,7 +1174,9 @@ function SessionDetailPanel({
             </Badge>
           )}
         </div>
-      )}
+        {/* Toggle lets users switch weight + pace units on the fly. */}
+        <UnitToggle className="shrink-0" />
+      </div>
 
       {/* Equipment required */}
       {session.equipmentRequired && session.equipmentRequired.length > 0 && (
@@ -1201,7 +1230,7 @@ function SessionDetailPanel({
                         {movement.name}
                       </p>
                       <p className="text-xs font-mono text-muted-foreground whitespace-pre-line break-words">
-                        {movement.prescription}
+                        {renderPrescription(movement, isMixed)}
                       </p>
                       {movement.rest && (
                         <p className="text-[11px] text-muted-foreground">

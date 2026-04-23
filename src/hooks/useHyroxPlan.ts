@@ -44,6 +44,66 @@ export function useGeneratePlan() {
 }
 
 // ---------------------------------------------------------------------------
+// Create free (generic) plan
+// ---------------------------------------------------------------------------
+
+export interface FreePlanRequest {
+  gender: "women" | "men";
+  raceFormat: "singles" | "doubles" | "relay";
+  weightTier?: "open" | "pro";
+  paceTier: "beginner" | "intermediate" | "advanced" | "elite";
+  raceDate: string | null;
+  disclaimerAccepted: boolean;
+}
+
+export interface FreePlanResponse {
+  planId: string;
+  generationStatus: "completed";
+  totalWeeks: number;
+  startDate: string;
+  endDate: string;
+}
+
+export class RaceTooSoonError extends Error {
+  weeksUntilRace: number;
+  constructor(weeksUntilRace: number, message: string) {
+    super(message);
+    this.name = "RaceTooSoonError";
+    this.weeksUntilRace = weeksUntilRace;
+  }
+}
+
+export function useCreateFreePlan() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (body: FreePlanRequest): Promise<FreePlanResponse> => {
+      const response = await fetch("/api/hyrox/plan/free", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (response.status === 422) {
+        const err = await response.json();
+        if (err.error === "race_too_soon") {
+          throw new RaceTooSoonError(err.weeksUntilRace, err.message);
+        }
+      }
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || "Failed to create plan");
+      }
+      return response.json() as Promise<FreePlanResponse>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["hyrox-plan"] });
+      queryClient.invalidateQueries({ queryKey: ["hyrox-profile"] });
+      queryClient.invalidateQueries({ queryKey: ["hyrox-plan-history"] });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Poll generation status
 // ---------------------------------------------------------------------------
 

@@ -1634,6 +1634,169 @@ export function metersToFeet(m: number): number {
   return Math.round(m * 3.28084);
 }
 
+// ---------------------------------------------------------------------------
+// Structured movement prescription rendering
+//
+// Free-generic and (eventually) AI-personalized sessions store movements
+// with canonical-unit fields (weight_kg, distance_meters, pace_spec) and
+// optional prescription templates. This helper renders them to the user's
+// preferred units at display time.
+// ---------------------------------------------------------------------------
+
+export type PaceSpec =
+  | { kind: "run_per_km"; seconds: number; range?: [number, number] }
+  | { kind: "per_500m"; seconds: number; range?: [number, number] }
+  | { kind: "total_seconds"; seconds: number };
+
+export interface MovementLike {
+  prescription?: string;
+  prescriptionTemplate?: string;
+  weightKg?: number;
+  weightKgPerHand?: number;
+  hands?: number;
+  distanceMeters?: number;
+  reps?: number;
+  paceSpec?: PaceSpec;
+}
+
+export interface FormatUnits {
+  /** 'mi' = min/mile, 'km' = min/km. Used for run paces only. */
+  paceUnit: "mi" | "km";
+  /** 'kg' or 'lb'. Machine paces (per-500m) always display in /500m regardless. */
+  weightUnit: "kg" | "lb";
+}
+
+const KM_PER_MI = 1.609344;
+
+/** Format a number of seconds as M:SS. */
+function fmtTime(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${m}:${rem.toString().padStart(2, "0")}`;
+}
+
+function fmtTimeRange(range: [number, number]): string {
+  return `${fmtTime(range[0])}–${fmtTime(range[1])}`;
+}
+
+/** Render a distance in meters as a readable label ("30m", "1km"). */
+export function formatDistanceMeters(meters: number): string {
+  if (meters >= 1000 && meters % 1000 === 0) return `${meters / 1000}km`;
+  return `${meters}m`;
+}
+
+/** Render a pace spec to a display string (e.g. "8:15/mi", "2:15/500m"). */
+export function formatPaceSpec(spec: PaceSpec, paceUnit: "mi" | "km"): string {
+  if (spec.kind === "per_500m") {
+    // Machine paces always display per 500m
+    if (spec.range) return `${fmtTimeRange(spec.range)}/500m`;
+    return `${fmtTime(spec.seconds)}/500m`;
+  }
+  if (spec.kind === "run_per_km") {
+    if (paceUnit === "km") {
+      if (spec.range) return `${fmtTimeRange(spec.range)}/km`;
+      return `${fmtTime(spec.seconds)}/km`;
+    }
+    // Convert sec/km → sec/mile
+    const perMi = spec.seconds * KM_PER_MI;
+    if (spec.range) {
+      const r: [number, number] = [spec.range[0] * KM_PER_MI, spec.range[1] * KM_PER_MI];
+      return `${fmtTimeRange(r)}/mi`;
+    }
+    return `${fmtTime(perMi)}/mi`;
+  }
+  // total_seconds — render as MM:SS
+  return fmtTime(spec.seconds);
+}
+
+/** Render a weight (kg canonical) in the user's preferred unit. */
+export function formatWeight(
+  weightKg: number,
+  opts: { weightUnit: "kg" | "lb"; perHand?: boolean; hands?: number },
+): string {
+  const unit = opts.weightUnit === "lb" ? "lbs" : "kg";
+  const value = opts.weightUnit === "lb" ? kgToLbs(weightKg) : weightKg;
+  if (opts.perHand && opts.hands && opts.hands > 1) {
+    return `${opts.hands} × ${value} ${unit}`;
+  }
+  return `${value} ${unit}`;
+}
+
+/**
+ * Render a movement as a human-readable prescription string.
+ *
+ * Priority:
+ *   1. If the movement has structured fields (weightKg, distanceMeters,
+ *      paceSpec, reps) and either a `prescriptionTemplate` or enough fields
+ *      for us to auto-assemble a string, use the structured path.
+ *   2. Otherwise fall back to the free-text `prescription` field (legacy
+ *      AI-generated plans).
+ *
+ * Supported template placeholders: {{weight}}, {{pace}}, {{distance}}, {{reps}}.
+ */
+export function formatMovementPrescription(
+  movement: MovementLike,
+  units: FormatUnits,
+): string {
+  const hasStructured =
+    movement.weightKg !== undefined ||
+    movement.weightKgPerHand !== undefined ||
+    movement.distanceMeters !== undefined ||
+    movement.paceSpec !== undefined ||
+    movement.reps !== undefined;
+
+  if (!hasStructured && movement.prescription) {
+    return movement.prescription;
+  }
+
+  // Build replacement values
+  const weightStr = (() => {
+    if (movement.weightKgPerHand !== undefined) {
+      return formatWeight(movement.weightKgPerHand, {
+        weightUnit: units.weightUnit,
+        perHand: true,
+        hands: movement.hands ?? 2,
+      });
+    }
+    if (movement.weightKg !== undefined) {
+      return formatWeight(movement.weightKg, { weightUnit: units.weightUnit });
+    }
+    return "";
+  })();
+  const paceStr = movement.paceSpec ? formatPaceSpec(movement.paceSpec, units.paceUnit) : "";
+  const distanceStr = movement.distanceMeters !== undefined ? formatDistanceMeters(movement.distanceMeters) : "";
+  const repsStr = movement.reps !== undefined ? `${movement.reps}` : "";
+
+  // Template path — explicit wins
+  if (movement.prescriptionTemplate) {
+    return movement.prescriptionTemplate
+      .replace(/\{\{\s*weight\s*\}\}/g, weightStr)
+      .replace(/\{\{\s*pace\s*\}\}/g, paceStr)
+      .replace(/\{\{\s*distance\s*\}\}/g, distanceStr)
+      .replace(/\{\{\s*reps\s*\}\}/g, repsStr)
+      .trim();
+  }
+
+  // Auto-assembled: "distance @ pace", "reps @ weight", "distance @ weight",
+  // or just "@ pace" → fall back to bare pace without the "@".
+  const parts: string[] = [];
+  if (distanceStr) parts.push(distanceStr);
+  else if (repsStr) parts.push(`${repsStr} reps`);
+
+  if (paceStr) {
+    parts.push(parts.length === 0 ? paceStr : `@ ${paceStr}`);
+  } else if (weightStr) {
+    parts.push(parts.length === 0 ? weightStr : `@ ${weightStr}`);
+  }
+
+  const assembled = parts.join(" ").trim();
+  if (assembled) return assembled;
+
+  // Last resort: the free-text prescription or just the movement name blank
+  return movement.prescription ?? "";
+}
+
 /** Confidence labels */
 export const CONFIDENCE_LABELS: Record<number, string> = {
   1: "Struggling",
