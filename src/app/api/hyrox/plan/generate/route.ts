@@ -8,6 +8,10 @@ import {
 import { eq, and } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { inngest } from "@/inngest/client";
+import {
+  ENTITLEMENT_PERSONALIZED,
+  isUserEntitledOrBypassed,
+} from "@/lib/entitlements";
 import type { AthleteSnapshot } from "@/types/hyrox-plan";
 
 export const maxDuration = 60;
@@ -16,6 +20,21 @@ export const maxDuration = 60;
 export async function POST(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Paywall — gated by HYROX_PAYWALL_ENFORCED. When off, passes through so
+  // dev testing and free-flow-upgrade exploration stay unblocked.
+  const entitled = await isUserEntitledOrBypassed(user.id, ENTITLEMENT_PERSONALIZED);
+  if (!entitled) {
+    return NextResponse.json(
+      {
+        error: "subscription_required",
+        entitlement: ENTITLEMENT_PERSONALIZED,
+        message:
+          "A personalized plan subscription is required. Start with the free plan, or subscribe to unlock AI personalization.",
+      },
+      { status: 402 },
+    );
+  }
 
   // Load profile + assessments
   const [profile] = await db

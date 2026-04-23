@@ -2,16 +2,37 @@
 // HYROX Plan V2 — Types for AI-generated plans
 // ---------------------------------------------------------------------------
 
-import type { StationName, DivisionKey, RaceDivisionKey } from "@/lib/hyrox-data";
+import type { StationName, DivisionKey, RaceDivisionKey, PaceSpec } from "@/lib/hyrox-data";
+
+// Re-export for backward-compatible imports (types/hyrox-plan is the
+// canonical module for consumers of session/plan shapes).
+export type { PaceSpec };
 
 // ---------------------------------------------------------------------------
 // Session detail (stored in session_detail JSONB)
+//
+// Structured fields (weight_kg, distance_meters, reps, pace_spec) are the
+// preferred way to describe a movement — they round-trip cleanly through
+// the unit toggle. `prescription` is retained as a fallback for legacy
+// AI-generated plans and for free-text coach notes that don't need unit
+// conversion.
 // ---------------------------------------------------------------------------
 
 export interface SessionMovement {
   name: string;
-  prescription: string;
+  /** Free-text fallback; prefer structured fields below when possible. */
+  prescription?: string;
+  /** Template string with {{weight}} / {{pace}} / {{distance}} placeholders. */
+  prescriptionTemplate?: string;
+  weightKg?: number;
+  /** Per-hand weight for carries (e.g. Farmers). */
+  weightKgPerHand?: number;
+  hands?: number;
+  distanceMeters?: number;
+  reps?: number;
+  paceSpec?: PaceSpec;
   rest?: string;
+  restSeconds?: number;
   notes?: string;
   equipmentNeeded?: string;
 }
@@ -19,6 +40,8 @@ export interface SessionMovement {
 export interface SessionBlock {
   label: string;
   movements: SessionMovement[];
+  restBetweenStationsSeconds?: number;
+  coachNote?: string;
 }
 
 export interface SessionDetail {
