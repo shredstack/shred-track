@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Calendar, Plus, ClipboardPaste, Wrench, Zap, Trophy } from "lucide-react";
+import { useState, useMemo } from "react";
+import { Plus, ClipboardPaste, Wrench, Zap, Trophy, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,106 +12,232 @@ import { WorkoutParser } from "@/components/crossfit/workout-parser";
 import { BenchmarkPicker } from "@/components/crossfit/benchmark-picker";
 import { ScoreEntry } from "@/components/crossfit/score-entry";
 import { DateNavigator } from "@/components/crossfit/date-navigator";
+import {
+  useWorkoutsByDate,
+  useCreateWorkout,
+  useDeleteWorkout,
+  useLogScore,
+  useUpdateScore,
+  type CreatePartInput,
+} from "@/hooks/useWorkouts";
+import { useMovements, useCreateMovement } from "@/hooks/useMovements";
 import type {
-  WorkoutDisplay,
-  WorkoutMovementDisplay,
   WorkoutBuilderForm,
+  WorkoutBuilderPart,
   ParsedWorkout,
-  WorkoutType,
+  ParsedMovement,
   ScoreInput,
-  ScoreDisplay,
+  MovementOption,
 } from "@/types/crossfit";
-
-function builderFormToWorkout(form: WorkoutBuilderForm, date: string): WorkoutDisplay {
-  const movements: WorkoutMovementDisplay[] = form.movements.map((m, i) => ({
-    id: m.tempId,
-    movementId: m.movementId || m.tempId,
-    movementName: m.movementName,
-    category: m.category || "other",
-    isWeighted: m.isWeighted,
-    prescribedReps: m.prescribedReps || undefined,
-    prescribedWeightMale: m.prescribedWeightMale || undefined,
-    prescribedWeightFemale: m.prescribedWeightFemale || undefined,
-    rxStandard: m.rxStandard || undefined,
-    orderIndex: i,
-  }));
-  return {
-    id: `workout-${Date.now()}`,
-    title: form.title || undefined,
-    description: form.description || undefined,
-    workoutType: form.workoutType,
-    workoutDate: date,
-    timeCapSeconds: form.timeCapMinutes ? parseInt(form.timeCapMinutes) * 60 + parseInt(form.timeCapSeconds || "0") : undefined,
-    amrapDurationSeconds: form.amrapDurationMinutes ? parseInt(form.amrapDurationMinutes) * 60 : undefined,
-    repScheme: form.repScheme || undefined,
-    movements,
-    createdBy: "current-user",
-  };
-}
-
-function parsedToWorkout(parsed: ParsedWorkout, date: string): WorkoutDisplay {
-  const movements: WorkoutMovementDisplay[] = parsed.movements.map((m, i) => ({
-    id: `pm-${Date.now()}-${i}`,
-    movementId: `pm-${Date.now()}-${i}`,
-    movementName: m.matchedCanonicalName || m.name,
-    category: "other",
-    isWeighted: !!(m.weightMale || m.weightFemale),
-    prescribedReps: m.reps,
-    prescribedWeightMale: m.weightMale?.toString(),
-    prescribedWeightFemale: m.weightFemale?.toString(),
-    orderIndex: i,
-  }));
-  return {
-    id: `workout-${Date.now()}`,
-    title: parsed.title,
-    description: parsed.description,
-    workoutType: parsed.workoutType,
-    workoutDate: date,
-    timeCapSeconds: parsed.timeCapSeconds,
-    amrapDurationSeconds: parsed.amrapDurationSeconds,
-    repScheme: parsed.repScheme,
-    movements,
-    createdBy: "current-user",
-  };
-}
 
 function toDateString(d: Date) {
   return d.toISOString().split("T")[0];
 }
 
+// ============================================
+// Builder form → API payload
+// ============================================
+
+function builderPartToPayload(part: WorkoutBuilderPart): CreatePartInput | null {
+  const movements = part.movements.filter((m) => m.movementId);
+  if (movements.length === 0) return null;
+  return {
+    label: part.label || undefined,
+    workoutType: part.workoutType,
+    timeCapSeconds: part.timeCapMinutes
+      ? parseInt(part.timeCapMinutes) * 60
+      : undefined,
+    amrapDurationSeconds: part.amrapDurationMinutes
+      ? parseInt(part.amrapDurationMinutes) * 60
+      : undefined,
+    emomIntervalSeconds: part.emomIntervalSeconds
+      ? parseInt(part.emomIntervalSeconds)
+      : undefined,
+    repScheme: part.repScheme || undefined,
+    movements: movements.map((m, i) => ({
+      movementId: m.movementId!,
+      orderIndex: i,
+      prescribedReps: m.prescribedReps || undefined,
+      prescribedWeightMale: m.prescribedWeightMale
+        ? parseFloat(m.prescribedWeightMale)
+        : undefined,
+      prescribedWeightFemale: m.prescribedWeightFemale
+        ? parseFloat(m.prescribedWeightFemale)
+        : undefined,
+      equipmentCount: m.equipmentCount,
+      rxStandard: m.rxStandard || undefined,
+    })),
+  };
+}
+
+// ============================================
+// Page
+// ============================================
+
 export default function CrossfitPage() {
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [workouts, setWorkouts] = useState<WorkoutDisplay[]>([]);
   const [showAddWorkout, setShowAddWorkout] = useState(false);
-  const [scoringWorkout, setScoringWorkout] = useState<WorkoutDisplay | null>(null);
+  const [scoringWorkoutId, setScoringWorkoutId] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const dateStr = toDateString(selectedDate);
-  const dayWorkouts = workouts.filter((w) => w.workoutDate === dateStr);
 
-  const handleSaveFromBuilder = (form: WorkoutBuilderForm) => {
-    setWorkouts([builderFormToWorkout(form, dateStr), ...workouts]);
-    setShowAddWorkout(false);
+  const { data: workouts = [], isLoading } = useWorkoutsByDate(dateStr);
+  const { data: movementLibrary = [] } = useMovements();
+  const createWorkout = useCreateWorkout();
+  const deleteWorkout = useDeleteWorkout();
+  const logScore = useLogScore();
+  const updateScore = useUpdateScore();
+  const createMovement = useCreateMovement();
+
+  const scoringWorkout = useMemo(
+    () => workouts.find((w) => w.id === scoringWorkoutId) ?? null,
+    [workouts, scoringWorkoutId]
+  );
+
+  // ============================================
+  // Save — Smart Builder
+  // ============================================
+
+  const handleSaveFromBuilder = async (form: WorkoutBuilderForm) => {
+    setSaveError(null);
+    const parts = form.parts
+      .map(builderPartToPayload)
+      .filter((p): p is CreatePartInput => p !== null);
+    if (parts.length === 0) {
+      setSaveError("Add at least one part with movements.");
+      return;
+    }
+
+    try {
+      await createWorkout.mutateAsync({
+        title: form.title || undefined,
+        description: form.description || undefined,
+        workoutDate: form.workoutDate || dateStr,
+        benchmarkWorkoutId: form.benchmarkWorkoutId ?? undefined,
+        parts,
+      });
+      setShowAddWorkout(false);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save workout");
+    }
   };
 
-  const handleSaveFromParser = (parsed: ParsedWorkout) => {
-    setWorkouts([parsedToWorkout(parsed, dateStr), ...workouts]);
-    setShowAddWorkout(false);
+  // ============================================
+  // Save — Paste/Parser flow
+  // ============================================
+  //
+  // The parser returns movements with canonical names (not IDs). Resolve each
+  // name against the live movement library; auto-create missing ones as
+  // user-scoped custom movements so the save always succeeds.
+
+  const resolveMovementId = async (
+    parsed: ParsedMovement
+  ): Promise<MovementOption | null> => {
+    const targetName = (parsed.matchedCanonicalName || parsed.name).trim();
+    if (!targetName) return null;
+    const match = movementLibrary.find(
+      (m) => m.canonicalName.toLowerCase() === targetName.toLowerCase()
+    );
+    if (match) return match;
+    // Not in the library — create a user-owned custom movement.
+    try {
+      return await createMovement.mutateAsync({ canonicalName: targetName });
+    } catch {
+      return null;
+    }
   };
 
-  const handleDeleteWorkout = (workoutId: string) => {
-    setWorkouts((prev) => prev.filter((w) => w.id !== workoutId));
+  const handleSaveFromParser = async (parsed: ParsedWorkout) => {
+    setSaveError(null);
+
+    const resolved = await Promise.all(
+      parsed.movements.map(async (m) => ({
+        parsed: m,
+        movement: await resolveMovementId(m),
+      }))
+    );
+
+    const usable = resolved.filter((r) => r.movement !== null);
+    if (usable.length === 0) {
+      setSaveError("Couldn't resolve any movements. Try the Smart Builder.");
+      return;
+    }
+
+    try {
+      await createWorkout.mutateAsync({
+        title: parsed.title,
+        description: parsed.description,
+        workoutDate: dateStr,
+        parts: [
+          {
+            workoutType: parsed.workoutType,
+            timeCapSeconds: parsed.timeCapSeconds,
+            amrapDurationSeconds: parsed.amrapDurationSeconds,
+            repScheme: parsed.repScheme,
+            movements: usable.map((r, i) => ({
+              movementId: r.movement!.id,
+              orderIndex: i,
+              prescribedReps: r.parsed.reps,
+              prescribedWeightMale: r.parsed.weightMale,
+              prescribedWeightFemale: r.parsed.weightFemale,
+            })),
+          },
+        ],
+      });
+      setShowAddWorkout(false);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save workout");
+    }
   };
+
+  // ============================================
+  // Delete
+  // ============================================
+
+  const handleDeleteWorkout = async (workoutId: string) => {
+    try {
+      await deleteWorkout.mutateAsync(workoutId);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to delete");
+    }
+  };
+
+  // ============================================
+  // Score submit
+  // ============================================
+
+  const handlePartScoreSubmit = async (partId: string, score: ScoreInput) => {
+    if (!scoringWorkout) return;
+    const part = scoringWorkout.parts.find((p) => p.id === partId);
+    if (!part) return;
+
+    try {
+      if (part.score?.id) {
+        await updateScore.mutateAsync({ scoreId: part.score.id, score });
+      } else {
+        await logScore.mutateAsync(score);
+      }
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save score");
+    }
+  };
+
+  // ============================================
+  // Render
+  // ============================================
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Date navigator */}
       <DateNavigator selectedDate={selectedDate} onDateChange={setSelectedDate} />
 
-      {/* Add workout button */}
       <div className="flex justify-end">
         <Button
           size="sm"
-          onClick={() => setShowAddWorkout(true)}
+          onClick={() => {
+            setSaveError(null);
+            setShowAddWorkout(true);
+          }}
           className="gap-1.5"
         >
           <Plus className="h-4 w-4" />
@@ -119,44 +245,59 @@ export default function CrossfitPage() {
         </Button>
       </div>
 
-      {/* Workouts for selected date */}
-      {dayWorkouts.map((workout) => (
-        <WorkoutCard
-          key={workout.id}
-          workout={workout}
-          onLogScore={() => setScoringWorkout(workout)}
-          onDelete={handleDeleteWorkout}
-        />
-      ))}
-
-      {/* Empty state */}
-      {dayWorkouts.length === 0 && (
-        <Card className="border-dashed border-white/[0.06]">
-          <CardContent className="flex flex-col items-center gap-4 py-10">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
-              <Zap className="h-6 w-6 text-primary/60" />
-            </div>
-            <div className="text-center">
-              <p className="font-semibold">No workouts for this date</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Add a workout or paste one from your gym
-              </p>
-            </div>
-            <Button variant="outline" className="mt-1 border-white/[0.08]" onClick={() => setShowAddWorkout(true)}>
-              <Plus className="h-4 w-4" />
-              Add Workout
-            </Button>
-          </CardContent>
-        </Card>
+      {saveError && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {saveError}
+        </div>
       )}
 
-      {/* Add Workout Dialog */}
+      {isLoading ? (
+        <div className="flex items-center justify-center py-10">
+          <Loader2 className="size-5 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
+        <>
+          {workouts.map((workout) => (
+            <WorkoutCard
+              key={workout.id}
+              workout={workout}
+              onLogScore={() => setScoringWorkoutId(workout.id)}
+              onDelete={handleDeleteWorkout}
+            />
+          ))}
+
+          {workouts.length === 0 && (
+            <Card className="border-dashed border-white/[0.06]">
+              <CardContent className="flex flex-col items-center gap-4 py-10">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+                  <Zap className="h-6 w-6 text-primary/60" />
+                </div>
+                <div className="text-center">
+                  <p className="font-semibold">No workouts for this date</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Add a workout or paste one from your gym
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  className="mt-1 border-white/[0.08]"
+                  onClick={() => setShowAddWorkout(true)}
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Workout
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
+
       <Dialog open={showAddWorkout} onOpenChange={setShowAddWorkout}>
         <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add Workout</DialogTitle>
           </DialogHeader>
-          <Tabs defaultValue="paste">
+          <Tabs defaultValue="build">
             <TabsList className="w-full">
               <TabsTrigger value="paste" className="flex-1 gap-1.5">
                 <ClipboardPaste className="h-3.5 w-3.5" />
@@ -193,38 +334,16 @@ export default function CrossfitPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Score Entry */}
       {scoringWorkout && (
         <ScoreEntry
           open
-          onOpenChange={(open) => { if (!open) setScoringWorkout(null); }}
+          onOpenChange={(open) => {
+            if (!open) setScoringWorkoutId(null);
+          }}
           workoutId={scoringWorkout.id}
           workoutTitle={scoringWorkout.title}
-          workoutType={scoringWorkout.workoutType as WorkoutType}
-          timeCapSeconds={scoringWorkout.timeCapSeconds}
-          movements={scoringWorkout.movements}
-          existingScore={scoringWorkout.score ?? undefined}
-          onSubmit={(scoreInput: ScoreInput) => {
-            const scoreDisplay: ScoreDisplay = {
-              id: scoringWorkout.score?.id ?? `score-${Date.now()}`,
-              division: scoreInput.division,
-              timeSeconds: scoreInput.timeSeconds,
-              rounds: scoreInput.rounds,
-              remainderReps: scoreInput.remainderReps,
-              weightLbs: scoreInput.weightLbs?.toString(),
-              totalReps: scoreInput.totalReps,
-              scoreText: scoreInput.scoreText,
-              hitTimeCap: scoreInput.hitTimeCap,
-              notes: scoreInput.notes,
-              rpe: scoreInput.rpe,
-            };
-            setWorkouts((prev) =>
-              prev.map((w) =>
-                w.id === scoringWorkout.id ? { ...w, score: scoreDisplay } : w
-              )
-            );
-            setScoringWorkout(null);
-          }}
+          parts={scoringWorkout.parts}
+          onSubmit={handlePartScoreSubmit}
         />
       )}
     </div>

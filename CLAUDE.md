@@ -250,13 +250,16 @@ Before writing a migration:
 
 ## Database Seeds
 
+**Default: a new seed belongs in `src/db/seeds/`.** Only fall back to `src/db/` (root) if the seed genuinely can't be made idempotent. Production never picks up anything outside `src/db/seeds/`, so a root-only seed that's useful in production is a bug — expect a PR comment asking to move it.
+
 Seeds live in one of two places — the location determines whether they auto-deploy to production:
 
 - **`src/db/seeds/`** — auto-deployed to production by the `deploy_database_migrations.yml` workflow on merge to `main`. Every file here **must be idempotent** and must export a `run()` function. The runner (`src/db/seeds/run-all.ts`) discovers every `.ts` file in this directory and awaits each `run()` in sequence.
-- **`src/db/` (root)** — local-dev / one-shot seeds (e.g. `seed.ts`, `seed-benchmarks.ts`). Not touched by CI. Use this location for seeds that can't safely be re-run against an already-seeded database.
+- **`src/db/` (root)** — local-dev / one-shot seeds (e.g. `seed.ts`). Not touched by CI. Only use this location for seeds that can't safely be re-run against an already-seeded database.
 
 **Rules for `src/db/seeds/` files:**
-- Idempotent by a stable key (delete+rebuild, or `onConflictDoUpdate`). Plain `insert()` without a conflict strategy will break on the second deploy.
-- Export a `run()` function so the runner can await it. Keep a self-invoke block (`if (process.argv[1] === fileURLToPath(import.meta.url)) run()...`) so direct invocation via `npx tsx` still works.
+- Idempotent by a stable key (delete+rebuild inside a transaction, or `onConflictDoUpdate`). Plain `insert()` without a conflict strategy will break on the second deploy.
+- Export a `run()` function so the runner can await it. Keep a self-invoke block (`if (process.argv[1] === fileURLToPath(import.meta.url)) run()...`) so direct invocation via `npx tsx src/db/seeds/<name>.ts` still works.
 - Wrap each logical entity's delete+rebuild in `db.transaction()` so readers never see a window where the entity is missing.
-- The workflow also triggers on changes to any library the seed imports from (e.g. `src/lib/hyrox-generic-plans/**`). When adding a seed that reads from a new lib, update the `paths` filter in the workflow.
+- Import the schema via `../schema` (not `./schema`) since the file lives one level deeper than the root seeds.
+- The workflow also triggers on changes to any library the seed imports from (e.g. `src/lib/hyrox-generic-plans/**`). When adding a seed that reads from a new lib, update the `paths` filter in `.github/workflows/deploy_database_migrations.yml`.

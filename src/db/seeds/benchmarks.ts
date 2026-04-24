@@ -3,10 +3,8 @@ config({ path: ".env.local" });
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { eq, and } from "drizzle-orm";
-import * as schema from "./schema";
-
-const client = postgres(process.env.DATABASE_URL!);
-const db = drizzle(client, { schema });
+import { fileURLToPath } from "url";
+import * as schema from "../schema";
 
 // ============================================
 // Benchmark definitions keyed by movement canonical names
@@ -19,7 +17,7 @@ type BenchmarkSeed = {
   timeCapSeconds?: number;
   amrapDurationSeconds?: number;
   repScheme?: string;
-  category: "girls" | "heroes" | "common";
+  category: "girls" | "heroes" | "common" | "opens" | "strength";
   movements: {
     canonicalName: string;
     prescribedReps?: string;
@@ -208,6 +206,19 @@ const benchmarkSeeds: BenchmarkSeed[] = [
     ],
   },
   {
+    name: "Half Murph",
+    description: "Half of Murph. A common scaled version for rest days or shorter sessions.",
+    workoutType: "for_time",
+    category: "heroes",
+    movements: [
+      { canonicalName: "Run", prescribedReps: "800m" },
+      { canonicalName: "Pull-Up", prescribedReps: "50" },
+      { canonicalName: "Push-Up", prescribedReps: "100" },
+      { canonicalName: "Air Squat", prescribedReps: "150" },
+      { canonicalName: "Run", prescribedReps: "800m", notes: "Finish with an 800m run" },
+    ],
+  },
+  {
     name: "DT",
     description: "In honor of USAF SSgt Timothy P. Davis. 5 rounds of barbell work.",
     workoutType: "for_time",
@@ -241,6 +252,39 @@ const benchmarkSeeds: BenchmarkSeed[] = [
       { canonicalName: "Handstand Push-Up", prescribedReps: "21-15-9" },
       { canonicalName: "Ring Dip", prescribedReps: "21-15-9" },
       { canonicalName: "Push-Up", prescribedReps: "21-15-9" },
+    ],
+  },
+  {
+    name: "Kalsu",
+    description: "In honor of 1st Lt. James Robert Kalsu. 100 thrusters for time, with 5 burpees at the top of every minute (starting at minute 0).",
+    workoutType: "for_time",
+    repScheme: "100 reps",
+    category: "heroes",
+    movements: [
+      { canonicalName: "Thruster", prescribedReps: "100", prescribedWeightMale: 135, prescribedWeightFemale: 95 },
+      { canonicalName: "Burpee", prescribedReps: "5 at top of every minute (incl. 0:00)" },
+    ],
+  },
+  {
+    name: "Holleyman",
+    description: "In honor of USAF SSgt James Holleyman. 30 rounds for time — wall balls, HSPU, power clean.",
+    workoutType: "for_time",
+    repScheme: "30 rounds",
+    category: "heroes",
+    movements: [
+      { canonicalName: "Wall Ball", prescribedReps: "5", prescribedWeightMale: 20, prescribedWeightFemale: 14 },
+      { canonicalName: "Handstand Push-Up", prescribedReps: "3" },
+      { canonicalName: "Power Clean", prescribedReps: "1", prescribedWeightMale: 225, prescribedWeightFemale: 155 },
+    ],
+  },
+  {
+    name: "Chad",
+    description: "In honor of Navy SEAL Lt. Cmdr. Chad Wilkinson. 1,000 step-ups for time with a 45/35 lb ruck or 20/14 lb vest.",
+    workoutType: "for_time",
+    repScheme: "1000 reps",
+    category: "heroes",
+    movements: [
+      { canonicalName: "Box Step-Up", prescribedReps: "1000", notes: "20 inch box, 45/35 lb ruck or 20/14 lb vest" },
     ],
   },
 
@@ -293,34 +337,139 @@ const benchmarkSeeds: BenchmarkSeed[] = [
       { canonicalName: "Air Squat", prescribedReps: "9" },
     ],
   },
+
+  // ============================================
+  // Strength Benchmarks (for_load / 1RM)
+  // ============================================
+  {
+    name: "Back Squat 1RM",
+    description: "Find your 1-rep max back squat.",
+    workoutType: "for_load",
+    repScheme: "1RM",
+    category: "strength",
+    movements: [
+      { canonicalName: "Back Squat", prescribedReps: "1" },
+    ],
+  },
+  {
+    name: "Back Squat 5RM",
+    description: "Find your 5-rep max back squat — heaviest weight you can hit for 5 straight reps.",
+    workoutType: "for_load",
+    repScheme: "5-5-5-5-5",
+    category: "strength",
+    movements: [
+      { canonicalName: "Back Squat", prescribedReps: "5-5-5-5-5" },
+    ],
+  },
+  {
+    name: "Deadlift 1RM",
+    description: "Find your 1-rep max deadlift.",
+    workoutType: "for_load",
+    repScheme: "1RM",
+    category: "strength",
+    movements: [
+      { canonicalName: "Deadlift", prescribedReps: "1" },
+    ],
+  },
+  {
+    name: "Front Squat 1RM",
+    description: "Find your 1-rep max front squat.",
+    workoutType: "for_load",
+    repScheme: "1RM",
+    category: "strength",
+    movements: [
+      { canonicalName: "Front Squat", prescribedReps: "1" },
+    ],
+  },
+  {
+    name: "Overhead Squat 1RM",
+    description: "Find your 1-rep max overhead squat.",
+    workoutType: "for_load",
+    repScheme: "1RM",
+    category: "strength",
+    movements: [
+      { canonicalName: "Overhead Squat", prescribedReps: "1" },
+    ],
+  },
+  {
+    name: "Clean and Jerk 1RM",
+    description: "Find your 1-rep max clean and jerk.",
+    workoutType: "for_load",
+    repScheme: "1RM",
+    category: "strength",
+    movements: [
+      { canonicalName: "Clean and Jerk", prescribedReps: "1" },
+    ],
+  },
+  {
+    name: "Snatch 1RM",
+    description: "Find your 1-rep max snatch.",
+    workoutType: "for_load",
+    repScheme: "1RM",
+    category: "strength",
+    movements: [
+      { canonicalName: "Snatch", prescribedReps: "1" },
+    ],
+  },
+  {
+    name: "Bench Press 1RM",
+    description: "Find your 1-rep max bench press.",
+    workoutType: "for_load",
+    repScheme: "1RM",
+    category: "strength",
+    movements: [
+      { canonicalName: "Bench Press", prescribedReps: "1" },
+    ],
+  },
+  {
+    name: "Shoulder Press 1RM",
+    description: "Find your 1-rep max strict shoulder press.",
+    workoutType: "for_load",
+    repScheme: "1RM",
+    category: "strength",
+    movements: [
+      { canonicalName: "Shoulder Press", prescribedReps: "1" },
+    ],
+  },
+
+  // ============================================
+  // CrossFit Open — recent selections
+  // ============================================
+  {
+    name: "14.4",
+    description: "2014 CrossFit Open 14.4. 14-minute AMRAP chipper climbing through row cals, T2B, wall balls, cleans, and muscle-ups.",
+    workoutType: "amrap",
+    amrapDurationSeconds: 840,
+    category: "opens",
+    movements: [
+      { canonicalName: "Row", prescribedReps: "60 calories" },
+      { canonicalName: "Toes-to-Bar", prescribedReps: "50" },
+      { canonicalName: "Wall Ball", prescribedReps: "40", prescribedWeightMale: 20, prescribedWeightFemale: 14, notes: "10/9 ft target" },
+      { canonicalName: "Clean", prescribedReps: "30", prescribedWeightMale: 135, prescribedWeightFemale: 95 },
+      { canonicalName: "Muscle-Up", prescribedReps: "20" },
+    ],
+  },
 ];
 
 // ============================================
-// Seed function
+// Idempotent upsert helper
 // ============================================
 
-async function seedBenchmarks() {
-  console.log("Seeding benchmark workouts...\n");
-
-  // Build a lookup of movement canonical names -> IDs
-  const allMovements = await db.select().from(schema.movements);
-  if (allMovements.length === 0) {
-    console.error(
-      "ERROR: No movements found in the database.\n" +
-      "Run the movements seed first: npx tsx src/db/seed.ts"
+async function upsertBenchmark(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  benchmark: BenchmarkSeed,
+  movementMap: Map<string, string>
+): Promise<"created" | "updated" | "skipped"> {
+  const missing = benchmark.movements.filter((m) => !movementMap.has(m.canonicalName));
+  if (missing.length > 0) {
+    console.warn(
+      `  WARN: ${benchmark.name} — missing movements: ${missing.map((m) => m.canonicalName).join(", ")}. Skipping.`
     );
-    await client.end();
-    process.exit(1);
+    return "skipped";
   }
-  console.log(`  Found ${allMovements.length} movements in the database.\n`);
-  const movementMap = new Map(allMovements.map((m) => [m.canonicalName, m.id]));
 
-  let created = 0;
-  let skipped = 0;
-
-  for (const benchmark of benchmarkSeeds) {
-    // Check if this system benchmark already exists
-    const existing = await db
+  return db.transaction(async (tx) => {
+    const existing = await tx
       .select()
       .from(schema.benchmarkWorkouts)
       .where(
@@ -331,44 +480,50 @@ async function seedBenchmarks() {
       )
       .limit(1);
 
+    let status: "created" | "updated";
+    let benchmarkId: string;
+
     if (existing.length > 0) {
-      console.log(`  SKIP: ${benchmark.name} (already exists)`);
-      skipped++;
-      continue;
+      benchmarkId = existing[0].id;
+      status = "updated";
+
+      await tx
+        .update(schema.benchmarkWorkouts)
+        .set({
+          description: benchmark.description || null,
+          workoutType: benchmark.workoutType,
+          timeCapSeconds: benchmark.timeCapSeconds || null,
+          amrapDurationSeconds: benchmark.amrapDurationSeconds || null,
+          repScheme: benchmark.repScheme || null,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.benchmarkWorkouts.id, benchmarkId));
+
+      await tx
+        .delete(schema.benchmarkWorkoutMovements)
+        .where(eq(schema.benchmarkWorkoutMovements.benchmarkWorkoutId, benchmarkId));
+    } else {
+      const [bw] = await tx
+        .insert(schema.benchmarkWorkouts)
+        .values({
+          name: benchmark.name,
+          description: benchmark.description || null,
+          workoutType: benchmark.workoutType,
+          timeCapSeconds: benchmark.timeCapSeconds || null,
+          amrapDurationSeconds: benchmark.amrapDurationSeconds || null,
+          repScheme: benchmark.repScheme || null,
+          createdBy: null,
+          communityId: null,
+          isSystem: true,
+        })
+        .returning();
+      benchmarkId = bw.id;
+      status = "created";
     }
 
-    // Validate all movements exist
-    const missingMovements = benchmark.movements.filter(
-      (m) => !movementMap.has(m.canonicalName)
-    );
-    if (missingMovements.length > 0) {
-      console.warn(
-        `  WARN: ${benchmark.name} — missing movements: ${missingMovements.map((m) => m.canonicalName).join(", ")}. Skipping.`
-      );
-      skipped++;
-      continue;
-    }
-
-    // Insert benchmark workout
-    const [bw] = await db
-      .insert(schema.benchmarkWorkouts)
-      .values({
-        name: benchmark.name,
-        description: benchmark.description || null,
-        workoutType: benchmark.workoutType,
-        timeCapSeconds: benchmark.timeCapSeconds || null,
-        amrapDurationSeconds: benchmark.amrapDurationSeconds || null,
-        repScheme: benchmark.repScheme || null,
-        createdBy: null,
-        communityId: null,
-        isSystem: true,
-      })
-      .returning();
-
-    // Insert movements
-    await db.insert(schema.benchmarkWorkoutMovements).values(
+    await tx.insert(schema.benchmarkWorkoutMovements).values(
       benchmark.movements.map((m, i) => ({
-        benchmarkWorkoutId: bw.id,
+        benchmarkWorkoutId: benchmarkId,
         movementId: movementMap.get(m.canonicalName)!,
         orderIndex: i,
         prescribedReps: m.prescribedReps || null,
@@ -379,15 +534,58 @@ async function seedBenchmarks() {
       }))
     );
 
-    console.log(`  OK: ${benchmark.name} (${benchmark.movements.length} movements)`);
-    created++;
-  }
-
-  console.log(`\nDone! Created: ${created}, Skipped: ${skipped}`);
-  await client.end();
+    return status;
+  });
 }
 
-seedBenchmarks().catch((err) => {
-  console.error("Seed failed:", err);
-  process.exit(1);
-});
+// ============================================
+// Seed function
+// ============================================
+
+export async function run() {
+  const client = postgres(process.env.DATABASE_URL!);
+  const db = drizzle(client, { schema });
+
+  try {
+    console.log("Seeding benchmark workouts...\n");
+
+    const allMovements = await db.select().from(schema.movements);
+    if (allMovements.length === 0) {
+      console.error(
+        "ERROR: No movements found in the database.\n" +
+          "Run the movements seed first: npx tsx src/db/seed.ts"
+      );
+      process.exit(1);
+    }
+    console.log(`  Found ${allMovements.length} movements in the database.\n`);
+    const movementMap = new Map(allMovements.map((m) => [m.canonicalName, m.id]));
+
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    for (const benchmark of benchmarkSeeds) {
+      const status = await upsertBenchmark(db, benchmark, movementMap);
+      if (status === "created") {
+        console.log(`  OK (new):     ${benchmark.name}`);
+        created++;
+      } else if (status === "updated") {
+        console.log(`  OK (updated): ${benchmark.name}`);
+        updated++;
+      } else {
+        skipped++;
+      }
+    }
+
+    console.log(`\nDone! Created: ${created}, Updated: ${updated}, Skipped: ${skipped}`);
+  } finally {
+    await client.end();
+  }
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  run().catch((err) => {
+    console.error("Seed failed:", err);
+    process.exit(1);
+  });
+}
