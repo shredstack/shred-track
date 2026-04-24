@@ -84,7 +84,8 @@ const MODIFICATION_BY_VALUE = new Map(
 // ============================================
 
 interface PartState {
-  division: "rx" | "scaled" | "rx_plus";
+  // null = user hasn't picked yet; required before save
+  division: "rx" | "scaled" | "rx_plus" | null;
   timeSeconds?: number;
   hitTimeCap: boolean;
   totalReps: string;
@@ -94,7 +95,6 @@ interface PartState {
   scoreText: string;
   rpe: number;
   notes: string;
-  showScaling: boolean;
   // Keyed by **movement_id** (not workout_movement_id) so the same movement
   // appearing multiple times in a part only needs one scaling entry. On save,
   // this scaling is spread to every workout_movement occurrence of that movement.
@@ -136,7 +136,7 @@ function emptyPartState(
     }
   }
   return {
-    division: existing?.division ?? "rx",
+    division: existing?.division ?? null,
     timeSeconds: existing?.timeSeconds,
     hitTimeCap: existing?.hitTimeCap ?? false,
     totalReps: existing?.totalReps?.toString() ?? "",
@@ -146,7 +146,6 @@ function emptyPartState(
     scoreText: existing?.scoreText ?? "",
     rpe: existing?.rpe ?? 7,
     notes: existing?.notes ?? "",
-    showScaling: Object.values(scalings).some((s) => s.wasRx === false),
     movementScalings: scalings,
     setWeightsMap,
   };
@@ -299,6 +298,7 @@ export function ScoreEntry({
   const [activePartId, setActivePartId] = useState<string>(
     () => initialPartId ?? parts[0]?.id ?? ""
   );
+  const [divisionError, setDivisionError] = useState<string | null>(null);
 
   // One state slot per part, seeded from each part's existing score.
   // The parent remounts ScoreEntry for each target workout, so initial seeding
@@ -367,10 +367,15 @@ export function ScoreEntry({
   // ============================================
 
   const buildScoreInput = useCallback(
-    (part: WorkoutPartDisplay, st: PartState): ScoreInput => {
-      // Scaling is captured per distinct movement_id; each occurrence
-      // (workout_movement_id) gets the same scaling applied on save, while
-      // set weights remain per-occurrence.
+    (
+      part: WorkoutPartDisplay,
+      st: PartState & { division: NonNullable<PartState["division"]> }
+    ): ScoreInput => {
+      // Scaling details are only meaningful when the user picked Scaled.
+      // For Rx / Rx+, discard any per-movement scaling the user may have
+      // left in state (from a prior toggle), but keep setWeights — those
+      // are the canonical record of what was lifted on for_load parts.
+      const includeScalingDetails = st.division === "scaled";
       const scalings: MovementScaling[] = part.movements.map((mov) => {
         const scaling = st.movementScalings[mov.movementId] ?? {};
         const setWeights = (st.setWeightsMap[mov.id] ?? [])
@@ -378,13 +383,15 @@ export function ScoreEntry({
           .filter((w) => !isNaN(w) && w > 0);
         return {
           workoutMovementId: mov.id,
-          wasRx: scaling.wasRx ?? true,
-          actualWeight: scaling.actualWeight,
-          actualReps: scaling.actualReps,
-          modification: scaling.modification,
-          substitutionMovementId: scaling.substitutionMovementId,
+          wasRx: includeScalingDetails ? (scaling.wasRx ?? true) : true,
+          actualWeight: includeScalingDetails ? scaling.actualWeight : undefined,
+          actualReps: includeScalingDetails ? scaling.actualReps : undefined,
+          modification: includeScalingDetails ? scaling.modification : undefined,
+          substitutionMovementId: includeScalingDetails
+            ? scaling.substitutionMovementId
+            : undefined,
           setWeights: setWeights.length > 0 ? setWeights : undefined,
-          notes: scaling.notes,
+          notes: includeScalingDetails ? scaling.notes : undefined,
         };
       });
 
@@ -466,12 +473,24 @@ export function ScoreEntry({
   );
 
   const handleSubmit = () => {
-    // Submit every part that has any score data entered.
+    // Every part with data must have a division picked. If one doesn't,
+    // jump to it so the user sees the inline error.
+    const missing = parts.find((part) => {
+      const st = partStates[part.id];
+      return !!st && partHasData(part, st) && st.division === null;
+    });
+    if (missing) {
+      setActivePartId(missing.id);
+      setDivisionError("Please select a division before saving.");
+      return;
+    }
+
     for (const part of parts) {
       const st = partStates[part.id];
       if (!st) continue;
       if (!partHasData(part, st)) continue;
-      const score = buildScoreInput(part, st);
+      if (st.division === null) continue;
+      const score = buildScoreInput(part, { ...st, division: st.division });
       onSubmit?.(part.id, score);
     }
     onOpenChange(false);
@@ -768,7 +787,9 @@ export function ScoreEntry({
         <div className="space-y-6">
           {/* Division */}
           <div className="space-y-2">
-            <Label>Division</Label>
+            <Label>
+              Division <span className="text-destructive">*</span>
+            </Label>
             <div className="flex gap-2">
               {(["rx", "scaled", "rx_plus"] as const).map((div) => {
                 const labels = { rx: "Rx", scaled: "Scaled", rx_plus: "Rx+" };
@@ -779,7 +800,10 @@ export function ScoreEntry({
                     type="button"
                     variant={isActive ? "default" : "outline"}
                     size="sm"
-                    onClick={() => updateState(activePart.id, { division: div })}
+                    onClick={() => {
+                      updateState(activePart.id, { division: div });
+                      setDivisionError(null);
+                    }}
                     className="flex-1"
                   >
                     {labels[div]}
@@ -787,6 +811,9 @@ export function ScoreEntry({
                 );
               })}
             </div>
+            {divisionError && (
+              <p className="text-xs text-destructive">{divisionError}</p>
+            )}
           </div>
 
           {/* Type-specific inputs */}
@@ -794,27 +821,11 @@ export function ScoreEntry({
 
           <Separator />
 
-          {/* Scaling toggle */}
-          {activePart.movements.length > 0 && (
+          {/* Per-movement scaling — shown automatically when division is Scaled */}
+          {activePart.movements.length > 0 && state.division === "scaled" && (
             <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <Switch
-                  checked={state.showScaling}
-                  onCheckedChange={(checked) => {
-                    updateState(activePart.id, {
-                      showScaling: !!checked,
-                      division:
-                        checked && state.division === "rx"
-                          ? "scaled"
-                          : state.division,
-                    });
-                  }}
-                />
-                <Label className="text-sm">I scaled something</Label>
-              </div>
-
-              {state.showScaling && (
-                <div className="space-y-3">
+              <Label className="text-sm">Scaling details</Label>
+              <div className="space-y-3">
                   {distinctMovements(activePart).map((mov) => {
                     const scaling = state.movementScalings[mov.movementId] ?? {};
                     const selectedMod = scaling.modification
@@ -984,8 +995,7 @@ export function ScoreEntry({
                       </div>
                     );
                   })}
-                </div>
-              )}
+              </div>
             </div>
           )}
 

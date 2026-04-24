@@ -10,7 +10,7 @@ import {
   scores,
   scoreMovementDetails,
 } from "@/db/schema";
-import { eq, desc, and, inArray } from "drizzle-orm";
+import { eq, desc, and, inArray, gte, lte, or, ilike } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import type { WorkoutType } from "@/types/crossfit";
 
@@ -41,27 +41,64 @@ interface PartInput {
 }
 
 // GET /api/workouts — list workouts.
-// Supports filters: ?communityId=... and ?date=YYYY-MM-DD.
+// Supports filters:
+//   ?communityId=...        — scope to a community (default: caller's own)
+//   ?date=YYYY-MM-DD        — exact match on workoutDate
+//   ?startDate=YYYY-MM-DD   — workoutDate >=
+//   ?endDate=YYYY-MM-DD     — workoutDate <=
+//   ?movementId=<uuid>      — only workouts containing this movement
+//   ?q=<text>               — case-insensitive search over title/description/rawText
 // Returns each workout with its nested parts, movements, and (for the
 // caller's own workouts) per-part scores + movement details.
 export async function GET(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const communityId = req.nextUrl.searchParams.get("communityId");
-  const date = req.nextUrl.searchParams.get("date");
+  const params = req.nextUrl.searchParams;
+  const communityId = params.get("communityId");
+  const date = params.get("date");
+  const startDate = params.get("startDate");
+  const endDate = params.get("endDate");
+  const movementId = params.get("movementId");
+  const q = params.get("q")?.trim();
 
   const conds = [];
   if (communityId) conds.push(eq(workouts.communityId, communityId));
   else conds.push(eq(workouts.createdBy, user.id));
   if (date) conds.push(eq(workouts.workoutDate, date));
+  if (startDate) conds.push(gte(workouts.workoutDate, startDate));
+  if (endDate) conds.push(lte(workouts.workoutDate, endDate));
+
+  if (movementId) {
+    const workoutIdsWithMovement = db
+      .selectDistinct({ id: workoutMovements.workoutId })
+      .from(workoutMovements)
+      .where(eq(workoutMovements.movementId, movementId));
+    conds.push(inArray(workouts.id, workoutIdsWithMovement));
+  }
+
+  if (q) {
+    const pattern = `%${q}%`;
+    const textCond = or(
+      ilike(workouts.title, pattern),
+      ilike(workouts.description, pattern),
+      ilike(workouts.rawText, pattern)
+    );
+    if (textCond) conds.push(textCond);
+  }
+
+  // Search requests (any filter beyond date/community) return more results so
+  // the user can scan history; the day-view path stays at 50 since a single
+  // date rarely has more.
+  const isSearch = !!(startDate || endDate || movementId || q);
+  const limit = isSearch ? 100 : 50;
 
   const workoutRows = await db
     .select()
     .from(workouts)
     .where(and(...conds))
     .orderBy(desc(workouts.workoutDate))
-    .limit(50);
+    .limit(limit);
 
   if (workoutRows.length === 0) return NextResponse.json([]);
 

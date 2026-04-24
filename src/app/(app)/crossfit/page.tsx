@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Plus, ClipboardPaste, Wrench, Zap, Trophy, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { Plus, ClipboardPaste, Wrench, Zap, Trophy, Loader2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -30,8 +31,13 @@ import type {
   MovementOption,
 } from "@/types/crossfit";
 
+// Local (not UTC) YYYY-MM-DD. `.toISOString()` yields a UTC date, which
+// in positive timezones can roll a selected "Nov 18 local" back to Nov 17.
 function toDateString(d: Date) {
-  return d.toISOString().split("T")[0];
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 // ============================================
@@ -231,7 +237,13 @@ export default function CrossfitPage() {
     <div className="flex flex-col gap-5">
       <DateNavigator selectedDate={selectedDate} onDateChange={setSelectedDate} />
 
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-2">
+        <Link href="/crossfit/search">
+          <Button variant="outline" size="sm" className="gap-1.5 border-white/[0.08]">
+            <Search className="h-4 w-4" />
+            Search
+          </Button>
+        </Link>
         <Button
           size="sm"
           onClick={() => {

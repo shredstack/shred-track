@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useRef } from "react";
+import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
@@ -29,17 +30,44 @@ function getWeekDays(centerDate: Date): Date[] {
   return Array.from({ length: 7 }, (_, i) => addDays(startOfWeek, i));
 }
 
+// Local (not UTC) YYYY-MM-DD — matches what <input type="date"> returns and
+// avoids the off-by-one that bites toISOString() in negative timezones.
+function toLocalDateString(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 const DAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
 
 export function DateNavigator({ selectedDate, onDateChange }: DateNavigatorProps) {
   const today = new Date();
   const weekDays = getWeekDays(selectedDate);
   const isToday = isSameDay(selectedDate, today);
+  const dateInputRef = useRef<HTMLInputElement>(null);
 
   const monthYear = selectedDate.toLocaleDateString("en-US", {
     month: "long",
     year: "numeric",
   });
+
+  const openPicker = () => {
+    const input = dateInputRef.current;
+    if (!input) return;
+    // showPicker() is the modern call; fall back to focusing the input so
+    // browsers without it (older Safari) still surface the native calendar.
+    if (typeof input.showPicker === "function") {
+      try {
+        input.showPicker();
+        return;
+      } catch {
+        // Some browsers throw if called without a user gesture — fall through.
+      }
+    }
+    input.focus();
+    input.click();
+  };
 
   return (
     <div className="flex flex-col gap-3">
@@ -53,7 +81,15 @@ export function DateNavigator({ selectedDate, onDateChange }: DateNavigatorProps
           <ChevronLeft className="h-4 w-4" />
         </Button>
         <div className="flex items-center gap-2.5">
-          <span className="text-sm font-semibold">{monthYear}</span>
+          <button
+            type="button"
+            onClick={openPicker}
+            className="flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-sm font-semibold transition-colors hover:bg-white/[0.04]"
+            aria-label="Jump to date"
+          >
+            <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
+            {monthYear}
+          </button>
           {!isToday && (
             <button
               onClick={() => onDateChange(today)}
@@ -62,6 +98,20 @@ export function DateNavigator({ selectedDate, onDateChange }: DateNavigatorProps
               Today
             </button>
           )}
+          <input
+            ref={dateInputRef}
+            type="date"
+            value={toLocalDateString(selectedDate)}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (!v) return;
+              const [y, m, d] = v.split("-").map(Number);
+              onDateChange(new Date(y, m - 1, d));
+            }}
+            className="pointer-events-none absolute h-0 w-0 opacity-0"
+            tabIndex={-1}
+            aria-hidden="true"
+          />
         </div>
         <Button
           variant="ghost"
