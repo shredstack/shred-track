@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useCallback } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AdminMovements } from "@/components/admin/admin-movements";
 import { AdminBenchmarks } from "@/components/admin/admin-benchmarks";
-import { Dumbbell, Trophy } from "lucide-react";
+import { AdminHyroxVip } from "@/components/admin/admin-hyrox-vip";
+import { Dumbbell, Trophy, Sparkles } from "lucide-react";
 
 export default function AdminPage() {
   return (
@@ -12,7 +12,7 @@ export default function AdminPage() {
       <div>
         <h1 className="text-2xl font-bold">Admin</h1>
         <p className="text-sm text-muted-foreground">
-          Manage movements and benchmark workouts
+          Manage movements, benchmarks, and HYROX VIP access
         </p>
       </div>
 
@@ -26,12 +26,19 @@ export default function AdminPage() {
             <Trophy className="h-3.5 w-3.5" />
             Benchmarks
           </TabsTrigger>
+          <TabsTrigger value="hyrox-vip" className="flex-1 gap-1.5">
+            <Sparkles className="h-3.5 w-3.5" />
+            HYROX VIP
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="movements" className="mt-4">
           <AdminMovements />
         </TabsContent>
         <TabsContent value="benchmarks" className="mt-4">
           <AdminBenchmarks />
+        </TabsContent>
+        <TabsContent value="hyrox-vip" className="mt-4">
+          <AdminHyroxVip />
         </TabsContent>
       </Tabs>
     </div>

@@ -25,6 +25,7 @@ export const users = pgTable("users", {
   unitPreference: text("unit_preference").default("mixed").notNull(), // 'metric' | 'mixed'
   image: text("image"),
   emailVerified: timestamp("email_verified", { mode: "date" }),
+  isAdmin: boolean("is_admin").default(false).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -624,6 +625,53 @@ export const hyroxEntitlements = pgTable(
     uniqueIndex("hyrox_entitlements_user_key").on(table.userId, table.entitlementKey),
     index("idx_hyrox_entitlements_user_active").on(table.userId, table.active),
   ]
+);
+
+// ============================================
+// HYROX: Plan Credits (pay-per-plan + VIP allowance)
+// ============================================
+
+export const hyroxVipGrants = pgTable(
+  "hyrox_vip_grants",
+  {
+    userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+    plansPerYear: integer("plans_per_year").notNull(),
+    active: boolean("active").default(true).notNull(),
+    grantedBy: uuid("granted_by").references(() => users.id, { onDelete: "set null" }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+);
+
+export const hyroxPlanPurchases = pgTable(
+  "hyrox_plan_purchases",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    rcEventId: text("rc_event_id").unique().notNull(),
+    rcTransactionId: text("rc_transaction_id"),
+    productId: text("product_id"),
+    amountCents: integer("amount_cents"),
+    currency: text("currency"),
+    purchasedAt: timestamp("purchased_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("idx_hyrox_plan_purchases_user").on(table.userId, table.purchasedAt)]
+);
+
+export const hyroxPlanGenerations = pgTable(
+  "hyrox_plan_generations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    planId: uuid("plan_id").references(() => hyroxTrainingPlans.id, { onDelete: "set null" }),
+    source: text("source").notNull(), // 'vip' | 'purchase' | 'bypass'
+    // Unique so a purchase row can be consumed by at most one generation.
+    purchaseId: uuid("purchase_id").unique().references(() => hyroxPlanPurchases.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("idx_hyrox_plan_generations_user_created").on(table.userId, table.createdAt)]
 );
 
 // ============================================

@@ -1,10 +1,16 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Check, Sparkles, Zap } from "lucide-react";
+import { Check, Loader2, Sparkles, Zap } from "lucide-react";
+import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { usePlanCredits } from "@/hooks/usePlanCredits";
+import {
+  PurchaseCancelledError,
+  usePurchasePersonalized,
+} from "@/hooks/usePurchasePersonalized";
 
 /**
  * Entry screen for new HYROX users. Presents a Free (generic template) path
@@ -13,6 +19,38 @@ import { Badge } from "@/components/ui/badge";
  */
 export function PlanChooser() {
   const router = useRouter();
+  const credits = usePlanCredits();
+  const purchase = usePurchasePersonalized();
+
+  async function handleUpgrade() {
+    // If a credit is already available (VIP, bypass, or a past purchase),
+    // skip checkout and go straight to onboarding.
+    if (credits.canGenerate) {
+      router.push("/hyrox/onboarding");
+      return;
+    }
+
+    try {
+      await purchase.mutateAsync();
+      router.push("/hyrox/onboarding");
+    } catch (err) {
+      if (err instanceof PurchaseCancelledError) return;
+      toast.error(
+        err instanceof Error ? err.message : "Purchase failed. Please try again.",
+      );
+    }
+  }
+
+  const personalizedCta = (() => {
+    if (purchase.isPending) return "Processing...";
+    if (credits.isLoading) return "Upgrade to Personalized";
+    if (credits.canGenerate) {
+      if (credits.nextSource === "vip") return "Use VIP credit";
+      if (credits.nextSource === "purchase") return "Use your credit";
+      return "Continue";
+    }
+    return `Upgrade to Personalized — $${credits.priceUsd}`;
+  })();
 
   return (
     <div className="flex flex-col gap-6">
@@ -91,10 +129,17 @@ export function PlanChooser() {
             size="lg"
             variant="outline"
             className="w-full"
-            onClick={() => router.push("/hyrox/onboarding")}
+            onClick={handleUpgrade}
+            disabled={purchase.isPending}
           >
-            Upgrade to Personalized
+            {purchase.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {personalizedCta}
           </Button>
+          {credits.isVip && credits.vipRemaining > 0 && (
+            <p className="text-center text-[10px] text-muted-foreground">
+              VIP: {credits.vipRemaining} plan{credits.vipRemaining === 1 ? "" : "s"} remaining this year
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>

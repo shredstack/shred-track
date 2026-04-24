@@ -3,12 +3,25 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { OnboardingWizard } from "@/components/hyrox/onboarding-wizard";
 import { usePlanStatus } from "@/hooks/useHyroxPlan";
+import { usePlanCredits } from "@/hooks/usePlanCredits";
 
 export default function HyroxOnboardingPage() {
   const router = useRouter();
   const [planId, setPlanId] = useState<string | null>(null);
+
+  // Credit gate — personalized onboarding assumes the user has something to
+  // spend. If not, send them back to the chooser where they can purchase.
+  const credits = usePlanCredits();
+  useEffect(() => {
+    if (credits.isLoading) return;
+    if (!credits.canGenerate) {
+      toast.info("Purchase a personalized plan to continue.");
+      router.replace("/hyrox");
+    }
+  }, [credits.isLoading, credits.canGenerate, router]);
 
   // Poll generation status after onboarding completes
   const { data: statusData } = usePlanStatus(planId);
@@ -22,6 +35,14 @@ export default function HyroxOnboardingPage() {
 
   if (statusData?.generationStatus === "completed") {
     return null;
+  }
+
+  if (credits.isLoading || !credits.canGenerate) {
+    return (
+      <div className="flex items-center justify-center py-14">
+        <Loader2 className="h-6 w-6 text-muted-foreground animate-spin" />
+      </div>
+    );
   }
 
   // Show generating state after onboarding is done

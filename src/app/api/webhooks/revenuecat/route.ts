@@ -22,6 +22,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { applyRCEvent, type RCWebhookPayload } from "@/lib/entitlements";
+import { grantPurchaseCredit } from "@/lib/plan-credits";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -45,7 +46,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // ---- Parse + apply ----
+  // ---- Parse + dispatch ----
   let payload: RCWebhookPayload;
   try {
     payload = (await req.json()) as RCWebhookPayload;
@@ -57,14 +58,41 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Malformed payload" }, { status: 400 });
   }
 
+  const evt = payload.event;
+
   try {
-    const result = await applyRCEvent(payload.event);
+    // Consumable purchases (pay-per-plan) — the pay-per-plan gate reads from
+    // hyrox_plan_purchases, not hyrox_entitlements. Each NON_RENEWING_PURCHASE
+    // grants one credit. Idempotent by rc_event_id.
+    if (evt.type === "NON_RENEWING_PURCHASE") {
+      const purchasedAt = evt.purchased_at_ms
+        ? new Date(evt.purchased_at_ms)
+        : new Date(evt.event_timestamp_ms ?? Date.now());
+      const result = await grantPurchaseCredit({
+        userId: evt.app_user_id,
+        rcEventId: evt.id,
+        rcTransactionId: evt.transaction_id ?? null,
+        productId: evt.product_id ?? null,
+        amountCents: evt.price_in_purchased_currency ?? evt.price ?? null,
+        currency: evt.currency ?? null,
+        purchasedAt,
+      });
+      console.log(
+        `[rc-webhook] NON_RENEWING_PURCHASE id=${evt.id} user=${evt.app_user_id} granted=${result.granted} reason=${result.reason ?? "ok"}`,
+      );
+      return NextResponse.json({ ok: true, applied: result.granted });
+    }
+
+    // Subscription lifecycle — falls through to the entitlements mirror.
+    // Reserved for a future subscription product; no-op today since
+    // consumables don't set entitlement_ids.
+    const result = await applyRCEvent(evt);
     console.log(
-      `[rc-webhook] ${payload.event.type} id=${payload.event.id} user=${payload.event.app_user_id} applied=${result.applied} reason=${result.reason ?? "ok"}`,
+      `[rc-webhook] ${evt.type} id=${evt.id} user=${evt.app_user_id} applied=${result.applied} reason=${result.reason ?? "ok"}`,
     );
     return NextResponse.json({ ok: true, applied: result.applied });
   } catch (err) {
-    console.error(`[rc-webhook] apply failed for event ${payload.event.id}:`, err);
+    console.error(`[rc-webhook] apply failed for event ${evt.id}:`, err);
     // Return 500 so RC retries — the event will be redelivered.
     return NextResponse.json({ error: "Failed to apply event" }, { status: 500 });
   }

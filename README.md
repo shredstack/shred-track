@@ -153,6 +153,36 @@ For an extra safety layer on database migrations, create a `production` environm
 3. Enable **Required reviewers** and add yourself
 4. Migration deployments will now require manual approval before running
 
+## ShredTrack Products
+
+### Free HYROX plan ($0)
+
+Template-based 18-week training plan, selected from 40 pre-seeded variants by gender × format × pace tier × weight tier. Free users answer 5 questions in `/hyrox/free-onboarding` and get a plan in under a second. No payment, no entitlement.
+
+### Personalized HYROX plan ($9.99 per plan)
+
+AI-generated plan tailored to the user's profile (station benchmarks, running paces, race date, equipment, weak spots). Sold as a **one-time consumable** — users can purchase again for each new training cycle.
+
+The credit gate at [src/lib/plan-credits.ts](src/lib/plan-credits.ts) resolves in priority order:
+
+1. **Bypass** — `HYROX_PAYWALL_ENFORCED=false`, dev only.
+2. **VIP** — user has an active row in `hyrox_vip_grants` and has used fewer than `plans_per_year` in the trailing 365 days. Admin-granted via `/admin` → HYROX VIP tab.
+3. **Purchase** — user has an unconsumed row in `hyrox_plan_purchases`. The oldest unconsumed purchase is atomically consumed per generation (`SELECT ... FOR UPDATE SKIP LOCKED`).
+4. Otherwise — `/api/hyrox/plan/generate` returns 402 and the client routes to checkout.
+
+Every generation is logged to `hyrox_plan_generations` with the source, and purchased credits don't expire.
+
+### RevenueCat + Stripe setup
+
+1. In RC → **Project settings → Apps → + New** → pick **Web Billing** (required for `@revenuecat/purchases-js` checkout). Do **not** use the legacy Stripe app — it doesn't host checkout.
+2. Connect your Stripe account to the Web Billing app.
+3. Create a **Consumable** product priced at $9.99 (current identifier: `single_hyrox_personalized_plan`).
+4. Create an offering (identifier `default`), mark it **Current**, and attach the product as its sole package.
+5. Integrations → Webhooks → point at `/api/webhooks/revenuecat` with `Authorization: Bearer <REVENUECAT_WEBHOOK_SECRET>`. Send all event types (or at minimum `NON_RENEWING_PURCHASE`).
+6. Copy the Web Billing public key (`rcb_...`) into `NEXT_PUBLIC_REVENUECAT_API_KEY`.
+
+Each `NON_RENEWING_PURCHASE` event writes one row to `hyrox_plan_purchases`, idempotent by RC event id.
+
 ## Project Structure
 
 ```

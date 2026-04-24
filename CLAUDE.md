@@ -247,3 +247,16 @@ Before writing a migration:
 - Are RLS policies correctly configured for new tables?
 - Are appropriate indexes added for columns used in WHERE clauses or JOINs?
 - Do new NOT NULL columns have sensible defaults or a data backfill step?
+
+## Database Seeds
+
+Seeds live in one of two places — the location determines whether they auto-deploy to production:
+
+- **`src/db/seeds/`** — auto-deployed to production by the `deploy_database_migrations.yml` workflow on merge to `main`. Every file here **must be idempotent** and must export a `run()` function. The runner (`src/db/seeds/run-all.ts`) discovers every `.ts` file in this directory and awaits each `run()` in sequence.
+- **`src/db/` (root)** — local-dev / one-shot seeds (e.g. `seed.ts`, `seed-benchmarks.ts`). Not touched by CI. Use this location for seeds that can't safely be re-run against an already-seeded database.
+
+**Rules for `src/db/seeds/` files:**
+- Idempotent by a stable key (delete+rebuild, or `onConflictDoUpdate`). Plain `insert()` without a conflict strategy will break on the second deploy.
+- Export a `run()` function so the runner can await it. Keep a self-invoke block (`if (process.argv[1] === fileURLToPath(import.meta.url)) run()...`) so direct invocation via `npx tsx` still works.
+- Wrap each logical entity's delete+rebuild in `db.transaction()` so readers never see a window where the entity is missing.
+- The workflow also triggers on changes to any library the seed imports from (e.g. `src/lib/hyrox-generic-plans/**`). When adding a seed that reads from a new lib, update the `paths` filter in the workflow.
