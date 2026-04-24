@@ -163,6 +163,42 @@ export function useWorkoutsByDate(date: string) {
 }
 
 // ============================================
+// useWorkoutSearch — for the search/browse page
+// ============================================
+//
+// Disabled when every filter is empty so we don't fetch the full history just
+// because the page rendered. Callers should pass whatever filters the user
+// has set; an all-empty object returns `undefined` with loading=false.
+
+export interface WorkoutSearchFilters {
+  q?: string;
+  movementId?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
+export function useWorkoutSearch(filters: WorkoutSearchFilters) {
+  const { q, movementId, startDate, endDate } = filters;
+  const hasAnyFilter = !!(q?.trim() || movementId || startDate || endDate);
+
+  return useQuery({
+    queryKey: ["workouts", "search", { q: q?.trim() || "", movementId, startDate, endDate }],
+    enabled: hasAnyFilter,
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (q?.trim()) params.set("q", q.trim());
+      if (movementId) params.set("movementId", movementId);
+      if (startDate) params.set("startDate", startDate);
+      if (endDate) params.set("endDate", endDate);
+      const res = await fetch(`/api/workouts?${params.toString()}`);
+      if (!res.ok) throw new Error("Failed to search workouts");
+      const rows = (await res.json()) as WireWorkout[];
+      return rows.map(wireWorkoutToDisplay);
+    },
+  });
+}
+
+// ============================================
 // Mutations
 // ============================================
 
