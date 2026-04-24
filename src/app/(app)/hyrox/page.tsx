@@ -3,16 +3,24 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, ChevronDown, ChevronUp, Archive } from "lucide-react";
+import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useActivePlan, usePlanStatus, usePlanHistory } from "@/hooks/useHyroxPlan";
 import { PlanChooser } from "@/components/hyrox/plan-chooser";
 import { UpgradeCard } from "@/components/hyrox/upgrade-card";
+import { usePlanCredits } from "@/hooks/usePlanCredits";
+import {
+  PurchaseCancelledError,
+  usePurchasePersonalized,
+} from "@/hooks/usePurchasePersonalized";
 
 export default function HyroxPage() {
   const router = useRouter();
   const { data: plan, isLoading } = useActivePlan();
+  const credits = usePlanCredits();
+  const purchase = usePurchasePersonalized();
 
   // Poll status if plan is generating
   const isGenerating =
@@ -65,6 +73,47 @@ export default function HyroxPage() {
   const philosophy = plan.trainingPhilosophy as { summary?: string } | null;
   const isGenericPlan = plan.planType === "generic";
 
+  async function handleNewPersonalizedPlan() {
+    // Has a credit already — confirm the replacement and go straight to
+    // onboarding. Skip the confirm on the no-credit path since the RevenueCat
+    // checkout modal already acts as a confirmation step.
+    if (credits.canGenerate) {
+      const proceed = confirm(
+        "This will walk you through onboarding again with your current values pre-filled. Your current plan will be archived and a new one generated. Continue?",
+      );
+      if (!proceed) return;
+      try { localStorage.removeItem("hyrox-onboarding-draft"); } catch {}
+      router.push("/hyrox/onboarding");
+      return;
+    }
+
+    try {
+      await purchase.mutateAsync();
+      try { localStorage.removeItem("hyrox-onboarding-draft"); } catch {}
+      router.push("/hyrox/onboarding");
+    } catch (err) {
+      if (err instanceof PurchaseCancelledError) return;
+      toast.error(
+        err instanceof Error ? err.message : "Purchase failed. Please try again.",
+      );
+    }
+  }
+
+  const newPlanLabel = (() => {
+    if (purchase.isPending) return "Processing...";
+    if (credits.isLoading) return "New personalized plan";
+    if (credits.canGenerate) {
+      if (credits.nextSource === "vip") return "New personalized plan (VIP credit)";
+      if (credits.nextSource === "purchase") return "New personalized plan (use credit)";
+      return "Redo onboarding";
+    }
+    return `Purchase a new personalized plan — $${credits.priceUsd}`;
+  })();
+
+  const newPlanSubLabel = credits.canGenerate
+    ? "Review & update your profile, then generate a new plan"
+    : "Unlock a fresh AI-generated plan tuned to your latest stats";
+
   return (
     <div className="flex flex-col gap-4">
       {/* Upgrade upsell — only for free-flow (generic) plans */}
@@ -110,20 +159,18 @@ export default function HyroxPage() {
         </Button>
       </div>
 
-      {/* Redo onboarding / new plan action */}
+      {/* New personalized plan — purchases if no credit is available */}
       <Button
         variant="ghost"
         className="w-full h-auto py-3 flex-col gap-0.5 text-muted-foreground"
-        onClick={() => {
-          if (confirm("This will walk you through onboarding again with your current values pre-filled. Your current plan will be archived and a new one generated. Continue?")) {
-            // Clear any stale localStorage draft so DB profile values take priority
-            try { localStorage.removeItem("hyrox-onboarding-draft"); } catch {}
-            router.push("/hyrox/onboarding");
-          }
-        }}
+        onClick={handleNewPersonalizedPlan}
+        disabled={purchase.isPending || credits.isLoading}
       >
-        <span className="text-xs font-medium">Redo Onboarding</span>
-        <span className="text-[10px]">Review &amp; update your profile, then generate a new plan</span>
+        <span className="text-xs font-medium inline-flex items-center gap-1.5">
+          {purchase.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
+          {newPlanLabel}
+        </span>
+        <span className="text-[10px]">{newPlanSubLabel}</span>
       </Button>
 
       {/* Philosophy summary */}
