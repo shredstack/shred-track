@@ -139,29 +139,40 @@ export interface WorkoutMovementDisplay {
   prescribedReps?: string;
   prescribedWeightMale?: string;
   prescribedWeightFemale?: string;
+  equipmentCount?: number;
   rxStandard?: string;
   notes?: string;
   isWeighted: boolean;
+}
+
+export interface WorkoutPartDisplay {
+  id: string;
+  orderIndex: number;
+  label?: string | null;
+  workoutType: WorkoutType;
+  timeCapSeconds?: number;
+  amrapDurationSeconds?: number;
+  emomIntervalSeconds?: number;
+  repScheme?: string;
+  notes?: string;
+  movements: WorkoutMovementDisplay[];
+  score?: ScoreDisplay | null;
 }
 
 export interface WorkoutDisplay {
   id: string;
   title?: string;
   description?: string;
-  workoutType: WorkoutType;
   workoutDate: string;
-  timeCapSeconds?: number;
-  amrapDurationSeconds?: number;
-  repScheme?: string;
-  movements: WorkoutMovementDisplay[];
+  parts: WorkoutPartDisplay[];
   createdBy: string;
   createdByName?: string;
   benchmarkWorkoutId?: string | null;
-  score?: ScoreDisplay | null;
 }
 
 export interface ScoreDisplay {
   id: string;
+  workoutPartId?: string;
   division: "rx" | "scaled" | "rx_plus";
   timeSeconds?: number;
   rounds?: number;
@@ -174,6 +185,19 @@ export interface ScoreDisplay {
   rpe?: number;
   userName?: string;
   scalingDetails?: MovementScalingDisplay[];
+  movementDetails?: ScoreMovementDetailDisplay[];
+}
+
+export interface ScoreMovementDetailDisplay {
+  workoutMovementId: string;
+  movementName?: string;
+  wasRx: boolean;
+  actualWeight?: number;
+  actualReps?: string;
+  modification?: string;
+  substitutionMovementId?: string;
+  setWeights?: number[];
+  notes?: string;
 }
 
 export interface MovementScalingDisplay {
@@ -192,6 +216,7 @@ export interface MovementScalingDisplay {
 
 export interface ScoreInput {
   workoutId: string;
+  workoutPartId?: string;
   division: "rx" | "scaled" | "rx_plus";
   timeSeconds?: number;
   rounds?: number;
@@ -229,20 +254,28 @@ export interface WorkoutBuilderMovement {
   prescribedReps: string;
   prescribedWeightMale: string;
   prescribedWeightFemale: string;
+  equipmentCount?: number;
   rxStandard: string;
   notes: string;
+}
+
+export interface WorkoutBuilderPart {
+  tempId: string;
+  label: string;
+  workoutType: WorkoutType;
+  timeCapMinutes: string;
+  amrapDurationMinutes: string;
+  emomIntervalSeconds: string;
+  repScheme: string;
+  movements: WorkoutBuilderMovement[];
 }
 
 export interface WorkoutBuilderForm {
   title: string;
   description: string;
-  workoutType: WorkoutType;
   workoutDate: string;
-  timeCapMinutes: string;
-  timeCapSeconds: string;
-  amrapDurationMinutes: string;
-  repScheme: string;
-  movements: WorkoutBuilderMovement[];
+  parts: WorkoutBuilderPart[];
+  benchmarkWorkoutId?: string | null;
 }
 
 // ============================================

@@ -91,17 +91,22 @@ export const communityMemberships = pgTable(
 // CrossFit: Movements
 // ============================================
 
-export const movements = pgTable("movements", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  canonicalName: text("canonical_name").unique().notNull(),
-  category: text("category").notNull(), // barbell | dumbbell | kettlebell | gymnastics | bodyweight | monostructural | accessory | other
-  isWeighted: boolean("is_weighted").default(false).notNull(),
-  is1rmApplicable: boolean("is_1rm_applicable").default(false).notNull(),
-  commonRxWeightMale: numeric("common_rx_weight_male"),
-  commonRxWeightFemale: numeric("common_rx_weight_female"),
-  videoUrl: text("video_url"),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+export const movements = pgTable(
+  "movements",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    canonicalName: text("canonical_name").notNull(),
+    category: text("category").notNull(), // barbell | dumbbell | kettlebell | gymnastics | bodyweight | monostructural | accessory | other
+    isWeighted: boolean("is_weighted").default(false).notNull(),
+    is1rmApplicable: boolean("is_1rm_applicable").default(false).notNull(),
+    commonRxWeightMale: numeric("common_rx_weight_male"),
+    commonRxWeightFemale: numeric("common_rx_weight_female"),
+    videoUrl: text("video_url"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("movements_created_by_idx").on(table.createdBy)]
+);
 
 // ============================================
 // CrossFit: Workouts
@@ -126,14 +131,37 @@ export const workouts = pgTable("workouts", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const workoutParts = pgTable(
+  "workout_parts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workoutId: uuid("workout_id").notNull().references(() => workouts.id, { onDelete: "cascade" }),
+    orderIndex: integer("order_index").notNull(),
+    label: text("label"),
+    workoutType: text("workout_type").notNull(),
+    timeCapSeconds: integer("time_cap_seconds"),
+    amrapDurationSeconds: integer("amrap_duration_seconds"),
+    emomIntervalSeconds: integer("emom_interval_seconds"),
+    repScheme: text("rep_scheme"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("workout_parts_workout_order_unique").on(table.workoutId, table.orderIndex),
+    index("workout_parts_workout_id_idx").on(table.workoutId),
+  ]
+);
+
 export const workoutMovements = pgTable("workout_movements", {
   id: uuid("id").defaultRandom().primaryKey(),
   workoutId: uuid("workout_id").notNull().references(() => workouts.id, { onDelete: "cascade" }),
+  workoutPartId: uuid("workout_part_id").references(() => workoutParts.id, { onDelete: "cascade" }),
   movementId: uuid("movement_id").notNull().references(() => movements.id),
   orderIndex: integer("order_index").notNull(),
   prescribedReps: text("prescribed_reps"),
   prescribedWeightMale: numeric("prescribed_weight_male"),
   prescribedWeightFemale: numeric("prescribed_weight_female"),
+  equipmentCount: integer("equipment_count"),
   rxStandard: text("rx_standard"),
   notes: text("notes"),
 });
@@ -147,6 +175,7 @@ export const scores = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     workoutId: uuid("workout_id").notNull().references(() => workouts.id, { onDelete: "cascade" }),
+    workoutPartId: uuid("workout_part_id").references(() => workoutParts.id, { onDelete: "cascade" }),
     userId: uuid("user_id").notNull().references(() => users.id),
     division: text("division").notNull(), // 'rx' | 'scaled' | 'rx_plus'
     timeSeconds: integer("time_seconds"),
@@ -161,7 +190,10 @@ export const scores = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [uniqueIndex("scores_workout_user").on(table.workoutId, table.userId)]
+  (table) => [
+    uniqueIndex("scores_part_user_unique").on(table.workoutPartId, table.userId),
+    index("scores_part_idx").on(table.workoutPartId),
+  ]
 );
 
 export const scoreMovementDetails = pgTable("score_movement_details", {

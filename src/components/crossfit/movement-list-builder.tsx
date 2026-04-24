@@ -1,21 +1,23 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import {
   Trash2,
   ChevronUp,
   ChevronDown,
   ChevronRight,
+  Loader2,
 } from "lucide-react";
 import { MovementSearch } from "@/components/crossfit/movement-search";
+import { useCreateMovement } from "@/hooks/useMovements";
 import type {
   WorkoutBuilderMovement,
   MovementOption,
 } from "@/types/crossfit";
-import { useState } from "react";
 
 function generateTempId() {
   return `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -31,6 +33,9 @@ export function MovementListBuilder({
   onChange,
 }: MovementListBuilderProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [creatingName, setCreatingName] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const createMovement = useCreateMovement();
 
   const toggleExpanded = useCallback((tempId: string) => {
     setExpandedIds((prev) => {
@@ -60,21 +65,35 @@ export function MovementListBuilder({
     [movements, onChange]
   );
 
+  // Persist the custom movement to the user's library before adding it to
+  // the workout. This gives the builder movement a real `movementId` and
+  // makes the name available for future searches.
   const addCustomMovement = useCallback(
-    (name: string) => {
-      const newMovement: WorkoutBuilderMovement = {
-        tempId: generateTempId(),
-        movementName: name,
-        isWeighted: false,
-        prescribedReps: "",
-        prescribedWeightMale: "",
-        prescribedWeightFemale: "",
-        rxStandard: "",
-        notes: "",
-      };
-      onChange([...movements, newMovement]);
+    async (name: string) => {
+      setCreateError(null);
+      setCreatingName(name);
+      try {
+        const created = await createMovement.mutateAsync({ canonicalName: name });
+        const newMovement: WorkoutBuilderMovement = {
+          tempId: generateTempId(),
+          movementId: created.id,
+          movementName: created.canonicalName,
+          category: created.category,
+          isWeighted: created.isWeighted,
+          prescribedReps: "",
+          prescribedWeightMale: created.commonRxWeightMale || "",
+          prescribedWeightFemale: created.commonRxWeightFemale || "",
+          rxStandard: "",
+          notes: "",
+        };
+        onChange([...movements, newMovement]);
+      } catch (err) {
+        setCreateError(err instanceof Error ? err.message : "Failed to add movement");
+      } finally {
+        setCreatingName(null);
+      }
     },
-    [movements, onChange]
+    [createMovement, movements, onChange]
   );
 
   const updateMovement = useCallback(
@@ -179,7 +198,7 @@ export function MovementListBuilder({
                 </div>
               </div>
 
-              {/* Reps row — always visible */}
+              {/* Reps — always visible */}
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Reps</Label>
                 <Input
@@ -194,43 +213,89 @@ export function MovementListBuilder({
                 />
               </div>
 
-              {/* Expanded fields */}
+              {/* Rx Weight — visible whenever movement is weighted (no expand needed) */}
+              {mov.isWeighted && (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">
+                        Rx Weight (M)
+                      </Label>
+                      <Input
+                        value={mov.prescribedWeightMale}
+                        onChange={(e) =>
+                          updateMovement(mov.tempId, {
+                            prescribedWeightMale: e.target.value,
+                          })
+                        }
+                        placeholder="e.g. 135"
+                        className="h-7 text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">
+                        Rx Weight (F)
+                      </Label>
+                      <Input
+                        value={mov.prescribedWeightFemale}
+                        onChange={(e) =>
+                          updateMovement(mov.tempId, {
+                            prescribedWeightFemale: e.target.value,
+                          })
+                        }
+                        placeholder="e.g. 95"
+                        className="h-7 text-xs"
+                      />
+                    </div>
+                  </div>
+                  {/* Equipment count — prominent for dumbbells (so "DB Deadlift 50/70 lb" renders as "2 × 50/70 lb") */}
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs text-muted-foreground">
+                      {mov.category === "dumbbell" ? "Dumbbells per rep" : "Implements per rep"}
+                    </Label>
+                    <div className="flex gap-1">
+                      {[1, 2].map((n) => {
+                        const selected = (mov.equipmentCount ?? 1) === n;
+                        return (
+                          <button
+                            key={n}
+                            type="button"
+                            onClick={() =>
+                              updateMovement(mov.tempId, {
+                                // Store 1 as undefined — "1" is the implicit default.
+                                equipmentCount: n === 1 ? undefined : n,
+                              })
+                            }
+                            className={`rounded-md px-2 py-0.5 text-xs font-medium ${
+                              selected
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted/50 text-muted-foreground hover:bg-muted"
+                            }`}
+                          >
+                            {n}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Expanded fields — weighted toggle + rx standard */}
               {isExpanded && (
                 <div className="space-y-2 pt-1">
-                  {mov.isWeighted && (
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">
-                          Rx Weight (M)
-                        </Label>
-                        <Input
-                          value={mov.prescribedWeightMale}
-                          onChange={(e) =>
-                            updateMovement(mov.tempId, {
-                              prescribedWeightMale: e.target.value,
-                            })
-                          }
-                          placeholder="e.g. 135"
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">
-                          Rx Weight (F)
-                        </Label>
-                        <Input
-                          value={mov.prescribedWeightFemale}
-                          onChange={(e) =>
-                            updateMovement(mov.tempId, {
-                              prescribedWeightFemale: e.target.value,
-                            })
-                          }
-                          placeholder="e.g. 95"
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-3">
+                    <Switch
+                      checked={mov.isWeighted}
+                      onCheckedChange={(checked) =>
+                        updateMovement(mov.tempId, { isWeighted: !!checked })
+                      }
+                      size="sm"
+                    />
+                    <Label className="text-xs text-muted-foreground">
+                      Uses weight
+                    </Label>
+                  </div>
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">
                       Rx Standard / Notes
@@ -261,6 +326,15 @@ export function MovementListBuilder({
           onAddNew={addCustomMovement}
           placeholder="Search or type a movement name..."
         />
+        {creatingName && (
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Loader2 className="size-3 animate-spin" />
+            Saving &quot;{creatingName}&quot; to your movements…
+          </p>
+        )}
+        {createError && (
+          <p className="text-xs text-destructive">{createError}</p>
+        )}
       </div>
     </div>
   );

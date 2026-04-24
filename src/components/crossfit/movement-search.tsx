@@ -4,14 +4,16 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Search, Plus } from "lucide-react";
+import { useMovements } from "@/hooks/useMovements";
 import type { MovementOption, MovementCategory } from "@/types/crossfit";
 import { MOVEMENT_CATEGORY_COLORS } from "@/types/crossfit";
 
 // ============================================
-// Default Movement Library
+// Fallback library — used only when the live fetch hasn't returned yet
+// or when a caller explicitly opts out (e.g. tests, storybook).
 // ============================================
 
-const DEFAULT_MOVEMENTS: MovementOption[] = [
+const FALLBACK_MOVEMENTS: MovementOption[] = [
   { id: "m-1", canonicalName: "Thruster", category: "barbell", isWeighted: true, is1rmApplicable: false },
   { id: "m-2", canonicalName: "Clean", category: "barbell", isWeighted: true, is1rmApplicable: true },
   { id: "m-3", canonicalName: "Power Clean", category: "barbell", isWeighted: true, is1rmApplicable: true },
@@ -83,6 +85,7 @@ interface MovementSearchProps {
   onSelect: (movement: MovementOption) => void;
   onAddNew?: (name: string) => void;
   placeholder?: string;
+  /** Override the live fetch — used by tests. Production paths shouldn't pass this. */
   movements?: MovementOption[];
 }
 
@@ -90,8 +93,10 @@ export function MovementSearch({
   onSelect,
   onAddNew,
   placeholder = "Search movements...",
-  movements = DEFAULT_MOVEMENTS,
+  movements: movementsOverride,
 }: MovementSearchProps) {
+  const { data: fetched } = useMovements();
+  const movements = movementsOverride ?? fetched ?? FALLBACK_MOVEMENTS;
   const [query, setQuery] = useState("");
   const [isOpen, setIsOpen] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(0);
@@ -163,10 +168,6 @@ export function MovementSearch({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  useEffect(() => {
-    setHighlightIndex(0);
-  }, [query]);
-
   return (
     <div ref={containerRef} className="relative">
       <div className="relative">
@@ -176,6 +177,7 @@ export function MovementSearch({
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
+            setHighlightIndex(0);
             setIsOpen(true);
           }}
           onFocus={() => setIsOpen(true)}
@@ -242,4 +244,4 @@ export function MovementSearch({
   );
 }
 
-export { DEFAULT_MOVEMENTS };
+export { FALLBACK_MOVEMENTS };

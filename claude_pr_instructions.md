@@ -46,6 +46,19 @@ If the PR modifies `src/db/schema.ts`:
 - [ ] **Type safety**: Column types match their usage (e.g., `numeric` for weights, `integer` for time in seconds)
 - [ ] **Unique constraints**: Appropriate uniqueness constraints to prevent duplicate data
 
+### Database Seed Review (if applicable)
+
+Seeds live in `src/db/seeds/` (auto-deployed to prod via `deploy_database_migrations.yml`) or `src/db/` root (local-only, not touched by CI). A new seed defaults to `src/db/seeds/`.
+
+If the PR adds or modifies a seed file:
+- [ ] **Right location**: Production-useful seeds go in `src/db/seeds/`. A new seed in `src/db/` root should have a clear reason it can't be idempotent — otherwise flag and ask to move it.
+- [ ] **Idempotent**: Uses delete+rebuild in a transaction or `onConflictDoUpdate`. Plain `insert()` without a conflict strategy breaks on the second deploy — flag this.
+- [ ] **`run()` export**: Files in `src/db/seeds/` must export an async `run()` function so `run-all.ts` can await them.
+- [ ] **Self-invoke guard**: Keeps `if (process.argv[1] === fileURLToPath(import.meta.url)) run()...` so direct `npx tsx` invocation works.
+- [ ] **Transactional writes**: Delete+rebuild of the same entity is wrapped in `db.transaction()` so readers don't see a missing-row window.
+- [ ] **Workflow `paths` filter**: If the seed imports from a new library directory, `.github/workflows/deploy_database_migrations.yml`'s `paths:` filter should include that path, otherwise library-only edits won't trigger a redeploy.
+- [ ] **Schema import path**: Files in `src/db/seeds/` import schema as `../schema`, not `./schema`.
+
 ### Code Quality
 
 - **Architecture**: Does the code follow separation of concerns? Is it testable and maintainable?
