@@ -100,10 +100,16 @@ export interface RCEvent {
   original_app_user_id?: string;
   entitlement_ids?: string[] | null;
   product_id?: string;
+  transaction_id?: string;
   expiration_at_ms?: number | null;
   purchased_at_ms?: number;
   event_timestamp_ms?: number;
   period_type?: "NORMAL" | "TRIAL" | "INTRO" | "PROMOTIONAL";
+  // Price in minor units (e.g. 999 for $9.99). RC exposes this on purchase
+  // events but the exact field varies by event version — we try both.
+  price_in_purchased_currency?: number;
+  price?: number;
+  currency?: string;
 }
 
 export interface RCWebhookPayload {

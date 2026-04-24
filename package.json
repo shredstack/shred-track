@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "db:seed": "npx tsx src/db/seed.ts",
-    "db:seed:hyrox-generic-plans": "npx tsx src/db/seed-hyrox-generic-plans.ts",
+    "db:seed:hyrox-generic-plans": "npx tsx src/db/seeds/hyrox-generic-plans.ts",
+    "db:seed:deploy": "npx tsx src/db/seeds/run-all.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push"
@@ -22,6 +23,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@react-email/components": "^1.0.11",
+    "@revenuecat/purchases-js": "^1.36.0",
     "@supabase/ssr": "^0.10.0",
     "@supabase/supabase-js": "^2.101.1",
     "@tanstack/react-query": "^5.96.2",

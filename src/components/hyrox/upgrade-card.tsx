@@ -2,9 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Sparkles, X } from "lucide-react";
+import { Loader2, Sparkles, X } from "lucide-react";
+import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { usePlanCredits } from "@/hooks/usePlanCredits";
+import {
+  PurchaseCancelledError,
+  usePurchasePersonalized,
+} from "@/hooks/usePurchasePersonalized";
 
 const DISMISS_KEY = "shredtrack-upgrade-card-dismissed";
 
@@ -20,6 +26,8 @@ const DISMISS_KEY = "shredtrack-upgrade-card-dismissed";
 export function UpgradeCard() {
   const router = useRouter();
   const [dismissed, setDismissed] = useState(true);
+  const credits = usePlanCredits();
+  const purchase = usePurchasePersonalized();
 
   // Hydrate client-side only to avoid SSR mismatch on localStorage read.
   useEffect(() => {
@@ -40,6 +48,28 @@ export function UpgradeCard() {
     }
     setDismissed(true);
   }
+
+  async function handleUpgrade() {
+    if (credits.canGenerate) {
+      router.push("/hyrox/onboarding");
+      return;
+    }
+    try {
+      await purchase.mutateAsync();
+      router.push("/hyrox/onboarding");
+    } catch (err) {
+      if (err instanceof PurchaseCancelledError) return;
+      toast.error(
+        err instanceof Error ? err.message : "Purchase failed. Please try again.",
+      );
+    }
+  }
+
+  const ctaLabel = (() => {
+    if (purchase.isPending) return "Processing...";
+    if (credits.canGenerate) return "Continue to personalized";
+    return `Upgrade — $${credits.priceUsd}`;
+  })();
 
   return (
     <Card className="border-amber-500/30 bg-amber-500/5 overflow-visible">
@@ -67,9 +97,11 @@ export function UpgradeCard() {
           size="sm"
           variant="outline"
           className="w-full"
-          onClick={() => router.push("/hyrox/onboarding")}
+          onClick={handleUpgrade}
+          disabled={purchase.isPending}
         >
-          Upgrade to Personalized
+          {purchase.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          {ctaLabel}
         </Button>
       </CardContent>
     </Card>

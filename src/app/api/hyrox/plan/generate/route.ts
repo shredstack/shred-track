@@ -9,9 +9,11 @@ import { eq, and } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { inngest } from "@/inngest/client";
 import {
-  ENTITLEMENT_PERSONALIZED,
-  isUserEntitledOrBypassed,
-} from "@/lib/entitlements";
+  consumeCredit,
+  linkGenerationToPlan,
+  refundGeneration,
+  PERSONALIZED_PLAN_PRICE_USD,
+} from "@/lib/plan-credits";
 import type { AthleteSnapshot } from "@/types/hyrox-plan";
 
 export const maxDuration = 60;
@@ -21,16 +23,15 @@ export async function POST(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  // Paywall — gated by HYROX_PAYWALL_ENFORCED. When off, passes through so
-  // dev testing and free-flow-upgrade exploration stay unblocked.
-  const entitled = await isUserEntitledOrBypassed(user.id, ENTITLEMENT_PERSONALIZED);
-  if (!entitled) {
+  // Pay-per-plan gate. Tries VIP allowance → purchased credit → bypass.
+  // Consumption is recorded up front; refunded below if plan creation fails.
+  const credit = await consumeCredit(user.id);
+  if (!credit.allowed) {
     return NextResponse.json(
       {
-        error: "subscription_required",
-        entitlement: ENTITLEMENT_PERSONALIZED,
-        message:
-          "A personalized plan subscription is required. Start with the free plan, or subscribe to unlock AI personalization.",
+        error: "payment_required",
+        message: `A personalized plan costs $${PERSONALIZED_PLAN_PRICE_USD}. Purchase one to continue, or start with the free plan.`,
+        priceUsd: PERSONALIZED_PLAN_PRICE_USD,
       },
       { status: 402 },
     );
@@ -44,6 +45,8 @@ export async function POST(req: NextRequest) {
     .limit(1);
 
   if (!profile) {
+    // Refund — no plan was created, so the credit shouldn't count.
+    await refundGeneration(credit.generationId);
     return NextResponse.json(
       { error: "Complete HYROX onboarding first" },
       { status: 400 }
@@ -123,9 +126,11 @@ export async function POST(req: NextRequest) {
     })
     .returning();
 
+  await linkGenerationToPlan(credit.generationId, plan.id);
+
   // Fire Inngest event
   try {
-    console.log(`[plan/generate] Sending inngest event for plan ${plan.id}`);
+    console.log(`[plan/generate] Sending inngest event for plan ${plan.id} (credit=${credit.source})`);
     await inngest.send({
       name: "hyrox/plan.requested",
       data: {
@@ -136,11 +141,13 @@ export async function POST(req: NextRequest) {
     console.log(`[plan/generate] Inngest event sent successfully for plan ${plan.id}`);
   } catch (error) {
     console.error(`[plan/generate] Failed to send inngest event for plan ${plan.id}:`, error);
-    // Plan record exists — mark it failed so the user can retry
+    // Plan record exists — mark it failed so the user can retry. Refund the
+    // generation ledger row so the credit is restored for the retry.
     await db
       .update(hyroxTrainingPlans)
       .set({ generationStatus: "failed" })
       .where(eq(hyroxTrainingPlans.id, plan.id));
+    await refundGeneration(credit.generationId);
     return NextResponse.json(
       { error: "Failed to start plan generation. Please try again." },
       { status: 500 }
@@ -148,7 +155,7 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json(
-    { planId: plan.id, generationStatus: "pending" },
+    { planId: plan.id, generationStatus: "pending", creditSource: credit.source },
     { status: 202 }
   );
 }
