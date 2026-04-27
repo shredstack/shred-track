@@ -86,6 +86,12 @@ def setup_logging(env: str) -> Path:
 MIN_DELAY = 0.8
 MAX_DELAY = 1.5
 
+# Backoff schedule (seconds, jitter added). First three attempts recover quickly
+# from transient blips; later attempts wait longer for sustained upstream outages
+# (results.hyrox.com regularly returns 502/504 in clusters lasting tens of seconds).
+RETRY_BACKOFF_SCHEDULE = [1, 2, 4, 15, 45, 120]
+DEFAULT_RETRIES = len(RETRY_BACKOFF_SCHEDULE)
+
 USER_AGENT = "ShredTrack Research Script (shredstacksarah@gmail.com)"
 
 
@@ -182,19 +188,26 @@ class HyroxScraper:
     def _rate_limit(self):
         time.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
 
-    def _fetch(self, url: str, retries: int = 3) -> str | None:
-        """Fetch URL with retries and exponential backoff."""
+    def _fetch(self, url: str, retries: int = DEFAULT_RETRIES) -> str | None:
+        """Fetch URL with retries on 5xx/connection errors. 4xx is not retried."""
         for attempt in range(retries):
             try:
                 self._rate_limit()
                 resp = self.session.get(url, timeout=30)
+
+                if 400 <= resp.status_code < 500:
+                    logger.error(f"Client error {resp.status_code} for {url} — not retrying")
+                    return None
+
                 resp.raise_for_status()
                 return resp.text
             except requests.RequestException as e:
-                wait = (2 ** attempt) + random.random()
+                if attempt >= retries - 1:
+                    break
+                base = RETRY_BACKOFF_SCHEDULE[min(attempt, len(RETRY_BACKOFF_SCHEDULE) - 1)]
+                wait = base + random.random()
                 logger.warning(f"Fetch failed (attempt {attempt + 1}/{retries}): {e}. Retrying in {wait:.1f}s")
-                if attempt < retries - 1:
-                    time.sleep(wait)
+                time.sleep(wait)
         logger.error(f"Failed to fetch {url} after {retries} attempts")
         return None
 
@@ -471,7 +484,12 @@ class HyroxScraper:
                     "type": "fetch_failed",
                     "idp": idp,
                     "event_id": event_id,
+                    "event_uuid": event_uuid,
                     "division": division_key,
+                    "division_rank": list_result["rank"],
+                    "field_size_division": field_size,
+                    "season_path": season_path,
+                    "event_prefix": event_prefix,
                 })
                 continue
 
@@ -519,6 +537,109 @@ class HyroxScraper:
         elif self.dry_run:
             logger.info(f"    [DRY RUN] Would write {len(batch)} results")
 
+    def replay_failures(self, failures_path: Path) -> None:
+        """Re-fetch and upsert only the detail pages that failed in a previous run.
+
+        Reads a parse_errors_*.json file written by a prior scrape, groups the
+        fetch_failed entries by (event_uuid, division, event_id), re-fetches
+        each detail page, and upserts. Records that lack the replay metadata
+        (older error files written before that field was added) are skipped
+        with a warning.
+        """
+        from collections import defaultdict
+
+        with open(failures_path) as f:
+            failures = json.load(f)
+
+        fetch_failures = [f for f in failures if f.get("type") == "fetch_failed"]
+        skipped_old = [f for f in fetch_failures if "event_uuid" not in f or "season_path" not in f]
+        replayable = [f for f in fetch_failures if "event_uuid" in f and "season_path" in f]
+
+        logger.info(f"Loaded {len(failures)} error records from {failures_path}")
+        logger.info(f"  fetch_failed: {len(fetch_failures)}")
+        logger.info(f"  replayable:   {len(replayable)}")
+        if skipped_old:
+            logger.warning(
+                f"  {len(skipped_old)} old-format records missing replay metadata — skipping"
+            )
+
+        if not replayable:
+            logger.info("Nothing to replay. Done.")
+            return
+
+        grouped: dict[tuple, list[dict]] = defaultdict(list)
+        for item in replayable:
+            key = (
+                item["event_uuid"],
+                item["division"],
+                item["event_id"],
+                item["season_path"],
+                item.get("event_prefix", "H_"),
+            )
+            grouped[key].append(item)
+
+        for (event_uuid, division_key, event_id, season_path, event_prefix), items in grouped.items():
+            logger.info(
+                f"\nReplaying {len(items)} failure(s) for {division_key} on {event_id}"
+            )
+            segment_map = sel.get_segment_map(event_prefix)
+            batch: list[ParsedResult] = []
+
+            for item in items:
+                idp = item["idp"]
+                detail_url = sel.detail_page_url(season_path, idp, event_id)
+                detail_html = self._fetch(detail_url)
+
+                if not detail_html:
+                    self.stats["parse_errors"].append({
+                        "type": "fetch_failed",
+                        "idp": idp,
+                        "event_id": event_id,
+                        "event_uuid": event_uuid,
+                        "division": division_key,
+                        "division_rank": item["division_rank"],
+                        "field_size_division": item["field_size_division"],
+                        "season_path": season_path,
+                        "event_prefix": event_prefix,
+                    })
+                    continue
+
+                detail = parse_athlete_detail(detail_html, segment_map=segment_map)
+                if not detail:
+                    self.stats["parse_errors"].append({
+                        "type": "parse_failed",
+                        "idp": idp,
+                        "event_id": event_id,
+                        "division": division_key,
+                    })
+                    continue
+
+                batch.append(ParsedResult(
+                    external_result_id=idp,
+                    athlete_name=detail["name"],
+                    division_key=division_key,
+                    age_group=detail["age_group"],
+                    finish_time_seconds=detail["finish_time_seconds"],
+                    overall_rank=detail["overall_rank"],
+                    division_rank=item["division_rank"],
+                    field_size_division=item["field_size_division"],
+                    is_dnf=False,
+                    splits=detail["splits"],
+                ))
+
+            if not self.dry_run and self.db and event_uuid and batch:
+                db_stats = self.db.upsert_results_batch(event_uuid, batch)
+                self.stats["results_inserted"] += db_stats["inserted"]
+                self.stats["results_updated"] += db_stats["updated"]
+                self.stats["splits_replaced"] += db_stats["splits_replaced"]
+                logger.info(
+                    f"  DB: {db_stats['inserted']} inserted, "
+                    f"{db_stats['updated']} updated, "
+                    f"{db_stats['splits_replaced']} splits replaced"
+                )
+            elif self.dry_run:
+                logger.info(f"  [DRY RUN] Would write {len(batch)} replayed results")
+
     def print_summary(self) -> None:
         elapsed = time.time() - self.stats["start_time"]
         logger.info(f"\n{'='*60}")
@@ -544,8 +665,8 @@ class HyroxScraper:
 
 
 @click.command()
-@click.option("--since", required=True, type=click.DateTime(formats=["%Y-%m-%d"]),
-              help="Scrape events from this date forward (YYYY-MM-DD)")
+@click.option("--since", required=False, type=click.DateTime(formats=["%Y-%m-%d"]),
+              help="Scrape events from this date forward (YYYY-MM-DD). Required unless --retry-failed is set.")
 @click.option("--divisions", default="all",
               help="Comma-separated division keys to scrape, or 'all' for everything")
 @click.option("--events", default=None,
@@ -556,23 +677,31 @@ class HyroxScraper:
 @click.option("--force", is_flag=True, help="Re-scrape all events even if already complete in DB")
 @click.option("--refresh-mv/--no-refresh-mv", default=True,
               help="Refresh materialized view after scraping")
+@click.option("--retry-failed", "retry_failed", default=None,
+              type=click.Path(exists=True, dir_okay=False),
+              help="Replay only the dropped detail-page fetches from a previous run's "
+                   "parse_errors_*.json. Skips event discovery entirely.")
 @click.option("--env", "env_file", default="local",
               type=click.Choice(["local", "prod"]),
               help="Environment to use: 'local' reads ../.env.local, 'prod' reads ../.env.prod")
 @click.option("--db-url", default=None,
               help="Explicit Postgres connection string (overrides --env)")
 def main(
-    since: datetime,
+    since: datetime | None,
     divisions: str,
     events: str | None,
     pick: bool,
     dry_run: bool,
     force: bool,
     refresh_mv: bool,
+    retry_failed: str | None,
     env_file: str,
     db_url: str | None,
 ):
     """Scrape HYROX public results into the ShredTrack database."""
+
+    if since is None and not retry_failed:
+        raise click.UsageError("--since is required unless --retry-failed is provided")
 
     # Set up logging to console + file
     setup_logging(env_file)
@@ -611,14 +740,32 @@ def main(
 
     db = HyroxDB(db_url) if db_url and not dry_run else None
 
+    # In replay mode --since is unused — pass a placeholder
+    effective_since = (
+        since.date() if isinstance(since, datetime)
+        else since if since is not None
+        else date(1970, 1, 1)
+    )
+
     scraper = HyroxScraper(
         db=db,
-        since=since.date() if isinstance(since, datetime) else since,
+        since=effective_since,
         divisions=division_list,
         event_filter=event_filter,
         dry_run=dry_run,
         force=force,
     )
+
+    # Replay-only mode: skip discovery, re-fetch the dropped detail pages, and exit.
+    if retry_failed:
+        scraper.replay_failures(Path(retry_failed))
+        if refresh_mv and db and not dry_run:
+            try:
+                db.refresh_materialized_view()
+            except Exception as e:
+                logger.error(f"Failed to refresh materialized view: {e}")
+        scraper.print_summary()
+        return
 
     # Step 1: Discover events
     event_groups = scraper.discover_events()

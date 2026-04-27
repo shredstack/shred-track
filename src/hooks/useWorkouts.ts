@@ -220,6 +220,7 @@ export interface CreatePartInput {
   amrapDurationSeconds?: number;
   emomIntervalSeconds?: number;
   repScheme?: string;
+  rounds?: number;
   notes?: string;
   movements: CreatePartMovementInput[];
 }

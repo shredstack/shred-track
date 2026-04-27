@@ -139,6 +139,7 @@ export async function GET(
       amrapDurationSeconds: p.amrapDurationSeconds,
       emomIntervalSeconds: p.emomIntervalSeconds,
       repScheme: p.repScheme,
+      rounds: p.rounds,
       notes: p.notes,
       movements: (movementsByPart.get(p.id) ?? []).map((m) => ({
         id: m.id,

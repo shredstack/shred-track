@@ -107,11 +107,10 @@ function ScoreRow({ part }: { part: WorkoutPartDisplay }) {
                 )}
                 <SetWeightBreakdown
                   setWeights={d.setWeights!}
-                  repsPerSet={
-                    part.repScheme
-                      ? parseRepsPerSet(part.repScheme)
-                      : undefined
-                  }
+                  repsPerSet={(() => {
+                    const scheme = mov?.prescribedReps || part.repScheme;
+                    return scheme ? parseRepsPerSet(scheme) : undefined;
+                  })()}
                 />
               </div>
             );
@@ -156,6 +155,13 @@ function PartSection({
       >
         <Clock className="size-3" />
         {formatTime(part.amrapDurationSeconds)}
+      </span>
+    );
+  }
+  if (part.workoutType === "for_time" && part.rounds) {
+    metaBits.push(
+      <span key="rounds" className="text-muted-foreground font-mono">
+        {part.rounds} rounds
       </span>
     );
   }

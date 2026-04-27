@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { useActivePlan, usePlanStatus, usePlanHistory } from "@/hooks/useHyroxPlan";
 import { PlanChooser } from "@/components/hyrox/plan-chooser";
 import { UpgradeCard } from "@/components/hyrox/upgrade-card";
+import { RecalibrationBanner } from "@/components/hyrox/race-history/recalibration-banner";
 import { usePlanCredits } from "@/hooks/usePlanCredits";
 import {
   PurchaseCancelledError,
@@ -116,6 +117,9 @@ export default function HyroxPage() {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Recalibration suggestion (Phase 3) */}
+      <RecalibrationBanner />
+
       {/* Upgrade upsell — only for free-flow (generic) plans */}
       {isGenericPlan && <UpgradeCard />}
 

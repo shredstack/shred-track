@@ -131,29 +131,32 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          # Call Claude API using --rawfile to avoid shell expansion issues
-          RESPONSE=$(curl -s https://api.anthropic.com/v1/messages \
+          # Build the request body on disk — passing it through `curl -d "$(...)"` puts
+          # the entire prompt on argv and trips ARG_MAX on large diffs.
+          jq -n \
+            --rawfile prompt review_prompt.txt \
+            '{
+              "model": "claude-sonnet-4-6",
+              "max_tokens": 4096,
+              "messages": [
+                {
+                  "role": "user",
+                  "content": $prompt
+                }
+              ]
+            }' > request_body.json
+
+          # Write response to a file too — `RESPONSE=$(curl ...)` would put the
+          # whole response into a shell variable, which has the same issue in reverse.
+          curl -sS https://api.anthropic.com/v1/messages \
             -H "Content-Type: application/json" \
             -H "x-api-key: $ANTHROPIC_API_KEY" \
             -H "anthropic-version: 2023-06-01" \
-            -d "$(jq -n \
-              --rawfile prompt review_prompt.txt \
-              '{
-                "model": "claude-sonnet-4-20250514",
-                "max_tokens": 4096,
-                "messages": [
-                  {
-                    "role": "user",
-                    "content": $prompt
-                  }
-                ]
-              }')")
+            --data-binary @request_body.json \
+            -o response.json
 
           # Extract the review text
-          REVIEW=$(echo "$RESPONSE" | jq -r '.content[0].text // "Error: Could not generate review"')
-
-          # Save to file for the comment step
-          echo "$REVIEW" > review_output.txt
+          jq -r '.content[0].text // "Error: Could not generate review"' response.json > review_output.txt
 
       - name: Post review comment
         uses: actions/github-script@v7

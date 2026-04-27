@@ -593,14 +593,19 @@ export function ScoreEntry({
         );
 
       case "for_load": {
-        const sets = setsFromRepScheme(activePart.repScheme);
-        const repsPerSet = repsPerSetFromRepScheme(activePart.repScheme);
         return (
           <div className="space-y-4">
-            {/* Per-movement set weights — the canonical data */}
+            {/* Per-movement set weights — the canonical data. Each movement
+                carries its own rep scheme (e.g. Deadlift "10-10-7-7-3-3-3"),
+                so we derive set count per movement and fall back to the
+                part-level scheme for legacy/parsed workouts. */}
             {activePart.movements
               .filter((m) => m.isWeighted)
               .map((mov) => {
+                const movScheme =
+                  mov.prescribedReps || activePart.repScheme;
+                const sets = setsFromRepScheme(movScheme);
+                const repsPerSet = repsPerSetFromRepScheme(movScheme);
                 const weights = state.setWeightsMap[mov.id] ?? [];
                 const numericWeights = weights.map(
                   (w) => parseFloat(w) || 0
@@ -612,9 +617,9 @@ export function ScoreEntry({
                   >
                     <Label className="text-xs font-medium">
                       {mov.movementName}
-                      {activePart.repScheme && (
+                      {movScheme && (
                         <span className="ml-1 text-muted-foreground font-normal">
-                          · {activePart.repScheme}
+                          · {movScheme}
                         </span>
                       )}
                     </Label>

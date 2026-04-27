@@ -60,6 +60,10 @@ function builderPartToPayload(part: WorkoutBuilderPart): CreatePartInput | null 
       ? parseInt(part.emomIntervalSeconds)
       : undefined,
     repScheme: part.repScheme || undefined,
+    rounds:
+      part.workoutType === "for_time" && part.rounds
+        ? parseInt(part.rounds)
+        : undefined,
     movements: movements.map((m, i) => ({
       movementId: m.movementId!,
       orderIndex: i,

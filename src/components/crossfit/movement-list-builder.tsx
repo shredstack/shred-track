@@ -17,6 +17,7 @@ import { useCreateMovement } from "@/hooks/useMovements";
 import type {
   WorkoutBuilderMovement,
   MovementOption,
+  WorkoutType,
 } from "@/types/crossfit";
 
 function generateTempId() {
@@ -26,12 +27,17 @@ function generateTempId() {
 interface MovementListBuilderProps {
   movements: WorkoutBuilderMovement[];
   onChange: (movements: WorkoutBuilderMovement[]) => void;
+  // For Load workouts have no prescribed weight (the athlete is *finding* the
+  // load), so we suppress the Rx weight inputs in that mode.
+  workoutType?: WorkoutType;
 }
 
 export function MovementListBuilder({
   movements,
   onChange,
+  workoutType,
 }: MovementListBuilderProps) {
+  const showRxWeights = workoutType !== "for_load";
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [creatingName, setCreatingName] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -198,9 +204,12 @@ export function MovementListBuilder({
                 </div>
               </div>
 
-              {/* Reps — always visible */}
+              {/* Reps — always visible. For_load uses the per-movement rep
+                  scheme (e.g. "10-10-7-7-3-3-3" for a deadlift wave). */}
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Reps</Label>
+                <Label className="text-xs text-muted-foreground">
+                  {workoutType === "for_load" ? "Rep Scheme" : "Reps"}
+                </Label>
                 <Input
                   value={mov.prescribedReps}
                   onChange={(e) =>
@@ -208,50 +217,64 @@ export function MovementListBuilder({
                       prescribedReps: e.target.value,
                     })
                   }
-                  placeholder="e.g. 21-15-9, 15, 400m"
+                  placeholder={
+                    workoutType === "for_load"
+                      ? "e.g. 5-5-5-5-5, 10-10-7-7-3-3-3, 1RM"
+                      : "e.g. 21-15-9, 15, 400m"
+                  }
                   className="h-7 text-xs"
                 />
               </div>
 
-              {/* Rx Weight — visible whenever movement is weighted (no expand needed) */}
-              {mov.isWeighted && (
-                <>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">
-                        Rx Weight (M)
-                      </Label>
-                      <Input
-                        value={mov.prescribedWeightMale}
-                        onChange={(e) =>
-                          updateMovement(mov.tempId, {
-                            prescribedWeightMale: e.target.value,
-                          })
-                        }
-                        placeholder="e.g. 135"
-                        className="h-7 text-xs"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">
-                        Rx Weight (F)
-                      </Label>
-                      <Input
-                        value={mov.prescribedWeightFemale}
-                        onChange={(e) =>
-                          updateMovement(mov.tempId, {
-                            prescribedWeightFemale: e.target.value,
-                          })
-                        }
-                        placeholder="e.g. 95"
-                        className="h-7 text-xs"
-                      />
-                    </div>
+              {/* Rx Weight — only meaningful when the workout prescribes a load.
+                  For_load is suppressed entirely (the athlete finds the load
+                  at score time). */}
+              {mov.isWeighted && showRxWeights && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">
+                      Rx Weight (M)
+                    </Label>
+                    <Input
+                      value={mov.prescribedWeightMale}
+                      onChange={(e) =>
+                        updateMovement(mov.tempId, {
+                          prescribedWeightMale: e.target.value,
+                        })
+                      }
+                      placeholder="e.g. 135"
+                      className="h-7 text-xs"
+                    />
                   </div>
-                  {/* Equipment count — prominent for dumbbells (so "DB Deadlift 50/70 lb" renders as "2 × 50/70 lb") */}
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">
+                      Rx Weight (F)
+                    </Label>
+                    <Input
+                      value={mov.prescribedWeightFemale}
+                      onChange={(e) =>
+                        updateMovement(mov.tempId, {
+                          prescribedWeightFemale: e.target.value,
+                        })
+                      }
+                      placeholder="e.g. 95"
+                      className="h-7 text-xs"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Implements per rep — only relevant for handheld pairs (1 vs 2
+                  dumbbells/kettlebells). Barbells, sandbags, machines have an
+                  implicit count of 1, so the toggle is just noise. */}
+              {mov.isWeighted &&
+                (mov.category === "dumbbell" ||
+                  mov.category === "kettlebell") && (
                   <div className="flex items-center gap-2">
                     <Label className="text-xs text-muted-foreground">
-                      {mov.category === "dumbbell" ? "Dumbbells per rep" : "Implements per rep"}
+                      {mov.category === "dumbbell"
+                        ? "Dumbbells per rep"
+                        : "Kettlebells per rep"}
                     </Label>
                     <div className="flex gap-1">
                       {[1, 2].map((n) => {
@@ -262,7 +285,6 @@ export function MovementListBuilder({
                             type="button"
                             onClick={() =>
                               updateMovement(mov.tempId, {
-                                // Store 1 as undefined — "1" is the implicit default.
                                 equipmentCount: n === 1 ? undefined : n,
                               })
                             }
@@ -278,8 +300,7 @@ export function MovementListBuilder({
                       })}
                     </div>
                   </div>
-                </>
-              )}
+                )}
 
               {/* Expanded fields — weighted toggle + rx standard */}
               {isExpanded && (
