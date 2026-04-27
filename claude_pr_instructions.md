@@ -151,6 +151,16 @@ Before flagging an issue, verify it's a real problem:
 2. **On-demand initialization is often intentional**: For client-side SDKs, lazy initialization during user actions is a valid pattern.
 3. **SDK error codes**: Flag only if there's no error handling at all, not just because error codes "might change."
 4. **RLS policies on ALTER TABLE migrations**: When a migration only adds columns to an existing table (e.g. `ALTER TABLE ... ADD COLUMN`), do NOT flag missing RLS policies. RLS is set at the table level, not the column level — if the table already has RLS enabled and policies defined (check `supabase/migrations/20260405000000_initial_schema.sql`), column additions are automatically covered. Only flag RLS issues when a migration creates a **new table** without enabling RLS or defining policies.
+5. **READ THE WHOLE MIGRATION FILE before flagging RLS or constraint issues on a new table.** Migrations frequently define a new table near the top of the file and then add `ENABLE ROW LEVEL SECURITY` + `CREATE POLICY` further down. If you only look at the `CREATE TABLE` block you'll miss the policies. Same goes for `ON DELETE` behavior — if it's already on the `REFERENCES` clause, do not say "verify cascade behavior".
+6. **READ THE FILE before flagging "missing useMemo / useCallback"**. Open the component and check the imports and the actual variable definition. If `useMemo`/`useCallback` is already imported and the value is already wrapped, don't suggest adding it.
+7. **Inngest functions already have retries + exponential backoff built in.** If a route fires an Inngest event and the heavy work happens in `src/inngest/functions/**`, do NOT suggest adding "exponential backoff" or "retry logic" to the route. Inngest handles transient failures via `retries: N` on the function definition and per-step retries on `step.run(...)`. Only flag missing error handling on the Inngest function itself if it has no `retries`, no `onFailure`, and no try/catch around external API calls.
+8. **Don't suggest list virtualization for user-scoped lists in this app.** A single user's races, workouts, plans, and benchmarks are inherently small (dozens, not thousands). Virtualization is unnecessary complexity for these views. Only flag virtualization concerns for genuinely unbounded lists like community feeds or admin dashboards.
+9. **Don't suggest jitter / thundering-herd mitigations for one-shot scripts** in `scripts/` that are run manually by a single operator. Thundering herd is a fleet-of-clients problem, not a single-script problem.
+10. **Don't suggest "consider extracting to a utility" or "consider a stronger type" as blocking changes.** These are stylistic; if you mention them at all, mark them clearly as **Nit** or **Optional**, never under "Request Changes".
+
+### Verdict discipline
+
+The **Request Changes** verdict is reserved for issues that genuinely block merge: data loss risk, security issues, broken functionality, missing user scoping, breaking API changes. Before issuing **Request Changes**, re-read each "Critical / Important" item and ask: *did I actually open the file and confirm this is missing?* If even one of your blocking items turns out to already be in the code, downgrade the verdict — a single false alarm in the blocking list erodes trust in the whole review.
 
 ### What to Actually Flag
 

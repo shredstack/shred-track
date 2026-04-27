@@ -7,24 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { formatLongTime, formatTime } from "@/lib/hyrox-data";
 import { PercentileChip } from "./percentile-chip";
-
-// ---------------------------------------------------------------------------
-// Types — match the JSONB shapes set by the Inngest generator
-// ---------------------------------------------------------------------------
-
-export interface TimeLossEntry {
-  station: string;
-  secondsLost: number;
-  percentile?: number;
-  p25Time?: number;
-}
-
-export interface FocusEntry {
-  focus: string;
-  rationale: string;
-  sessionsPerWeek: number;
-  durationWeeks: number;
-}
+import type {
+  TimeLossEntry,
+  FocusEntry,
+} from "@/types/hyrox-race-report";
 
 export interface RaceReport {
   id: string;

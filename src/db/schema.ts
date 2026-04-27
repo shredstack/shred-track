@@ -12,6 +12,7 @@ import {
   index,
   foreignKey,
 } from "drizzle-orm/pg-core";
+import type { TimeLossEntry, FocusEntry } from "@/types/hyrox-race-report";
 
 // ============================================
 // Users & Auth
@@ -771,8 +772,8 @@ export const hyroxRaceReports = pgTable(
 
     headline: text("headline"),
     pacingAnalysis: text("pacing_analysis"),
-    timeLossRanking: jsonb("time_loss_ranking"),
-    prioritizedFocus: jsonb("prioritized_focus"),
+    timeLossRanking: jsonb("time_loss_ranking").$type<TimeLossEntry[]>(),
+    prioritizedFocus: jsonb("prioritized_focus").$type<FocusEntry[]>(),
     projectedFinishSeconds: integer("projected_finish_seconds"),
     projectedFinishAssumptions: text("projected_finish_assumptions"),
 

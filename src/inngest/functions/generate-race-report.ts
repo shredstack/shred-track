@@ -17,6 +17,10 @@ import {
   type DivisionKey,
   type StationName,
 } from "@/lib/hyrox-data";
+import type {
+  TimeLossEntry,
+  FocusEntry,
+} from "@/types/hyrox-race-report";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -29,22 +33,8 @@ const AI_MODEL = process.env.HYROX_TEST_MODE === "true"
 const CLAUDE_TIMEOUT_MS = 180_000; // 3 min — analysis is much smaller than plan gen
 
 // ---------------------------------------------------------------------------
-// Types of the JSONB shapes we persist
+// Local types
 // ---------------------------------------------------------------------------
-
-interface TimeLossEntry {
-  station: string;
-  secondsLost: number;
-  percentile?: number;
-  p25Time?: number;
-}
-
-interface FocusEntry {
-  focus: string;
-  rationale: string;
-  sessionsPerWeek: number;
-  durationWeeks: number;
-}
 
 interface AIQualitativeOutput {
   headline: string;
