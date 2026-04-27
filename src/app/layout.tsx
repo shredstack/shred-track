@@ -35,6 +35,10 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   themeColor: "#151525",
+  // Reflow the layout when the on-screen keyboard opens so fixed-position
+  // sheets stay above it. Honored by Chromium; iOS Safari needs the
+  // visualViewport-based hooks below to compensate.
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({

@@ -17,6 +17,8 @@ ShredTrack is a mobile-first web application for HYROX and CrossFit athletes to 
 - **Resend** for transactional email (activation, invites)
 - **Capacitor** for planned iOS/Android native wrapper
 
+Production URL: https://shredtrack.shredstack.net (hosted on Vercel).
+
 For support, customers should email shredstacksarah@gmail.com.
 
 ## App Development Best Practices

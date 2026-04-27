@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Search, Plus } from "lucide-react";
 import { useMovements } from "@/hooks/useMovements";
+import { PickerSheet } from "@/components/shared/picker-sheet";
 import type { MovementOption, MovementCategory } from "@/types/crossfit";
 import { MOVEMENT_CATEGORY_COLORS } from "@/types/crossfit";
 
@@ -97,40 +98,67 @@ export function MovementSearch({
 }: MovementSearchProps) {
   const { data: fetched } = useMovements();
   const movements = movementsOverride ?? fetched ?? FALLBACK_MOVEMENTS;
+  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [isOpen, setIsOpen] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(0);
-  const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
-  const filtered = query.trim()
-    ? movements.filter((m) =>
-        m.canonicalName.toLowerCase().includes(query.toLowerCase())
-      )
-    : movements;
+  const filtered = useMemo(
+    () =>
+      query.trim()
+        ? movements.filter((m) =>
+            m.canonicalName.toLowerCase().includes(query.toLowerCase()),
+          )
+        : movements,
+    [movements, query],
+  );
+
+  const showAddNew = !!onAddNew && query.trim().length > 0;
+  const totalItems = filtered.length + (showAddNew ? 1 : 0);
+
+  const closeAndReset = useCallback(() => {
+    setOpen(false);
+    setQuery("");
+    setHighlightIndex(0);
+  }, []);
 
   const handleSelect = useCallback(
     (movement: MovementOption) => {
       onSelect(movement);
-      setQuery("");
-      setIsOpen(false);
+      closeAndReset();
     },
-    [onSelect]
+    [onSelect, closeAndReset],
   );
 
   const handleAddNew = useCallback(() => {
-    if (onAddNew && query.trim()) {
-      onAddNew(query.trim());
-      setQuery("");
-      setIsOpen(false);
+    const trimmed = query.trim();
+    if (onAddNew && trimmed) {
+      onAddNew(trimmed);
+      closeAndReset();
     }
-  }, [onAddNew, query]);
+  }, [onAddNew, query, closeAndReset]);
+
+  // Focus the search field once the sheet has opened. The next-frame defer
+  // gives the entrance animation time to settle so iOS reliably shows the
+  // keyboard.
+  useEffect(() => {
+    if (!open) return;
+    const id = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [open]);
+
+  // Keep the highlighted item visible as the user arrows through the list.
+  useEffect(() => {
+    if (!open) return;
+    const list = listRef.current;
+    if (!list) return;
+    const el = list.children[highlightIndex] as HTMLElement | undefined;
+    el?.scrollIntoView({ block: "nearest" });
+  }, [highlightIndex, open]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!isOpen) return;
-
-    const totalItems = filtered.length + (onAddNew && query.trim() ? 1 : 0);
-
+    if (totalItems === 0) return;
     switch (e.key) {
       case "ArrowDown":
         e.preventDefault();
@@ -144,53 +172,58 @@ export function MovementSearch({
         e.preventDefault();
         if (highlightIndex < filtered.length) {
           handleSelect(filtered[highlightIndex]);
-        } else {
+        } else if (showAddNew) {
           handleAddNew();
         }
-        break;
-      case "Escape":
-        setIsOpen(false);
         break;
     }
   };
 
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(event.target as Node)
-      ) {
-        setIsOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
   return (
-    <div ref={containerRef} className="relative">
-      <div className="relative">
-        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-        <Input
-          ref={inputRef}
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setHighlightIndex(0);
-            setIsOpen(true);
-          }}
-          onFocus={() => setIsOpen(true)}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          className="pl-8"
-        />
-      </div>
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex h-9 w-full items-center gap-2 rounded-md border border-input bg-transparent px-3 text-left text-sm text-muted-foreground transition-colors hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >
+        <Search className="size-4 shrink-0 text-muted-foreground" />
+        <span className="truncate">{placeholder}</span>
+      </button>
 
-      {isOpen && (
-        <div className="absolute z-50 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg">
-          {filtered.length === 0 && !query.trim() && (
-            <div className="px-3 py-2 text-sm text-muted-foreground">
+      <PickerSheet
+        open={open}
+        onOpenChange={(next) => {
+          if (!next) closeAndReset();
+          else setOpen(true);
+        }}
+        title="Add Movement"
+      >
+        <div className="px-4 pb-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              ref={inputRef}
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setHighlightIndex(0);
+              }}
+              onKeyDown={handleKeyDown}
+              placeholder={placeholder}
+              className="pl-8"
+              enterKeyHint="search"
+              autoComplete="off"
+            />
+          </div>
+        </div>
+
+        <div
+          ref={listRef}
+          className="flex-1 overflow-y-auto px-2 pb-4"
+          role="listbox"
+        >
+          {filtered.length === 0 && !showAddNew && (
+            <div className="px-3 py-6 text-center text-sm text-muted-foreground">
               No movements found
             </div>
           )}
@@ -199,7 +232,9 @@ export function MovementSearch({
             <button
               key={movement.id}
               type="button"
-              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
+              role="option"
+              aria-selected={idx === highlightIndex}
+              className={`flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
                 idx === highlightIndex
                   ? "bg-accent text-accent-foreground"
                   : "hover:bg-accent/50"
@@ -221,10 +256,12 @@ export function MovementSearch({
             </button>
           ))}
 
-          {onAddNew && query.trim() && (
+          {showAddNew && (
             <button
               type="button"
-              className={`flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-sm transition-colors ${
+              role="option"
+              aria-selected={highlightIndex === filtered.length}
+              className={`mt-1 flex w-full items-center gap-2 rounded-md border-t border-border px-3 py-2.5 text-left text-sm transition-colors ${
                 highlightIndex === filtered.length
                   ? "bg-accent text-accent-foreground"
                   : "hover:bg-accent/50"
@@ -233,14 +270,12 @@ export function MovementSearch({
               onClick={handleAddNew}
             >
               <Plus className="size-4 text-muted-foreground" />
-              <span>
-                Add &quot;{query.trim()}&quot; as new movement
-              </span>
+              <span>Add &quot;{query.trim()}&quot; as new movement</span>
             </button>
           )}
         </div>
-      )}
-    </div>
+      </PickerSheet>
+    </>
   );
 }
 
