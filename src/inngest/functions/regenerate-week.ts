@@ -12,7 +12,7 @@ import { DIVISIONS, REFERENCE_TIMES, formatTime, formatLongTime } from "@/lib/hy
 
 const AI_MODEL = process.env.HYROX_TEST_MODE === "true"
   ? "claude-haiku-4-5-20251001"
-  : "claude-sonnet-4-6-20250514";
+  : "claude-sonnet-4-6";
 
 function buildSystemPrompt(): string {
   return `You are an elite HYROX training coach regenerating a single week of a training plan. The athlete has requested changes to this specific week.
