@@ -50,7 +50,11 @@ interface TimerCompleteProps {
   /** Whether the user is logged in */
   isLoggedIn: boolean;
   /** Called when user wants to save results (logged-in only) */
-  onSave: (title: string, notes: string) => Promise<void>;
+  onSave: (
+    title: string,
+    notes: string,
+    raceType: "practice" | "actual",
+  ) => Promise<void>;
   /** Called when user wants to start a new race */
   onNewRace: () => void;
   /** Called when user wants to go back to setup */
@@ -61,6 +65,8 @@ interface TimerCompleteProps {
   isSaving?: boolean;
   /** Whether save succeeded */
   saved?: boolean;
+  /** ID of the saved race (if any), used for the post-save link to detail page. */
+  savedRaceId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,9 +85,11 @@ export function TimerComplete({
   personalBests = [],
   isSaving = false,
   saved = false,
+  savedRaceId = null,
 }: TimerCompleteProps) {
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
+  const [raceType, setRaceType] = useState<"practice" | "actual">("practice");
 
   const runSegments = useMemo(
     () => completedSegments.filter((s) => s.segmentType === "run"),
@@ -109,7 +117,7 @@ export function TimerComplete({
   const fastest = sortedStations[sortedStations.length - 1];
 
   const handleSave = () => {
-    onSave(title || "Practice Race", notes);
+    onSave(title || "Practice Race", notes, raceType);
   };
 
   return (
@@ -240,6 +248,41 @@ export function TimerComplete({
               rows={2}
               className="w-full rounded-lg bg-white/[0.04] border border-white/[0.08] px-3 py-2 text-sm placeholder:text-muted-foreground outline-none focus:border-primary/40 resize-none"
             />
+            {/* Race type toggle */}
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                Race type
+              </span>
+              <div className="flex gap-1 rounded-lg bg-white/[0.03] p-1">
+                <button
+                  type="button"
+                  onClick={() => setRaceType("practice")}
+                  className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                    raceType === "practice"
+                      ? "bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:bg-white/[0.04]"
+                  }`}
+                >
+                  Practice sim
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRaceType("actual")}
+                  className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                    raceType === "actual"
+                      ? "bg-emerald-500/15 text-emerald-400"
+                      : "text-muted-foreground hover:bg-white/[0.04]"
+                  }`}
+                >
+                  Actual race
+                </button>
+              </div>
+              <span className="text-[10px] text-muted-foreground/80">
+                {raceType === "actual"
+                  ? "Counts toward your race total and finish-time PR."
+                  : "Recorded for tracking, not added to lifetime race count."}
+              </span>
+            </div>
             <Button
               onClick={handleSave}
               disabled={isSaving}
@@ -254,10 +297,18 @@ export function TimerComplete({
 
       {/* Save success */}
       {saved && (
-        <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 text-center">
+        <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 text-center flex flex-col gap-2 items-center">
           <p className="text-sm font-medium text-emerald-400">
             Race saved! Your benchmarks have been updated.
           </p>
+          {savedRaceId && (
+            <a
+              href={`/hyrox/race-tools/races/${savedRaceId}`}
+              className="text-xs text-primary hover:underline"
+            >
+              View race details &amp; AI report →
+            </a>
+          )}
         </div>
       )}
 

@@ -154,6 +154,7 @@ export interface WorkoutPartDisplay {
   amrapDurationSeconds?: number;
   emomIntervalSeconds?: number;
   repScheme?: string;
+  rounds?: number;
   notes?: string;
   movements: WorkoutMovementDisplay[];
   score?: ScoreDisplay | null;
@@ -266,7 +267,12 @@ export interface WorkoutBuilderPart {
   timeCapMinutes: string;
   amrapDurationMinutes: string;
   emomIntervalSeconds: string;
+  // Workout-level rep scheme. Retained on the type for legacy / parsed
+  // workouts; the Smart Builder no longer surfaces it directly — for_load
+  // expresses its scheme per-movement via `prescribedReps`, and round-based
+  // workouts use `rounds` below.
   repScheme: string;
+  rounds: string;
   movements: WorkoutBuilderMovement[];
 }
 

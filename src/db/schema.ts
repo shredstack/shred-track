@@ -123,6 +123,7 @@ export const workouts = pgTable("workouts", {
   timeCapSeconds: integer("time_cap_seconds"),
   amrapDurationSeconds: integer("amrap_duration_seconds"),
   repScheme: text("rep_scheme"),
+  rounds: integer("rounds"),
   workoutDate: date("workout_date").notNull(),
   published: boolean("published").default(false).notNull(),
   source: text("source").default("manual").notNull(), // 'manual' | 'parsed' | 'import' | 'benchmark'
@@ -143,6 +144,7 @@ export const workoutParts = pgTable(
     amrapDurationSeconds: integer("amrap_duration_seconds"),
     emomIntervalSeconds: integer("emom_interval_seconds"),
     repScheme: text("rep_scheme"),
+    rounds: integer("rounds"),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -316,6 +318,8 @@ export const hyroxTrainingPlans = pgTable("hyrox_training_plans", {
   aiModel: text("ai_model"),
   trainingPhilosophy: jsonb("training_philosophy"),
   athleteSnapshot: jsonb("athlete_snapshot"),
+  recalibrationSuggestedAt: timestamp("recalibration_suggested_at", { withTimezone: true }),
+  recalibrationSourceRaceId: uuid("recalibration_source_race_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -391,8 +395,12 @@ export const hyroxStationBenchmarks = pgTable(
     loggedAt: timestamp("logged_at", { withTimezone: true }).defaultNow().notNull(),
     source: text("source"),
     notes: text("notes"),
+    sourceRaceId: uuid("source_race_id"),
   },
-  (table) => [index("benchmarks_user_station").on(table.userId, table.station, table.loggedAt)]
+  (table) => [
+    index("benchmarks_user_station").on(table.userId, table.station, table.loggedAt),
+    index("benchmarks_source_race").on(table.sourceRaceId),
+  ]
 );
 
 // ============================================
@@ -722,6 +730,7 @@ export const hyroxPracticeRaces = pgTable(
     startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
     completedAt: timestamp("completed_at", { withTimezone: true }).notNull(),
     notes: text("notes"),
+    raceType: text("race_type").notNull().default("practice"), // 'practice' | 'actual'
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [index("practice_races_user").on(table.userId)],
@@ -743,4 +752,35 @@ export const hyroxPracticeRaceSplits = pgTable(
     uniqueIndex("practice_splits_unique").on(table.raceId, table.segmentOrder),
     index("practice_splits_race").on(table.raceId),
   ],
+);
+
+// ============================================
+// HYROX: AI Race Reports
+// ============================================
+
+export const hyroxRaceReports = pgTable(
+  "hyrox_race_reports",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    raceId: uuid("race_id")
+      .notNull()
+      .unique()
+      .references(() => hyroxPracticeRaces.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("pending"), // 'pending' | 'generating' | 'completed' | 'failed'
+
+    headline: text("headline"),
+    pacingAnalysis: text("pacing_analysis"),
+    timeLossRanking: jsonb("time_loss_ranking"),
+    prioritizedFocus: jsonb("prioritized_focus"),
+    projectedFinishSeconds: integer("projected_finish_seconds"),
+    projectedFinishAssumptions: text("projected_finish_assumptions"),
+
+    aiModel: text("ai_model"),
+    generationStartedAt: timestamp("generation_started_at", { withTimezone: true }),
+    generationCompletedAt: timestamp("generation_completed_at", { withTimezone: true }),
+    generationError: text("generation_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("race_reports_user").on(table.userId)],
 );

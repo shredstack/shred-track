@@ -5,8 +5,11 @@ import {
   hyroxPracticeRaces,
   hyroxPracticeRaceSplits,
   hyroxStationBenchmarks,
+  hyroxProfiles,
+  hyroxRaceReports,
 } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
+import { inngest } from "@/inngest/client";
 
 // ---------------------------------------------------------------------------
 // GET — list user's practice races
@@ -45,6 +48,7 @@ interface RacePayload {
   notes?: string;
   divisionKey?: string;
   template?: string;
+  raceType?: "practice" | "actual";
   totalTimeSeconds: number;
   startedAt: string;
   completedAt: string;
@@ -66,6 +70,9 @@ export async function POST(request: Request) {
     );
   }
 
+  const raceType = body.raceType === "actual" ? "actual" : "practice";
+  const totalTimeSecondsRounded = Math.round(body.totalTimeSeconds);
+
   // Use a transaction for atomicity
   const result = await db.transaction(async (tx) => {
     // 1. Insert the race
@@ -80,6 +87,7 @@ export async function POST(request: Request) {
         startedAt: new Date(body.startedAt),
         completedAt: new Date(body.completedAt),
         notes: body.notes,
+        raceType,
       })
       .returning();
 
@@ -96,7 +104,7 @@ export async function POST(request: Request) {
       })),
     );
 
-    // 3. Check for personal bests on station segments
+    // 3. Check for personal bests on station segments + insert benchmarks
     const stationSplits = body.splits.filter((s) => s.segmentType === "station");
     const personalBests: string[] = [];
 
@@ -116,13 +124,14 @@ export async function POST(request: Request) {
 
       const isNewBest = !currentBest || timeSeconds < currentBest.timeSeconds;
 
-      // Always record the benchmark
+      // Always record the benchmark, linked to this race
       await tx.insert(hyroxStationBenchmarks).values({
         userId: user.id,
         station: split.segmentLabel,
         timeSeconds,
         source: "practice_race",
         notes: `Practice race: ${race.title}`,
+        sourceRaceId: race.id,
       });
 
       if (isNewBest) {
@@ -130,11 +139,51 @@ export async function POST(request: Request) {
       }
     }
 
-    return { race, personalBests };
+    // 4. Detect overall finish-time PR (compared to profile.bestFinishTimeSeconds).
+    const [profile] = await tx
+      .select()
+      .from(hyroxProfiles)
+      .where(eq(hyroxProfiles.userId, user.id))
+      .limit(1);
+
+    const priorBestFinishSeconds = profile?.bestFinishTimeSeconds ?? null;
+    // Tied times do NOT count as a PR.
+    const isFinishPR =
+      priorBestFinishSeconds == null ||
+      totalTimeSecondsRounded < priorBestFinishSeconds;
+
+    // 5. Pre-create a pending race report row so the GET endpoint can poll.
+    await tx
+      .insert(hyroxRaceReports)
+      .values({
+        raceId: race.id,
+        userId: user.id,
+        status: "pending",
+      })
+      .onConflictDoNothing();
+
+    return { race, personalBests, isFinishPR, priorBestFinishSeconds };
   });
+
+  // Fire Inngest event to generate the AI race report (fire-and-forget).
+  // Failures here should not break the save response.
+  try {
+    await inngest.send({
+      name: "hyrox/race.completed",
+      data: {
+        raceId: result.race.id,
+        userId: user.id,
+      },
+    });
+  } catch (err) {
+    console.error("Failed to dispatch hyrox/race.completed event:", err);
+  }
 
   return NextResponse.json({
     id: result.race.id,
     personalBests: result.personalBests,
+    isFinishPR: result.isFinishPR,
+    priorBestFinishSeconds: result.priorBestFinishSeconds,
+    raceType,
   });
 }

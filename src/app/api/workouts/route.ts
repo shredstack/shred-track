@@ -36,6 +36,7 @@ interface PartInput {
   amrapDurationSeconds?: number;
   emomIntervalSeconds?: number;
   repScheme?: string;
+  rounds?: number;
   notes?: string;
   movements: PartMovementInput[];
 }
@@ -189,6 +190,7 @@ export async function GET(req: NextRequest) {
         amrapDurationSeconds: p.amrapDurationSeconds,
         emomIntervalSeconds: p.emomIntervalSeconds,
         repScheme: p.repScheme,
+        rounds: p.rounds,
         notes: p.notes,
         movements: (movementsByPart.get(p.id) ?? []).map((m) => ({
           id: m.id,
@@ -375,6 +377,7 @@ export async function POST(req: NextRequest) {
         timeCapSeconds: firstPart.timeCapSeconds || null,
         amrapDurationSeconds: firstPart.amrapDurationSeconds || null,
         repScheme: firstPart.repScheme || null,
+        rounds: firstPart.rounds ?? null,
         workoutDate,
         published: published ?? false,
         source: source || "manual",
@@ -394,6 +397,7 @@ export async function POST(req: NextRequest) {
           amrapDurationSeconds: p.amrapDurationSeconds || null,
           emomIntervalSeconds: p.emomIntervalSeconds || null,
           repScheme: p.repScheme || null,
+          rounds: p.rounds ?? null,
           notes: p.notes || null,
         })
         .returning();
@@ -441,6 +445,7 @@ function normalizeParts(body: Record<string, unknown>): PartInput[] {
         timeCapSeconds: body.timeCapSeconds as number | undefined,
         amrapDurationSeconds: body.amrapDurationSeconds as number | undefined,
         repScheme: body.repScheme as string | undefined,
+        rounds: body.rounds as number | undefined,
         movements: body.movements as PartMovementInput[],
       },
     ];

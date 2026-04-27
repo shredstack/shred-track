@@ -48,6 +48,7 @@ function emptyPart(): WorkoutBuilderPart {
     amrapDurationMinutes: "",
     emomIntervalSeconds: "",
     repScheme: "",
+    rounds: "",
     movements: [],
   };
 }
@@ -66,6 +67,8 @@ function partSummary(part: WorkoutBuilderPart, idx: number): string {
   const parts: string[] = [];
   parts.push(part.label || `Part ${String.fromCharCode(65 + idx)}`);
   parts.push(WORKOUT_TYPE_LABELS[part.workoutType]);
+  if (part.workoutType === "for_time" && part.rounds)
+    parts.push(`${part.rounds} rds`);
   if (part.repScheme) parts.push(part.repScheme);
   if (part.workoutType === "amrap" && part.amrapDurationMinutes)
     parts.push(`${part.amrapDurationMinutes} min`);
@@ -110,11 +113,6 @@ function PartCard({
   onMove,
   onDelete,
 }: PartCardProps) {
-  // Rep scheme is most meaningful for For Load ("5-5-5-5-5", "1RM"). For other
-  // types, per-movement rep specs carry the reps; a top-level rep scheme is
-  // redundant, so we hide the field.
-  const showRepScheme = part.workoutType === "for_load";
-
   const defaultLabel = `Part ${String.fromCharCode(65 + index)}`;
 
   return (
@@ -251,25 +249,24 @@ function PartCard({
             </div>
           )}
 
-          {showRepScheme && (
+          {part.workoutType === "for_time" && (
             <div className="space-y-1">
               <Label className="text-xs text-muted-foreground">
-                Rep Scheme
+                Rounds (optional)
               </Label>
               <Input
-                value={part.repScheme}
-                onChange={(e) => onChange({ repScheme: e.target.value })}
-                placeholder={
-                  part.workoutType === "for_load"
-                    ? "e.g. 5-5-5-5-5 or 1RM"
-                    : "e.g. 21-15-9 or 5 rounds"
-                }
+                type="number"
+                min={1}
+                value={part.rounds}
+                onChange={(e) => onChange({ rounds: e.target.value })}
+                placeholder="e.g. 5"
                 className="h-8"
               />
             </div>
           )}
 
           <MovementListBuilder
+            workoutType={part.workoutType}
             movements={part.movements}
             onChange={onMovementsChange}
           />
@@ -582,6 +579,9 @@ export function SmartBuilder({ onSave, onCancel }: SmartBuilderProps) {
                   </Badge>
                   <span className="text-xs text-muted-foreground">
                     {WORKOUT_TYPE_LABELS[part.workoutType]}
+                    {part.workoutType === "for_time" && part.rounds
+                      ? ` · ${part.rounds} rds`
+                      : ""}
                     {part.repScheme ? ` · ${part.repScheme}` : ""}
                     {part.workoutType === "amrap" && part.amrapDurationMinutes
                       ? ` · ${part.amrapDurationMinutes} min`

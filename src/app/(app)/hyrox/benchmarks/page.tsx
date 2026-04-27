@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import {
   Timer,
   Activity,
@@ -10,7 +10,6 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   useActivePlan,
@@ -19,6 +18,8 @@ import {
   type StationProgress,
   type WeeklyTotal,
 } from "@/hooks/useHyroxPlan";
+import { StationBestTimes } from "@/components/hyrox/race-history/station-best-times";
+import { useHyroxStationBenchmarks } from "@/hooks/useHyroxStationBenchmarks";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -324,12 +325,17 @@ export default function HyroxBenchmarksPage() {
   const { data: plan } = useActivePlan();
   const planId = plan?.generationStatus === "completed" ? plan.id : null;
   const { data: progress, isLoading } = useProgressData(planId);
+  const { data: stationBenchmarks } = useHyroxStationBenchmarks();
 
-  if (!plan || plan.generationStatus !== "completed") {
+  const hasStationBenchmarks = (stationBenchmarks?.length ?? 0) > 0;
+  const planIsActive = plan && plan.generationStatus === "completed";
+
+  // No active plan AND no station benchmark history → full empty state.
+  if (!planIsActive && !hasStationBenchmarks) {
     return <EmptyState />;
   }
 
-  if (isLoading) {
+  if (isLoading && planIsActive && !stationBenchmarks) {
     return (
       <div className="flex flex-col gap-4 animate-pulse">
         <div className="h-28 rounded-xl bg-white/[0.04]" />
@@ -339,33 +345,34 @@ export default function HyroxBenchmarksPage() {
     );
   }
 
-  if (
-    !progress ||
-    (progress.runs.length === 0 &&
-      progress.stations.length === 0 &&
-      progress.weeklyTotals.every((t) => t.sessionsCompleted === 0))
-  ) {
-    return <EmptyState />;
-  }
+  const hasPlanProgress =
+    progress &&
+    (progress.runs.length > 0 ||
+      progress.stations.length > 0 ||
+      progress.weeklyTotals.some((t) => t.sessionsCompleted > 0));
 
   return (
     <div className="flex flex-col gap-4">
       {/* Page header */}
       <div>
-        <h2 className="text-lg font-bold">Training Progress</h2>
+        <h2 className="text-lg font-bold">Benchmarks &amp; Progress</h2>
         <p className="text-xs text-muted-foreground">
-          Your logged results across the training plan
+          Station best times, race-day splits, and training-plan results.
         </p>
       </div>
 
-      {/* Weekly overview */}
-      <WeeklyOverview totals={progress.weeklyTotals} />
+      {/* Station best times — sourced from hyrox_station_benchmarks (includes practice races) */}
+      <StationBestTimes />
 
-      {/* Run progress */}
-      <RunProgressTable runs={progress.runs} />
+      {planIsActive && hasPlanProgress && progress && (
+        <>
+          <WeeklyOverview totals={progress.weeklyTotals} />
+          <RunProgressTable runs={progress.runs} />
+          <StationProgressTable stations={progress.stations} />
+        </>
+      )}
 
-      {/* Station progress */}
-      <StationProgressTable stations={progress.stations} />
+      {!planIsActive && !hasStationBenchmarks && <EmptyState />}
     </div>
   );
 }

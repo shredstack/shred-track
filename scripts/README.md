@@ -54,6 +54,9 @@ uv run scrape_hyrox.py --since 2026-01-01 --events "Las Vegas" --pick
 
 # Skip materialized view refresh
 uv run scrape_hyrox.py --since 2024-04-01 --no-refresh-mv
+
+# Replay only the dropped detail pages from a previous run's error file
+uv run scrape_hyrox.py --retry-failed logs/scrape_errors_20260426_150500.json --env prod
 ```
 
 ### How It Works
@@ -73,12 +76,12 @@ uv run scrape_hyrox.py --since 2024-04-01 --no-refresh-mv
 ### Rate Limiting
 
 - 0.8–1.5s delay between requests (with jitter)
-- Exponential backoff on failures (3 retries)
+- 6 retries on 5xx / connection errors with escalating backoff (~1s, 2s, 4s, 15s, 45s, 120s + jitter). 4xx responses are not retried.
 - User-Agent identifies the script
 
 ### Parse Errors
 
-Errors are logged to `scripts/logs/scrape_<timestamp>.json` for review.
+Errors are logged to `scripts/logs/scrape_errors_<timestamp>.json` for review. `fetch_failed` entries include the metadata needed to replay them via `--retry-failed`, so dropped detail pages can be recovered without re-scraping the whole event.
 
 ## Model Training
 
