@@ -18,13 +18,18 @@ import {
   Flame,
   Trash2,
 } from "lucide-react";
-import type { WorkoutDisplay, WorkoutPartDisplay } from "@/types/crossfit";
+import type {
+  WorkoutDisplay,
+  WorkoutMovementDisplay,
+  WorkoutPartDisplay,
+} from "@/types/crossfit";
 import {
   WORKOUT_TYPE_LABELS,
   WORKOUT_TYPE_COLORS,
 } from "@/types/crossfit";
 import { formatTime } from "@/lib/workout-parser";
 import { SetWeightBreakdown } from "@/components/crossfit/set-weight-breakdown";
+import { AmrapScoreBreakdown } from "@/components/crossfit/amrap-score-breakdown";
 
 interface WorkoutCardProps {
   workout: WorkoutDisplay;
@@ -84,6 +89,13 @@ function ScoreRow({ part }: { part: WorkoutPartDisplay }) {
         )}
       </div>
 
+      {/* Round-by-round breakdown for AMRAP parts when we have parsed
+          rep schemes / metric values to walk. Self-renders nothing
+          when decomposition isn't possible. */}
+      {part.workoutType === "amrap" && (
+        <AmrapScoreBreakdown part={part} score={s} />
+      )}
+
       {/* Per-set breakdown for for_load parts */}
       {part.workoutType === "for_load" &&
         s.movementDetails &&
@@ -117,6 +129,35 @@ function ScoreRow({ part }: { part: WorkoutPartDisplay }) {
           })}
     </div>
   );
+}
+
+// Formats the gendered metric pair for display ("135/95 lb",
+// "15/12 cal", "400/320 m"), or null if no metric is set on the
+// movement. The unit is implied by the movement's metric type.
+function formatMovementMetric(mov: WorkoutMovementDisplay): string | null {
+  if (mov.metricType === "calories") {
+    if (mov.prescribedCaloriesMale == null && mov.prescribedCaloriesFemale == null)
+      return null;
+    return `${mov.prescribedCaloriesMale ?? "?"}${
+      mov.prescribedCaloriesFemale != null ? `/${mov.prescribedCaloriesFemale}` : ""
+    } cal`;
+  }
+  if (mov.metricType === "distance") {
+    if (mov.prescribedDistanceMale == null && mov.prescribedDistanceFemale == null)
+      return null;
+    return `${mov.prescribedDistanceMale ?? "?"}${
+      mov.prescribedDistanceFemale != null ? `/${mov.prescribedDistanceFemale}` : ""
+    } m`;
+  }
+  // weight is the catch-all (also covers older rows where metric_type
+  // wasn't set when the workout was created — they default to "reps" but
+  // may still carry weight values for legacy reasons).
+  if (mov.prescribedWeightMale || mov.prescribedWeightFemale) {
+    return `${mov.prescribedWeightMale || "?"}${
+      mov.prescribedWeightFemale ? `/${mov.prescribedWeightFemale}` : ""
+    } lb`;
+  }
+  return null;
 }
 
 function parseRepsPerSet(repScheme: string): number | undefined {
@@ -193,12 +234,7 @@ function PartSection({
 
       <div className="space-y-1.5 rounded-lg bg-white/[0.02] border border-white/[0.04] p-3">
         {part.movements.map((mov) => {
-          const hasWeight = mov.prescribedWeightMale || mov.prescribedWeightFemale;
-          const weightText = hasWeight
-            ? `${mov.prescribedWeightMale || "?"}${
-                mov.prescribedWeightFemale ? `/${mov.prescribedWeightFemale}` : ""
-              } lb`
-            : null;
+          const metricText = formatMovementMetric(mov);
           const prefix =
             mov.equipmentCount && mov.equipmentCount > 1
               ? `${mov.equipmentCount} × `
@@ -215,13 +251,13 @@ function PartSection({
                   </span>
                 )}
                 <span className="text-foreground/85">{mov.movementName}</span>
-                {weightText && (
+                {metricText && (
                   <span className="ml-1.5 text-xs text-muted-foreground font-mono">
                     ({prefix}
-                    {weightText})
+                    {metricText})
                   </span>
                 )}
-                {!hasWeight && prefix && (
+                {!metricText && prefix && (
                   <span className="ml-1.5 text-xs text-muted-foreground font-mono">
                     ({mov.equipmentCount} DBs)
                   </span>

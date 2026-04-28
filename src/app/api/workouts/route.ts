@@ -13,6 +13,10 @@ import {
 import { eq, desc, and, inArray, gte, lte, or, ilike } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import type { WorkoutType } from "@/types/crossfit";
+import {
+  parseRepScheme,
+  type RepSchemeParsed,
+} from "@/lib/crossfit/rep-scheme-parser";
 
 // ============================================
 // Types
@@ -24,6 +28,14 @@ interface PartMovementInput {
   prescribedReps?: string;
   prescribedWeightMale?: number | string;
   prescribedWeightFemale?: number | string;
+  prescribedCaloriesMale?: number | string;
+  prescribedCaloriesFemale?: number | string;
+  prescribedDistanceMale?: number | string;
+  prescribedDistanceFemale?: number | string;
+  // Hint flag from the builder. When true and the parsed shape comes back
+  // as a closed arithmetic sequence, the server promotes it to an open
+  // ladder before persisting. See rep-scheme-parser for the rules.
+  promoteSequenceToLadder?: boolean;
   equipmentCount?: number;
   rxStandard?: string;
   notes?: string;
@@ -122,12 +134,18 @@ export async function GET(req: NextRequest) {
         prescribedReps: workoutMovements.prescribedReps,
         prescribedWeightMale: workoutMovements.prescribedWeightMale,
         prescribedWeightFemale: workoutMovements.prescribedWeightFemale,
+        prescribedCaloriesMale: workoutMovements.prescribedCaloriesMale,
+        prescribedCaloriesFemale: workoutMovements.prescribedCaloriesFemale,
+        prescribedDistanceMale: workoutMovements.prescribedDistanceMale,
+        prescribedDistanceFemale: workoutMovements.prescribedDistanceFemale,
+        repSchemeParsed: workoutMovements.repSchemeParsed,
         equipmentCount: workoutMovements.equipmentCount,
         rxStandard: workoutMovements.rxStandard,
         notes: workoutMovements.notes,
         movementName: movements.canonicalName,
         movementCategory: movements.category,
         isWeighted: movements.isWeighted,
+        metricType: movements.metricType,
       })
       .from(workoutMovements)
       .innerJoin(movements, eq(movements.id, workoutMovements.movementId))
@@ -198,10 +216,16 @@ export async function GET(req: NextRequest) {
           movementName: m.movementName,
           category: m.movementCategory,
           isWeighted: m.isWeighted,
+          metricType: m.metricType,
           orderIndex: m.orderIndex,
           prescribedReps: m.prescribedReps,
           prescribedWeightMale: m.prescribedWeightMale,
           prescribedWeightFemale: m.prescribedWeightFemale,
+          prescribedCaloriesMale: m.prescribedCaloriesMale,
+          prescribedCaloriesFemale: m.prescribedCaloriesFemale,
+          prescribedDistanceMale: m.prescribedDistanceMale,
+          prescribedDistanceFemale: m.prescribedDistanceFemale,
+          repSchemeParsed: m.repSchemeParsed,
           equipmentCount: m.equipmentCount,
           rxStandard: m.rxStandard,
           notes: m.notes,
@@ -332,6 +356,10 @@ export async function POST(req: NextRequest) {
             prescribedReps: m.prescribedReps,
             prescribedWeightMale: m.prescribedWeightMale,
             prescribedWeightFemale: m.prescribedWeightFemale,
+            // Parse benchmark rep schemes too — benchmarks like "Cindy"
+            // (5-10-15 ladder territory) get the same structured shape as
+            // user-built workouts.
+            repSchemeParsed: parseAndPromote(m.prescribedReps, false),
             rxStandard: m.rxStandard,
             notes: m.notes,
           }))
@@ -412,6 +440,17 @@ export async function POST(req: NextRequest) {
             prescribedReps: m.prescribedReps || null,
             prescribedWeightMale: m.prescribedWeightMale?.toString() || null,
             prescribedWeightFemale: m.prescribedWeightFemale?.toString() || null,
+            prescribedCaloriesMale: toIntOrNull(m.prescribedCaloriesMale),
+            prescribedCaloriesFemale: toIntOrNull(m.prescribedCaloriesFemale),
+            prescribedDistanceMale: toIntOrNull(m.prescribedDistanceMale),
+            prescribedDistanceFemale: toIntOrNull(m.prescribedDistanceFemale),
+            // Server is the single source of truth for the parsed shape —
+            // we ignore any client-provided value to avoid drift if the
+            // parser changes.
+            repSchemeParsed: parseAndPromote(
+              m.prescribedReps,
+              m.promoteSequenceToLadder ?? false
+            ),
             equipmentCount: m.equipmentCount ?? null,
             rxStandard: m.rxStandard || null,
             notes: m.notes || null,
@@ -424,6 +463,47 @@ export async function POST(req: NextRequest) {
   });
 
   return NextResponse.json(result, { status: 201 });
+}
+
+// ============================================
+// Helpers
+// ============================================
+
+function toIntOrNull(value: number | string | undefined | null): number | null {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : parseInt(value, 10);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}
+
+// Parse + apply the "Continue as ladder?" promotion the builder may have
+// requested. Returns null when the input doesn't parse — the score logger
+// degrades cleanly to today's behavior in that case.
+function parseAndPromote(
+  reps: string | null | undefined,
+  promote: boolean
+): RepSchemeParsed | null {
+  const parsed = parseRepScheme(reps ?? null);
+  if (!parsed) return null;
+  if (
+    promote &&
+    parsed.kind === "sequence" &&
+    parsed.reps.length >= 3
+  ) {
+    const step = parsed.reps[1] - parsed.reps[0];
+    if (step <= 0) return parsed;
+    let ok = true;
+    for (let i = 2; i < parsed.reps.length; i++) {
+      if (parsed.reps[i] - parsed.reps[i - 1] !== step) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) {
+      return { kind: "ladder", start: parsed.reps[0], step, openEnded: true };
+    }
+  }
+  return parsed;
 }
 
 // ============================================

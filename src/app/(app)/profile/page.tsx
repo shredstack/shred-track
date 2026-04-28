@@ -71,18 +71,28 @@ function GeneralSection() {
   const updateUser = useUpdateUserProfile();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
+  // "" represents "unset" in the form; on save we send null.
+  const [gender, setGender] = useState<"" | "male" | "female" | "other">("");
 
   const startEditing = useCallback(() => {
     if (user) {
       setName(user.name);
+      const g = user.gender;
+      setGender(g === "male" || g === "female" || g === "other" ? g : "");
       setEditing(true);
     }
   }, [user]);
 
   const save = useCallback(() => {
     if (!name.trim()) return;
-    updateUser.mutate({ name: name.trim() }, { onSuccess: () => setEditing(false) });
-  }, [name, updateUser]);
+    updateUser.mutate(
+      {
+        name: name.trim(),
+        gender: gender === "" ? null : gender,
+      },
+      { onSuccess: () => setEditing(false) }
+    );
+  }, [name, gender, updateUser]);
 
   if (isLoading) {
     return (
@@ -115,6 +125,27 @@ function GeneralSection() {
               <Input value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             <div className="space-y-2">
+              <Label>Gender</Label>
+              <select
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={gender}
+                onChange={(e) =>
+                  setGender(
+                    e.target.value as "" | "male" | "female" | "other"
+                  )
+                }
+              >
+                <option value="">— not set —</option>
+                <option value="female">Female</option>
+                <option value="male">Male</option>
+                <option value="other">Other</option>
+              </select>
+              <p className="text-[11px] text-muted-foreground">
+                Used to pick the right side of gendered Rx (e.g. 12 cal F /
+                15 cal M) when decomposing AMRAP scores.
+              </p>
+            </div>
+            <div className="space-y-2">
               <Label className="text-muted-foreground">Email</Label>
               <p className="text-sm">{user.email}</p>
             </div>
@@ -138,6 +169,12 @@ function GeneralSection() {
             <div>
               <p className="text-xs text-muted-foreground">Name</p>
               <p className="text-sm font-medium">{user.name}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Gender</p>
+              <p className="text-sm font-medium capitalize">
+                {user.gender ?? "—"}
+              </p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Email</p>

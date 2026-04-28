@@ -63,6 +63,35 @@ function createEmptyForm(): WorkoutBuilderForm {
   };
 }
 
+// Single-line metric summary for the review screen. Returns the gendered
+// pair for whichever metric type the movement uses, or null when the
+// builder hasn't filled in any metric yet.
+function formatBuilderMovementMetric(
+  m: WorkoutBuilderMovement
+): string | null {
+  const prefix =
+    m.equipmentCount && m.equipmentCount > 1 ? `${m.equipmentCount} × ` : "";
+  if (m.metricType === "weight") {
+    if (!m.prescribedWeightMale && !m.prescribedWeightFemale) return null;
+    return `${prefix}${m.prescribedWeightMale || "?"}${
+      m.prescribedWeightFemale ? `/${m.prescribedWeightFemale}` : ""
+    } lb`;
+  }
+  if (m.metricType === "calories") {
+    if (!m.prescribedCaloriesMale && !m.prescribedCaloriesFemale) return null;
+    return `${m.prescribedCaloriesMale || "?"}${
+      m.prescribedCaloriesFemale ? `/${m.prescribedCaloriesFemale}` : ""
+    } cal`;
+  }
+  if (m.metricType === "distance") {
+    if (!m.prescribedDistanceMale && !m.prescribedDistanceFemale) return null;
+    return `${m.prescribedDistanceMale || "?"}${
+      m.prescribedDistanceFemale ? `/${m.prescribedDistanceFemale}` : ""
+    } m`;
+  }
+  return null;
+}
+
 function partSummary(part: WorkoutBuilderPart, idx: number): string {
   const parts: string[] = [];
   parts.push(part.label || `Part ${String.fromCharCode(65 + idx)}`);
@@ -595,32 +624,28 @@ export function SmartBuilder({ onSave, onCancel }: SmartBuilderProps) {
                 </div>
                 <Separator />
                 <div className="space-y-1">
-                  {part.movements.map((m, i) => (
-                    <div
-                      key={m.tempId}
-                      className="flex items-center gap-2 text-sm"
-                    >
-                      <span className="text-muted-foreground">{i + 1}.</span>
-                      <span className="font-medium">{m.movementName}</span>
-                      {m.prescribedReps && (
-                        <span className="text-muted-foreground">
-                          — {m.prescribedReps}
-                        </span>
-                      )}
-                      {m.prescribedWeightMale && (
-                        <span className="text-xs text-muted-foreground">
-                          ({m.equipmentCount && m.equipmentCount > 1
-                            ? `${m.equipmentCount} × `
-                            : ""}
-                          {m.prescribedWeightMale}
-                          {m.prescribedWeightFemale
-                            ? `/${m.prescribedWeightFemale}`
-                            : ""}{" "}
-                          lb)
-                        </span>
-                      )}
-                    </div>
-                  ))}
+                  {part.movements.map((m, i) => {
+                    const metric = formatBuilderMovementMetric(m);
+                    return (
+                      <div
+                        key={m.tempId}
+                        className="flex items-center gap-2 text-sm"
+                      >
+                        <span className="text-muted-foreground">{i + 1}.</span>
+                        <span className="font-medium">{m.movementName}</span>
+                        {m.prescribedReps && (
+                          <span className="text-muted-foreground">
+                            — {m.prescribedReps}
+                          </span>
+                        )}
+                        {metric && (
+                          <span className="text-xs text-muted-foreground">
+                            ({metric})
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             ))}

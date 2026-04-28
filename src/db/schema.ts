@@ -100,6 +100,7 @@ export const movements = pgTable(
     category: text("category").notNull(), // barbell | dumbbell | kettlebell | gymnastics | bodyweight | monostructural | accessory | other
     isWeighted: boolean("is_weighted").default(false).notNull(),
     is1rmApplicable: boolean("is_1rm_applicable").default(false).notNull(),
+    metricType: text("metric_type").default("reps").notNull(), // 'reps' | 'weight' | 'calories' | 'distance'
     commonRxWeightMale: numeric("common_rx_weight_male"),
     commonRxWeightFemale: numeric("common_rx_weight_female"),
     videoUrl: text("video_url"),
@@ -164,6 +165,11 @@ export const workoutMovements = pgTable("workout_movements", {
   prescribedReps: text("prescribed_reps"),
   prescribedWeightMale: numeric("prescribed_weight_male"),
   prescribedWeightFemale: numeric("prescribed_weight_female"),
+  prescribedCaloriesMale: integer("prescribed_calories_male"),
+  prescribedCaloriesFemale: integer("prescribed_calories_female"),
+  prescribedDistanceMale: integer("prescribed_distance_male"), // meters
+  prescribedDistanceFemale: integer("prescribed_distance_female"), // meters
+  repSchemeParsed: jsonb("rep_scheme_parsed"), // RepSchemeParsed | null — see lib/crossfit/rep-scheme-parser.ts
   equipmentCount: integer("equipment_count"),
   rxStandard: text("rx_standard"),
   notes: text("notes"),

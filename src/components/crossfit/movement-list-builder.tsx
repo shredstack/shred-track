@@ -1,19 +1,23 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import {
   Trash2,
   ChevronUp,
   ChevronDown,
   ChevronRight,
   Loader2,
+  Check,
 } from "lucide-react";
 import { MovementSearch } from "@/components/crossfit/movement-search";
 import { useCreateMovement } from "@/hooks/useMovements";
+import {
+  parseRepScheme,
+  canPromoteSequenceToLadder,
+} from "@/lib/crossfit/rep-scheme-parser";
 import type {
   WorkoutBuilderMovement,
   MovementOption,
@@ -60,9 +64,14 @@ export function MovementListBuilder({
         movementName: movement.canonicalName,
         category: movement.category,
         isWeighted: movement.isWeighted,
+        metricType: movement.metricType,
         prescribedReps: "",
         prescribedWeightMale: movement.commonRxWeightMale || "",
         prescribedWeightFemale: movement.commonRxWeightFemale || "",
+        prescribedCaloriesMale: "",
+        prescribedCaloriesFemale: "",
+        prescribedDistanceMale: "",
+        prescribedDistanceFemale: "",
         rxStandard: "",
         notes: "",
       };
@@ -86,9 +95,14 @@ export function MovementListBuilder({
           movementName: created.canonicalName,
           category: created.category,
           isWeighted: created.isWeighted,
+          metricType: created.metricType,
           prescribedReps: "",
           prescribedWeightMale: created.commonRxWeightMale || "",
           prescribedWeightFemale: created.commonRxWeightFemale || "",
+          prescribedCaloriesMale: "",
+          prescribedCaloriesFemale: "",
+          prescribedDistanceMale: "",
+          prescribedDistanceFemale: "",
           rxStandard: "",
           notes: "",
         };
@@ -206,30 +220,22 @@ export function MovementListBuilder({
 
               {/* Reps — always visible. For_load uses the per-movement rep
                   scheme (e.g. "10-10-7-7-3-3-3" for a deadlift wave). */}
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">
-                  {workoutType === "for_load" ? "Rep Scheme" : "Reps"}
-                </Label>
-                <Input
-                  value={mov.prescribedReps}
-                  onChange={(e) =>
-                    updateMovement(mov.tempId, {
-                      prescribedReps: e.target.value,
-                    })
-                  }
-                  placeholder={
-                    workoutType === "for_load"
-                      ? "e.g. 5-5-5-5-5, 10-10-7-7-3-3-3, 1RM"
-                      : "e.g. 21-15-9, 15, 400m"
-                  }
-                  className="h-7 text-xs"
-                />
-              </div>
+              <RepSchemeField
+                value={mov.prescribedReps}
+                onChange={(reps) =>
+                  updateMovement(mov.tempId, { prescribedReps: reps })
+                }
+                promoteSequenceToLadder={!!mov.promoteSequenceToLadder}
+                onPromoteChange={(promote) =>
+                  updateMovement(mov.tempId, {
+                    promoteSequenceToLadder: promote,
+                  })
+                }
+                workoutType={workoutType}
+              />
 
-              {/* Rx Weight — only meaningful when the workout prescribes a load.
-                  For_load is suppressed entirely (the athlete finds the load
-                  at score time). */}
-              {mov.isWeighted && showRxWeights && (
+              {/* Metric inputs — gender-split, metric-type-aware. */}
+              {mov.metricType === "weight" && showRxWeights && (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">
@@ -258,6 +264,84 @@ export function MovementListBuilder({
                         })
                       }
                       placeholder="e.g. 95"
+                      className="h-7 text-xs"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {mov.metricType === "calories" && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">
+                      Cals (M)
+                    </Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={mov.prescribedCaloriesMale}
+                      onChange={(e) =>
+                        updateMovement(mov.tempId, {
+                          prescribedCaloriesMale: e.target.value,
+                        })
+                      }
+                      placeholder="e.g. 15"
+                      className="h-7 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">
+                      Cals (F)
+                    </Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={mov.prescribedCaloriesFemale}
+                      onChange={(e) =>
+                        updateMovement(mov.tempId, {
+                          prescribedCaloriesFemale: e.target.value,
+                        })
+                      }
+                      placeholder="e.g. 12"
+                      className="h-7 text-xs"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {mov.metricType === "distance" && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">
+                      Distance (M) — meters
+                    </Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={mov.prescribedDistanceMale}
+                      onChange={(e) =>
+                        updateMovement(mov.tempId, {
+                          prescribedDistanceMale: e.target.value,
+                        })
+                      }
+                      placeholder="e.g. 400"
+                      className="h-7 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">
+                      Distance (F) — meters
+                    </Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={mov.prescribedDistanceFemale}
+                      onChange={(e) =>
+                        updateMovement(mov.tempId, {
+                          prescribedDistanceFemale: e.target.value,
+                        })
+                      }
+                      placeholder="e.g. 320"
                       className="h-7 text-xs"
                     />
                   </div>
@@ -302,20 +386,45 @@ export function MovementListBuilder({
                   </div>
                 )}
 
-              {/* Expanded fields — weighted toggle + rx standard */}
+              {/* Expanded fields — metric type, weighted toggle, rx standard */}
               {isExpanded && (
                 <div className="space-y-2 pt-1">
-                  <div className="flex items-center gap-3">
-                    <Switch
-                      checked={mov.isWeighted}
-                      onCheckedChange={(checked) =>
-                        updateMovement(mov.tempId, { isWeighted: !!checked })
-                      }
-                      size="sm"
-                    />
+                  <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">
-                      Uses weight
+                      Metric type
                     </Label>
+                    <div className="flex flex-wrap gap-1">
+                      {(
+                        ["reps", "weight", "calories", "distance"] as const
+                      ).map((mt) => {
+                        const selected = mov.metricType === mt;
+                        return (
+                          <button
+                            key={mt}
+                            type="button"
+                            onClick={() => {
+                              const updates: Partial<WorkoutBuilderMovement> = {
+                                metricType: mt,
+                              };
+                              // Keep isWeighted in sync with metric type so the
+                              // for_load per-set weight UI continues to surface
+                              // for weighted movements without a separate toggle.
+                              if (mt === "weight") updates.isWeighted = true;
+                              if (mt === "calories" || mt === "distance")
+                                updates.isWeighted = false;
+                              updateMovement(mov.tempId, updates);
+                            }}
+                            className={`rounded-md px-2 py-0.5 text-xs font-medium capitalize ${
+                              selected
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted/50 text-muted-foreground hover:bg-muted"
+                            }`}
+                          >
+                            {mt}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">
@@ -359,4 +468,106 @@ export function MovementListBuilder({
       </div>
     </div>
   );
+}
+
+// ============================================
+// RepSchemeField
+// ============================================
+//
+// Free-text rep input with a small parser feedback chip and an optional
+// "Continue as ladder?" toggle for ascending arithmetic sequences. Parsing
+// is purely visual here — the canonical parsed shape is computed
+// server-side at write time.
+
+interface RepSchemeFieldProps {
+  value: string;
+  onChange: (next: string) => void;
+  promoteSequenceToLadder: boolean;
+  onPromoteChange: (next: boolean) => void;
+  workoutType?: WorkoutType;
+}
+
+function RepSchemeField({
+  value,
+  onChange,
+  promoteSequenceToLadder,
+  onPromoteChange,
+  workoutType,
+}: RepSchemeFieldProps) {
+  const parsed = parseRepScheme(value);
+  const promotable = !!(parsed && canPromoteSequenceToLadder(parsed));
+
+  // If the input changes such that the toggle no longer applies (e.g. user
+  // edits "3-6-9-12-15" to "3-6-7"), clear the saved intent so the form
+  // doesn't carry a stale "promote" flag.
+  useEffect(() => {
+    if (!promotable && promoteSequenceToLadder) {
+      onPromoteChange(false);
+    }
+  }, [promotable, promoteSequenceToLadder, onPromoteChange]);
+
+  let chip: React.ReactNode = null;
+  if (parsed) {
+    if (parsed.kind === "fixed") {
+      chip = `Fixed: ${parsed.reps}`;
+    } else if (parsed.kind === "sequence") {
+      chip =
+        promotable && promoteSequenceToLadder
+          ? `Ladder: ${ladderPreview(parsed.reps[0], parsed.reps[1] - parsed.reps[0])}`
+          : `Sequence: ${parsed.reps.join(", ")}`;
+    } else if (parsed.kind === "ladder") {
+      chip = `Ladder: ${ladderPreview(parsed.start, parsed.step)}`;
+    } else if (parsed.kind === "sets") {
+      chip = `Sets: ${parsed.sets} × ${parsed.reps}`;
+    }
+  }
+
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs text-muted-foreground">
+        {workoutType === "for_load" ? "Rep Scheme" : "Reps"}
+      </Label>
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={
+          workoutType === "for_load"
+            ? "e.g. 5-5-5-5-5, 10-10-7-7-3-3-3, 1RM"
+            : "e.g. 21-15-9, 3-6-9-12..., 5x5, 15"
+        }
+        className="h-7 text-xs"
+      />
+      {chip && (
+        <p className="flex items-center gap-1 text-[11px] text-emerald-400">
+          <Check className="size-3" />
+          {chip}
+        </p>
+      )}
+      {promotable && (
+        <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
+          <input
+            type="checkbox"
+            checked={promoteSequenceToLadder}
+            onChange={(e) => onPromoteChange(e.target.checked)}
+            className="size-3 cursor-pointer"
+          />
+          Continue as ladder?
+          {!promoteSequenceToLadder &&
+            parsed?.kind === "sequence" &&
+            parsed.reps.length >= 2 && (
+              <span className="text-muted-foreground/70">
+                Preview: {ladderPreview(parsed.reps[0], parsed.reps[1] - parsed.reps[0])}
+              </span>
+            )}
+        </label>
+      )}
+    </div>
+  );
+}
+
+// Render a few terms past the seed so the user sees the open-ended shape.
+function ladderPreview(start: number, step: number, terms = 7): string {
+  const out: number[] = [];
+  for (let i = 0; i < terms; i++) out.push(start + i * step);
+  return `${out.join(", ")}, …`;
 }

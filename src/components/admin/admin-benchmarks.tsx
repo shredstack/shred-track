@@ -168,17 +168,33 @@ export function AdminBenchmarks() {
         : "",
       repScheme: b.repScheme || "",
       isSystem: b.isSystem,
-      movements: b.movements.map((m) => ({
-        tempId: generateTempId(),
-        movementId: m.movementId,
-        movementName: m.movementName,
-        isWeighted: !!(m.prescribedWeightMale || m.prescribedWeightFemale),
-        prescribedReps: m.prescribedReps || "",
-        prescribedWeightMale: m.prescribedWeightMale?.toString() || "",
-        prescribedWeightFemale: m.prescribedWeightFemale?.toString() || "",
-        rxStandard: m.rxStandard || "",
-        notes: "",
-      })),
+      movements: b.movements.map((m) => {
+        // Best-effort metric type inference: benchmark loads only carry
+        // the male/female weights, not the underlying movement's metric
+        // type. Anything with a weight is "weight"; anything else is
+        // "reps" — close enough for the legacy admin path.
+        const isWeighted = !!(m.prescribedWeightMale || m.prescribedWeightFemale);
+        return {
+          tempId: generateTempId(),
+          movementId: m.movementId,
+          movementName: m.movementName,
+          isWeighted,
+          metricType: (isWeighted ? "weight" : "reps") as
+            | "weight"
+            | "reps"
+            | "calories"
+            | "distance",
+          prescribedReps: m.prescribedReps || "",
+          prescribedWeightMale: m.prescribedWeightMale?.toString() || "",
+          prescribedWeightFemale: m.prescribedWeightFemale?.toString() || "",
+          prescribedCaloriesMale: "",
+          prescribedCaloriesFemale: "",
+          prescribedDistanceMale: "",
+          prescribedDistanceFemale: "",
+          rxStandard: "",
+          notes: "",
+        };
+      }),
     });
     setEditingId(b.id);
     setError("");

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Search, Plus } from "lucide-react";
 import { useMovements } from "@/hooks/useMovements";
 import { PickerSheet } from "@/components/shared/picker-sheet";
+import { inferDefaultMetricType } from "@/lib/crossfit/rep-scheme-parser";
 import type { MovementOption, MovementCategory } from "@/types/crossfit";
 import { MOVEMENT_CATEGORY_COLORS } from "@/types/crossfit";
 
@@ -14,7 +15,9 @@ import { MOVEMENT_CATEGORY_COLORS } from "@/types/crossfit";
 // or when a caller explicitly opts out (e.g. tests, storybook).
 // ============================================
 
-const FALLBACK_MOVEMENTS: MovementOption[] = [
+type FallbackMovement = Omit<MovementOption, "metricType">;
+
+const FALLBACK_MOVEMENTS_RAW: FallbackMovement[] = [
   { id: "m-1", canonicalName: "Thruster", category: "barbell", isWeighted: true, is1rmApplicable: false },
   { id: "m-2", canonicalName: "Clean", category: "barbell", isWeighted: true, is1rmApplicable: true },
   { id: "m-3", canonicalName: "Power Clean", category: "barbell", isWeighted: true, is1rmApplicable: true },
@@ -77,6 +80,13 @@ const FALLBACK_MOVEMENTS: MovementOption[] = [
   { id: "m-95", canonicalName: "Double-Under", category: "monostructural", isWeighted: false, is1rmApplicable: false },
   { id: "m-96", canonicalName: "Single-Under", category: "monostructural", isWeighted: false, is1rmApplicable: false },
 ];
+
+const FALLBACK_MOVEMENTS: MovementOption[] = FALLBACK_MOVEMENTS_RAW.map(
+  (m) => ({
+    ...m,
+    metricType: inferDefaultMetricType(m.canonicalName, m.category, m.isWeighted),
+  })
+);
 
 // ============================================
 // Component

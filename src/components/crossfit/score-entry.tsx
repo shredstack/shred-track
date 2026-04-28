@@ -28,6 +28,7 @@ import { Save, Trophy } from "lucide-react";
 import { SetWeightBreakdown } from "@/components/crossfit/set-weight-breakdown";
 import type {
   WorkoutPartDisplay,
+  WorkoutMovementDisplay,
   ScoreInput,
   MovementScaling,
   ScoreDisplay,
@@ -37,10 +38,46 @@ import { WORKOUT_TYPE_LABELS } from "@/types/crossfit";
 const MAX_SET_INPUTS = 15;
 
 // Each modification type declares which contextual input (if any) it exposes.
-// - `weight` → numeric "Weight used (lb)" input
+// - `weight` → numeric input. For monostructural movements (Row, Run, etc.)
+//              we relabel this on render to "Cals used" / "Distance used"
+//              so the same column captures whatever the metric is.
 // - `reps`   → text "Reps / time completed" input (supports "2 min practice")
 // - `none`   → notes only
 type ScalingFieldType = "weight" | "reps" | "none";
+
+// Helper: returns the right label/unit/placeholder for the numeric scaling
+// field based on the movement's metric type. Re-uses the `actualWeight`
+// numeric column to store the value regardless of unit (the unit is
+// recovered at read time from the movement's metric type).
+function scaledMetricCopy(mov: WorkoutMovementDisplay): {
+  label: string;
+  unit: string;
+  placeholder: string;
+} {
+  if (mov.metricType === "calories") {
+    const rx = mov.prescribedCaloriesMale ?? mov.prescribedCaloriesFemale;
+    return {
+      label: "Cals used",
+      unit: "cal",
+      placeholder: rx != null ? `Rx: ${rx} cal` : "Cals completed",
+    };
+  }
+  if (mov.metricType === "distance") {
+    const rx = mov.prescribedDistanceMale ?? mov.prescribedDistanceFemale;
+    return {
+      label: "Distance used (m)",
+      unit: "m",
+      placeholder: rx != null ? `Rx: ${rx} m` : "Distance completed",
+    };
+  }
+  return {
+    label: "Weight used (lb)",
+    unit: "lb",
+    placeholder: mov.prescribedWeightMale
+      ? `Rx: ${mov.prescribedWeightMale} lb`
+      : "Weight used",
+  };
+}
 
 interface ScalingModification {
   value: string;
@@ -917,33 +954,43 @@ export function ScoreEntry({
                               </Select>
                             </div>
 
-                            {/* Contextual field driven by modification choice */}
+                            {/* Contextual field driven by modification choice.
+                                For monostructural movements (rowers, runs)
+                                we re-label "Weight used" to "Cals used" or
+                                "Distance used" with the gendered Rx as the
+                                placeholder hint — most "scaled" notes here
+                                are "did 10 cal instead of 12". */}
                             {selectedMod?.fieldType === "weight" && (
                               <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">
-                                  Weight used (lb)
-                                </Label>
-                                <Input
-                                  type="number"
-                                  value={scaling.actualWeight ?? ""}
-                                  onChange={(e) =>
-                                    updateMovementScaling(
-                                      activePart.id,
-                                      mov.movementId,
-                                      {
-                                        actualWeight: e.target.value
-                                          ? parseFloat(e.target.value)
-                                          : undefined,
-                                      }
-                                    )
-                                  }
-                                  placeholder={
-                                    mov.prescribedWeightMale
-                                      ? `Rx: ${mov.prescribedWeightMale} lb`
-                                      : "Weight used"
-                                  }
-                                  className="h-7 text-xs font-mono"
-                                />
+                                {(() => {
+                                  const { label, unit, placeholder } =
+                                    scaledMetricCopy(mov);
+                                  return (
+                                    <>
+                                      <Label className="text-xs text-muted-foreground">
+                                        {label}
+                                      </Label>
+                                      <Input
+                                        type="number"
+                                        value={scaling.actualWeight ?? ""}
+                                        onChange={(e) =>
+                                          updateMovementScaling(
+                                            activePart.id,
+                                            mov.movementId,
+                                            {
+                                              actualWeight: e.target.value
+                                                ? parseFloat(e.target.value)
+                                                : undefined,
+                                            }
+                                          )
+                                        }
+                                        placeholder={placeholder}
+                                        className="h-7 text-xs font-mono"
+                                        aria-label={`${label} (${unit})`}
+                                      />
+                                    </>
+                                  );
+                                })()}
                               </div>
                             )}
 

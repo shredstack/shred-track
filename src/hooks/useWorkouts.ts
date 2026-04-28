@@ -6,8 +6,10 @@ import type {
   WorkoutType,
   ScoreInput,
   MovementCategory,
+  MovementMetricType,
   ScoreDisplay,
 } from "@/types/crossfit";
+import type { RepSchemeParsed } from "@/lib/crossfit/rep-scheme-parser";
 
 // ============================================
 // Wire types (what the API returns)
@@ -19,10 +21,16 @@ interface WireMovement {
   movementName: string;
   category: string;
   isWeighted: boolean;
+  metricType: MovementMetricType;
   orderIndex: number;
   prescribedReps: string | null;
   prescribedWeightMale: string | null;
   prescribedWeightFemale: string | null;
+  prescribedCaloriesMale: number | null;
+  prescribedCaloriesFemale: number | null;
+  prescribedDistanceMale: number | null;
+  prescribedDistanceFemale: number | null;
+  repSchemeParsed: RepSchemeParsed | null;
   equipmentCount: number | null;
   rxStandard: string | null;
   notes: string | null;
@@ -90,10 +98,16 @@ function wireMovementToDisplay(m: WireMovement): WorkoutMovementDisplay {
     movementName: m.movementName,
     category: m.category as MovementCategory,
     isWeighted: m.isWeighted,
+    metricType: m.metricType,
     orderIndex: m.orderIndex,
     prescribedReps: m.prescribedReps ?? undefined,
     prescribedWeightMale: m.prescribedWeightMale ?? undefined,
     prescribedWeightFemale: m.prescribedWeightFemale ?? undefined,
+    prescribedCaloriesMale: m.prescribedCaloriesMale ?? undefined,
+    prescribedCaloriesFemale: m.prescribedCaloriesFemale ?? undefined,
+    prescribedDistanceMale: m.prescribedDistanceMale ?? undefined,
+    prescribedDistanceFemale: m.prescribedDistanceFemale ?? undefined,
+    repSchemeParsed: m.repSchemeParsed,
     equipmentCount: m.equipmentCount ?? undefined,
     rxStandard: m.rxStandard ?? undefined,
     notes: m.notes ?? undefined,
@@ -208,6 +222,11 @@ export interface CreatePartMovementInput {
   prescribedReps?: string;
   prescribedWeightMale?: number;
   prescribedWeightFemale?: number;
+  prescribedCaloriesMale?: number;
+  prescribedCaloriesFemale?: number;
+  prescribedDistanceMale?: number;
+  prescribedDistanceFemale?: number;
+  promoteSequenceToLadder?: boolean;
   equipmentCount?: number;
   rxStandard?: string;
   notes?: string;

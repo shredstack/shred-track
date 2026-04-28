@@ -27,7 +27,10 @@ export function useUserProfile() {
 export function useUpdateUserProfile() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { name: string }) => {
+    mutationFn: async (data: {
+      name?: string;
+      gender?: "male" | "female" | "other" | null;
+    }) => {
       const res = await fetch("/api/user/profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
