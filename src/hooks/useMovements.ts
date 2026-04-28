@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
   MovementOption,
   MovementCategory,
+  MovementMetricType,
 } from "@/types/crossfit";
 
 // ============================================
@@ -14,6 +15,7 @@ interface MovementRow {
   category: string;
   isWeighted: boolean;
   is1rmApplicable: boolean;
+  metricType: string | null;
   commonRxWeightMale: string | null;
   commonRxWeightFemale: string | null;
   videoUrl: string | null;
@@ -21,12 +23,22 @@ interface MovementRow {
 }
 
 function toMovementOption(row: MovementRow): MovementOption {
+  // Older API responses may pre-date the metric_type column, so default to
+  // "reps" for safety. The DB column is NOT NULL, so this only matters for
+  // tests / mocks.
+  const metricType: MovementMetricType =
+    row.metricType === "weight" ||
+    row.metricType === "calories" ||
+    row.metricType === "distance"
+      ? row.metricType
+      : "reps";
   return {
     id: row.id,
     canonicalName: row.canonicalName,
     category: row.category as MovementCategory,
     isWeighted: row.isWeighted,
     is1rmApplicable: row.is1rmApplicable,
+    metricType,
     commonRxWeightMale: row.commonRxWeightMale ?? undefined,
     commonRxWeightFemale: row.commonRxWeightFemale ?? undefined,
     videoUrl: row.videoUrl,

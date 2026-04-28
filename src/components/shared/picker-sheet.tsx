@@ -52,10 +52,23 @@ export function PickerSheet({
             className,
           )}
           // On iOS Safari the layout viewport doesn't shrink for the keyboard,
-          // so we lift the sheet ourselves. On Chromium with
-          // `interactive-widget=resizes-content` the inset is ~0, so this is a
-          // no-op there.
-          style={isMobile ? { bottom: keyboardInset } : undefined}
+          // so we lift the sheet ourselves and also clamp its max-height — dvh
+          // doesn't account for the keyboard, so without this clamp an
+          // 85dvh-tall sheet pushed up by the keyboard inset would extend
+          // above the viewport, hiding the title and any sticky header. On
+          // Chromium with `interactive-widget=resizes-content` the inset is
+          // ~0, so the clamp is a no-op there.
+          style={
+            isMobile
+              ? {
+                  bottom: keyboardInset,
+                  maxHeight:
+                    keyboardInset > 0
+                      ? `min(85dvh, calc(100dvh - ${keyboardInset}px - 1rem))`
+                      : undefined,
+                }
+              : undefined
+          }
         >
           {isMobile && (
             <div

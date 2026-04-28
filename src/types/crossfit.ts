@@ -1,3 +1,21 @@
+import type { RepSchemeParsed } from "@/lib/crossfit/rep-scheme-parser";
+
+// ============================================
+// Movement Metric Type
+// ============================================
+//
+// How a movement is measured. Drives which gender-split inputs the workout
+// builder UI exposes ("weight" → lb pair, "calories" → cal pair, etc.).
+
+export const MOVEMENT_METRIC_TYPES = [
+  "reps",
+  "weight",
+  "calories",
+  "distance",
+] as const;
+
+export type MovementMetricType = (typeof MOVEMENT_METRIC_TYPES)[number];
+
 // ============================================
 // Workout Types
 // ============================================
@@ -139,10 +157,16 @@ export interface WorkoutMovementDisplay {
   prescribedReps?: string;
   prescribedWeightMale?: string;
   prescribedWeightFemale?: string;
+  prescribedCaloriesMale?: number;
+  prescribedCaloriesFemale?: number;
+  prescribedDistanceMale?: number;
+  prescribedDistanceFemale?: number;
   equipmentCount?: number;
   rxStandard?: string;
   notes?: string;
   isWeighted: boolean;
+  metricType: MovementMetricType;
+  repSchemeParsed?: RepSchemeParsed | null;
 }
 
 export interface WorkoutPartDisplay {
@@ -252,9 +276,19 @@ export interface WorkoutBuilderMovement {
   movementName: string;
   category?: MovementCategory;
   isWeighted: boolean;
+  metricType: MovementMetricType;
   prescribedReps: string;
+  // When true and `prescribedReps` is a closed arithmetic sequence (e.g.
+  // "3-6-9-12-15"), the server promotes the parsed shape from `sequence`
+  // to an open `ladder`. Surfaces in the builder as a "Continue as
+  // ladder?" checkbox under the parser-feedback chip.
+  promoteSequenceToLadder?: boolean;
   prescribedWeightMale: string;
   prescribedWeightFemale: string;
+  prescribedCaloriesMale: string;
+  prescribedCaloriesFemale: string;
+  prescribedDistanceMale: string;
+  prescribedDistanceFemale: string;
   equipmentCount?: number;
   rxStandard: string;
   notes: string;
@@ -316,6 +350,7 @@ export interface MovementOption {
   category: MovementCategory;
   isWeighted: boolean;
   is1rmApplicable: boolean;
+  metricType: MovementMetricType;
   commonRxWeightMale?: string;
   commonRxWeightFemale?: string;
   videoUrl?: string | null;

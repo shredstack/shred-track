@@ -71,6 +71,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // metric_type defaults to "reps" in the column. Callers can pass an
+  // explicit value when seeding a known cal/distance/weight movement.
+  const metricType =
+    typeof body.metricType === "string" &&
+    ["reps", "weight", "calories", "distance"].includes(body.metricType)
+      ? (body.metricType as "reps" | "weight" | "calories" | "distance")
+      : undefined;
+
   try {
     const [movement] = await db
       .insert(movements)
@@ -79,6 +87,7 @@ export async function POST(req: NextRequest) {
         category: body.category || "other",
         isWeighted: body.isWeighted ?? false,
         is1rmApplicable: body.is1rmApplicable ?? false,
+        ...(metricType ? { metricType } : {}),
         commonRxWeightMale: body.commonRxWeightMale || null,
         commonRxWeightFemale: body.commonRxWeightFemale || null,
         createdBy: user.id,

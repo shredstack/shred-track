@@ -74,6 +74,19 @@ function builderPartToPayload(part: WorkoutBuilderPart): CreatePartInput | null 
       prescribedWeightFemale: m.prescribedWeightFemale
         ? parseFloat(m.prescribedWeightFemale)
         : undefined,
+      prescribedCaloriesMale: m.prescribedCaloriesMale
+        ? parseInt(m.prescribedCaloriesMale, 10)
+        : undefined,
+      prescribedCaloriesFemale: m.prescribedCaloriesFemale
+        ? parseInt(m.prescribedCaloriesFemale, 10)
+        : undefined,
+      prescribedDistanceMale: m.prescribedDistanceMale
+        ? parseInt(m.prescribedDistanceMale, 10)
+        : undefined,
+      prescribedDistanceFemale: m.prescribedDistanceFemale
+        ? parseInt(m.prescribedDistanceFemale, 10)
+        : undefined,
+      promoteSequenceToLadder: m.promoteSequenceToLadder || undefined,
       equipmentCount: m.equipmentCount,
       rxStandard: m.rxStandard || undefined,
     })),
