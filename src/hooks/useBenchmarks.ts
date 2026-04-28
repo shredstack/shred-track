@@ -1,15 +1,25 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { BenchmarkWorkout, BenchmarkCategory } from "@/types/crossfit";
+import type {
+  BenchmarkWorkout,
+  BenchmarkCategory,
+  BenchmarkCategoryName,
+  BenchmarkHistory,
+} from "@/types/crossfit";
 
 async function fetchBenchmarks(params?: {
   search?: string;
   category?: BenchmarkCategory;
+  benchmarkCategory?: BenchmarkCategoryName;
   communityId?: string;
+  includeStats?: boolean;
 }): Promise<BenchmarkWorkout[]> {
   const searchParams = new URLSearchParams();
   if (params?.search) searchParams.set("search", params.search);
   if (params?.category) searchParams.set("category", params.category);
+  if (params?.benchmarkCategory)
+    searchParams.set("benchmarkCategory", params.benchmarkCategory);
   if (params?.communityId) searchParams.set("communityId", params.communityId);
+  if (params?.includeStats) searchParams.set("includeStats", "true");
 
   const url = `/api/benchmarks${searchParams.toString() ? `?${searchParams}` : ""}`;
   const response = await fetch(url);
@@ -20,11 +30,25 @@ async function fetchBenchmarks(params?: {
 export function useBenchmarks(params?: {
   search?: string;
   category?: BenchmarkCategory;
+  benchmarkCategory?: BenchmarkCategoryName;
   communityId?: string;
+  includeStats?: boolean;
 }) {
   return useQuery({
     queryKey: ["benchmarks", params],
     queryFn: () => fetchBenchmarks(params),
+  });
+}
+
+export function useBenchmarkHistory(benchmarkId: string | null) {
+  return useQuery({
+    queryKey: ["benchmark-history", benchmarkId],
+    queryFn: async (): Promise<BenchmarkHistory> => {
+      const response = await fetch(`/api/benchmarks/${benchmarkId}/history`);
+      if (!response.ok) throw new Error("Failed to fetch benchmark history");
+      return response.json();
+    },
+    enabled: !!benchmarkId,
   });
 }
 
@@ -36,6 +60,7 @@ export function useCreateBenchmark() {
       name: string;
       description?: string;
       workoutType: string;
+      category?: BenchmarkCategoryName | null;
       timeCapSeconds?: number;
       amrapDurationSeconds?: number;
       repScheme?: string;
@@ -108,6 +133,7 @@ export function useCreateWorkoutFromBenchmark() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["workouts"] });
+      queryClient.invalidateQueries({ queryKey: ["benchmarks"] });
     },
   });
 }

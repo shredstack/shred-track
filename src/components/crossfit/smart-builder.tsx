@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,10 +16,10 @@ import {
   Trash2,
   ChevronUp,
   ChevronDown,
+  ChevronRight,
   Loader2,
 } from "lucide-react";
-import { WorkoutTypeSelector } from "@/components/crossfit/workout-type-selector";
-import { MovementListBuilder } from "@/components/crossfit/movement-list-builder";
+import { WorkoutPartConfig } from "@/components/crossfit/workout-part-config";
 import type {
   WorkoutBuilderForm,
   WorkoutBuilderPart,
@@ -29,6 +30,15 @@ import { WORKOUT_TYPE_LABELS, WORKOUT_TYPE_COLORS } from "@/types/crossfit";
 interface SmartBuilderProps {
   onSave: (form: WorkoutBuilderForm) => void;
   onCancel?: () => void;
+  // When provided, pre-populates the form for editing an existing workout.
+  // The save handler is responsible for routing to the update endpoint.
+  initialForm?: WorkoutBuilderForm;
+  // Label for the primary save action (e.g. "Save Changes" in edit mode).
+  saveLabel?: string;
+  // YYYY-MM-DD (caller-local). Used as the default workout date for new
+  // workouts so "Add Workout" while viewing a non-today date saves to the
+  // date the user is looking at, not today.
+  defaultWorkoutDate?: string;
 }
 
 type Step = "build" | "review";
@@ -53,12 +63,20 @@ function emptyPart(): WorkoutBuilderPart {
   };
 }
 
-function createEmptyForm(): WorkoutBuilderForm {
-  const today = new Date().toISOString().split("T")[0];
+function createEmptyForm(workoutDate?: string): WorkoutBuilderForm {
+  // Fall back to local-today (NOT toISOString, which is UTC and can drift
+  // the date by one in positive timezones).
+  const fallback = (() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  })();
   return {
     title: "",
     description: "",
-    workoutDate: today,
+    workoutDate: workoutDate || fallback,
     parts: [emptyPart()],
   };
 }
@@ -98,11 +116,15 @@ function partSummary(part: WorkoutBuilderPart, idx: number): string {
   parts.push(WORKOUT_TYPE_LABELS[part.workoutType]);
   if (part.workoutType === "for_time" && part.rounds)
     parts.push(`${part.rounds} rds`);
+  if (part.workoutType === "for_reps" && part.structure === "tabata")
+    parts.push("Tabata");
   if (part.repScheme) parts.push(part.repScheme);
   if (part.workoutType === "amrap" && part.amrapDurationMinutes)
     parts.push(`${part.amrapDurationMinutes} min`);
   if (
-    (part.workoutType === "for_time" || part.workoutType === "emom") &&
+    (part.workoutType === "for_time" ||
+      part.workoutType === "emom" ||
+      part.workoutType === "for_reps") &&
     part.timeCapMinutes
   )
     parts.push(`${part.timeCapMinutes} min`);
@@ -149,9 +171,16 @@ function PartCard({
       <div className="flex items-center gap-2">
         <button
           type="button"
-          className="flex flex-1 items-center gap-2 text-left"
+          className="flex flex-1 items-center gap-2 text-left min-w-0"
           onClick={onToggleCollapse}
+          aria-expanded={!isCollapsed}
+          aria-label={isCollapsed ? "Expand part" : "Collapse part"}
         >
+          <ChevronRight
+            className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${
+              isCollapsed ? "" : "rotate-90"
+            }`}
+          />
           <Badge
             variant="outline"
             className={WORKOUT_TYPE_COLORS[part.workoutType]}
@@ -213,91 +242,11 @@ function PartCard({
             </div>
           )}
 
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Type</Label>
-            <WorkoutTypeSelector
-              value={part.workoutType}
-              onSelect={(type) => onChange({ workoutType: type })}
-            />
-          </div>
-
-          {(part.workoutType === "for_time" || part.workoutType === "emom") && (
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">
-                {part.workoutType === "emom"
-                  ? "EMOM Duration (min)"
-                  : "Time Cap (min)"}
-              </Label>
-              <Input
-                type="number"
-                min={0}
-                value={part.timeCapMinutes}
-                onChange={(e) => onChange({ timeCapMinutes: e.target.value })}
-                placeholder={
-                  part.workoutType === "emom" ? "e.g. 20" : "Optional"
-                }
-                className="h-8"
-              />
-            </div>
-          )}
-
-          {part.workoutType === "amrap" && (
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">
-                AMRAP Duration (min)
-              </Label>
-              <Input
-                type="number"
-                min={1}
-                value={part.amrapDurationMinutes}
-                onChange={(e) =>
-                  onChange({ amrapDurationMinutes: e.target.value })
-                }
-                placeholder="e.g. 12"
-                className="h-8"
-              />
-            </div>
-          )}
-
-          {part.workoutType === "emom" && (
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">
-                Interval (seconds)
-              </Label>
-              <Input
-                type="number"
-                min={30}
-                step={30}
-                value={part.emomIntervalSeconds}
-                onChange={(e) =>
-                  onChange({ emomIntervalSeconds: e.target.value })
-                }
-                placeholder="60"
-                className="h-8"
-              />
-            </div>
-          )}
-
-          {part.workoutType === "for_time" && (
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">
-                Rounds (optional)
-              </Label>
-              <Input
-                type="number"
-                min={1}
-                value={part.rounds}
-                onChange={(e) => onChange({ rounds: e.target.value })}
-                placeholder="e.g. 5"
-                className="h-8"
-              />
-            </div>
-          )}
-
-          <MovementListBuilder
-            workoutType={part.workoutType}
-            movements={part.movements}
-            onChange={onMovementsChange}
+          <WorkoutPartConfig
+            part={part}
+            onChange={onChange}
+            onMovementsChange={onMovementsChange}
+            compact
           />
         </div>
       )}
@@ -309,10 +258,21 @@ function PartCard({
 // Smart Builder
 // ============================================
 
-export function SmartBuilder({ onSave, onCancel }: SmartBuilderProps) {
+export function SmartBuilder({
+  onSave,
+  onCancel,
+  initialForm,
+  saveLabel,
+  defaultWorkoutDate,
+}: SmartBuilderProps) {
   const [step, setStep] = useState<Step>("build");
-  const [form, setForm] = useState<WorkoutBuilderForm>(createEmptyForm);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [form, setForm] = useState<WorkoutBuilderForm>(
+    () => initialForm ?? createEmptyForm(defaultWorkoutDate)
+  );
+  // Always start with every part expanded — collapsed parts hide the edit
+  // surface and confuse users into thinking parts can only be reordered or
+  // deleted. The user can collapse manually via the chevron.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [suggestion, setSuggestion] = useState<{
     title: string;
     source: string;
@@ -611,12 +571,17 @@ export function SmartBuilder({ onSave, onCancel }: SmartBuilderProps) {
                     {part.workoutType === "for_time" && part.rounds
                       ? ` · ${part.rounds} rds`
                       : ""}
+                    {part.workoutType === "for_reps" &&
+                    part.structure === "tabata"
+                      ? " · Tabata"
+                      : ""}
                     {part.repScheme ? ` · ${part.repScheme}` : ""}
                     {part.workoutType === "amrap" && part.amrapDurationMinutes
                       ? ` · ${part.amrapDurationMinutes} min`
                       : ""}
                     {(part.workoutType === "for_time" ||
-                      part.workoutType === "emom") &&
+                      part.workoutType === "emom" ||
+                      part.workoutType === "for_reps") &&
                     part.timeCapMinutes
                       ? ` · ${part.timeCapMinutes} min`
                       : ""}
@@ -715,11 +680,26 @@ export function SmartBuilder({ onSave, onCancel }: SmartBuilderProps) {
             />
           </div>
 
+          {/* Notes */}
+          <div className="space-y-2">
+            <Label htmlFor="sb-notes">Notes (optional)</Label>
+            <Textarea
+              id="sb-notes"
+              value={form.description}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, description: e.target.value }))
+              }
+              placeholder="e.g. Each Tabata is 8 rounds of :20 work / :10 rest. No breaks between Tabatas."
+              rows={3}
+              className="resize-y text-sm"
+            />
+          </div>
+
           {/* Actions */}
           <div className="flex gap-2">
             <Button type="button" onClick={handleSubmit} className="flex-1">
               <Save className="size-4" />
-              Save Workout
+              {saveLabel ?? "Save Workout"}
             </Button>
             {onCancel && (
               <Button type="button" variant="outline" onClick={onCancel}>

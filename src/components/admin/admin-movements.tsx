@@ -20,7 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Search, Plus, Pencil, Trash2, Video, Loader2 } from "lucide-react";
+import { Search, Plus, Pencil, Trash2, Video, Loader2, CheckCircle2, ShieldAlert } from "lucide-react";
 import {
   MOVEMENT_CATEGORIES,
   MOVEMENT_CATEGORY_COLORS,
@@ -36,14 +36,21 @@ interface Movement {
   commonRxWeightMale: string | null;
   commonRxWeightFemale: string | null;
   videoUrl: string | null;
+  createdBy: string | null;
+  isValidated: boolean;
+  createdByEmail: string | null;
+  createdByName: string | null;
 }
 
-function useAdminMovements(search?: string) {
+type StatusFilter = "all" | "pending" | "validated";
+
+function useAdminMovements(search?: string, status: StatusFilter = "all") {
   return useQuery<Movement[]>({
-    queryKey: ["admin-movements", search],
+    queryKey: ["admin-movements", search, status],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (search) params.set("search", search);
+      if (status !== "all") params.set("status", status);
       const res = await fetch(`/api/admin/movements?${params}`);
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json();
@@ -74,12 +81,34 @@ const emptyForm: MovementFormData = {
 export function AdminMovements() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<StatusFilter>("all");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<MovementFormData>(emptyForm);
   const [error, setError] = useState("");
 
-  const { data: movements, isLoading } = useAdminMovements(search || undefined);
+  const { data: movements, isLoading } = useAdminMovements(
+    search || undefined,
+    status,
+  );
+
+  const validateMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/admin/movements/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isValidated: true }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to validate");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-movements"] });
+    },
+  });
 
   const saveMutation = useMutation({
     mutationFn: async (data: { id?: string; form: MovementFormData }) => {
@@ -168,6 +197,16 @@ export function AdminMovements() {
             className="pl-9"
           />
         </div>
+        <Select value={status} onValueChange={(v) => setStatus(v as StatusFilter)}>
+          <SelectTrigger className="w-[140px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="validated">Validated</SelectItem>
+          </SelectContent>
+        </Select>
         <Button onClick={openCreate} size="sm">
           <Plus className="size-4" />
           Add
@@ -190,7 +229,7 @@ export function AdminMovements() {
               className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-2"
             >
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-medium truncate">
                     {m.canonicalName}
                   </span>
@@ -200,6 +239,15 @@ export function AdminMovements() {
                   >
                     {m.category}
                   </Badge>
+                  {!m.isValidated && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] gap-1 border-amber-500/40 text-amber-300"
+                    >
+                      <ShieldAlert className="size-3" />
+                      Pending
+                    </Badge>
+                  )}
                   {m.videoUrl && (
                     <Video className="size-3 text-muted-foreground" />
                   )}
@@ -209,7 +257,24 @@ export function AdminMovements() {
                     Rx: {m.commonRxWeightMale || "—"}/{m.commonRxWeightFemale || "—"} lb
                   </p>
                 )}
+                {m.createdBy && (
+                  <p className="text-[10px] text-muted-foreground">
+                    by {m.createdByName || m.createdByEmail || "user"}
+                  </p>
+                )}
               </div>
+              {!m.isValidated && (
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  className="text-emerald-400 hover:text-emerald-300"
+                  title="Validate"
+                  disabled={validateMutation.isPending}
+                  onClick={() => validateMutation.mutate(m.id)}
+                >
+                  <CheckCircle2 className="size-3.5" />
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="icon-xs"

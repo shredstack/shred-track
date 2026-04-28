@@ -84,6 +84,7 @@ export async function run() {
               is1rmApplicable: v.is1rmApplicable,
               commonRxWeightMale: v.commonRxWeightMale ?? null,
               commonRxWeightFemale: v.commonRxWeightFemale ?? null,
+              isValidated: true,
             })
             .where(eq(schema.movements.id, current.id));
           updated++;
@@ -96,6 +97,7 @@ export async function run() {
             commonRxWeightMale: v.commonRxWeightMale ?? null,
             commonRxWeightFemale: v.commonRxWeightFemale ?? null,
             createdBy: null,
+            isValidated: true,
           });
           created++;
         }

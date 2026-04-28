@@ -522,21 +522,35 @@ function RepSchemeField({
     }
   }
 
+  const isForReps = workoutType === "for_reps";
+  const repsLabel =
+    workoutType === "for_load"
+      ? "Rep Scheme"
+      : isForReps
+        ? "Reps (optional)"
+        : "Reps";
+  const repsPlaceholder =
+    workoutType === "for_load"
+      ? "e.g. 5-5-5-5-5, 10-10-7-7-3-3-3, 1RM"
+      : isForReps
+        ? "Optional — only set for prescribed movements"
+        : "e.g. 21-15-9, 3-6-9-12..., 5x5, 15";
+
   return (
     <div className="space-y-1">
-      <Label className="text-xs text-muted-foreground">
-        {workoutType === "for_load" ? "Rep Scheme" : "Reps"}
-      </Label>
+      <Label className="text-xs text-muted-foreground">{repsLabel}</Label>
       <Input
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={
-          workoutType === "for_load"
-            ? "e.g. 5-5-5-5-5, 10-10-7-7-3-3-3, 1RM"
-            : "e.g. 21-15-9, 3-6-9-12..., 5x5, 15"
-        }
+        placeholder={repsPlaceholder}
         className="h-7 text-xs"
       />
+      {isForReps && !value && (
+        <p className="text-[11px] text-muted-foreground/70">
+          Leave blank if this movement is scored. Set reps only for capped
+          movements (e.g. &quot;10 T2B&quot; before a max-cal row).
+        </p>
+      )}
       {chip && (
         <p className="flex items-center gap-1 text-[11px] text-emerald-400">
           <Check className="size-3" />

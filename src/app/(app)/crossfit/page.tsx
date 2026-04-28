@@ -16,6 +16,7 @@ import { DateNavigator } from "@/components/crossfit/date-navigator";
 import {
   useWorkoutsByDate,
   useCreateWorkout,
+  useUpdateWorkout,
   useDeleteWorkout,
   useLogScore,
   useUpdateScore,
@@ -25,6 +26,8 @@ import { useMovements, useCreateMovement } from "@/hooks/useMovements";
 import type {
   WorkoutBuilderForm,
   WorkoutBuilderPart,
+  WorkoutBuilderMovement,
+  WorkoutDisplay,
   ParsedWorkout,
   ParsedMovement,
   ScoreInput,
@@ -48,6 +51,7 @@ function builderPartToPayload(part: WorkoutBuilderPart): CreatePartInput | null 
   const movements = part.movements.filter((m) => m.movementId);
   if (movements.length === 0) return null;
   return {
+    id: part.id,
     label: part.label || undefined,
     workoutType: part.workoutType,
     timeCapSeconds: part.timeCapMinutes
@@ -64,7 +68,12 @@ function builderPartToPayload(part: WorkoutBuilderPart): CreatePartInput | null 
       part.workoutType === "for_time" && part.rounds
         ? parseInt(part.rounds)
         : undefined,
+    structure:
+      part.workoutType === "for_reps" && part.structure
+        ? part.structure
+        : undefined,
     movements: movements.map((m, i) => ({
+      id: m.id,
       movementId: m.movementId!,
       orderIndex: i,
       prescribedReps: m.prescribedReps || undefined,
@@ -94,12 +103,85 @@ function builderPartToPayload(part: WorkoutBuilderPart): CreatePartInput | null 
 }
 
 // ============================================
+// WorkoutDisplay → builder form (edit mode)
+// ============================================
+
+function generateTempId() {
+  return `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
+  return {
+    title: w.title ?? "",
+    description: w.description ?? "",
+    workoutDate: w.workoutDate,
+    benchmarkWorkoutId: w.benchmarkWorkoutId ?? null,
+    parts: w.parts.map((p): WorkoutBuilderPart => {
+      const timeCapMinutes = p.timeCapSeconds
+        ? String(Math.round(p.timeCapSeconds / 60))
+        : "";
+      const amrapDurationMinutes = p.amrapDurationSeconds
+        ? String(Math.round(p.amrapDurationSeconds / 60))
+        : "";
+      return {
+        tempId: generateTempId(),
+        id: p.id,
+        label: p.label ?? "",
+        workoutType: p.workoutType,
+        timeCapMinutes,
+        amrapDurationMinutes,
+        emomIntervalSeconds: p.emomIntervalSeconds
+          ? String(p.emomIntervalSeconds)
+          : "",
+        repScheme: p.repScheme ?? "",
+        rounds: p.rounds ? String(p.rounds) : "",
+        structure: p.structure,
+        movements: p.movements.map(
+          (m): WorkoutBuilderMovement => ({
+            tempId: generateTempId(),
+            id: m.id,
+            movementId: m.movementId,
+            movementName: m.movementName,
+            category: m.category,
+            isWeighted: m.isWeighted,
+            metricType: m.metricType,
+            prescribedReps: m.prescribedReps ?? "",
+            prescribedWeightMale: m.prescribedWeightMale ?? "",
+            prescribedWeightFemale: m.prescribedWeightFemale ?? "",
+            prescribedCaloriesMale:
+              m.prescribedCaloriesMale != null
+                ? String(m.prescribedCaloriesMale)
+                : "",
+            prescribedCaloriesFemale:
+              m.prescribedCaloriesFemale != null
+                ? String(m.prescribedCaloriesFemale)
+                : "",
+            prescribedDistanceMale:
+              m.prescribedDistanceMale != null
+                ? String(m.prescribedDistanceMale)
+                : "",
+            prescribedDistanceFemale:
+              m.prescribedDistanceFemale != null
+                ? String(m.prescribedDistanceFemale)
+                : "",
+            equipmentCount: m.equipmentCount,
+            rxStandard: m.rxStandard ?? "",
+            notes: m.notes ?? "",
+          })
+        ),
+      };
+    }),
+  };
+}
+
+// ============================================
 // Page
 // ============================================
 
 export default function CrossfitPage() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showAddWorkout, setShowAddWorkout] = useState(false);
+  const [editingWorkoutId, setEditingWorkoutId] = useState<string | null>(null);
   const [scoringWorkoutId, setScoringWorkoutId] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -108,6 +190,7 @@ export default function CrossfitPage() {
   const { data: workouts = [], isLoading } = useWorkoutsByDate(dateStr);
   const { data: movementLibrary = [] } = useMovements();
   const createWorkout = useCreateWorkout();
+  const updateWorkout = useUpdateWorkout();
   const deleteWorkout = useDeleteWorkout();
   const logScore = useLogScore();
   const updateScore = useUpdateScore();
@@ -116,6 +199,16 @@ export default function CrossfitPage() {
   const scoringWorkout = useMemo(
     () => workouts.find((w) => w.id === scoringWorkoutId) ?? null,
     [workouts, scoringWorkoutId]
+  );
+
+  const editingWorkout = useMemo(
+    () => workouts.find((w) => w.id === editingWorkoutId) ?? null,
+    [workouts, editingWorkoutId]
+  );
+
+  const editingForm = useMemo(
+    () => (editingWorkout ? workoutToBuilderForm(editingWorkout) : null),
+    [editingWorkout]
   );
 
   // ============================================
@@ -215,6 +308,37 @@ export default function CrossfitPage() {
   };
 
   // ============================================
+  // Edit — Smart Builder (PUT existing workout)
+  // ============================================
+
+  const handleSaveEdit = async (form: WorkoutBuilderForm) => {
+    if (!editingWorkoutId) return;
+    setSaveError(null);
+    const parts = form.parts
+      .map(builderPartToPayload)
+      .filter((p): p is CreatePartInput => p !== null);
+    if (parts.length === 0) {
+      setSaveError("Add at least one part with movements.");
+      return;
+    }
+
+    try {
+      await updateWorkout.mutateAsync({
+        id: editingWorkoutId,
+        input: {
+          title: form.title || undefined,
+          description: form.description || undefined,
+          workoutDate: form.workoutDate || dateStr,
+          parts,
+        },
+      });
+      setEditingWorkoutId(null);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to update workout");
+    }
+  };
+
+  // ============================================
   // Delete
   // ============================================
 
@@ -291,6 +415,10 @@ export default function CrossfitPage() {
               key={workout.id}
               workout={workout}
               onLogScore={() => setScoringWorkoutId(workout.id)}
+              onEdit={() => {
+                setSaveError(null);
+                setEditingWorkoutId(workout.id);
+              }}
               onDelete={handleDeleteWorkout}
             />
           ))}
@@ -322,7 +450,7 @@ export default function CrossfitPage() {
       )}
 
       <Dialog open={showAddWorkout} onOpenChange={setShowAddWorkout}>
-        <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
+        <DialogContent className="max-h-[90vh] w-[min(96vw,42rem)] max-w-none overflow-x-hidden overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add Workout</DialogTitle>
           </DialogHeader>
@@ -349,6 +477,7 @@ export default function CrossfitPage() {
             </TabsContent>
             <TabsContent value="build" className="mt-4">
               <SmartBuilder
+                defaultWorkoutDate={dateStr}
                 onSave={handleSaveFromBuilder}
                 onCancel={() => setShowAddWorkout(false)}
               />
@@ -375,6 +504,27 @@ export default function CrossfitPage() {
           onSubmit={handlePartScoreSubmit}
         />
       )}
+
+      <Dialog
+        open={!!editingWorkoutId}
+        onOpenChange={(open) => {
+          if (!open) setEditingWorkoutId(null);
+        }}
+      >
+        <DialogContent className="max-h-[90vh] w-[min(96vw,42rem)] max-w-none overflow-x-hidden overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Workout</DialogTitle>
+          </DialogHeader>
+          {editingForm && (
+            <SmartBuilder
+              initialForm={editingForm}
+              saveLabel="Save Changes"
+              onSave={handleSaveEdit}
+              onCancel={() => setEditingWorkoutId(null)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,28 +1,47 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { movements } from "@/db/schema";
-import { ilike, asc } from "drizzle-orm";
+import { movements, users } from "@/db/schema";
+import { ilike, asc, eq, and, type SQL } from "drizzle-orm";
 import { getAdminUser } from "@/lib/admin";
 
-// GET /api/admin/movements — list all movements (admin only)
+// GET /api/admin/movements — list all movements (admin only).
+// Optional filters: ?search=&category=&status=pending|validated|all (default all)
 export async function GET(req: NextRequest) {
   const user = await getAdminUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const search = req.nextUrl.searchParams.get("search");
   const category = req.nextUrl.searchParams.get("category");
+  const status = req.nextUrl.searchParams.get("status");
 
-  let query = db.select().from(movements).$dynamic();
+  const filters: SQL[] = [];
+  if (search) filters.push(ilike(movements.canonicalName, `%${search}%`));
+  if (category) filters.push(eq(movements.category, category));
+  if (status === "pending") filters.push(eq(movements.isValidated, false));
+  if (status === "validated") filters.push(eq(movements.isValidated, true));
 
-  if (search) {
-    query = query.where(ilike(movements.canonicalName, `%${search}%`));
-  }
-  if (category) {
-    const { eq } = await import("drizzle-orm");
-    query = query.where(eq(movements.category, category));
-  }
+  const rows = await db
+    .select({
+      id: movements.id,
+      canonicalName: movements.canonicalName,
+      category: movements.category,
+      isWeighted: movements.isWeighted,
+      is1rmApplicable: movements.is1rmApplicable,
+      metricType: movements.metricType,
+      commonRxWeightMale: movements.commonRxWeightMale,
+      commonRxWeightFemale: movements.commonRxWeightFemale,
+      videoUrl: movements.videoUrl,
+      createdBy: movements.createdBy,
+      isValidated: movements.isValidated,
+      createdAt: movements.createdAt,
+      createdByEmail: users.email,
+      createdByName: users.name,
+    })
+    .from(movements)
+    .leftJoin(users, eq(users.id, movements.createdBy))
+    .where(filters.length ? and(...filters) : undefined)
+    .orderBy(asc(movements.canonicalName));
 
-  const rows = await query.orderBy(asc(movements.canonicalName));
   return NextResponse.json(rows);
 }
 
@@ -61,6 +80,7 @@ export async function POST(req: NextRequest) {
         commonRxWeightMale: commonRxWeightMale?.toString() || null,
         commonRxWeightFemale: commonRxWeightFemale?.toString() || null,
         videoUrl: videoUrl || null,
+        isValidated: true,
       })
       .returning();
 

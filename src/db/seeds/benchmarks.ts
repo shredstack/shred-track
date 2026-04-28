@@ -10,6 +10,15 @@ import * as schema from "../schema";
 // Benchmark definitions keyed by movement canonical names
 // ============================================
 
+// Source-of-truth for system benchmark categories. Mirrors the CHECK
+// constraint on benchmark_workouts.category — keep in sync.
+type BenchmarkCategory =
+  | "girls"
+  | "heroes"
+  | "open"
+  | "weightlifting"
+  | "gym_benchmark";
+
 type BenchmarkSeed = {
   name: string;
   description?: string;
@@ -17,7 +26,7 @@ type BenchmarkSeed = {
   timeCapSeconds?: number;
   amrapDurationSeconds?: number;
   repScheme?: string;
-  category: "girls" | "heroes" | "common" | "opens" | "strength";
+  category: BenchmarkCategory;
   movements: {
     canonicalName: string;
     prescribedReps?: string;
@@ -296,7 +305,7 @@ const benchmarkSeeds: BenchmarkSeed[] = [
     description: "3 rounds, 1 minute at each station, 1 minute rest between rounds. Score is total reps.",
     workoutType: "for_reps",
     repScheme: "3 rounds",
-    category: "common",
+    category: "gym_benchmark",
     movements: [
       { canonicalName: "Wall Ball", prescribedReps: "1 min", prescribedWeightMale: 20, prescribedWeightFemale: 14 },
       { canonicalName: "Sumo Deadlift High Pull", prescribedReps: "1 min", prescribedWeightMale: 75, prescribedWeightFemale: 55 },
@@ -310,7 +319,7 @@ const benchmarkSeeds: BenchmarkSeed[] = [
     description: "50 reps of 10 movements for time. A long chipper.",
     workoutType: "for_time",
     repScheme: "50 reps each",
-    category: "common",
+    category: "gym_benchmark",
     movements: [
       { canonicalName: "Box Jump", prescribedReps: "50", notes: "24 inch box" },
       { canonicalName: "Pull-Up", prescribedReps: "50", notes: "Jumping pull-ups" },
@@ -330,7 +339,7 @@ const benchmarkSeeds: BenchmarkSeed[] = [
     workoutType: "amrap",
     amrapDurationSeconds: 900,
     repScheme: "5 x 3-min AMRAPs",
-    category: "common",
+    category: "gym_benchmark",
     movements: [
       { canonicalName: "Power Clean", prescribedReps: "3", prescribedWeightMale: 135, prescribedWeightFemale: 95 },
       { canonicalName: "Push-Up", prescribedReps: "6" },
@@ -346,7 +355,7 @@ const benchmarkSeeds: BenchmarkSeed[] = [
     description: "Find your 1-rep max back squat.",
     workoutType: "for_load",
     repScheme: "1RM",
-    category: "strength",
+    category: "weightlifting",
     movements: [
       { canonicalName: "Back Squat", prescribedReps: "1" },
     ],
@@ -356,7 +365,7 @@ const benchmarkSeeds: BenchmarkSeed[] = [
     description: "Find your 5-rep max back squat — heaviest weight you can hit for 5 straight reps.",
     workoutType: "for_load",
     repScheme: "5-5-5-5-5",
-    category: "strength",
+    category: "weightlifting",
     movements: [
       { canonicalName: "Back Squat", prescribedReps: "5-5-5-5-5" },
     ],
@@ -366,7 +375,7 @@ const benchmarkSeeds: BenchmarkSeed[] = [
     description: "Find your 1-rep max deadlift.",
     workoutType: "for_load",
     repScheme: "1RM",
-    category: "strength",
+    category: "weightlifting",
     movements: [
       { canonicalName: "Deadlift", prescribedReps: "1" },
     ],
@@ -376,7 +385,7 @@ const benchmarkSeeds: BenchmarkSeed[] = [
     description: "Find your 1-rep max front squat.",
     workoutType: "for_load",
     repScheme: "1RM",
-    category: "strength",
+    category: "weightlifting",
     movements: [
       { canonicalName: "Front Squat", prescribedReps: "1" },
     ],
@@ -386,7 +395,7 @@ const benchmarkSeeds: BenchmarkSeed[] = [
     description: "Find your 1-rep max overhead squat.",
     workoutType: "for_load",
     repScheme: "1RM",
-    category: "strength",
+    category: "weightlifting",
     movements: [
       { canonicalName: "Overhead Squat", prescribedReps: "1" },
     ],
@@ -396,7 +405,7 @@ const benchmarkSeeds: BenchmarkSeed[] = [
     description: "Find your 1-rep max clean and jerk.",
     workoutType: "for_load",
     repScheme: "1RM",
-    category: "strength",
+    category: "weightlifting",
     movements: [
       { canonicalName: "Clean and Jerk", prescribedReps: "1" },
     ],
@@ -406,7 +415,7 @@ const benchmarkSeeds: BenchmarkSeed[] = [
     description: "Find your 1-rep max snatch.",
     workoutType: "for_load",
     repScheme: "1RM",
-    category: "strength",
+    category: "weightlifting",
     movements: [
       { canonicalName: "Snatch", prescribedReps: "1" },
     ],
@@ -416,7 +425,7 @@ const benchmarkSeeds: BenchmarkSeed[] = [
     description: "Find your 1-rep max bench press.",
     workoutType: "for_load",
     repScheme: "1RM",
-    category: "strength",
+    category: "weightlifting",
     movements: [
       { canonicalName: "Bench Press", prescribedReps: "1" },
     ],
@@ -426,7 +435,7 @@ const benchmarkSeeds: BenchmarkSeed[] = [
     description: "Find your 1-rep max strict shoulder press.",
     workoutType: "for_load",
     repScheme: "1RM",
-    category: "strength",
+    category: "weightlifting",
     movements: [
       { canonicalName: "Shoulder Press", prescribedReps: "1" },
     ],
@@ -440,7 +449,7 @@ const benchmarkSeeds: BenchmarkSeed[] = [
     description: "2014 CrossFit Open 14.4. 14-minute AMRAP chipper climbing through row cals, T2B, wall balls, cleans, and muscle-ups.",
     workoutType: "amrap",
     amrapDurationSeconds: 840,
-    category: "opens",
+    category: "open",
     movements: [
       { canonicalName: "Row", prescribedReps: "60 calories" },
       { canonicalName: "Toes-to-Bar", prescribedReps: "50" },
@@ -492,6 +501,7 @@ async function upsertBenchmark(
         .set({
           description: benchmark.description || null,
           workoutType: benchmark.workoutType,
+          category: benchmark.category,
           timeCapSeconds: benchmark.timeCapSeconds || null,
           amrapDurationSeconds: benchmark.amrapDurationSeconds || null,
           repScheme: benchmark.repScheme || null,
@@ -509,6 +519,7 @@ async function upsertBenchmark(
           name: benchmark.name,
           description: benchmark.description || null,
           workoutType: benchmark.workoutType,
+          category: benchmark.category,
           timeCapSeconds: benchmark.timeCapSeconds || null,
           amrapDurationSeconds: benchmark.amrapDurationSeconds || null,
           repScheme: benchmark.repScheme || null,

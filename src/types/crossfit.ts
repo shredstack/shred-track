@@ -117,11 +117,97 @@ export interface ParsedWorkout {
 // Benchmark Workout Types
 // ============================================
 
+// ============================================
+// Benchmark Categories (intrinsic to the benchmark itself)
+// ============================================
+//
+// "Girls", "Heroes", etc. classify what kind of benchmark this is. NULL on
+// user-created custom benchmarks that aren't tagged. Distinct from
+// `BenchmarkCategory` below, which is the API filter for ownership
+// (system / custom / community).
+
+export const BENCHMARK_CATEGORIES = [
+  "girls",
+  "heroes",
+  "open",
+  "weightlifting",
+  "gym_benchmark",
+] as const;
+
+export type BenchmarkCategoryName = (typeof BENCHMARK_CATEGORIES)[number];
+
+export const BENCHMARK_CATEGORY_LABELS: Record<BenchmarkCategoryName, string> = {
+  girls: "The Girls",
+  heroes: "Hero WODs",
+  open: "CF Open",
+  weightlifting: "Weightlifting",
+  gym_benchmark: "Gym Benchmark",
+};
+
+export const BENCHMARK_CATEGORY_SHORT_LABELS: Record<BenchmarkCategoryName, string> = {
+  girls: "Girls",
+  heroes: "Hero",
+  open: "CF Open",
+  weightlifting: "Weightlifting",
+  gym_benchmark: "Gym",
+};
+
+export const BENCHMARK_CATEGORY_COLORS: Record<BenchmarkCategoryName, string> = {
+  girls: "bg-pink-500/15 text-pink-300 border-pink-500/30",
+  heroes: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+  open: "bg-sky-500/15 text-sky-300 border-sky-500/30",
+  weightlifting: "bg-red-500/15 text-red-300 border-red-500/30",
+  gym_benchmark: "bg-zinc-500/15 text-zinc-300 border-zinc-500/30",
+};
+
+export interface BenchmarkUserStats {
+  attempts: number;
+  bestScore: BenchmarkBestScore | null;
+  lastAttemptDate: string | null;
+}
+
+export interface BenchmarkBestScore {
+  display: string;
+  division: string;
+  workoutDate: string;
+  hitTimeCap: boolean;
+  timeSeconds: number | null;
+  totalReps: number | null;
+  weightLbs: number | null;
+  rounds: number | null;
+  remainderReps: number | null;
+}
+
+export interface BenchmarkAttempt {
+  scoreId: string;
+  workoutId: string;
+  workoutDate: string;
+  division: string;
+  timeSeconds: number | null;
+  rounds: number | null;
+  remainderReps: number | null;
+  weightLbs: number | null;
+  totalReps: number | null;
+  scoreText: string | null;
+  hitTimeCap: boolean;
+  notes: string | null;
+  createdAt: string;
+  isPR: boolean;
+}
+
+export interface BenchmarkHistory {
+  benchmarkId: string;
+  benchmarkName: string;
+  workoutType: WorkoutType;
+  attempts: BenchmarkAttempt[];
+}
+
 export interface BenchmarkWorkout {
   id: string;
   name: string;
   description: string | null;
   workoutType: WorkoutType;
+  category: BenchmarkCategoryName | null;
   timeCapSeconds: number | null;
   amrapDurationSeconds: number | null;
   repScheme: string | null;
@@ -129,6 +215,7 @@ export interface BenchmarkWorkout {
   createdBy: string | null;
   communityId: string | null;
   movements: BenchmarkMovement[];
+  userStats?: BenchmarkUserStats;
 }
 
 export interface BenchmarkMovement {
@@ -169,6 +256,8 @@ export interface WorkoutMovementDisplay {
   repSchemeParsed?: RepSchemeParsed | null;
 }
 
+export type WorkoutPartStructure = "tabata";
+
 export interface WorkoutPartDisplay {
   id: string;
   orderIndex: number;
@@ -179,6 +268,7 @@ export interface WorkoutPartDisplay {
   emomIntervalSeconds?: number;
   repScheme?: string;
   rounds?: number;
+  structure?: WorkoutPartStructure;
   notes?: string;
   movements: WorkoutMovementDisplay[];
   score?: ScoreDisplay | null;
@@ -272,6 +362,9 @@ export interface MovementScaling {
 
 export interface WorkoutBuilderMovement {
   tempId: string;
+  // Real DB id when editing an existing workout. Undefined for newly added
+  // movements; used by the diff-based update endpoint to preserve scores.
+  id?: string;
   movementId?: string;
   movementName: string;
   category?: MovementCategory;
@@ -296,6 +389,10 @@ export interface WorkoutBuilderMovement {
 
 export interface WorkoutBuilderPart {
   tempId: string;
+  // Real DB id when editing an existing workout. Undefined for newly added
+  // parts; used by the diff-based update endpoint to preserve scores on
+  // existing parts.
+  id?: string;
   label: string;
   workoutType: WorkoutType;
   timeCapMinutes: string;
@@ -307,6 +404,7 @@ export interface WorkoutBuilderPart {
   // workouts use `rounds` below.
   repScheme: string;
   rounds: string;
+  structure?: WorkoutPartStructure;
   movements: WorkoutBuilderMovement[];
 }
 

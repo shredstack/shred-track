@@ -13,6 +13,11 @@ const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
   .map((e) => e.trim().toLowerCase())
   .filter(Boolean);
 
+/** True if the email is in the bootstrap allowlist (env-var override). */
+export function isAdminEmail(email: string): boolean {
+  return ADMIN_EMAILS.includes(email.toLowerCase());
+}
+
 export async function getAdminUser() {
   const user = await getSessionUser();
   if (!user) return null;

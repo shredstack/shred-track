@@ -12,21 +12,35 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Search, Plus, Pencil, Trash2, Loader2, Star } from "lucide-react";
-import { WorkoutTypeSelector } from "@/components/crossfit/workout-type-selector";
-import { MovementListBuilder } from "@/components/crossfit/movement-list-builder";
+import { WorkoutPartConfig } from "@/components/crossfit/workout-part-config";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import type {
   BenchmarkWorkout,
-  WorkoutType,
+  BenchmarkCategoryName,
+  WorkoutBuilderPart,
   WorkoutBuilderMovement,
 } from "@/types/crossfit";
 import {
   WORKOUT_TYPE_LABELS,
   WORKOUT_TYPE_COLORS,
+  BENCHMARK_CATEGORIES,
+  BENCHMARK_CATEGORY_LABELS,
+  BENCHMARK_CATEGORY_SHORT_LABELS,
+  BENCHMARK_CATEGORY_COLORS,
 } from "@/types/crossfit";
+
+const NO_CATEGORY = "__none__";
+const NO_CATEGORY_FILTER = "__all__";
 
 function useAdminBenchmarks() {
   return useQuery<BenchmarkWorkout[]>({
@@ -42,32 +56,127 @@ function useAdminBenchmarks() {
 interface BenchmarkFormState {
   name: string;
   description: string;
-  workoutType: WorkoutType;
-  timeCapMinutes: string;
-  amrapDurationMinutes: string;
-  repScheme: string;
+  category: BenchmarkCategoryName | null;
   isSystem: boolean;
-  movements: WorkoutBuilderMovement[];
+  // Part configuration (workout type, time cap, AMRAP duration, EMOM
+  // interval, rounds, structure, repScheme, movements) is held in the same
+  // shape the Smart Builder uses, so the WorkoutPartConfig component can
+  // render it directly. A benchmark is always single-part.
+  part: WorkoutBuilderPart;
+}
+
+function generateId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function emptyPart(): WorkoutBuilderPart {
+  return {
+    tempId: generateId("part"),
+    label: "",
+    workoutType: "for_time",
+    timeCapMinutes: "",
+    amrapDurationMinutes: "",
+    emomIntervalSeconds: "",
+    repScheme: "",
+    rounds: "",
+    movements: [],
+  };
 }
 
 const emptyForm: BenchmarkFormState = {
   name: "",
   description: "",
-  workoutType: "for_time",
-  timeCapMinutes: "",
-  amrapDurationMinutes: "",
-  repScheme: "",
+  category: null,
   isSystem: false,
-  movements: [],
+  part: emptyPart(),
 };
 
-function generateTempId() {
-  return `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+// Convert an existing benchmark into the BenchmarkFormState the form drives.
+function benchmarkToForm(b: BenchmarkWorkout): BenchmarkFormState {
+  const movements: WorkoutBuilderMovement[] = b.movements.map((m) => {
+    const isWeighted = !!(m.prescribedWeightMale || m.prescribedWeightFemale);
+    return {
+      tempId: generateId("mov"),
+      movementId: m.movementId,
+      movementName: m.movementName,
+      isWeighted,
+      // Best-effort metric type inference: benchmarks only carry the
+      // gendered weight pair, not the underlying movement's metric type.
+      // Anything with a weight is "weight"; everything else is "reps".
+      metricType: isWeighted ? "weight" : "reps",
+      prescribedReps: m.prescribedReps || "",
+      prescribedWeightMale: m.prescribedWeightMale?.toString() || "",
+      prescribedWeightFemale: m.prescribedWeightFemale?.toString() || "",
+      prescribedCaloriesMale: "",
+      prescribedCaloriesFemale: "",
+      prescribedDistanceMale: "",
+      prescribedDistanceFemale: "",
+      rxStandard: m.rxStandard || "",
+      notes: "",
+    };
+  });
+
+  return {
+    name: b.name,
+    description: b.description || "",
+    category: b.category,
+    isSystem: b.isSystem,
+    part: {
+      tempId: generateId("part"),
+      label: "",
+      workoutType: b.workoutType,
+      timeCapMinutes: b.timeCapSeconds
+        ? String(Math.floor(b.timeCapSeconds / 60))
+        : "",
+      amrapDurationMinutes: b.amrapDurationSeconds
+        ? String(Math.floor(b.amrapDurationSeconds / 60))
+        : "",
+      emomIntervalSeconds: "",
+      repScheme: b.repScheme || "",
+      rounds: "",
+      movements,
+    },
+  };
+}
+
+// Convert the form state into the API payload.
+function formToPayload(form: BenchmarkFormState) {
+  return {
+    name: form.name,
+    description: form.description || undefined,
+    category: form.category ?? null,
+    isSystem: form.isSystem,
+    workoutType: form.part.workoutType,
+    timeCapSeconds: form.part.timeCapMinutes
+      ? parseInt(form.part.timeCapMinutes, 10) * 60
+      : undefined,
+    amrapDurationSeconds: form.part.amrapDurationMinutes
+      ? parseInt(form.part.amrapDurationMinutes, 10) * 60
+      : undefined,
+    repScheme: form.part.repScheme || undefined,
+    movements: form.part.movements
+      .filter((m) => m.movementId)
+      .map((m, i) => ({
+        movementId: m.movementId!,
+        orderIndex: i,
+        prescribedReps: m.prescribedReps || undefined,
+        prescribedWeightMale: m.prescribedWeightMale
+          ? Number(m.prescribedWeightMale)
+          : undefined,
+        prescribedWeightFemale: m.prescribedWeightFemale
+          ? Number(m.prescribedWeightFemale)
+          : undefined,
+        rxStandard: m.rxStandard || undefined,
+      })),
+  };
 }
 
 export function AdminBenchmarks() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<
+    BenchmarkCategoryName | typeof NO_CATEGORY_FILTER
+  >(NO_CATEGORY_FILTER);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<BenchmarkFormState>(emptyForm);
@@ -75,11 +184,13 @@ export function AdminBenchmarks() {
 
   const { data: benchmarks, isLoading } = useAdminBenchmarks();
 
-  const filtered = benchmarks?.filter(
-    (b) =>
-      !search ||
-      b.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = benchmarks?.filter((b) => {
+    if (search && !b.name.toLowerCase().includes(search.toLowerCase()))
+      return false;
+    if (categoryFilter !== NO_CATEGORY_FILTER && b.category !== categoryFilter)
+      return false;
+    return true;
+  });
 
   const saveMutation = useMutation({
     mutationFn: async (data: { id?: string; form: BenchmarkFormState }) => {
@@ -87,38 +198,10 @@ export function AdminBenchmarks() {
         ? `/api/admin/benchmarks/${data.id}`
         : "/api/admin/benchmarks";
 
-      const payload = {
-        name: data.form.name,
-        description: data.form.description || undefined,
-        workoutType: data.form.workoutType,
-        timeCapSeconds: data.form.timeCapMinutes
-          ? parseInt(data.form.timeCapMinutes) * 60
-          : undefined,
-        amrapDurationSeconds: data.form.amrapDurationMinutes
-          ? parseInt(data.form.amrapDurationMinutes) * 60
-          : undefined,
-        repScheme: data.form.repScheme || undefined,
-        isSystem: data.form.isSystem,
-        movements: data.form.movements
-          .filter((m) => m.movementId)
-          .map((m, i) => ({
-            movementId: m.movementId,
-            orderIndex: i,
-            prescribedReps: m.prescribedReps || undefined,
-            prescribedWeightMale: m.prescribedWeightMale
-              ? Number(m.prescribedWeightMale)
-              : undefined,
-            prescribedWeightFemale: m.prescribedWeightFemale
-              ? Number(m.prescribedWeightFemale)
-              : undefined,
-            rxStandard: m.rxStandard || undefined,
-          })),
-      };
-
       const res = await fetch(url, {
         method: data.id ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(formToPayload(data.form)),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -128,6 +211,8 @@ export function AdminBenchmarks() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-benchmarks"] });
+      // Also invalidate the user-facing list so it picks up admin changes.
+      queryClient.invalidateQueries({ queryKey: ["benchmarks"] });
       closeForm();
     },
     onError: (err: Error) => setError(err.message),
@@ -145,57 +230,19 @@ export function AdminBenchmarks() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-benchmarks"] });
+      queryClient.invalidateQueries({ queryKey: ["benchmarks"] });
     },
   });
 
   const openCreate = useCallback(() => {
-    setForm(emptyForm);
+    setForm({ ...emptyForm, part: emptyPart() });
     setEditingId(null);
     setError("");
     setShowForm(true);
   }, []);
 
   const openEdit = useCallback((b: BenchmarkWorkout) => {
-    setForm({
-      name: b.name,
-      description: b.description || "",
-      workoutType: b.workoutType,
-      timeCapMinutes: b.timeCapSeconds
-        ? String(Math.floor(b.timeCapSeconds / 60))
-        : "",
-      amrapDurationMinutes: b.amrapDurationSeconds
-        ? String(Math.floor(b.amrapDurationSeconds / 60))
-        : "",
-      repScheme: b.repScheme || "",
-      isSystem: b.isSystem,
-      movements: b.movements.map((m) => {
-        // Best-effort metric type inference: benchmark loads only carry
-        // the male/female weights, not the underlying movement's metric
-        // type. Anything with a weight is "weight"; anything else is
-        // "reps" — close enough for the legacy admin path.
-        const isWeighted = !!(m.prescribedWeightMale || m.prescribedWeightFemale);
-        return {
-          tempId: generateTempId(),
-          movementId: m.movementId,
-          movementName: m.movementName,
-          isWeighted,
-          metricType: (isWeighted ? "weight" : "reps") as
-            | "weight"
-            | "reps"
-            | "calories"
-            | "distance",
-          prescribedReps: m.prescribedReps || "",
-          prescribedWeightMale: m.prescribedWeightMale?.toString() || "",
-          prescribedWeightFemale: m.prescribedWeightFemale?.toString() || "",
-          prescribedCaloriesMale: "",
-          prescribedCaloriesFemale: "",
-          prescribedDistanceMale: "",
-          prescribedDistanceFemale: "",
-          rxStandard: "",
-          notes: "",
-        };
-      }),
-    });
+    setForm(benchmarkToForm(b));
     setEditingId(b.id);
     setError("");
     setShowForm(true);
@@ -215,9 +262,20 @@ export function AdminBenchmarks() {
     [editingId, form, saveMutation]
   );
 
+  const updatePart = useCallback((updates: Partial<WorkoutBuilderPart>) => {
+    setForm((prev) => ({ ...prev, part: { ...prev.part, ...updates } }));
+  }, []);
+
+  const updatePartMovements = useCallback(
+    (movements: WorkoutBuilderMovement[]) => {
+      setForm((prev) => ({ ...prev, part: { ...prev.part, movements } }));
+    },
+    []
+  );
+
   return (
     <div className="space-y-4">
-      {/* Search + Add */}
+      {/* Search + Category filter + Add */}
       <div className="flex gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
@@ -228,6 +286,24 @@ export function AdminBenchmarks() {
             className="pl-9"
           />
         </div>
+        <Select
+          value={categoryFilter}
+          onValueChange={(v) =>
+            setCategoryFilter(v as BenchmarkCategoryName | typeof NO_CATEGORY_FILTER)
+          }
+        >
+          <SelectTrigger className="w-[150px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NO_CATEGORY_FILTER}>All categories</SelectItem>
+            {BENCHMARK_CATEGORIES.map((cat) => (
+              <SelectItem key={cat} value={cat}>
+                {BENCHMARK_CATEGORY_LABELS[cat]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Button onClick={openCreate} size="sm">
           <Plus className="size-4" />
           Add
@@ -250,7 +326,7 @@ export function AdminBenchmarks() {
               className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-2"
             >
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium truncate">
                     {b.name}
                   </span>
@@ -263,6 +339,14 @@ export function AdminBenchmarks() {
                   >
                     {WORKOUT_TYPE_LABELS[b.workoutType]}
                   </Badge>
+                  {b.category && (
+                    <Badge
+                      variant="outline"
+                      className={`text-[10px] ${BENCHMARK_CATEGORY_COLORS[b.category]}`}
+                    >
+                      {BENCHMARK_CATEGORY_SHORT_LABELS[b.category]}
+                    </Badge>
+                  )}
                 </div>
                 <p className="text-[10px] text-muted-foreground truncate">
                   {b.repScheme && `${b.repScheme}: `}
@@ -328,6 +412,32 @@ export function AdminBenchmarks() {
               />
             </div>
 
+            <div className="space-y-2">
+              <Label htmlFor="ab-cat">Category</Label>
+              <Select
+                value={form.category ?? NO_CATEGORY}
+                onValueChange={(v) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    category:
+                      v === NO_CATEGORY ? null : (v as BenchmarkCategoryName),
+                  }))
+                }
+              >
+                <SelectTrigger id="ab-cat">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_CATEGORY}>None</SelectItem>
+                  {BENCHMARK_CATEGORIES.map((cat) => (
+                    <SelectItem key={cat} value={cat}>
+                      {BENCHMARK_CATEGORY_LABELS[cat]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="flex items-center gap-2">
               <Switch
                 id="ab-system"
@@ -343,74 +453,11 @@ export function AdminBenchmarks() {
 
             <Separator />
 
-            <div className="space-y-2">
-              <Label>Workout Type</Label>
-              <WorkoutTypeSelector
-                value={form.workoutType}
-                onSelect={(type) =>
-                  setForm((prev) => ({ ...prev, workoutType: type }))
-                }
-              />
-            </div>
-
-            {(form.workoutType === "for_time" || form.workoutType === "emom") && (
-              <div className="space-y-2">
-                <Label>
-                  {form.workoutType === "emom"
-                    ? "Duration (min)"
-                    : "Time Cap (min)"}
-                </Label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={form.timeCapMinutes}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      timeCapMinutes: e.target.value,
-                    }))
-                  }
-                  placeholder="Optional"
-                />
-              </div>
-            )}
-
-            {form.workoutType === "amrap" && (
-              <div className="space-y-2">
-                <Label>AMRAP Duration (min)</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={form.amrapDurationMinutes}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      amrapDurationMinutes: e.target.value,
-                    }))
-                  }
-                  placeholder="e.g. 12"
-                />
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Label>Rep Scheme</Label>
-              <Input
-                value={form.repScheme}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, repScheme: e.target.value }))
-                }
-                placeholder="e.g. 21-15-9 or 5 rounds"
-              />
-            </div>
-
-            <Separator />
-
-            <MovementListBuilder
-              movements={form.movements}
-              onChange={(movements) =>
-                setForm((prev) => ({ ...prev, movements }))
-              }
+            <WorkoutPartConfig
+              part={form.part}
+              onChange={updatePart}
+              onMovementsChange={updatePartMovements}
+              showRepScheme
             />
 
             {error && (

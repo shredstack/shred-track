@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
   WorkoutDisplay,
   WorkoutPartDisplay,
+  WorkoutPartStructure,
   WorkoutMovementDisplay,
   WorkoutType,
   ScoreInput,
@@ -72,6 +73,7 @@ interface WirePart {
   amrapDurationSeconds: number | null;
   emomIntervalSeconds: number | null;
   repScheme: string | null;
+  structure: string | null;
   notes: string | null;
   movements: WireMovement[];
   score: WireScore | null;
@@ -142,6 +144,7 @@ function wirePartToDisplay(p: WirePart): WorkoutPartDisplay {
     amrapDurationSeconds: p.amrapDurationSeconds ?? undefined,
     emomIntervalSeconds: p.emomIntervalSeconds ?? undefined,
     repScheme: p.repScheme ?? undefined,
+    structure: (p.structure as WorkoutPartStructure | null) ?? undefined,
     notes: p.notes ?? undefined,
     movements: p.movements.map(wireMovementToDisplay),
     score: p.score ? wireScoreToDisplay(p.score) : null,
@@ -217,6 +220,8 @@ export function useWorkoutSearch(filters: WorkoutSearchFilters) {
 // ============================================
 
 export interface CreatePartMovementInput {
+  // Real DB id when editing — keeps the row (and its score detail) in place.
+  id?: string;
   movementId: string;
   orderIndex: number;
   prescribedReps?: string;
@@ -233,6 +238,8 @@ export interface CreatePartMovementInput {
 }
 
 export interface CreatePartInput {
+  // Real DB id when editing — keeps the row (and its score) in place.
+  id?: string;
   label?: string;
   workoutType: WorkoutType;
   timeCapSeconds?: number;
@@ -240,6 +247,7 @@ export interface CreatePartInput {
   emomIntervalSeconds?: number;
   repScheme?: string;
   rounds?: number;
+  structure?: WorkoutPartStructure;
   notes?: string;
   movements: CreatePartMovementInput[];
 }
@@ -249,6 +257,13 @@ export interface CreateWorkoutInput {
   description?: string;
   workoutDate: string;
   benchmarkWorkoutId?: string;
+  parts: CreatePartInput[];
+}
+
+export interface UpdateWorkoutInput {
+  title?: string;
+  description?: string;
+  workoutDate: string;
   parts: CreatePartInput[];
 }
 
@@ -265,6 +280,34 @@ export function useCreateWorkout() {
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.error || "Failed to create workout");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["workouts"] });
+    },
+  });
+}
+
+export function useUpdateWorkout() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: UpdateWorkoutInput;
+    }) => {
+      const res = await fetch(`/api/workouts/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || "Failed to update workout");
       }
       return res.json();
     },
@@ -310,6 +353,8 @@ export function useLogScore() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["workouts"] });
+      queryClient.invalidateQueries({ queryKey: ["benchmarks"] });
+      queryClient.invalidateQueries({ queryKey: ["benchmark-history"] });
     },
   });
 }
@@ -338,6 +383,8 @@ export function useUpdateScore() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["workouts"] });
+      queryClient.invalidateQueries({ queryKey: ["benchmarks"] });
+      queryClient.invalidateQueries({ queryKey: ["benchmark-history"] });
     },
   });
 }
