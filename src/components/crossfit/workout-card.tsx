@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   Flame,
   Trash2,
+  Pencil,
 } from "lucide-react";
 import type {
   WorkoutDisplay,
@@ -35,6 +36,7 @@ interface WorkoutCardProps {
   workout: WorkoutDisplay;
   onLogScore?: (workoutId: string) => void;
   onDelete?: (workoutId: string) => void;
+  onEdit?: (workoutId: string) => void;
   onViewLeaderboard?: (workoutId: string) => void;
 }
 
@@ -206,6 +208,17 @@ function PartSection({
       </span>
     );
   }
+  if (part.workoutType === "for_reps" && part.structure === "tabata") {
+    metaBits.push(
+      <span
+        key="tabata"
+        className="text-muted-foreground font-mono"
+        title="8 rounds × :20 work / :10 rest per movement"
+      >
+        Tabata (8×:20/:10)
+      </span>
+    );
+  }
   if (part.repScheme) {
     metaBits.push(
       <span key="reps" className="text-muted-foreground font-mono">
@@ -277,6 +290,7 @@ export function WorkoutCard({
   workout,
   onLogScore,
   onDelete,
+  onEdit,
   onViewLeaderboard,
 }: WorkoutCardProps) {
   const parts = workout.parts ?? [];
@@ -341,6 +355,17 @@ export function WorkoutCard({
             Leaderboard
           </Button>
         )}
+        {onEdit && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-white/[0.08] text-muted-foreground hover:text-foreground"
+            onClick={() => onEdit(workout.id)}
+            aria-label="Edit workout"
+          >
+            <Pencil className="size-3.5" />
+          </Button>
+        )}
         {onDelete && (
           <Button
             variant="outline"
@@ -351,6 +376,7 @@ export function WorkoutCard({
                 onDelete(workout.id);
               }
             }}
+            aria-label="Delete workout"
           >
             <Trash2 className="size-3.5" />
           </Button>

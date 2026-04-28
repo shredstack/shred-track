@@ -22,6 +22,7 @@ export async function PUT(
     commonRxWeightMale,
     commonRxWeightFemale,
     videoUrl,
+    isValidated,
   } = body;
 
   const [existing] = await db
@@ -49,6 +50,7 @@ export async function PUT(
           ? (commonRxWeightFemale?.toString() || null)
           : existing.commonRxWeightFemale,
         videoUrl: videoUrl !== undefined ? (videoUrl || null) : existing.videoUrl,
+        isValidated: isValidated ?? existing.isValidated,
       })
       .where(eq(movements.id, id))
       .returning();

@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
+import { isAdminEmail } from "@/lib/admin";
 
 // GET /api/user/profile — get basic user info
 export async function GET() {
@@ -16,6 +17,8 @@ export async function GET() {
       email: users.email,
       gender: users.gender,
       unitPreference: users.unitPreference,
+      isAdmin: users.isAdmin,
+      isVip: users.isVip,
       createdAt: users.createdAt,
     })
     .from(users)
@@ -24,7 +27,10 @@ export async function GET() {
 
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-  return NextResponse.json(user);
+  return NextResponse.json({
+    ...user,
+    isAdmin: user.isAdmin || isAdminEmail(user.email),
+  });
 }
 
 // PUT /api/user/profile — update basic user info

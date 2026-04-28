@@ -15,6 +15,7 @@ export interface PlanCreditsResponse {
   canGenerate: boolean;
   nextSource: CreditSource | null;
   paywallEnforced: boolean;
+  isVipUser: boolean;
   purchases: { total: number; consumed: number; remaining: number };
   vip: {
     isVip: boolean;
@@ -47,6 +48,7 @@ export function usePlanCredits() {
     purchasesRemaining: query.data?.purchases.remaining ?? 0,
     vipRemaining: query.data?.vip.remaining ?? 0,
     isVip: query.data?.vip.isVip ?? false,
+    isVipUser: query.data?.isVipUser ?? false,
     priceUsd: query.data?.priceUsd ?? "9.99",
   };
 }

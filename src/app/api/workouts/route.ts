@@ -49,6 +49,7 @@ interface PartInput {
   emomIntervalSeconds?: number;
   repScheme?: string;
   rounds?: number;
+  structure?: string;
   notes?: string;
   movements: PartMovementInput[];
 }
@@ -209,6 +210,7 @@ export async function GET(req: NextRequest) {
         emomIntervalSeconds: p.emomIntervalSeconds,
         repScheme: p.repScheme,
         rounds: p.rounds,
+        structure: p.structure,
         notes: p.notes,
         movements: (movementsByPart.get(p.id) ?? []).map((m) => ({
           id: m.id,
@@ -426,6 +428,7 @@ export async function POST(req: NextRequest) {
           emomIntervalSeconds: p.emomIntervalSeconds || null,
           repScheme: p.repScheme || null,
           rounds: p.rounds ?? null,
+          structure: p.structure || null,
           notes: p.notes || null,
         })
         .returning();

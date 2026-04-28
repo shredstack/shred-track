@@ -69,6 +69,7 @@ export async function POST(req: NextRequest) {
     name,
     description,
     workoutType,
+    category,
     timeCapSeconds,
     amrapDurationSeconds,
     repScheme,
@@ -83,6 +84,19 @@ export async function POST(req: NextRequest) {
   if (!workoutType) {
     return NextResponse.json({ error: "Workout type is required" }, { status: 400 });
   }
+  const VALID_CATEGORIES = new Set([
+    "girls",
+    "heroes",
+    "open",
+    "weightlifting",
+    "gym_benchmark",
+  ]);
+  if (category != null && !VALID_CATEGORIES.has(category)) {
+    return NextResponse.json(
+      { error: "Invalid benchmark category" },
+      { status: 400 }
+    );
+  }
 
   const result = await db.transaction(async (tx) => {
     const [bw] = await tx
@@ -91,6 +105,7 @@ export async function POST(req: NextRequest) {
         name: trimmedName,
         description: description || null,
         workoutType,
+        category: category || null,
         timeCapSeconds: timeCapSeconds || null,
         amrapDurationSeconds: amrapDurationSeconds || null,
         repScheme: repScheme || null,

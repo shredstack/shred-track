@@ -440,7 +440,7 @@ async function seed() {
   console.log("Seeding movements...");
   await db
     .insert(schema.movements)
-    .values(movementSeeds)
+    .values(movementSeeds.map((m) => ({ ...m, isValidated: true })))
     .onConflictDoNothing();
   console.log(`  -> ${movementSeeds.length} movements seeded.`);
 

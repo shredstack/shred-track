@@ -8,8 +8,13 @@ import {
   scores,
   scoreMovementDetails,
 } from "@/db/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, notInArray } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
+import {
+  parseRepScheme,
+  type RepSchemeParsed,
+} from "@/lib/crossfit/rep-scheme-parser";
+import type { WorkoutType } from "@/types/crossfit";
 
 // GET /api/workouts/[id] — single workout with its parts, movements, and
 // (if the requester has one) the caller's scores per part.
@@ -146,6 +151,7 @@ export async function GET(
       emomIntervalSeconds: p.emomIntervalSeconds,
       repScheme: p.repScheme,
       rounds: p.rounds,
+      structure: p.structure,
       notes: p.notes,
       movements: (movementsByPart.get(p.id) ?? []).map((m) => ({
         id: m.id,
@@ -201,8 +207,42 @@ export async function GET(
   return NextResponse.json({ ...workout, parts: partsPayload });
 }
 
-// PUT /api/workouts/[id] — update top-level workout metadata.
-// Part-level edits are out of scope for this endpoint today.
+interface UpdatePartMovementInput {
+  id?: string;
+  movementId: string;
+  orderIndex?: number;
+  prescribedReps?: string;
+  prescribedWeightMale?: number | string;
+  prescribedWeightFemale?: number | string;
+  prescribedCaloriesMale?: number | string;
+  prescribedCaloriesFemale?: number | string;
+  prescribedDistanceMale?: number | string;
+  prescribedDistanceFemale?: number | string;
+  promoteSequenceToLadder?: boolean;
+  equipmentCount?: number;
+  rxStandard?: string;
+  notes?: string;
+}
+
+interface UpdatePartInput {
+  id?: string;
+  label?: string;
+  workoutType: WorkoutType;
+  timeCapSeconds?: number;
+  amrapDurationSeconds?: number;
+  emomIntervalSeconds?: number;
+  repScheme?: string;
+  rounds?: number;
+  structure?: string;
+  notes?: string;
+  movements: UpdatePartMovementInput[];
+}
+
+// PUT /api/workouts/[id] — update workout, including its parts and
+// movements. Uses a diff strategy: parts/movements with an `id` are updated
+// in place; new ones are inserted; ones missing from the payload are
+// deleted (which cascades scores for removed parts). Existing scores on
+// preserved parts survive intact.
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -223,20 +263,243 @@ export async function PUT(
     return NextResponse.json({ error: "Workout not found or not owned by you" }, { status: 404 });
   }
 
-  const [updated] = await db
-    .update(workouts)
-    .set({
-      title: body.title ?? existing.title,
-      description: body.description ?? existing.description,
-      rawText: body.rawText ?? existing.rawText,
-      workoutDate: body.workoutDate ?? existing.workoutDate,
-      published: body.published ?? existing.published,
-      updatedAt: new Date(),
-    })
-    .where(eq(workouts.id, id))
-    .returning();
+  // Metadata-only update path (no parts in body) — preserves the original
+  // narrow PUT behavior so existing callers keep working.
+  if (!Array.isArray(body.parts)) {
+    const [updated] = await db
+      .update(workouts)
+      .set({
+        title: body.title ?? existing.title,
+        description: body.description ?? existing.description,
+        rawText: body.rawText ?? existing.rawText,
+        workoutDate: body.workoutDate ?? existing.workoutDate,
+        published: body.published ?? existing.published,
+        updatedAt: new Date(),
+      })
+      .where(eq(workouts.id, id))
+      .returning();
 
-  return NextResponse.json(updated);
+    return NextResponse.json(updated);
+  }
+
+  const incomingParts = body.parts as UpdatePartInput[];
+  if (incomingParts.length === 0) {
+    return NextResponse.json({ error: "At least one part with movements is required" }, { status: 400 });
+  }
+
+  const firstPart = incomingParts[0];
+
+  const result = await db.transaction(async (tx) => {
+    // 1) Update workout-level fields. Mirror the first part's type/timing
+    //    onto the legacy top-level columns for read-compat.
+    const [updatedWorkout] = await tx
+      .update(workouts)
+      .set({
+        title: body.title ?? existing.title,
+        description: body.description ?? existing.description,
+        workoutDate: body.workoutDate ?? existing.workoutDate,
+        workoutType: firstPart.workoutType,
+        timeCapSeconds: firstPart.timeCapSeconds || null,
+        amrapDurationSeconds: firstPart.amrapDurationSeconds || null,
+        repScheme: firstPart.repScheme || null,
+        rounds: firstPart.rounds ?? null,
+        updatedAt: new Date(),
+      })
+      .where(eq(workouts.id, id))
+      .returning();
+
+    // 2) Delete parts that are no longer in the payload (cascades movements
+    //    and scores for removed parts).
+    const keepPartIds = incomingParts
+      .map((p) => p.id)
+      .filter((x): x is string => !!x);
+    if (keepPartIds.length > 0) {
+      await tx
+        .delete(workoutParts)
+        .where(
+          and(
+            eq(workoutParts.workoutId, id),
+            notInArray(workoutParts.id, keepPartIds)
+          )
+        );
+    } else {
+      await tx.delete(workoutParts).where(eq(workoutParts.workoutId, id));
+    }
+
+    // 3) Upsert each part, then diff its movements.
+    for (let i = 0; i < incomingParts.length; i++) {
+      const p = incomingParts[i];
+      let partId: string;
+
+      if (p.id) {
+        const [updatedPart] = await tx
+          .update(workoutParts)
+          .set({
+            orderIndex: i,
+            label: p.label || null,
+            workoutType: p.workoutType,
+            timeCapSeconds: p.timeCapSeconds || null,
+            amrapDurationSeconds: p.amrapDurationSeconds || null,
+            emomIntervalSeconds: p.emomIntervalSeconds || null,
+            repScheme: p.repScheme || null,
+            rounds: p.rounds ?? null,
+            structure: p.structure || null,
+            notes: p.notes || null,
+          })
+          .where(
+            and(eq(workoutParts.id, p.id), eq(workoutParts.workoutId, id))
+          )
+          .returning();
+        if (!updatedPart) {
+          // The id didn't belong to this workout — fall through and insert
+          // as a new part rather than silently dropping the data.
+          const [inserted] = await tx
+            .insert(workoutParts)
+            .values({
+              workoutId: id,
+              orderIndex: i,
+              label: p.label || null,
+              workoutType: p.workoutType,
+              timeCapSeconds: p.timeCapSeconds || null,
+              amrapDurationSeconds: p.amrapDurationSeconds || null,
+              emomIntervalSeconds: p.emomIntervalSeconds || null,
+              repScheme: p.repScheme || null,
+              rounds: p.rounds ?? null,
+              structure: p.structure || null,
+              notes: p.notes || null,
+            })
+            .returning();
+          partId = inserted.id;
+        } else {
+          partId = updatedPart.id;
+        }
+      } else {
+        const [inserted] = await tx
+          .insert(workoutParts)
+          .values({
+            workoutId: id,
+            orderIndex: i,
+            label: p.label || null,
+            workoutType: p.workoutType,
+            timeCapSeconds: p.timeCapSeconds || null,
+            amrapDurationSeconds: p.amrapDurationSeconds || null,
+            emomIntervalSeconds: p.emomIntervalSeconds || null,
+            repScheme: p.repScheme || null,
+            rounds: p.rounds ?? null,
+            structure: p.structure || null,
+            notes: p.notes || null,
+          })
+          .returning();
+        partId = inserted.id;
+      }
+
+      // 3a) Diff movements within this part.
+      const keepMovementIds = p.movements
+        .map((m) => m.id)
+        .filter((x): x is string => !!x);
+      if (keepMovementIds.length > 0) {
+        await tx
+          .delete(workoutMovements)
+          .where(
+            and(
+              eq(workoutMovements.workoutPartId, partId),
+              notInArray(workoutMovements.id, keepMovementIds)
+            )
+          );
+      } else {
+        await tx
+          .delete(workoutMovements)
+          .where(eq(workoutMovements.workoutPartId, partId));
+      }
+
+      for (let j = 0; j < p.movements.length; j++) {
+        const m = p.movements[j];
+        const repSchemeParsed = parseAndPromote(
+          m.prescribedReps,
+          m.promoteSequenceToLadder ?? false
+        );
+        const fields = {
+          movementId: m.movementId,
+          orderIndex: m.orderIndex ?? j,
+          prescribedReps: m.prescribedReps || null,
+          prescribedWeightMale: m.prescribedWeightMale?.toString() || null,
+          prescribedWeightFemale: m.prescribedWeightFemale?.toString() || null,
+          prescribedCaloriesMale: toIntOrNull(m.prescribedCaloriesMale),
+          prescribedCaloriesFemale: toIntOrNull(m.prescribedCaloriesFemale),
+          prescribedDistanceMale: toIntOrNull(m.prescribedDistanceMale),
+          prescribedDistanceFemale: toIntOrNull(m.prescribedDistanceFemale),
+          repSchemeParsed,
+          equipmentCount: m.equipmentCount ?? null,
+          rxStandard: m.rxStandard || null,
+          notes: m.notes || null,
+        };
+
+        if (m.id) {
+          const [updated] = await tx
+            .update(workoutMovements)
+            .set(fields)
+            .where(
+              and(
+                eq(workoutMovements.id, m.id),
+                eq(workoutMovements.workoutPartId, partId)
+              )
+            )
+            .returning();
+          if (!updated) {
+            await tx.insert(workoutMovements).values({
+              workoutId: id,
+              workoutPartId: partId,
+              ...fields,
+            });
+          }
+        } else {
+          await tx.insert(workoutMovements).values({
+            workoutId: id,
+            workoutPartId: partId,
+            ...fields,
+          });
+        }
+      }
+    }
+
+    return updatedWorkout;
+  });
+
+  return NextResponse.json(result);
+}
+
+// ============================================
+// Helpers (local to PUT)
+// ============================================
+
+function toIntOrNull(value: number | string | undefined | null): number | null {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : parseInt(value, 10);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}
+
+function parseAndPromote(
+  reps: string | null | undefined,
+  promote: boolean
+): RepSchemeParsed | null {
+  const parsed = parseRepScheme(reps ?? null);
+  if (!parsed) return null;
+  if (promote && parsed.kind === "sequence" && parsed.reps.length >= 3) {
+    const step = parsed.reps[1] - parsed.reps[0];
+    if (step <= 0) return parsed;
+    let ok = true;
+    for (let i = 2; i < parsed.reps.length; i++) {
+      if (parsed.reps[i] - parsed.reps[i - 1] !== step) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) {
+      return { kind: "ladder", start: parsed.reps[0], step, openEnded: true };
+    }
+  }
+  return parsed;
 }
 
 // DELETE /api/workouts/[id]

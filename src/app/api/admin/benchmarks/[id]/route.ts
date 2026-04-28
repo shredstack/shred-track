@@ -18,11 +18,27 @@ export async function PUT(
     name,
     description,
     workoutType,
+    category,
     timeCapSeconds,
     amrapDurationSeconds,
     repScheme,
+    isSystem,
     movements: movementsList,
   } = body;
+
+  const VALID_CATEGORIES = new Set([
+    "girls",
+    "heroes",
+    "open",
+    "weightlifting",
+    "gym_benchmark",
+  ]);
+  if (category != null && category !== "" && !VALID_CATEGORIES.has(category)) {
+    return NextResponse.json(
+      { error: "Invalid benchmark category" },
+      { status: 400 }
+    );
+  }
 
   const [existing] = await db
     .select()
@@ -41,9 +57,11 @@ export async function PUT(
         name: name?.trim() || existing.name,
         description: description !== undefined ? (description || null) : existing.description,
         workoutType: workoutType || existing.workoutType,
+        category: category !== undefined ? (category || null) : existing.category,
         timeCapSeconds: timeCapSeconds !== undefined ? (timeCapSeconds || null) : existing.timeCapSeconds,
         amrapDurationSeconds: amrapDurationSeconds !== undefined ? (amrapDurationSeconds || null) : existing.amrapDurationSeconds,
         repScheme: repScheme !== undefined ? (repScheme || null) : existing.repScheme,
+        isSystem: isSystem !== undefined ? !!isSystem : existing.isSystem,
         updatedAt: new Date(),
       })
       .where(eq(benchmarkWorkouts.id, id))

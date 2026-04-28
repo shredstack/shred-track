@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   LogOut,
@@ -13,6 +14,8 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
+  Shield,
+  ChevronRight,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -924,6 +927,24 @@ export default function ProfilePage() {
           <HyroxSection />
         </TabsContent>
       </Tabs>
+
+      {/* Admin (only visible to admins) */}
+      {user?.isAdmin && (
+        <Card>
+          <CardContent className="pt-4">
+            <Link
+              href="/admin"
+              className="flex w-full items-center gap-3 rounded-lg px-2 py-3.5 text-sm transition-colors hover:bg-muted/40 group"
+            >
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+                <Shield className="h-4 w-4 text-primary" />
+              </div>
+              <span className="flex-1 text-left font-medium">Admin</span>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </Link>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Sign out */}
       <Card>

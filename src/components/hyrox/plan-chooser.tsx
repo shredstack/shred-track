@@ -45,6 +45,7 @@ export function PlanChooser() {
     if (purchase.isPending) return "Processing...";
     if (credits.isLoading) return "Upgrade to Personalized";
     if (credits.canGenerate) {
+      if (credits.nextSource === "vip_user") return "Generate (VIP)";
       if (credits.nextSource === "vip") return "Use VIP credit";
       if (credits.nextSource === "purchase") return "Use your credit";
       return "Continue";

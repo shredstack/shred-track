@@ -104,6 +104,7 @@ export default function HyroxPage() {
     if (purchase.isPending) return "Processing...";
     if (credits.isLoading) return "New personalized plan";
     if (credits.canGenerate) {
+      if (credits.nextSource === "vip_user") return "New personalized plan (VIP)";
       if (credits.nextSource === "vip") return "New personalized plan (VIP credit)";
       if (credits.nextSource === "purchase") return "New personalized plan (use credit)";
       return "Redo onboarding";

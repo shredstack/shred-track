@@ -27,6 +27,7 @@ export const users = pgTable("users", {
   image: text("image"),
   emailVerified: timestamp("email_verified", { mode: "date" }),
   isAdmin: boolean("is_admin").default(false).notNull(),
+  isVip: boolean("is_vip").default(false).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -105,6 +106,7 @@ export const movements = pgTable(
     commonRxWeightFemale: numeric("common_rx_weight_female"),
     videoUrl: text("video_url"),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    isValidated: boolean("is_validated").default(false).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [index("movements_created_by_idx").on(table.createdBy)]
@@ -147,6 +149,10 @@ export const workoutParts = pgTable(
     emomIntervalSeconds: integer("emom_interval_seconds"),
     repScheme: text("rep_scheme"),
     rounds: integer("rounds"),
+    // Structural pattern modifier for the part (currently 'tabata' on for_reps,
+    // null otherwise). Lets a "For Reps" part declare a Tabata cadence without
+    // creating a new workout_type.
+    structure: text("structure"),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -233,6 +239,9 @@ export const benchmarkWorkouts = pgTable("benchmark_workouts", {
   name: text("name").notNull(),
   description: text("description"),
   workoutType: text("workout_type").notNull(),
+  // 'girls' | 'heroes' | 'open' | 'weightlifting' | 'gym_benchmark'.
+  // Nullable so user-created custom benchmarks don't have to be classified.
+  category: text("category"),
   timeCapSeconds: integer("time_cap_seconds"),
   amrapDurationSeconds: integer("amrap_duration_seconds"),
   repScheme: text("rep_scheme"),

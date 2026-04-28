@@ -10,6 +10,8 @@ export interface UserProfile {
   email: string;
   gender: string | null;
   unitPreference: string;
+  isAdmin: boolean;
+  isVip: boolean;
   createdAt: string;
 }
 

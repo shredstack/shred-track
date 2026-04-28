@@ -4,15 +4,16 @@
 // Each personalized plan generation consumes one "credit" from the highest-
 // priority source available at gate time:
 //   1. Bypass      — HYROX_PAYWALL_ENFORCED=false, dev mode.
-//   2. VIP         — user has an active hyrox_vip_grants row AND has used
+//   2. VIP user    — users.is_vip=true (blanket bypass for paid features).
+//   3. VIP grant   — user has an active hyrox_vip_grants row AND has used
 //                    fewer than plans_per_year in the trailing 365 days.
-//   3. Purchase    — user has an unconsumed row in hyrox_plan_purchases.
+//   4. Purchase    — user has an unconsumed row in hyrox_plan_purchases.
 //
 // If none apply, the gate returns `{ allowed: false, reason: 'payment_required' }`
 // and the caller is expected to 402 with checkout UX.
 //
 // Consumption is recorded in hyrox_plan_generations with:
-//   - source = 'vip' | 'purchase' | 'bypass'
+//   - source = 'vip' | 'vip_user' | 'purchase' | 'bypass'
 //   - purchase_id = the consumed purchase row (only for 'purchase')
 //
 // Gotcha: `consumeCredit()` wraps the check+insert in a DB transaction with
@@ -26,6 +27,7 @@ import {
   hyroxPlanGenerations,
   hyroxPlanPurchases,
   hyroxVipGrants,
+  users,
 } from "@/db/schema";
 import { isPaywallEnforced } from "@/lib/entitlements";
 
@@ -33,7 +35,7 @@ import { isPaywallEnforced } from "@/lib/entitlements";
 export const PERSONALIZED_PLAN_PRICE_CENTS = 999;
 export const PERSONALIZED_PLAN_PRICE_USD = "9.99";
 
-export type CreditSource = "vip" | "purchase" | "bypass";
+export type CreditSource = "vip" | "vip_user" | "purchase" | "bypass";
 
 export interface CreditStatus {
   /** True if the user can start a generation right now (no purchase needed). */
@@ -41,6 +43,8 @@ export interface CreditStatus {
   /** Which source the NEXT generation would draw from, if any. */
   nextSource: CreditSource | null;
   paywallEnforced: boolean;
+  /** users.is_vip — blanket bypass for paid features. */
+  isVipUser: boolean;
   purchases: {
     total: number;
     consumed: number;
@@ -59,6 +63,13 @@ const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 /** Read-only snapshot of the user's credit state. Safe to call anywhere. */
 export async function getCreditStatus(userId: string): Promise<CreditStatus> {
   const paywall = isPaywallEnforced();
+
+  const [userRow] = await db
+    .select({ isVip: users.isVip })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  const isVipUser = !!userRow?.isVip;
 
   const [vipRow] = await db
     .select()
@@ -99,6 +110,7 @@ export async function getCreditStatus(userId: string): Promise<CreditStatus> {
 
   let nextSource: CreditSource | null = null;
   if (!paywall) nextSource = "bypass";
+  else if (isVipUser) nextSource = "vip_user";
   else if (vipRow && vipRemaining > 0) nextSource = "vip";
   else if (purchaseRemaining > 0) nextSource = "purchase";
 
@@ -106,6 +118,7 @@ export async function getCreditStatus(userId: string): Promise<CreditStatus> {
     canGenerate: nextSource !== null,
     nextSource,
     paywallEnforced: paywall,
+    isVipUser,
     purchases: { total, consumed, remaining: purchaseRemaining },
     vip: {
       isVip: !!vipRow,
@@ -148,7 +161,22 @@ export async function consumeCredit(
   }
 
   return db.transaction(async (tx) => {
-    // VIP first — no purchase decrement needed, just record usage.
+    // is_vip user — blanket bypass. Highest priority below dev bypass so we
+    // never burn the user's metered VIP allowance or a paid purchase.
+    const [userRow] = await tx
+      .select({ isVip: users.isVip })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (userRow?.isVip) {
+      const [row] = await tx
+        .insert(hyroxPlanGenerations)
+        .values({ userId, source: "vip_user" })
+        .returning({ id: hyroxPlanGenerations.id });
+      return { allowed: true, source: "vip_user", generationId: row.id };
+    }
+
+    // Metered VIP grant — record usage but no purchase decrement.
     const [vipRow] = await tx
       .select()
       .from(hyroxVipGrants)
