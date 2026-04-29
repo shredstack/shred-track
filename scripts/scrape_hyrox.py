@@ -488,10 +488,10 @@ class HyroxScraper:
         self.stats["events_touched"] += 1
 
         # --- Skip check: already-scraped completeness (per division) ---
-        # Each value is {"count": int, "missing_names": int}. We re-scrape any
-        # division where rows are missing data we now collect (e.g.
-        # `athlete_names_normalized` after the column was added) — the skip
-        # heuristic must not strand us on stale rows.
+        # Each value is {"count": int, "missing_names": int}. `missing_names`
+        # counts rows whose `raw_scraped_names` is empty — we re-scrape any
+        # division still missing it (e.g. after the column was added) so the
+        # skip heuristic doesn't strand us on stale rows.
         db_division_status: dict[str, dict] = {}
         if self.db and not self.force:
             db_division_status = self.db.get_event_result_counts(external_id)
@@ -654,10 +654,12 @@ class HyroxScraper:
                         "division": division_key,
                     })
                 elif status == "ok" and detail is not None:
+                    raw_members = detail.get("members") or [detail["name"]]
                     batch.append(ParsedResult(
                         external_result_id=list_result["idp"],
                         athlete_name=detail["name"],
-                        athlete_names=(detail.get("members") or [detail["name"]])[:expected_member_count(division_key)],
+                        athlete_names=raw_members[:expected_member_count(division_key)],
+                        raw_scraped_names=raw_members,
                         division_key=division_key,
                         age_group=detail["age_group"],
                         finish_time_seconds=detail["finish_time_seconds"],
@@ -767,10 +769,12 @@ class HyroxScraper:
                             "division": division_key,
                         })
                     elif status == "ok" and detail is not None:
+                        raw_members = detail.get("members") or [detail["name"]]
                         batch.append(ParsedResult(
                             external_result_id=item["idp"],
                             athlete_name=detail["name"],
-                            athlete_names=(detail.get("members") or [detail["name"]])[:expected_member_count(division_key)],
+                            athlete_names=raw_members[:expected_member_count(division_key)],
+                            raw_scraped_names=raw_members,
                             division_key=division_key,
                             age_group=detail["age_group"],
                             finish_time_seconds=detail["finish_time_seconds"],

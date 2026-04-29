@@ -14,6 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { TimeLossEntry, FocusEntry } from "@/types/hyrox-race-report";
+import type { SetEntry } from "@/types/crossfit";
 
 // ============================================
 // Users & Auth
@@ -221,7 +222,10 @@ export const scoreMovementDetails = pgTable("score_movement_details", {
   actualReps: text("actual_reps"),
   modification: text("modification"),
   substitutionMovementId: uuid("substitution_movement_id").references(() => movements.id),
-  setWeights: jsonb("set_weights"), // for_load: per-set weights
+  // Per-set entries on for_load parts: [{ weight, reps?, rpe? }]. Column
+  // name kept as `set_weights` for migration simplicity. Use `setEntries`
+  // when reading/writing in code.
+  setEntries: jsonb("set_weights").$type<SetEntry[]>(),
   notes: text("notes"),
 }, (table) => [
   foreignKey({
@@ -251,6 +255,15 @@ export const benchmarkWorkouts = pgTable("benchmark_workouts", {
   isSystem: boolean("is_system").default(false).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// One row per user, holds the rendered DomainProfile JSON. See
+// claude_code_instructions/crossfit_smart_insights_spec.md §9.5.
+export const crossfitInsightsCache = pgTable("crossfit_insights_cache", {
+  userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  domainProfile: jsonb("domain_profile").notNull(),
+  computedAt: timestamp("computed_at", { withTimezone: true }).defaultNow().notNull(),
+  sourceScoreCount: integer("source_score_count").notNull(),
 });
 
 export const benchmarkWorkoutMovements = pgTable("benchmark_workout_movements", {
@@ -585,6 +598,7 @@ export const hyroxPublicResults = pgTable(
     percentile: numeric("percentile", { precision: 5, scale: 2 }).notNull(),
     isDnf: boolean("is_dnf").notNull().default(false),
     athleteNamesNormalized: text("athlete_names_normalized").array().notNull().default([]),
+    rawScrapedNames: text("raw_scraped_names").array().notNull().default([]),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

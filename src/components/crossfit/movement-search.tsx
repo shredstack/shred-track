@@ -4,10 +4,15 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Search, Plus } from "lucide-react";
-import { useMovements } from "@/hooks/useMovements";
+import { useMovements, useRecentMovements } from "@/hooks/useMovements";
 import { PickerSheet } from "@/components/shared/picker-sheet";
+import { CategoryPills } from "@/components/shared/category-pills";
 import { inferDefaultMetricType } from "@/lib/crossfit/rep-scheme-parser";
-import type { MovementOption, MovementCategory } from "@/types/crossfit";
+import type {
+  MovementOption,
+  MovementCategory,
+  CategoryFilter,
+} from "@/types/crossfit";
 import { MOVEMENT_CATEGORY_COLORS } from "@/types/crossfit";
 
 // ============================================
@@ -107,29 +112,62 @@ export function MovementSearch({
   movements: movementsOverride,
 }: MovementSearchProps) {
   const { data: fetched } = useMovements();
+  const { data: recentIds } = useRecentMovements();
   const movements = movementsOverride ?? fetched ?? FALLBACK_MOVEMENTS;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<CategoryFilter>("all");
   const [highlightIndex, setHighlightIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const filtered = useMemo(
-    () =>
-      query.trim()
-        ? movements.filter((m) =>
-            m.canonicalName.toLowerCase().includes(query.toLowerCase()),
-          )
-        : movements,
-    [movements, query],
-  );
+  const filtered = useMemo(() => {
+    const byCategory =
+      category === "all"
+        ? movements
+        : movements.filter((m) => m.category === category);
+    return query.trim()
+      ? byCategory.filter((m) =>
+          m.canonicalName.toLowerCase().includes(query.toLowerCase()),
+        )
+      : byCategory;
+  }, [movements, query, category]);
+
+  // Show the "Recent" group only when the user hasn't narrowed the list — once
+  // they pick a category or start typing, grouping just gets in the way.
+  const showGroupedRecent =
+    category === "all" &&
+    query.trim().length === 0 &&
+    !!recentIds &&
+    recentIds.length > 0;
+
+  // When grouping is on, hoist recent movements to the top of the display list.
+  // The id-preserving order from the API drives the within-group order.
+  const { displayItems, recentCount } = useMemo(() => {
+    if (!showGroupedRecent || !recentIds) {
+      return { displayItems: filtered, recentCount: 0 };
+    }
+    const byId = new Map(filtered.map((m) => [m.id, m]));
+    const recent: MovementOption[] = [];
+    const seen = new Set<string>();
+    for (const id of recentIds) {
+      const m = byId.get(id);
+      if (m && !seen.has(id)) {
+        recent.push(m);
+        seen.add(id);
+      }
+    }
+    const rest = filtered.filter((m) => !seen.has(m.id));
+    return { displayItems: [...recent, ...rest], recentCount: recent.length };
+  }, [filtered, recentIds, showGroupedRecent]);
 
   const showAddNew = !!onAddNew && query.trim().length > 0;
-  const totalItems = filtered.length + (showAddNew ? 1 : 0);
+  const totalItems = displayItems.length + (showAddNew ? 1 : 0);
 
   const closeAndReset = useCallback(() => {
     setOpen(false);
     setQuery("");
+    setCategory("all");
     setHighlightIndex(0);
   }, []);
 
@@ -180,8 +218,8 @@ export function MovementSearch({
         break;
       case "Enter":
         e.preventDefault();
-        if (highlightIndex < filtered.length) {
-          handleSelect(filtered[highlightIndex]);
+        if (highlightIndex < displayItems.length) {
+          handleSelect(displayItems[highlightIndex]);
         } else if (showAddNew) {
           handleAddNew();
         }
@@ -227,56 +265,81 @@ export function MovementSearch({
           </div>
         </div>
 
+        <CategoryPills
+          value={category}
+          onChange={(next) => {
+            setCategory(next);
+            setHighlightIndex(0);
+          }}
+          className="px-3 pb-2"
+        />
+
         <div
           ref={listRef}
           className="flex-1 overflow-y-auto px-2 pb-4"
           role="listbox"
         >
-          {filtered.length === 0 && !showAddNew && (
+          {displayItems.length === 0 && !showAddNew && (
             <div className="px-3 py-6 text-center text-sm text-muted-foreground">
               No movements found
             </div>
           )}
 
-          {filtered.map((movement, idx) => (
-            <button
-              key={movement.id}
-              type="button"
-              role="option"
-              aria-selected={idx === highlightIndex}
-              className={`flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
-                idx === highlightIndex
-                  ? "bg-accent text-accent-foreground"
-                  : "hover:bg-accent/50"
-              }`}
-              onMouseEnter={() => setHighlightIndex(idx)}
-              onClick={() => handleSelect(movement)}
-            >
-              <span className="flex-1">{movement.canonicalName}</span>
-              <Badge
-                variant="secondary"
-                className={`text-[10px] ${
-                  MOVEMENT_CATEGORY_COLORS[
-                    movement.category as MovementCategory
-                  ] || ""
-                }`}
-              >
-                {movement.category}
-              </Badge>
-            </button>
-          ))}
+          {displayItems.map((movement, idx) => {
+            const isFirstRecent = showGroupedRecent && idx === 0;
+            const isFirstAfterRecent =
+              showGroupedRecent && recentCount > 0 && idx === recentCount;
+            return (
+              <div key={movement.id}>
+                {isFirstRecent && (
+                  <div className="px-3 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Recent
+                  </div>
+                )}
+                {isFirstAfterRecent && (
+                  <div className="px-3 pt-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    All movements
+                  </div>
+                )}
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={idx === highlightIndex}
+                  className={`flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
+                    idx === highlightIndex
+                      ? "bg-accent text-accent-foreground"
+                      : "hover:bg-accent/50"
+                  }`}
+                  onMouseEnter={() => setHighlightIndex(idx)}
+                  onClick={() => handleSelect(movement)}
+                >
+                  <span className="flex-1">{movement.canonicalName}</span>
+                  <Badge
+                    variant="secondary"
+                    className={`text-[10px] ${
+                      MOVEMENT_CATEGORY_COLORS[
+                        movement.category as MovementCategory
+                      ] || ""
+                    }`}
+                  >
+                    {movement.category}
+                  </Badge>
+                </button>
+              </div>
+            );
+          })}
 
           {showAddNew && (
             <button
               type="button"
               role="option"
-              aria-selected={highlightIndex === filtered.length}
+              aria-selected={highlightIndex === displayItems.length}
               className={`mt-1 flex w-full items-center gap-2 rounded-md border-t border-border px-3 py-2.5 text-left text-sm transition-colors ${
-                highlightIndex === filtered.length
+                highlightIndex === displayItems.length
                   ? "bg-accent text-accent-foreground"
                   : "hover:bg-accent/50"
               }`}
-              onMouseEnter={() => setHighlightIndex(filtered.length)}
+              onMouseEnter={() => setHighlightIndex(displayItems.length)}
               onClick={handleAddNew}
             >
               <Plus className="size-4 text-muted-foreground" />

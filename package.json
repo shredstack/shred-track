@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "db:seed": "npx tsx src/db/seed.ts",
     "db:seed:hyrox-generic-plans": "npx tsx src/db/seeds/hyrox-generic-plans.ts",
     "db:seed:deploy": "npx tsx src/db/seeds/run-all.ts",
@@ -56,6 +58,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.2",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.5"
   }
 }

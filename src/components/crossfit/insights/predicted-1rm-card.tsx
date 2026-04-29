@@ -193,6 +193,9 @@ function PredictionRow({ p }: { p: Predicted1RM }) {
             >
               <span>
                 {s.weight} lb × {s.reps}
+                {s.rpe != null && (
+                  <span className="text-muted-foreground"> @{s.rpe}</span>
+                )}
               </span>
               <span className="text-muted-foreground">
                 {formatDate(s.loggedAt)}

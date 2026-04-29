@@ -15,6 +15,7 @@ import {
   type RepSchemeParsed,
 } from "@/lib/crossfit/rep-scheme-parser";
 import type { WorkoutType } from "@/types/crossfit";
+import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
 
 // GET /api/workouts/[id] — single workout with its parts, movements, and
 // (if the requester has one) the caller's scores per part.
@@ -90,7 +91,7 @@ export async function GET(
     actualReps: string | null;
     modification: string | null;
     substitutionMovementId: string | null;
-    setWeights: unknown;
+    setEntries: unknown;
     notes: string | null;
   }>>();
 
@@ -122,7 +123,7 @@ export async function GET(
           actualReps: d.actualReps,
           modification: d.modification,
           substitutionMovementId: d.substitutionMovementId,
-          setWeights: d.setWeights,
+          setEntries: d.setEntries,
           notes: d.notes,
         });
         detailsByScore.set(d.scoreId, list);
@@ -187,18 +188,19 @@ export async function GET(
             hitTimeCap: score.hitTimeCap,
             notes: score.notes ?? undefined,
             rpe: score.rpe ?? undefined,
-            movementDetails: (detailsByScore.get(score.id) ?? []).map((d) => ({
-              workoutMovementId: d.workoutMovementId,
-              wasRx: d.wasRx,
-              actualWeight: d.actualWeight ? Number(d.actualWeight) : undefined,
-              actualReps: d.actualReps ?? undefined,
-              modification: d.modification ?? undefined,
-              substitutionMovementId: d.substitutionMovementId ?? undefined,
-              setWeights: Array.isArray(d.setWeights)
-                ? (d.setWeights as number[])
-                : undefined,
-              notes: d.notes ?? undefined,
-            })),
+            movementDetails: (detailsByScore.get(score.id) ?? []).map((d) => {
+              const entries = normalizeSetEntries(d.setEntries);
+              return {
+                workoutMovementId: d.workoutMovementId,
+                wasRx: d.wasRx,
+                actualWeight: d.actualWeight ? Number(d.actualWeight) : undefined,
+                actualReps: d.actualReps ?? undefined,
+                modification: d.modification ?? undefined,
+                substitutionMovementId: d.substitutionMovementId ?? undefined,
+                setEntries: entries.length > 0 ? entries : undefined,
+                notes: d.notes ?? undefined,
+              };
+            }),
           }
         : null,
     };

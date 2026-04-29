@@ -89,13 +89,14 @@ class HyroxDB:
                             (id, event_id, external_result_id, external_athlete_hash,
                              division_key, age_group, finish_time_seconds,
                              overall_rank, division_rank, field_size_division,
-                             percentile, is_dnf, athlete_names_normalized)
+                             percentile, is_dnf, athlete_names_normalized,
+                             raw_scraped_names)
                         VALUES
                             (gen_random_uuid(), %(event_id)s, %(external_result_id)s,
                              %(external_athlete_hash)s, %(division_key)s, %(age_group)s,
                              %(finish_time_seconds)s, %(overall_rank)s, %(division_rank)s,
                              %(field_size_division)s, %(percentile)s, %(is_dnf)s,
-                             %(athlete_names_normalized)s)
+                             %(athlete_names_normalized)s, %(raw_scraped_names)s)
                         ON CONFLICT (event_id, external_result_id) DO UPDATE SET
                             external_athlete_hash = EXCLUDED.external_athlete_hash,
                             division_key = EXCLUDED.division_key,
@@ -107,6 +108,7 @@ class HyroxDB:
                             percentile = EXCLUDED.percentile,
                             is_dnf = EXCLUDED.is_dnf,
                             athlete_names_normalized = EXCLUDED.athlete_names_normalized,
+                            raw_scraped_names = EXCLUDED.raw_scraped_names,
                             updated_at = NOW()
                         RETURNING id, (xmax = 0) AS was_inserted
                         """,
@@ -123,6 +125,7 @@ class HyroxDB:
                             "percentile": result.percentile,
                             "is_dnf": result.is_dnf,
                             "athlete_names_normalized": result.athlete_names_normalized,
+                            "raw_scraped_names": result.raw_scraped_names,
                         },
                     )
                     row = cur.fetchone()
@@ -217,10 +220,12 @@ class HyroxDB:
 
         Returns {division_key: {"count": int, "missing_names": int}}.
 
-        `missing_names` counts rows whose `athlete_names_normalized` is NULL or
-        empty. The scraper uses it to override the "already complete" skip
-        check when a previously-scraped division still needs name data
-        backfilled (e.g. after the schema added the column).
+        `missing_names` counts rows whose `raw_scraped_names` is NULL or empty.
+        Raw is the recovery source — once it's populated, normalization can be
+        re-run from it without hitting the network. The scraper uses this to
+        override the "already complete" skip check when a previously-scraped
+        division still needs raw name data backfilled (e.g. after the column
+        was added).
         """
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -230,8 +235,8 @@ class HyroxDB:
                         r.division_key,
                         COUNT(*) AS count,
                         COUNT(*) FILTER (
-                            WHERE r.athlete_names_normalized IS NULL
-                               OR cardinality(r.athlete_names_normalized) = 0
+                            WHERE r.raw_scraped_names IS NULL
+                               OR cardinality(r.raw_scraped_names) = 0
                         ) AS missing_names
                     FROM hyrox_public_results r
                     JOIN hyrox_public_events e ON e.id = r.event_id

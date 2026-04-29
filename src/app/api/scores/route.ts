@@ -8,6 +8,9 @@ import {
 } from "@/db/schema";
 import { eq, desc, asc } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
+import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
+import { invalidateCrossfitInsightsCache } from "@/lib/crossfit/insights/cache";
+import type { SetEntry } from "@/types/crossfit";
 
 // ============================================
 // Request types
@@ -20,7 +23,9 @@ interface MovementDetailInput {
   actualReps?: string;
   modification?: string;
   substitutionMovementId?: string;
-  setWeights?: number[];
+  // Accept either the canonical shape or the legacy number[] for backward
+  // compatibility — old clients that haven't shipped yet may still send it.
+  setEntries?: Array<SetEntry | number>;
   notes?: string;
 }
 
@@ -133,15 +138,23 @@ export async function POST(req: NextRequest) {
 
   const details = body.movementDetails ?? body.movementScalings ?? [];
 
-  // Derive weightLbs from setWeights for for_load parts when not explicitly
-  // provided. The canonical per-set data lives in scoreMovementDetails;
-  // scores.weightLbs is a summary for legacy queries.
+  // Normalize setEntries on every detail up front so downstream code can
+  // assume the canonical shape.
+  const normalizedDetails = details.map((d) => ({
+    ...d,
+    setEntries: d.setEntries ? normalizeSetEntries(d.setEntries) : undefined,
+  }));
+
+  // Derive weightLbs from per-set entries for for_load parts when not
+  // explicitly provided. The canonical per-set data lives in
+  // scoreMovementDetails; scores.weightLbs is a summary for legacy queries.
   let weightLbs = body.weightLbs;
   if (weightLbs == null) {
-    const maxFromSets = details
-      .flatMap((d) => d.setWeights ?? [])
-      .reduce<number | null>((max, w) => (max == null || w > max ? w : max), null);
-    if (maxFromSets != null) weightLbs = maxFromSets;
+    const max = Math.max(
+      0,
+      ...normalizedDetails.flatMap((d) => (d.setEntries ?? []).map((e) => e.weight))
+    );
+    if (max > 0) weightLbs = max;
   }
 
   try {
@@ -165,9 +178,9 @@ export async function POST(req: NextRequest) {
         })
         .returning();
 
-      if (details.length > 0) {
+      if (normalizedDetails.length > 0) {
         await tx.insert(scoreMovementDetails).values(
-          details
+          normalizedDetails
             .filter((d) => d.workoutMovementId)
             .map((d) => ({
               scoreId: inserted.id,
@@ -177,7 +190,8 @@ export async function POST(req: NextRequest) {
               actualReps: d.actualReps ?? null,
               modification: d.modification ?? null,
               substitutionMovementId: d.substitutionMovementId ?? null,
-              setWeights: d.setWeights && d.setWeights.length > 0 ? d.setWeights : null,
+              setEntries:
+                d.setEntries && d.setEntries.length > 0 ? d.setEntries : null,
               notes: d.notes ?? null,
             }))
         );
@@ -185,6 +199,8 @@ export async function POST(req: NextRequest) {
 
       return inserted;
     });
+
+    await invalidateCrossfitInsightsCache(user.id);
 
     return NextResponse.json(score, { status: 201 });
   } catch (err: unknown) {

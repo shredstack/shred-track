@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { Predicted1RMResult } from "@/lib/crossfit/insights/predicted-1rm";
 import type { RxGapResult } from "@/lib/crossfit/insights/rx-gap";
+import type { DomainProfile } from "@/lib/crossfit/insights/domain-profile";
 
 const STALE_TIME = 5 * 60 * 1000; // 5 minutes — these don't change rapidly
 
@@ -27,6 +28,18 @@ export function useRxGap(windowDays?: number) {
       const url = `/api/crossfit/insights/rx-gap${params.toString() ? `?${params}` : ""}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error("Failed to fetch RX gap");
+      return res.json();
+    },
+    staleTime: STALE_TIME,
+  });
+}
+
+export function useDomainProfile() {
+  return useQuery<DomainProfile>({
+    queryKey: ["crossfit-insights", "domain-profile"],
+    queryFn: async () => {
+      const res = await fetch("/api/crossfit/insights/domain-profile");
+      if (!res.ok) throw new Error("Failed to fetch domain profile");
       return res.json();
     },
     staleTime: STALE_TIME,

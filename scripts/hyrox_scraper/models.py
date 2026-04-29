@@ -86,6 +86,7 @@ class ParsedResult(BaseModel):
     external_result_id: str
     athlete_name: str  # raw display string (singles: "Last, First"; teams: "A & B"). Hashed, not stored.
     athlete_names: list[str] = Field(default_factory=list)  # one raw name per team member (singles=1, doubles=2, relay≤4)
+    raw_scraped_names: list[str] = Field(default_factory=list)  # full untruncated <td.last> capture; stored verbatim as a recovery source
     division_key: str
     age_group: str | None = None
     finish_time_seconds: int

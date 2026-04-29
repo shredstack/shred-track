@@ -60,8 +60,19 @@ function formatDate(dateStr: string): string {
 function summarizeLog(log: MovementHistoryEntry, isWeighted: boolean): string {
   if (isWeighted) {
     if (log.actualWeight) return `${log.actualWeight} lb`;
-    if (Array.isArray(log.setWeights) && log.setWeights.length > 0) {
-      return (log.setWeights as Array<number | string>).join(" / ") + " lb";
+    if (log.setEntries && log.setEntries.length > 0) {
+      const repsVary = log.setEntries.some(
+        (e, _i, arr) => e.reps != null && e.reps !== arr[0].reps
+      );
+      return (
+        log.setEntries
+          .map((e) =>
+            repsVary && e.reps != null
+              ? `${e.weight}×${e.reps}`
+              : `${e.weight}`
+          )
+          .join(" / ") + " lb"
+      );
     }
     return "—";
   }
