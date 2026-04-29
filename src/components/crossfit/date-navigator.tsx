@@ -82,26 +82,26 @@ export function DateNavigator({ selectedDate, onDateChange }: DateNavigatorProps
           <button
             type="button"
             onClick={openPicker}
-            className="relative flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-0.5 text-sm font-semibold transition-colors hover:bg-white/[0.04]"
+            className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-0.5 text-sm font-semibold transition-colors hover:bg-white/[0.04]"
             aria-label="Jump to date"
           >
             <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
             {monthYear}
-            <input
-              ref={dateInputRef}
-              type="date"
-              value={toLocalDateString(selectedDate)}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (!v) return;
-                const [y, m, d] = v.split("-").map(Number);
-                onDateChange(new Date(y, m - 1, d));
-              }}
-              tabIndex={-1}
-              aria-hidden="true"
-              className="absolute inset-0 cursor-pointer opacity-0"
-            />
           </button>
+          <input
+            ref={dateInputRef}
+            type="date"
+            value={toLocalDateString(selectedDate)}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (!v) return;
+              const [y, m, d] = v.split("-").map(Number);
+              onDateChange(new Date(y, m - 1, d));
+            }}
+            tabIndex={-1}
+            aria-hidden="true"
+            className="sr-only"
+          />
           {!isToday && (
             <button
               onClick={() => onDateChange(today)}
