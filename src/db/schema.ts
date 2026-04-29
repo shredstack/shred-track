@@ -14,7 +14,12 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { TimeLossEntry, FocusEntry } from "@/types/hyrox-race-report";
-import type { SetEntry } from "@/types/crossfit";
+import type {
+  SetEntry,
+  NotesComplaint,
+  NotesScalingReason,
+  NotesMilestone,
+} from "@/types/crossfit";
 
 // ============================================
 // Users & Auth
@@ -264,6 +269,21 @@ export const crossfitInsightsCache = pgTable("crossfit_insights_cache", {
   domainProfile: jsonb("domain_profile").notNull(),
   computedAt: timestamp("computed_at", { withTimezone: true }).defaultNow().notNull(),
   sourceScoreCount: integer("source_score_count").notNull(),
+});
+
+// LLM-extracted structured signal from a score's free-text notes. Keyed by
+// score so re-extraction (e.g. on a model bump or note edit) is idempotent.
+// `contentHash` is a fingerprint of the prompt we sent the LLM — when notes
+// or scaling context change, the hash flips and we re-extract.
+// See claude_code_instructions/crossfit_smart_insights_spec.md §11.
+export const scoreNotesExtractions = pgTable("score_notes_extractions", {
+  scoreId: uuid("score_id").primaryKey().references(() => scores.id, { onDelete: "cascade" }),
+  complaints: jsonb("complaints").$type<NotesComplaint[]>().notNull(),
+  scalingRationale: jsonb("scaling_rationale").$type<NotesScalingReason[]>().notNull(),
+  milestones: jsonb("milestones").$type<NotesMilestone[]>().notNull(),
+  extractedAt: timestamp("extracted_at", { withTimezone: true }).defaultNow().notNull(),
+  modelVersion: text("model_version").notNull(),
+  contentHash: text("content_hash"),
 });
 
 export const benchmarkWorkoutMovements = pgTable("benchmark_workout_movements", {

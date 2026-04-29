@@ -16,6 +16,7 @@ import {
   ChevronUp,
   Shield,
   ChevronRight,
+  Sparkles,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -927,6 +928,33 @@ export default function ProfilePage() {
           <HyroxSection />
         </TabsContent>
       </Tabs>
+
+      {/* Notes processing privacy disclaimer (VIP only) */}
+      {user?.isVip && (
+        <Card className="border-fuchsia-500/20 bg-fuchsia-500/[0.04]">
+          <CardContent className="pt-4 pb-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-fuchsia-500/10">
+                <Sparkles className="h-4 w-4 text-fuchsia-400" />
+              </div>
+              <div className="space-y-1.5 text-xs">
+                <p className="font-medium text-foreground">
+                  Notes Insights (VIP)
+                </p>
+                <p className="text-muted-foreground leading-relaxed">
+                  As a VIP, the free-text notes you write on each score are
+                  sent to Anthropic&apos;s Claude API once a day so we can
+                  surface recurring complaints, scaling patterns, and
+                  milestones on the CrossFit Insights tab. Notes never leave
+                  Anthropic&apos;s API; nothing is shared with other athletes.
+                  This will become an opt-in subscription later — for now
+                  it&apos;s on by default for VIPs.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Admin (only visible to admins) */}
       {user?.isAdmin && (
