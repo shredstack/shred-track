@@ -4,6 +4,7 @@ import { scores, scoreMovementDetails } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
+import { invalidateCrossfitInsightsCache } from "@/lib/crossfit/insights/cache";
 import type { SetEntry } from "@/types/crossfit";
 
 interface MovementDetailInput {
@@ -99,6 +100,8 @@ export async function PUT(
     return row;
   });
 
+  await invalidateCrossfitInsightsCache(user.id);
+
   return NextResponse.json(updated);
 }
 
@@ -123,6 +126,8 @@ export async function DELETE(
   }
 
   await db.delete(scores).where(eq(scores.id, id));
+
+  await invalidateCrossfitInsightsCache(user.id);
 
   return NextResponse.json({ deleted: true });
 }

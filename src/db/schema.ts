@@ -257,6 +257,15 @@ export const benchmarkWorkouts = pgTable("benchmark_workouts", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+// One row per user, holds the rendered DomainProfile JSON. See
+// claude_code_instructions/crossfit_smart_insights_spec.md §9.5.
+export const crossfitInsightsCache = pgTable("crossfit_insights_cache", {
+  userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  domainProfile: jsonb("domain_profile").notNull(),
+  computedAt: timestamp("computed_at", { withTimezone: true }).defaultNow().notNull(),
+  sourceScoreCount: integer("source_score_count").notNull(),
+});
+
 export const benchmarkWorkoutMovements = pgTable("benchmark_workout_movements", {
   id: uuid("id").defaultRandom().primaryKey(),
   benchmarkWorkoutId: uuid("benchmark_workout_id").notNull().references(() => benchmarkWorkouts.id, { onDelete: "cascade" }),
@@ -589,6 +598,7 @@ export const hyroxPublicResults = pgTable(
     percentile: numeric("percentile", { precision: 5, scale: 2 }).notNull(),
     isDnf: boolean("is_dnf").notNull().default(false),
     athleteNamesNormalized: text("athlete_names_normalized").array().notNull().default([]),
+    rawScrapedNames: text("raw_scraped_names").array().notNull().default([]),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

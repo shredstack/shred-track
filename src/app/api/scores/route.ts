@@ -9,6 +9,7 @@ import {
 import { eq, desc, asc } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
+import { invalidateCrossfitInsightsCache } from "@/lib/crossfit/insights/cache";
 import type { SetEntry } from "@/types/crossfit";
 
 // ============================================
@@ -198,6 +199,8 @@ export async function POST(req: NextRequest) {
 
       return inserted;
     });
+
+    await invalidateCrossfitInsightsCache(user.id);
 
     return NextResponse.json(score, { status: 201 });
   } catch (err: unknown) {

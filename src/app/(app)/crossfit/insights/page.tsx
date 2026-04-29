@@ -2,6 +2,7 @@ import { BarChart3 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Predicted1RMCard } from "@/components/crossfit/insights/predicted-1rm-card";
 import { RxGapCard } from "@/components/crossfit/insights/rx-gap-card";
+import { DomainProfileCard } from "@/components/crossfit/insights/domain-profile-card";
 
 export default function CrossfitInsightsPage() {
   return (
@@ -22,13 +23,14 @@ export default function CrossfitInsightsPage() {
 
       <Predicted1RMCard />
       <RxGapCard />
+      <DomainProfileCard />
 
       <Card className="border-dashed border-white/[0.06]">
         <CardContent className="py-6 text-center">
           <p className="text-sm font-medium">More insights coming soon</p>
           <p className="mt-1 text-xs text-muted-foreground max-w-sm mx-auto">
-            Strong vs. weak domains, strength &amp; benchmark trends over time,
-            and notes-based pattern detection are on the way.
+            Strength &amp; benchmark trends over time, and notes-based pattern
+            detection are on the way.
           </p>
         </CardContent>
       </Card>
