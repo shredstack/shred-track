@@ -22,7 +22,10 @@ import os
 import random
 import re
 import sys
+import threading
 import time
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 
@@ -39,6 +42,7 @@ from hyrox_scraper.models import (
     ParsedSplit,
     city_to_country,
     country_to_region,
+    expected_member_count,
 )
 from hyrox_scraper.parser import (
     fetch_event_date_from_hyresult,
@@ -82,15 +86,29 @@ def setup_logging(env: str) -> Path:
     logger.info(f"Logging to {log_file}")
     return log_file
 
-# Rate limit: max 1 req/sec with jitter
-MIN_DELAY = 0.8
-MAX_DELAY = 1.5
+# Rate limit: jitter between request *starts*, enforced globally across all
+# worker threads via a single gate. Defaults are tuned for ~2 req/s aggregate
+# when running with the default 3 workers.
+DEFAULT_MIN_DELAY = 0.4
+DEFAULT_MAX_DELAY = 0.7
+DEFAULT_WORKERS = 3
 
-# Backoff schedule (seconds, jitter added). First three attempts recover quickly
-# from transient blips; later attempts wait longer for sustained upstream outages
-# (results.hyrox.com regularly returns 502/504 in clusters lasting tens of seconds).
-RETRY_BACKOFF_SCHEDULE = [1, 2, 4, 15, 45, 120]
+# Per-request HTTP timeout. 504 from the upstream is the tail of a slow query;
+# giving the server more time often resolves what would otherwise force a retry.
+DEFAULT_TIMEOUT_SECONDS = 60
+
+# Backoff schedule (seconds, jitter added). Stretched relative to the original
+# [1, 2, 4, 15, 45, 120] because results.hyrox.com tends to drop into multi-minute
+# 5xx clusters; longer waits between late attempts give it room to recover.
+RETRY_BACKOFF_SCHEDULE = [1, 3, 8, 30, 90, 240]
 DEFAULT_RETRIES = len(RETRY_BACKOFF_SCHEDULE)
+
+# Circuit breaker: if too many 5xx responses pile up across workers in a short
+# window, all workers pause to let upstream recover. Without this, parallel
+# workers can stampede a hiccupping server.
+CIRCUIT_FAILURE_WINDOW_SECONDS = 30
+CIRCUIT_FAILURE_THRESHOLD = 8
+CIRCUIT_COOLDOWN_SECONDS = 60
 
 USER_AGENT = "ShredTrack Research Script (shredstacksarah@gmail.com)"
 
@@ -161,6 +179,9 @@ class HyroxScraper:
         event_filter: list[str] | None = None,
         dry_run: bool = False,
         force: bool = False,
+        workers: int = DEFAULT_WORKERS,
+        min_delay: float = DEFAULT_MIN_DELAY,
+        max_delay: float = DEFAULT_MAX_DELAY,
     ):
         self.db = db
         self.since = since
@@ -169,8 +190,22 @@ class HyroxScraper:
         self.event_filter = [e.lower() for e in event_filter] if event_filter else None
         self.dry_run = dry_run
         self.force = force
+        self.workers = max(1, workers)
+        self.min_delay = min_delay
+        self.max_delay = max_delay
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": USER_AGENT})
+
+        # Rate-limit gate: serializes the *start* of requests across workers.
+        # Workers may overlap their fetch+parse, but request kickoffs are spaced
+        # by min_delay..max_delay, giving us a stable aggregate rate.
+        self._rate_lock = threading.Lock()
+        self._next_allowed_at: float = 0.0
+
+        # Circuit breaker state — see CIRCUIT_* constants for the policy.
+        self._circuit_lock = threading.Lock()
+        self._recent_failures: deque[float] = deque()
+        self._circuit_open_until: float = 0.0
 
         # Stats
         self.stats = {
@@ -182,30 +217,122 @@ class HyroxScraper:
             "results_updated": 0,
             "splits_replaced": 0,
             "parse_errors": [],
+            "circuit_trips": 0,
             "start_time": time.time(),
         }
 
-    def _rate_limit(self):
-        time.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
+    def _rate_limit(self) -> None:
+        """Globally space request starts to ~min_delay..max_delay apart.
+
+        Thread-safe: the gate's "next allowed" time is advanced under a lock,
+        but workers sleep outside the lock so concurrent fetches still overlap.
+        """
+        with self._rate_lock:
+            now = time.monotonic()
+            wait = self._next_allowed_at - now
+            self._next_allowed_at = max(now, self._next_allowed_at) + random.uniform(
+                self.min_delay, self.max_delay
+            )
+        if wait > 0:
+            time.sleep(wait)
+
+    def _wait_for_circuit(self) -> None:
+        """Block until the circuit breaker is closed, if it's open."""
+        with self._circuit_lock:
+            wait = self._circuit_open_until - time.monotonic()
+        if wait > 0:
+            logger.warning(f"Circuit breaker open — pausing {wait:.0f}s before next request")
+            time.sleep(wait)
+
+    def _record_failure(self) -> None:
+        """Track a 5xx/connection failure; trip the breaker if we've had too many."""
+        now = time.monotonic()
+        with self._circuit_lock:
+            cutoff = now - CIRCUIT_FAILURE_WINDOW_SECONDS
+            while self._recent_failures and self._recent_failures[0] < cutoff:
+                self._recent_failures.popleft()
+            self._recent_failures.append(now)
+            if (
+                len(self._recent_failures) >= CIRCUIT_FAILURE_THRESHOLD
+                and self._circuit_open_until <= now
+            ):
+                self._circuit_open_until = now + CIRCUIT_COOLDOWN_SECONDS
+                self._recent_failures.clear()
+                self.stats["circuit_trips"] += 1
+                logger.error(
+                    f"Circuit breaker tripped after "
+                    f"{CIRCUIT_FAILURE_THRESHOLD} failures in "
+                    f"{CIRCUIT_FAILURE_WINDOW_SECONDS}s — pausing all workers for "
+                    f"{CIRCUIT_COOLDOWN_SECONDS}s"
+                )
+
+    def _record_success(self) -> None:
+        """Reset the failure counter on a successful response."""
+        with self._circuit_lock:
+            self._recent_failures.clear()
+
+    @staticmethod
+    def _parse_retry_after(value: str | None) -> float | None:
+        """Parse a Retry-After header (seconds or HTTP-date). Returns seconds or None."""
+        if not value:
+            return None
+        try:
+            return max(0.0, float(value.strip()))
+        except ValueError:
+            pass
+        try:
+            from email.utils import parsedate_to_datetime
+            dt = parsedate_to_datetime(value)
+            if dt is None:
+                return None
+            delta = (dt.timestamp() - time.time())
+            return max(0.0, delta)
+        except (TypeError, ValueError):
+            return None
 
     def _fetch(self, url: str, retries: int = DEFAULT_RETRIES) -> str | None:
-        """Fetch URL with retries on 5xx/connection errors. 4xx is not retried."""
+        """Fetch URL with retries on 5xx/connection errors. 4xx is not retried.
+
+        Honors `Retry-After` headers, escalates to the circuit breaker when
+        upstream is in a sustained outage, and uses a longer per-request
+        timeout than the original (60s vs 30s) since 504s are upstream
+        timeouts that often clear with more patience.
+        """
         for attempt in range(retries):
+            self._wait_for_circuit()
+            self._rate_limit()
+
+            retry_after_seconds: float | None = None
+            resp: requests.Response | None = None
             try:
-                self._rate_limit()
-                resp = self.session.get(url, timeout=30)
+                resp = self.session.get(url, timeout=DEFAULT_TIMEOUT_SECONDS)
 
                 if 400 <= resp.status_code < 500:
                     logger.error(f"Client error {resp.status_code} for {url} — not retrying")
                     return None
 
-                resp.raise_for_status()
+                if resp.status_code >= 500:
+                    self._record_failure()
+                    retry_after_seconds = self._parse_retry_after(
+                        resp.headers.get("Retry-After")
+                    )
+                    resp.raise_for_status()
+
+                self._record_success()
                 return resp.text
             except requests.RequestException as e:
+                # Connection errors etc. — record as a failure (5xx already recorded above).
+                if resp is None:
+                    self._record_failure()
                 if attempt >= retries - 1:
                     break
                 base = RETRY_BACKOFF_SCHEDULE[min(attempt, len(RETRY_BACKOFF_SCHEDULE) - 1)]
                 wait = base + random.random()
+                if retry_after_seconds is not None:
+                    # Cap honored Retry-After at the next-tier backoff so a hostile
+                    # server header can't strand us forever, but never undercut it.
+                    cap = RETRY_BACKOFF_SCHEDULE[min(attempt + 1, len(RETRY_BACKOFF_SCHEDULE) - 1)]
+                    wait = max(wait, min(retry_after_seconds, cap))
                 logger.warning(f"Fetch failed (attempt {attempt + 1}/{retries}): {e}. Retrying in {wait:.1f}s")
                 time.sleep(wait)
         logger.error(f"Failed to fetch {url} after {retries} attempts")
@@ -361,9 +488,13 @@ class HyroxScraper:
         self.stats["events_touched"] += 1
 
         # --- Skip check: already-scraped completeness (per division) ---
-        db_counts: dict[str, int] = {}
+        # Each value is {"count": int, "missing_names": int}. We re-scrape any
+        # division where rows are missing data we now collect (e.g.
+        # `athlete_names_normalized` after the column was added) — the skip
+        # heuristic must not strand us on stale rows.
+        db_division_status: dict[str, dict] = {}
         if self.db and not self.force:
-            db_counts = self.db.get_event_result_counts(external_id)
+            db_division_status = self.db.get_event_result_counts(external_id)
 
         # Process each event entry (each represents a division/format)
         for event_entry in group["events"]:
@@ -396,16 +527,28 @@ class HyroxScraper:
                     logger.info(f"  Skipping {division_key} from {label} — 0 results on site")
                     continue
 
-                # Skip if already have ≥95% of results in DB
-                if not self.force and division_key in db_counts:
-                    db_count = db_counts[division_key]
-                    if db_count >= site_count * 0.95:
+                # Skip only if already have ≥95% of results AND every row has
+                # the data we currently collect (no rows missing names).
+                if not self.force and division_key in db_division_status:
+                    status = db_division_status[division_key]
+                    db_count = status["count"]
+                    missing_names = status["missing_names"]
+                    is_complete = db_count >= site_count * 0.95
+                    needs_backfill = missing_names > 0
+
+                    if is_complete and not needs_backfill:
                         logger.info(
                             f"  Skipping {division_key} from {label} — "
                             f"already have {db_count}/{site_count} results"
                         )
                         self.stats["events_skipped_complete"] += 1
                         continue
+                    elif is_complete and needs_backfill:
+                        logger.info(
+                            f"  Re-scraping {division_key} from {label} — "
+                            f"have {db_count}/{site_count} results but "
+                            f"{missing_names} need name backfill"
+                        )
                     else:
                         logger.info(
                             f"  Re-scraping {division_key} from {label} — "
@@ -472,54 +615,61 @@ class HyroxScraper:
         # Select the correct segment map for this division type
         segment_map = sel.get_segment_map(event_prefix)
 
-        # Now fetch detail pages for each athlete
+        # Now fetch detail pages for each athlete — parallelized across workers.
+        # The rate-limit gate keeps aggregate request rate bounded; parallelism
+        # mainly hides per-request fetch latency.
+        def fetch_one(list_result: dict) -> tuple[str, dict, dict | None]:
+            idp_local = list_result["idp"]
+            detail_url = sel.detail_page_url(season_path, idp_local, event_id)
+            html_local = self._fetch(detail_url)
+            if not html_local:
+                return ("fetch_failed", list_result, None)
+            parsed_detail = parse_athlete_detail(html_local, segment_map=segment_map)
+            if not parsed_detail:
+                return ("parse_failed", list_result, None)
+            return ("ok", list_result, parsed_detail)
+
         batch: list[ParsedResult] = []
-        for i, list_result in enumerate(all_list_results):
-            idp = list_result["idp"]
-            detail_url = sel.detail_page_url(season_path, idp, event_id)
-            detail_html = self._fetch(detail_url)
+        completed = 0
+        with ThreadPoolExecutor(max_workers=self.workers) as pool:
+            for status, list_result, detail in pool.map(fetch_one, all_list_results):
+                completed += 1
+                if status == "fetch_failed":
+                    self.stats["parse_errors"].append({
+                        "type": "fetch_failed",
+                        "idp": list_result["idp"],
+                        "event_id": event_id,
+                        "event_uuid": event_uuid,
+                        "division": division_key,
+                        "division_rank": list_result["rank"],
+                        "field_size_division": field_size,
+                        "season_path": season_path,
+                        "event_prefix": event_prefix,
+                    })
+                elif status == "parse_failed":
+                    self.stats["parse_errors"].append({
+                        "type": "parse_failed",
+                        "idp": list_result["idp"],
+                        "event_id": event_id,
+                        "division": division_key,
+                    })
+                elif status == "ok" and detail is not None:
+                    batch.append(ParsedResult(
+                        external_result_id=list_result["idp"],
+                        athlete_name=detail["name"],
+                        athlete_names=(detail.get("members") or [detail["name"]])[:expected_member_count(division_key)],
+                        division_key=division_key,
+                        age_group=detail["age_group"],
+                        finish_time_seconds=detail["finish_time_seconds"],
+                        overall_rank=detail["overall_rank"],
+                        division_rank=list_result["rank"],
+                        field_size_division=field_size,
+                        is_dnf=False,
+                        splits=detail["splits"],
+                    ))
 
-            if not detail_html:
-                self.stats["parse_errors"].append({
-                    "type": "fetch_failed",
-                    "idp": idp,
-                    "event_id": event_id,
-                    "event_uuid": event_uuid,
-                    "division": division_key,
-                    "division_rank": list_result["rank"],
-                    "field_size_division": field_size,
-                    "season_path": season_path,
-                    "event_prefix": event_prefix,
-                })
-                continue
-
-            detail = parse_athlete_detail(detail_html, segment_map=segment_map)
-            if not detail:
-                self.stats["parse_errors"].append({
-                    "type": "parse_failed",
-                    "idp": idp,
-                    "event_id": event_id,
-                    "division": division_key,
-                })
-                continue
-
-            parsed = ParsedResult(
-                external_result_id=idp,
-                athlete_name=detail["name"],
-                division_key=division_key,
-                age_group=detail["age_group"],
-                finish_time_seconds=detail["finish_time_seconds"],
-                overall_rank=detail["overall_rank"],
-                division_rank=list_result["rank"],
-                field_size_division=field_size,
-                is_dnf=False,
-                splits=detail["splits"],
-            )
-            batch.append(parsed)
-
-            # Log progress every 25 athletes
-            if (i + 1) % 25 == 0:
-                logger.info(f"    Fetched {i + 1}/{field_size} detail pages...")
+                if completed % 25 == 0:
+                    logger.info(f"    Fetched {completed}/{field_size} detail pages...")
 
         logger.info(f"    Parsed {len(batch)} results with splits for {division_key}")
 
@@ -585,47 +735,51 @@ class HyroxScraper:
             segment_map = sel.get_segment_map(event_prefix)
             batch: list[ParsedResult] = []
 
-            for item in items:
-                idp = item["idp"]
-                detail_url = sel.detail_page_url(season_path, idp, event_id)
-                detail_html = self._fetch(detail_url)
+            def fetch_one_replay(item: dict) -> tuple[str, dict, dict | None]:
+                detail_url = sel.detail_page_url(season_path, item["idp"], event_id)
+                html_local = self._fetch(detail_url)
+                if not html_local:
+                    return ("fetch_failed", item, None)
+                parsed_detail = parse_athlete_detail(html_local, segment_map=segment_map)
+                if not parsed_detail:
+                    return ("parse_failed", item, None)
+                return ("ok", item, parsed_detail)
 
-                if not detail_html:
-                    self.stats["parse_errors"].append({
-                        "type": "fetch_failed",
-                        "idp": idp,
-                        "event_id": event_id,
-                        "event_uuid": event_uuid,
-                        "division": division_key,
-                        "division_rank": item["division_rank"],
-                        "field_size_division": item["field_size_division"],
-                        "season_path": season_path,
-                        "event_prefix": event_prefix,
-                    })
-                    continue
-
-                detail = parse_athlete_detail(detail_html, segment_map=segment_map)
-                if not detail:
-                    self.stats["parse_errors"].append({
-                        "type": "parse_failed",
-                        "idp": idp,
-                        "event_id": event_id,
-                        "division": division_key,
-                    })
-                    continue
-
-                batch.append(ParsedResult(
-                    external_result_id=idp,
-                    athlete_name=detail["name"],
-                    division_key=division_key,
-                    age_group=detail["age_group"],
-                    finish_time_seconds=detail["finish_time_seconds"],
-                    overall_rank=detail["overall_rank"],
-                    division_rank=item["division_rank"],
-                    field_size_division=item["field_size_division"],
-                    is_dnf=False,
-                    splits=detail["splits"],
-                ))
+            with ThreadPoolExecutor(max_workers=self.workers) as pool:
+                for status, item, detail in pool.map(fetch_one_replay, items):
+                    if status == "fetch_failed":
+                        self.stats["parse_errors"].append({
+                            "type": "fetch_failed",
+                            "idp": item["idp"],
+                            "event_id": event_id,
+                            "event_uuid": event_uuid,
+                            "division": division_key,
+                            "division_rank": item["division_rank"],
+                            "field_size_division": item["field_size_division"],
+                            "season_path": season_path,
+                            "event_prefix": event_prefix,
+                        })
+                    elif status == "parse_failed":
+                        self.stats["parse_errors"].append({
+                            "type": "parse_failed",
+                            "idp": item["idp"],
+                            "event_id": event_id,
+                            "division": division_key,
+                        })
+                    elif status == "ok" and detail is not None:
+                        batch.append(ParsedResult(
+                            external_result_id=item["idp"],
+                            athlete_name=detail["name"],
+                            athlete_names=(detail.get("members") or [detail["name"]])[:expected_member_count(division_key)],
+                            division_key=division_key,
+                            age_group=detail["age_group"],
+                            finish_time_seconds=detail["finish_time_seconds"],
+                            overall_rank=detail["overall_rank"],
+                            division_rank=item["division_rank"],
+                            field_size_division=item["field_size_division"],
+                            is_dnf=False,
+                            splits=detail["splits"],
+                        ))
 
             if not self.dry_run and self.db and event_uuid and batch:
                 db_stats = self.db.upsert_results_batch(event_uuid, batch)
@@ -653,6 +807,7 @@ class HyroxScraper:
         logger.info(f"Results updated:      {self.stats['results_updated']}")
         logger.info(f"Splits replaced:      {self.stats['splits_replaced']}")
         logger.info(f"Parse errors:         {len(self.stats['parse_errors'])}")
+        logger.info(f"Circuit trips:        {self.stats['circuit_trips']}")
         logger.info(f"Wall-clock time:      {elapsed:.1f}s")
 
         if self.stats["parse_errors"]:
@@ -681,6 +836,13 @@ class HyroxScraper:
               type=click.Path(exists=True, dir_okay=False),
               help="Replay only the dropped detail-page fetches from a previous run's "
                    "parse_errors_*.json. Skips event discovery entirely.")
+@click.option("--workers", default=DEFAULT_WORKERS, type=int, show_default=True,
+              help="Concurrent threads for detail-page fetches. Aggregate request rate "
+                   "is still bounded by --min-delay/--max-delay.")
+@click.option("--min-delay", "min_delay", default=DEFAULT_MIN_DELAY, type=float, show_default=True,
+              help="Minimum gap between request starts (seconds), enforced globally.")
+@click.option("--max-delay", "max_delay", default=DEFAULT_MAX_DELAY, type=float, show_default=True,
+              help="Maximum gap between request starts (seconds), enforced globally.")
 @click.option("--env", "env_file", default="local",
               type=click.Choice(["local", "prod"]),
               help="Environment to use: 'local' reads ../.env.local, 'prod' reads ../.env.prod")
@@ -695,6 +857,9 @@ def main(
     force: bool,
     refresh_mv: bool,
     retry_failed: str | None,
+    workers: int,
+    min_delay: float,
+    max_delay: float,
     env_file: str,
     db_url: str | None,
 ):
@@ -754,6 +919,9 @@ def main(
         event_filter=event_filter,
         dry_run=dry_run,
         force=force,
+        workers=workers,
+        min_delay=min_delay,
+        max_delay=max_delay,
     )
 
     # Replay-only mode: skip discovery, re-fetch the dropped detail pages, and exit.

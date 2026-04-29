@@ -38,6 +38,8 @@ import {
 import type {
   BenchmarkWorkout,
   BenchmarkCategoryName,
+  BenchmarkAttempt,
+  WorkoutType,
 } from "@/types/crossfit";
 
 // Pills mix two filter axes:
@@ -456,8 +458,8 @@ function AttemptRow({
   attempt,
   workoutType,
 }: {
-  attempt: import("@/types/crossfit").BenchmarkAttempt;
-  workoutType: import("@/types/crossfit").WorkoutType;
+  attempt: BenchmarkAttempt;
+  workoutType: WorkoutType;
 }) {
   const display = formatAttemptDisplay(workoutType, attempt);
   return (
@@ -499,8 +501,8 @@ function AttemptRow({
 }
 
 function formatAttemptDisplay(
-  workoutType: import("@/types/crossfit").WorkoutType,
-  a: import("@/types/crossfit").BenchmarkAttempt
+  workoutType: WorkoutType,
+  a: BenchmarkAttempt
 ): string {
   if (a.scoreText) return a.scoreText;
   if (workoutType === "for_time" && a.timeSeconds != null) {

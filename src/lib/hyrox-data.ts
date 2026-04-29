@@ -936,6 +936,19 @@ export const ALL_DIVISION_KEYS = Object.keys(DIVISIONS) as DivisionKey[];
 /** Backwards compat: same as SINGLES_DIVISION_KEYS */
 export const DIVISION_KEYS = SINGLES_DIVISION_KEYS;
 
+/**
+ * How many distinct ShredTrack users may claim a single public race result.
+ * Singles = 1, Doubles = 2, Relays = 4. Defaults to 1 for unrecognized keys.
+ *
+ * Used by the public-race claim API to enforce that, e.g., both members of
+ * a doubles team can claim the same `hyrox_public_results` row, but a third
+ * person cannot.
+ */
+export function getDivisionMaxClaims(divisionKey: string): number {
+  const spec = DIVISIONS[divisionKey as DivisionKey];
+  return spec?.athletes ?? 1;
+}
+
 // ---------------------------------------------------------------------------
 // Division categories for the overview page
 // ---------------------------------------------------------------------------

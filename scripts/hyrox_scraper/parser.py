@@ -303,14 +303,22 @@ def _parse_total_pages(soup: BeautifulSoup) -> int:
 # Athlete detail / splits parsing
 # ---------------------------------------------------------------------------
 
-def _parse_members_name(soup: BeautifulSoup) -> tuple[str, str]:
+def _parse_members_name(soup: BeautifulSoup) -> tuple[str, list[str], str]:
     """
-    Extract team name and nationality from a doubles/relay "Members" table.
+    Extract team members and nationality from a doubles/relay "Members" table.
 
-    Doubles detail pages don't have td.f-__fullname. Instead they have a
-    Members section with <td class="last"> cells like "Wells, Sydney (USA)".
+    Doubles detail pages don't have td.f-__fullname (or have it blank). They
+    list athletes via <td class="last"> cells like "Wells, Sydney (USA)" —
+    or in some events, just "Wells, Sydney" with no country code at all.
 
-    Returns (joined_name, nationality) — e.g. ("Wells, Sydney & Griffith, Lauren", "USA").
+    The `td.last` CSS selector also matches dozens of unrelated cells on
+    the page (age group, splits, summary, ranks). We don't filter them out
+    here — instead, the caller in scrape_hyrox.py truncates the returned
+    list to the expected number of members for the division (1/2/4). The
+    real members are reliably the first N cells in document order.
+
+    Returns (joined_name, members, nationality) — e.g.
+    ("Wells, Sydney & Griffith, Lauren", ["Wells, Sydney", "Griffith, Lauren"], "USA").
     """
     members: list[str] = []
     nationalities: list[str] = []
@@ -318,7 +326,6 @@ def _parse_members_name(soup: BeautifulSoup) -> tuple[str, str]:
         text = td.get_text(strip=True)
         if not text:
             continue
-        # Extract nationality from parenthetical suffix, e.g. "Wells, Sydney (USA)"
         nat_match = re.search(r"\(([A-Z]{2,3})\)\s*$", text)
         if nat_match:
             nationalities.append(nat_match.group(1))
@@ -326,11 +333,11 @@ def _parse_members_name(soup: BeautifulSoup) -> tuple[str, str]:
         members.append(text)
 
     if not members:
-        return "", ""
+        return "", [], ""
 
     joined = " & ".join(members)
     nationality = nationalities[0] if nationalities else ""
-    return joined, nationality
+    return joined, members, nationality
 
 
 def parse_athlete_detail(html: str, segment_map: list[dict] | None = None) -> dict | None:
@@ -339,7 +346,8 @@ def parse_athlete_detail(html: str, segment_map: list[dict] | None = None) -> di
 
     Returns dict:
     {
-        "name": str,
+        "name": str,           # joined display name (singles: full name; teams: "A & B")
+        "members": list[str],  # raw per-member names (singles=1, doubles=2, relay≤4)
         "bib": str,
         "age_group": str,
         "nationality": str,
@@ -358,10 +366,11 @@ def parse_athlete_detail(html: str, segment_map: list[dict] | None = None) -> di
     name_el = soup.select_one(sel.SEL_DETAIL_NAME)
     if name_el:
         name = name_el.get_text(strip=True)
+        members = [name]
         nat_el = soup.select_one(sel.SEL_DETAIL_NATIONALITY)
         nationality = nat_el.get_text(strip=True) if nat_el else ""
     else:
-        name, nationality = _parse_members_name(soup)
+        name, members, nationality = _parse_members_name(soup)
         if not name:
             return None
 
@@ -433,6 +442,7 @@ def parse_athlete_detail(html: str, segment_map: list[dict] | None = None) -> di
 
     return {
         "name": name,
+        "members": members,
         "bib": bib,
         "age_group": age_group,
         "nationality": nationality,

@@ -3,9 +3,56 @@
 from __future__ import annotations
 
 import hashlib
+import re
+import unicodedata
 from datetime import date, datetime
 
 from pydantic import BaseModel, Field, field_validator
+
+
+def normalize_athlete_name(name: str) -> str:
+    """
+    Canonical form for athlete-name search.
+
+    Lowercased, accent-stripped, punctuation removed, whitespace collapsed.
+    Used both at ingest (to populate `athlete_names_normalized`) and at
+    query time (so the same input matches stored values regardless of
+    "Lastname, Firstname" vs "Firstname Lastname").
+
+    Examples:
+        "Wells, Sydney"          -> "wells sydney"
+        "Sárah  O'Connor"        -> "sarah oconnor"
+        "JOHN DOE-SMITH"         -> "john doe smith"
+    """
+    if not name:
+        return ""
+    # Strip accents via NFD decomposition, drop combining marks
+    nfkd = unicodedata.normalize("NFKD", name)
+    stripped = "".join(c for c in nfkd if not unicodedata.combining(c))
+    # Lowercase, replace non-alphanumeric with space, collapse whitespace
+    cleaned = re.sub(r"[^a-z0-9]+", " ", stripped.lower())
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def expected_member_count(division_key: str) -> int:
+    """
+    How many real athletes a result row has, given its division.
+
+    Mirrors `getDivisionMaxClaims` in src/lib/hyrox-data.ts. The detail-page
+    parser pulls every `td.last` cell on the page (the real members are
+    always the first N in document order, but trailing cells contain
+    unrelated metadata), so callers truncate `ParsedResult.athlete_names`
+    to this many entries before storing.
+    """
+    if division_key.startswith("doubles_") or division_key.startswith("elite_15_doubles"):
+        return 2
+    if (
+        division_key.startswith("relay_")
+        or division_key.startswith("corporate_relay_")
+        or division_key.startswith("company_challenge_")
+    ):
+        return 4
+    return 1
 
 
 class ParsedEvent(BaseModel):
@@ -37,7 +84,8 @@ class ParsedSplit(BaseModel):
 
 class ParsedResult(BaseModel):
     external_result_id: str
-    athlete_name: str  # used only for hashing, never stored
+    athlete_name: str  # raw display string (singles: "Last, First"; teams: "A & B"). Hashed, not stored.
+    athlete_names: list[str] = Field(default_factory=list)  # one raw name per team member (singles=1, doubles=2, relay≤4)
     division_key: str
     age_group: str | None = None
     finish_time_seconds: int
@@ -52,6 +100,25 @@ class ParsedResult(BaseModel):
         """SHA-256 of normalized name + division — not reversible."""
         raw = f"{self.athlete_name.strip().lower()}|{self.division_key}|{self.external_result_id}"
         return hashlib.sha256(raw.encode()).hexdigest()
+
+    @property
+    def athlete_names_normalized(self) -> list[str]:
+        """
+        Per-member normalized names for search/claim lookup.
+
+        Falls back to the joined `athlete_name` if `athlete_names` is empty
+        (defensive — older callers building ParsedResult without populating
+        the list still get a sensible value).
+        """
+        sources = self.athlete_names or [self.athlete_name]
+        seen: set[str] = set()
+        out: list[str] = []
+        for raw in sources:
+            n = normalize_athlete_name(raw)
+            if n and n not in seen:
+                seen.add(n)
+                out.append(n)
+        return out
 
     @property
     def percentile(self) -> float:
