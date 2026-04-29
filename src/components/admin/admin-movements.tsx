@@ -25,7 +25,9 @@ import {
   MOVEMENT_CATEGORIES,
   MOVEMENT_CATEGORY_COLORS,
   type MovementCategory,
+  type CategoryFilter,
 } from "@/types/crossfit";
+import { CategoryPills } from "@/components/shared/category-pills";
 
 interface Movement {
   id: string;
@@ -44,13 +46,18 @@ interface Movement {
 
 type StatusFilter = "all" | "pending" | "validated";
 
-function useAdminMovements(search?: string, status: StatusFilter = "all") {
+function useAdminMovements(
+  search?: string,
+  status: StatusFilter = "all",
+  category: CategoryFilter = "all",
+) {
   return useQuery<Movement[]>({
-    queryKey: ["admin-movements", search, status],
+    queryKey: ["admin-movements", search, status, category],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (search) params.set("search", search);
       if (status !== "all") params.set("status", status);
+      if (category !== "all") params.set("category", category);
       const res = await fetch(`/api/admin/movements?${params}`);
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json();
@@ -82,6 +89,7 @@ export function AdminMovements() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
+  const [category, setCategory] = useState<CategoryFilter>("all");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<MovementFormData>(emptyForm);
@@ -90,6 +98,7 @@ export function AdminMovements() {
   const { data: movements, isLoading } = useAdminMovements(
     search || undefined,
     status,
+    category,
   );
 
   const validateMutation = useMutation({
@@ -187,30 +196,33 @@ export function AdminMovements() {
   return (
     <div className="space-y-4">
       {/* Search + Add */}
-      <div className="flex gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search movements..."
-            className="pl-9"
-          />
+      <div className="flex flex-col gap-2">
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search movements..."
+              className="pl-9"
+            />
+          </div>
+          <Select value={status} onValueChange={(v) => setStatus(v as StatusFilter)}>
+            <SelectTrigger className="w-[140px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="validated">Validated</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button onClick={openCreate} size="sm">
+            <Plus className="size-4" />
+            Add
+          </Button>
         </div>
-        <Select value={status} onValueChange={(v) => setStatus(v as StatusFilter)}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="validated">Validated</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button onClick={openCreate} size="sm">
-          <Plus className="size-4" />
-          Add
-        </Button>
+        <CategoryPills value={category} onChange={setCategory} />
       </div>
 
       {/* Movement list */}

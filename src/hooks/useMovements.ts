@@ -63,6 +63,23 @@ export function useMovements() {
 }
 
 // ============================================
+// useRecentMovements — IDs of movements the caller has used in their own
+// workouts, most-recent first. Used by the picker to surface frequent picks.
+// ============================================
+
+export function useRecentMovements() {
+  return useQuery({
+    queryKey: ["movements", "recent"],
+    queryFn: async () => {
+      const res = await fetch("/api/movements/recent");
+      if (!res.ok) throw new Error("Failed to fetch recent movements");
+      return (await res.json()) as string[];
+    },
+    staleTime: 60 * 1000,
+  });
+}
+
+// ============================================
 // useCreateMovement — user-scoped custom movement
 // ============================================
 

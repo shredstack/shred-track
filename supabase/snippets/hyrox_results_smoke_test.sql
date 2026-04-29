@@ -16,8 +16,8 @@ LEFT JOIN hyrox_public_splits s
   ON s.result_id = r.id
 WHERE r.athlete_names_normalized is not null 
   --and e.external_id = '2026_LAS_VEGAS'
-  --and r.division_key = 'relay_mixed'
-  and array_to_string(r.athlete_names_normalized, ' | ') ILIKE '%dorich%'
+  and r.division_key = 'men_pro'
+  --and array_to_string(r.athlete_names_normalized, ' | ') ILIKE '%dorich%'
 ORDER BY e.event_date DESC LIMIT 20;
 
 SELECT distinct r.division_key

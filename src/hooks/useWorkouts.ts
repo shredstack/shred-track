@@ -9,6 +9,7 @@ import type {
   MovementCategory,
   MovementMetricType,
   ScoreDisplay,
+  SetEntry,
 } from "@/types/crossfit";
 import type { RepSchemeParsed } from "@/lib/crossfit/rep-scheme-parser";
 
@@ -44,7 +45,7 @@ interface WireMovementDetail {
   actualReps?: string;
   modification?: string;
   substitutionMovementId?: string;
-  setWeights?: number[];
+  setEntries?: SetEntry[];
   notes?: string;
 }
 
@@ -285,6 +286,7 @@ export function useCreateWorkout() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["workouts"] });
+      queryClient.invalidateQueries({ queryKey: ["movements", "recent"] });
     },
   });
 }
@@ -313,6 +315,7 @@ export function useUpdateWorkout() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["workouts"] });
+      queryClient.invalidateQueries({ queryKey: ["movements", "recent"] });
     },
   });
 }

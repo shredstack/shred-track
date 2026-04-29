@@ -20,6 +20,8 @@ import {
   workouts,
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
+import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
+import type { SetEntry } from "@/types/crossfit";
 
 export interface MovementHistoryEntry {
   detailId: string;
@@ -29,7 +31,7 @@ export interface MovementHistoryEntry {
   workoutDate: string;
   workoutTitle: string | null;
   actualWeight: string | null;
-  setWeights: unknown;
+  setEntries: SetEntry[] | null;
   actualReps: string | null;
   wasRx: boolean;
   modification: string | null;
@@ -60,7 +62,7 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const logs = await db
+  const rawLogs = await db
     .select({
       detailId: scoreMovementDetails.id,
       scoreId: scores.id,
@@ -69,7 +71,7 @@ export async function GET(
       workoutDate: workouts.workoutDate,
       workoutTitle: workouts.title,
       actualWeight: scoreMovementDetails.actualWeight,
-      setWeights: scoreMovementDetails.setWeights,
+      setEntries: scoreMovementDetails.setEntries,
       actualReps: scoreMovementDetails.actualReps,
       wasRx: scoreMovementDetails.wasRx,
       modification: scoreMovementDetails.modification,
@@ -90,6 +92,14 @@ export async function GET(
     )
     .orderBy(desc(workouts.workoutDate), desc(scores.createdAt));
 
+  const logs: MovementHistoryEntry[] = rawLogs.map((l) => {
+    const entries = normalizeSetEntries(l.setEntries);
+    return {
+      ...l,
+      setEntries: entries.length > 0 ? entries : null,
+    };
+  });
+
   return NextResponse.json({
     movement: {
       id: movement.id,
@@ -102,6 +112,6 @@ export async function GET(
       commonRxWeightFemale: movement.commonRxWeightFemale,
       videoUrl: movement.videoUrl,
     },
-    logs: logs satisfies MovementHistoryEntry[],
+    logs,
   });
 }

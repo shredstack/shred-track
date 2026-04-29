@@ -17,6 +17,7 @@ import {
   parseRepScheme,
   type RepSchemeParsed,
 } from "@/lib/crossfit/rep-scheme-parser";
+import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
 
 // ============================================
 // Types
@@ -246,18 +247,19 @@ export async function GET(req: NextRequest) {
               hitTimeCap: score.hitTimeCap,
               notes: score.notes ?? undefined,
               rpe: score.rpe ?? undefined,
-              movementDetails: (detailsByScore.get(score.id) ?? []).map((d) => ({
-                workoutMovementId: d.workoutMovementId,
-                wasRx: d.wasRx,
-                actualWeight: d.actualWeight ? Number(d.actualWeight) : undefined,
-                actualReps: d.actualReps ?? undefined,
-                modification: d.modification ?? undefined,
-                substitutionMovementId: d.substitutionMovementId ?? undefined,
-                setWeights: Array.isArray(d.setWeights)
-                  ? (d.setWeights as number[])
-                  : undefined,
-                notes: d.notes ?? undefined,
-              })),
+              movementDetails: (detailsByScore.get(score.id) ?? []).map((d) => {
+                const entries = normalizeSetEntries(d.setEntries);
+                return {
+                  workoutMovementId: d.workoutMovementId,
+                  wasRx: d.wasRx,
+                  actualWeight: d.actualWeight ? Number(d.actualWeight) : undefined,
+                  actualReps: d.actualReps ?? undefined,
+                  modification: d.modification ?? undefined,
+                  substitutionMovementId: d.substitutionMovementId ?? undefined,
+                  setEntries: entries.length > 0 ? entries : undefined,
+                  notes: d.notes ?? undefined,
+                };
+              }),
             }
           : null,
       };

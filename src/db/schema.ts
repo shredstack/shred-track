@@ -14,6 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { TimeLossEntry, FocusEntry } from "@/types/hyrox-race-report";
+import type { SetEntry } from "@/types/crossfit";
 
 // ============================================
 // Users & Auth
@@ -221,7 +222,10 @@ export const scoreMovementDetails = pgTable("score_movement_details", {
   actualReps: text("actual_reps"),
   modification: text("modification"),
   substitutionMovementId: uuid("substitution_movement_id").references(() => movements.id),
-  setWeights: jsonb("set_weights"), // for_load: per-set weights
+  // Per-set entries on for_load parts: [{ weight, reps?, rpe? }]. Column
+  // name kept as `set_weights` for migration simplicity. Use `setEntries`
+  // when reading/writing in code.
+  setEntries: jsonb("set_weights").$type<SetEntry[]>(),
   notes: text("notes"),
 }, (table) => [
   foreignKey({

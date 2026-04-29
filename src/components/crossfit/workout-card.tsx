@@ -103,7 +103,7 @@ function ScoreRow({ part }: { part: WorkoutPartDisplay }) {
         s.movementDetails &&
         s.movementDetails
           .filter(
-            (d) => d.setWeights && d.setWeights.some((w) => w > 0)
+            (d) => d.setEntries && d.setEntries.some((e) => e.weight > 0)
           )
           .map((d) => {
             const mov = part.movements.find(
@@ -120,7 +120,7 @@ function ScoreRow({ part }: { part: WorkoutPartDisplay }) {
                   </span>
                 )}
                 <SetWeightBreakdown
-                  setWeights={d.setWeights!}
+                  entries={d.setEntries!}
                   repsPerSet={(() => {
                     const scheme = mov?.prescribedReps || part.repScheme;
                     return scheme ? parseRepsPerSet(scheme) : undefined;

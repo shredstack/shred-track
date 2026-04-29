@@ -3,6 +3,8 @@ import { db } from "@/db";
 import { scores, scoreMovementDetails } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
+import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
+import type { SetEntry } from "@/types/crossfit";
 
 interface MovementDetailInput {
   workoutMovementId: string;
@@ -11,7 +13,7 @@ interface MovementDetailInput {
   actualReps?: string;
   modification?: string;
   substitutionMovementId?: string;
-  setWeights?: number[];
+  setEntries?: Array<SetEntry | number>;
   notes?: string;
 }
 
@@ -39,12 +41,18 @@ export async function PUT(
   const details: MovementDetailInput[] | undefined =
     body.movementDetails ?? body.movementScalings;
 
+  const normalizedDetails = details?.map((d) => ({
+    ...d,
+    setEntries: d.setEntries ? normalizeSetEntries(d.setEntries) : undefined,
+  }));
+
   let weightLbs = body.weightLbs;
-  if (weightLbs == null && details) {
-    const maxFromSets = details
-      .flatMap((d) => d.setWeights ?? [])
-      .reduce<number | null>((max, w) => (max == null || w > max ? w : max), null);
-    if (maxFromSets != null) weightLbs = maxFromSets;
+  if (weightLbs == null && normalizedDetails) {
+    const max = Math.max(
+      0,
+      ...normalizedDetails.flatMap((d) => (d.setEntries ?? []).map((e) => e.weight))
+    );
+    if (max > 0) weightLbs = max;
   }
 
   const updated = await db.transaction(async (tx) => {
@@ -66,11 +74,11 @@ export async function PUT(
       .where(eq(scores.id, id))
       .returning();
 
-    if (details) {
+    if (normalizedDetails) {
       await tx.delete(scoreMovementDetails).where(eq(scoreMovementDetails.scoreId, id));
-      if (details.length > 0) {
+      if (normalizedDetails.length > 0) {
         await tx.insert(scoreMovementDetails).values(
-          details
+          normalizedDetails
             .filter((d) => d.workoutMovementId)
             .map((d) => ({
               scoreId: id,
@@ -80,7 +88,8 @@ export async function PUT(
               actualReps: d.actualReps ?? null,
               modification: d.modification ?? null,
               substitutionMovementId: d.substitutionMovementId ?? null,
-              setWeights: d.setWeights && d.setWeights.length > 0 ? d.setWeights : null,
+              setEntries:
+                d.setEntries && d.setEntries.length > 0 ? d.setEntries : null,
               notes: d.notes ?? null,
             }))
         );

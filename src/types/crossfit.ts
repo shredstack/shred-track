@@ -86,6 +86,31 @@ export const MOVEMENT_CATEGORY_COLORS: Record<MovementCategory, string> = {
   other: "bg-zinc-500/20 text-zinc-400",
 };
 
+// Display labels for movement categories — "Cardio" reads more naturally
+// than "Monostructural" in user-facing UI.
+export const MOVEMENT_CATEGORY_LABELS: Record<MovementCategory, string> = {
+  barbell: "Barbell",
+  dumbbell: "Dumbbell",
+  kettlebell: "Kettlebell",
+  gymnastics: "Gymnastics",
+  bodyweight: "Bodyweight",
+  monostructural: "Cardio",
+  accessory: "Accessory",
+  other: "Other",
+};
+
+export type CategoryFilter = "all" | MovementCategory;
+
+// Used by <CategoryPills /> — the "All" entry is paired with the canonical
+// category list so every consumer renders the same filter row.
+export const CATEGORY_FILTER_OPTIONS: { key: CategoryFilter; label: string }[] = [
+  { key: "all", label: "All" },
+  ...MOVEMENT_CATEGORIES.map((cat) => ({
+    key: cat,
+    label: MOVEMENT_CATEGORY_LABELS[cat],
+  })),
+];
+
 // ============================================
 // Parsed Workout (from text parser)
 // ============================================
@@ -303,6 +328,15 @@ export interface ScoreDisplay {
   movementDetails?: ScoreMovementDetailDisplay[];
 }
 
+// One per-set entry on a for_load movement. `weight` is required (lb);
+// `reps` is the per-set rep count (defaults from the prescribed scheme but
+// can be overridden when reality deviates); `rpe` is per-set effort 1-10.
+export interface SetEntry {
+  weight: number;
+  reps?: number;
+  rpe?: number;
+}
+
 export interface ScoreMovementDetailDisplay {
   workoutMovementId: string;
   movementName?: string;
@@ -311,7 +345,7 @@ export interface ScoreMovementDetailDisplay {
   actualReps?: string;
   modification?: string;
   substitutionMovementId?: string;
-  setWeights?: number[];
+  setEntries?: SetEntry[];
   notes?: string;
 }
 
@@ -352,7 +386,7 @@ export interface MovementScaling {
   actualReps?: string;
   modification?: string;
   substitutionMovementId?: string;
-  setWeights?: number[];
+  setEntries?: SetEntry[];
   notes?: string;
 }
 

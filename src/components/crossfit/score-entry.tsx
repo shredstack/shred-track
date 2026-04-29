@@ -32,6 +32,7 @@ import type {
   ScoreInput,
   MovementScaling,
   ScoreDisplay,
+  SetEntry,
 } from "@/types/crossfit";
 import { WORKOUT_TYPE_LABELS } from "@/types/crossfit";
 
@@ -136,9 +137,16 @@ interface PartState {
   // appearing multiple times in a part only needs one scaling entry. On save,
   // this scaling is spread to every workout_movement occurrence of that movement.
   movementScalings: Record<string, Partial<MovementScaling>>;
-  // Keyed by workout_movement_id — set weights are per-occurrence (one row
-  // per barbell per set in a for_load part).
-  setWeightsMap: Record<string, string[]>;
+  // Keyed by workout_movement_id — set entries are per-occurrence (one row
+  // per barbell per set in a for_load part). Drafts hold strings so the
+  // user can type without losing focus; commit to numbers on save.
+  setEntriesMap: Record<string, SetEntryDraft[]>;
+}
+
+export interface SetEntryDraft {
+  weight: string;
+  reps: string;
+  rpe: string;
 }
 
 function emptyPartState(
@@ -146,7 +154,7 @@ function emptyPartState(
   existing?: ScoreDisplay | null
 ): PartState {
   const scalings: Record<string, Partial<MovementScaling>> = {};
-  const setWeightsMap: Record<string, string[]> = {};
+  const setEntriesMap: Record<string, SetEntryDraft[]> = {};
 
   // Walk existing movementDetails (keyed by workout_movement_id) and collapse
   // down to one entry per movement_id. Different occurrences of the same
@@ -167,8 +175,12 @@ function emptyPartState(
           notes: d.notes,
         };
       }
-      if (d.setWeights && d.setWeights.length > 0) {
-        setWeightsMap[d.workoutMovementId] = d.setWeights.map((w) => w.toString());
+      if (d.setEntries && d.setEntries.length > 0) {
+        setEntriesMap[d.workoutMovementId] = d.setEntries.map((e) => ({
+          weight: e.weight.toString(),
+          reps: e.reps != null ? e.reps.toString() : "",
+          rpe: e.rpe != null ? e.rpe.toString() : "",
+        }));
       }
     }
   }
@@ -184,7 +196,7 @@ function emptyPartState(
     rpe: existing?.rpe ?? 7,
     notes: existing?.notes ?? "",
     movementScalings: scalings,
-    setWeightsMap,
+    setEntriesMap,
   };
 }
 
@@ -204,21 +216,36 @@ function distinctMovements(part: WorkoutPartDisplay) {
 // Helpers
 // ============================================
 
+function repSchemeParts(repScheme?: string): number[] {
+  if (!repScheme) return [];
+  return repScheme
+    .split("-")
+    .map((s) => s.trim())
+    .filter((s) => /^\d+$/.test(s))
+    .map((s) => parseInt(s, 10));
+}
+
 function setsFromRepScheme(repScheme?: string): number {
-  if (!repScheme) return 1;
-  const parts = repScheme.split("-").filter((s) => /^\d+$/.test(s.trim()));
+  const parts = repSchemeParts(repScheme);
   if (parts.length > 0) return Math.min(parts.length, MAX_SET_INPUTS);
   return 1;
 }
 
 function repsPerSetFromRepScheme(repScheme?: string): number {
-  if (!repScheme) return 1;
-  const parts = repScheme.split("-").filter((s) => /^\d+$/.test(s.trim()));
+  const parts = repSchemeParts(repScheme);
   if (parts.length > 0) {
     // Use the last set's reps for e1RM (usually the heaviest working set).
-    return parseInt(parts[parts.length - 1], 10);
+    return parts[parts.length - 1];
   }
   return 1;
+}
+
+function prescribedRepsForSet(repScheme: string | undefined, setIdx: number): number | undefined {
+  const parts = repSchemeParts(repScheme);
+  if (parts.length === 0) return undefined;
+  if (setIdx < parts.length) return parts[setIdx];
+  // Out-of-bounds (extra set added) — fall back to last prescribed value.
+  return parts[parts.length - 1];
 }
 
 // The TimeInput owns its own string drafts so the user can type "06" in
@@ -378,18 +405,35 @@ export function ScoreEntry({
     []
   );
 
-  const updateSetWeight = useCallback(
-    (partId: string, movId: string, setIdx: number, value: string) => {
+  // Update a single field (weight, reps, or rpe) on a single set draft.
+  // Auto-grows the array up to setIdx so the user can edit Set 3 even if
+  // Set 1 and 2 are empty.
+  const updateSetEntry = useCallback(
+    (
+      partId: string,
+      movId: string,
+      setIdx: number,
+      field: "weight" | "reps" | "rpe",
+      value: string,
+      defaultReps?: number
+    ) => {
       setPartStates((prev) => {
-        const current = prev[partId].setWeightsMap[movId] ?? [];
+        const current = prev[partId].setEntriesMap[movId] ?? [];
         const updated = [...current];
-        updated[setIdx] = value;
+        for (let i = updated.length; i <= setIdx; i++) {
+          updated[i] = {
+            weight: "",
+            reps: defaultReps != null ? String(defaultReps) : "",
+            rpe: "",
+          };
+        }
+        updated[setIdx] = { ...updated[setIdx], [field]: value };
         return {
           ...prev,
           [partId]: {
             ...prev[partId],
-            setWeightsMap: {
-              ...prev[partId].setWeightsMap,
+            setEntriesMap: {
+              ...prev[partId].setEntriesMap,
               [movId]: updated,
             },
           },
@@ -410,14 +454,24 @@ export function ScoreEntry({
     ): ScoreInput => {
       // Scaling details are only meaningful when the user picked Scaled.
       // For Rx / Rx+, discard any per-movement scaling the user may have
-      // left in state (from a prior toggle), but keep setWeights — those
+      // left in state (from a prior toggle), but keep setEntries — those
       // are the canonical record of what was lifted on for_load parts.
       const includeScalingDetails = st.division === "scaled";
       const scalings: MovementScaling[] = part.movements.map((mov) => {
         const scaling = st.movementScalings[mov.movementId] ?? {};
-        const setWeights = (st.setWeightsMap[mov.id] ?? [])
-          .map((w) => parseFloat(w))
-          .filter((w) => !isNaN(w) && w > 0);
+        const setEntries: SetEntry[] = (st.setEntriesMap[mov.id] ?? [])
+          .map((draft): SetEntry | null => {
+            const weight = parseFloat(draft.weight);
+            if (!Number.isFinite(weight) || weight <= 0) return null;
+            const reps = parseInt(draft.reps, 10);
+            const rpe = parseFloat(draft.rpe);
+            return {
+              weight,
+              ...(Number.isFinite(reps) && reps > 0 ? { reps } : {}),
+              ...(Number.isFinite(rpe) && rpe >= 1 && rpe <= 10 ? { rpe } : {}),
+            };
+          })
+          .filter((e): e is SetEntry => e !== null);
         return {
           workoutMovementId: mov.id,
           wasRx: includeScalingDetails ? (scaling.wasRx ?? true) : true,
@@ -427,7 +481,7 @@ export function ScoreEntry({
           substitutionMovementId: includeScalingDetails
             ? scaling.substitutionMovementId
             : undefined,
-          setWeights: setWeights.length > 0 ? setWeights : undefined,
+          setEntries: setEntries.length > 0 ? setEntries : undefined,
           notes: includeScalingDetails ? scaling.notes : undefined,
         };
       });
@@ -461,7 +515,7 @@ export function ScoreEntry({
           const explicit = st.weightLbs ? parseFloat(st.weightLbs) : undefined;
           const maxFromSets = Math.max(
             0,
-            ...scalings.flatMap((s) => s.setWeights ?? [])
+            ...scalings.flatMap((s) => (s.setEntries ?? []).map((e) => e.weight))
           );
           score.weightLbs = explicit ?? (maxFromSets > 0 ? maxFromSets : undefined);
           break;
@@ -494,8 +548,8 @@ export function ScoreEntry({
         case "for_load":
           return (
             !!st.weightLbs ||
-            Object.values(st.setWeightsMap).some((ws) =>
-              ws.some((w) => parseFloat(w) > 0)
+            Object.values(st.setEntriesMap).some((entries) =>
+              entries.some((e) => parseFloat(e.weight) > 0)
             )
           );
         case "for_reps":
@@ -642,10 +696,23 @@ export function ScoreEntry({
                 const movScheme =
                   mov.prescribedReps || activePart.repScheme;
                 const sets = setsFromRepScheme(movScheme);
-                const repsPerSet = repsPerSetFromRepScheme(movScheme);
-                const weights = state.setWeightsMap[mov.id] ?? [];
-                const numericWeights = weights.map(
-                  (w) => parseFloat(w) || 0
+                const fallbackRepsPerSet = repsPerSetFromRepScheme(movScheme);
+                const drafts = state.setEntriesMap[mov.id] ?? [];
+                // Resolve drafts → SetEntry[] for the breakdown display.
+                // Empty reps fall back to the per-set prescription so the
+                // e1RM estimate is sensible from the moment a weight is typed.
+                const displayEntries: SetEntry[] = Array.from(
+                  { length: sets },
+                  (_, i) => {
+                    const d = drafts[i];
+                    const w = d ? parseFloat(d.weight) : NaN;
+                    if (!Number.isFinite(w) || w <= 0) return { weight: 0 };
+                    const typedReps = d ? parseInt(d.reps, 10) : NaN;
+                    const reps = Number.isFinite(typedReps) && typedReps > 0
+                      ? typedReps
+                      : prescribedRepsForSet(movScheme, i) ?? fallbackRepsPerSet;
+                    return { weight: w, reps };
+                  }
                 );
                 return (
                   <div
@@ -666,27 +733,76 @@ export function ScoreEntry({
                         gridTemplateColumns: `repeat(${Math.min(sets, 5)}, minmax(0, 1fr))`,
                       }}
                     >
-                      {Array.from({ length: sets }, (_, i) => (
-                        <Input
-                          key={i}
-                          type="number"
-                          value={weights[i] ?? ""}
-                          onChange={(e) =>
-                            updateSetWeight(
-                              activePart.id,
-                              mov.id,
-                              i,
-                              e.target.value
-                            )
-                          }
-                          placeholder={`Set ${i + 1}`}
-                          className="h-8 text-xs font-mono text-center"
-                        />
-                      ))}
+                      {Array.from({ length: sets }, (_, i) => {
+                        const draft = drafts[i];
+                        const prescribed = prescribedRepsForSet(movScheme, i);
+                        return (
+                          <div key={i} className="space-y-1">
+                            <Input
+                              type="number"
+                              value={draft?.weight ?? ""}
+                              onChange={(e) =>
+                                updateSetEntry(
+                                  activePart.id,
+                                  mov.id,
+                                  i,
+                                  "weight",
+                                  e.target.value,
+                                  prescribed
+                                )
+                              }
+                              placeholder={`Set ${i + 1}`}
+                              className="h-8 text-xs font-mono text-center"
+                              aria-label={`Set ${i + 1} weight`}
+                            />
+                            <Input
+                              type="number"
+                              value={draft?.reps ?? ""}
+                              onChange={(e) =>
+                                updateSetEntry(
+                                  activePart.id,
+                                  mov.id,
+                                  i,
+                                  "reps",
+                                  e.target.value,
+                                  prescribed
+                                )
+                              }
+                              placeholder={
+                                prescribed != null
+                                  ? `${prescribed} reps`
+                                  : "reps"
+                              }
+                              className="h-6 text-[10px] font-mono text-center text-muted-foreground"
+                              aria-label={`Set ${i + 1} reps`}
+                            />
+                            <Input
+                              type="number"
+                              min={1}
+                              max={10}
+                              step="0.5"
+                              value={draft?.rpe ?? ""}
+                              onChange={(e) =>
+                                updateSetEntry(
+                                  activePart.id,
+                                  mov.id,
+                                  i,
+                                  "rpe",
+                                  e.target.value,
+                                  prescribed
+                                )
+                              }
+                              placeholder="RPE"
+                              className="h-6 text-[10px] font-mono text-center text-muted-foreground"
+                              aria-label={`Set ${i + 1} RPE`}
+                            />
+                          </div>
+                        );
+                      })}
                     </div>
                     <SetWeightBreakdown
-                      setWeights={numericWeights}
-                      repsPerSet={repsPerSet}
+                      entries={displayEntries}
+                      repsPerSet={fallbackRepsPerSet}
                     />
                   </div>
                 );
