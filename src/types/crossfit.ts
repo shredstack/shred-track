@@ -487,3 +487,34 @@ export interface MovementOption {
   commonRxWeightFemale?: string;
   videoUrl?: string | null;
 }
+
+// ============================================
+// Notes Extraction (Phase 4 — VIP-gated)
+// ============================================
+
+// One physical/mental complaint mentioned in a score note. `topic` is a short
+// canonical phrase (e.g. "shoulder", "low back") so we can group across notes.
+export interface NotesComplaint {
+  topic: string;
+  phrase: string; // verbatim snippet from the note
+  confidence: number; // 0..1
+}
+
+export interface NotesScalingReason {
+  movement: string | null; // best-guess movement name; null if unspecified
+  reason: string; // short canonical reason ("grip", "shoulder pain", "skill")
+  phrase: string;
+}
+
+export type NotesMilestoneType = "first" | "pr" | "win";
+
+export interface NotesMilestone {
+  type: NotesMilestoneType;
+  phrase: string;
+}
+
+export interface NotesExtraction {
+  complaints: NotesComplaint[];
+  scalingRationale: NotesScalingReason[];
+  milestones: NotesMilestone[];
+}
