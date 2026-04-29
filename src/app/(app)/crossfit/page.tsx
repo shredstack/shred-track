@@ -264,7 +264,10 @@ export default function CrossfitPage() {
     }
   };
 
-  const handleSaveFromParser = async (parsed: ParsedWorkout) => {
+  const handleSaveFromParser = async (
+    parsed: ParsedWorkout,
+    workoutDate: string
+  ) => {
     setSaveError(null);
 
     const resolved = await Promise.all(
@@ -284,7 +287,7 @@ export default function CrossfitPage() {
       await createWorkout.mutateAsync({
         title: parsed.title,
         description: parsed.description,
-        workoutDate: dateStr,
+        workoutDate: workoutDate || dateStr,
         parts: [
           {
             workoutType: parsed.workoutType,
@@ -473,6 +476,7 @@ export default function CrossfitPage() {
               <WorkoutParser
                 onSave={handleSaveFromParser}
                 onCancel={() => setShowAddWorkout(false)}
+                defaultWorkoutDate={dateStr}
               />
             </TabsContent>
             <TabsContent value="build" className="mt-4">

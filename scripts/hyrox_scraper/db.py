@@ -89,12 +89,13 @@ class HyroxDB:
                             (id, event_id, external_result_id, external_athlete_hash,
                              division_key, age_group, finish_time_seconds,
                              overall_rank, division_rank, field_size_division,
-                             percentile, is_dnf)
+                             percentile, is_dnf, athlete_names_normalized)
                         VALUES
                             (gen_random_uuid(), %(event_id)s, %(external_result_id)s,
                              %(external_athlete_hash)s, %(division_key)s, %(age_group)s,
                              %(finish_time_seconds)s, %(overall_rank)s, %(division_rank)s,
-                             %(field_size_division)s, %(percentile)s, %(is_dnf)s)
+                             %(field_size_division)s, %(percentile)s, %(is_dnf)s,
+                             %(athlete_names_normalized)s)
                         ON CONFLICT (event_id, external_result_id) DO UPDATE SET
                             external_athlete_hash = EXCLUDED.external_athlete_hash,
                             division_key = EXCLUDED.division_key,
@@ -105,6 +106,7 @@ class HyroxDB:
                             field_size_division = EXCLUDED.field_size_division,
                             percentile = EXCLUDED.percentile,
                             is_dnf = EXCLUDED.is_dnf,
+                            athlete_names_normalized = EXCLUDED.athlete_names_normalized,
                             updated_at = NOW()
                         RETURNING id, (xmax = 0) AS was_inserted
                         """,
@@ -120,6 +122,7 @@ class HyroxDB:
                             "field_size_division": result.field_size_division,
                             "percentile": result.percentile,
                             "is_dnf": result.is_dnf,
+                            "athlete_names_normalized": result.athlete_names_normalized,
                         },
                     )
                     row = cur.fetchone()
@@ -208,13 +211,28 @@ class HyroxDB:
                 )
                 return {row["division_key"]: row["count"] for row in cur.fetchall()}
 
-    def get_event_result_counts(self, event_external_id: str) -> dict:
-        """Get result counts per division for a specific event. Returns {division_key: count}."""
+    def get_event_result_counts(self, event_external_id: str) -> dict[str, dict]:
+        """
+        Per-division status for an event.
+
+        Returns {division_key: {"count": int, "missing_names": int}}.
+
+        `missing_names` counts rows whose `athlete_names_normalized` is NULL or
+        empty. The scraper uses it to override the "already complete" skip
+        check when a previously-scraped division still needs name data
+        backfilled (e.g. after the schema added the column).
+        """
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT r.division_key, COUNT(*) as count
+                    SELECT
+                        r.division_key,
+                        COUNT(*) AS count,
+                        COUNT(*) FILTER (
+                            WHERE r.athlete_names_normalized IS NULL
+                               OR cardinality(r.athlete_names_normalized) = 0
+                        ) AS missing_names
                     FROM hyrox_public_results r
                     JOIN hyrox_public_events e ON e.id = r.event_id
                     WHERE e.external_id = %s
@@ -222,7 +240,13 @@ class HyroxDB:
                     """,
                     (event_external_id,),
                 )
-                return {row["division_key"]: row["count"] for row in cur.fetchall()}
+                return {
+                    row["division_key"]: {
+                        "count": row["count"],
+                        "missing_names": row["missing_names"],
+                    }
+                    for row in cur.fetchall()
+                }
 
     def get_event_date(self, event_external_id: str) -> str | None:
         """Get the stored event_date for an event. Returns ISO date string or None."""

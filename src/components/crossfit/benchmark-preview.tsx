@@ -2,19 +2,22 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Plus } from "lucide-react";
 import { useState } from "react";
 import type { BenchmarkWorkout } from "@/types/crossfit";
 import { WORKOUT_TYPE_LABELS, WORKOUT_TYPE_COLORS } from "@/types/crossfit";
+import {
+  WorkoutDateInput,
+  localTodayString,
+} from "@/components/crossfit/workout-date-input";
 
 interface BenchmarkPreviewProps {
   benchmark: BenchmarkWorkout;
   onAdd: (benchmarkId: string, workoutDate: string) => void;
   onBack: () => void;
   isLoading?: boolean;
+  defaultWorkoutDate?: string;
 }
 
 export function BenchmarkPreview({
@@ -22,9 +25,10 @@ export function BenchmarkPreview({
   onAdd,
   onBack,
   isLoading,
+  defaultWorkoutDate,
 }: BenchmarkPreviewProps) {
   const [workoutDate, setWorkoutDate] = useState(
-    new Date().toISOString().split("T")[0]
+    defaultWorkoutDate || localTodayString()
   );
 
   return (
@@ -106,15 +110,11 @@ export function BenchmarkPreview({
 
       {/* Date picker + Add button */}
       <div className="space-y-3">
-        <div className="space-y-2">
-          <Label htmlFor="bp-date">Workout Date</Label>
-          <Input
-            id="bp-date"
-            type="date"
-            value={workoutDate}
-            onChange={(e) => setWorkoutDate(e.target.value)}
-          />
-        </div>
+        <WorkoutDateInput
+          id="bp-date"
+          value={workoutDate}
+          onChange={setWorkoutDate}
+        />
 
         <Button
           className="w-full"

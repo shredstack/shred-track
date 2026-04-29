@@ -183,6 +183,15 @@ Every generation is logged to `hyrox_plan_generations` with the source, and purc
 
 Each `NON_RENEWING_PURCHASE` event writes one row to `hyrox_plan_purchases`, idempotent by RC event id.
 
+## Scaling Backlog
+
+A running list of items that are fine at current usage but will need attention before scaling. Add to this list whenever a Claude PR review (or any other source) flags an item tagged **Scaling Enhancement**.
+
+| Item | Source | Notes |
+|------|--------|-------|
+| Add `CONCURRENTLY` to GIN index on `hyrox_public_results.athlete_names_normalized` | PR #23 | [Migration](supabase/migrations/20260428222131_add_hyrox_name_search_and_claims.sql#L24-L25) creates the index without `CONCURRENTLY`. Locks the table during build. Fine while the table is small; revisit before the results table grows materially. Note: `CREATE INDEX CONCURRENTLY` can't run inside a transaction, so the fix needs a standalone migration. |
+| Move admin benchmark propagation to a background job | PR #23 | [`PUT /api/admin/benchmarks/[id]`](src/app/api/admin/benchmarks/[id]/route.ts#L121-L227) propagates a benchmark edit to every linked workout inside one transaction. As the user base grows, a popular benchmark could push this past the connection timeout. Fix: enqueue an Inngest job per linked workout. |
+
 ## Project Structure
 
 ```

@@ -55,18 +55,16 @@ export function DateNavigator({ selectedDate, onDateChange }: DateNavigatorProps
   const openPicker = () => {
     const input = dateInputRef.current;
     if (!input) return;
-    // showPicker() is the modern call; fall back to focusing the input so
-    // browsers without it (older Safari) still surface the native calendar.
     if (typeof input.showPicker === "function") {
       try {
         input.showPicker();
-        return;
       } catch {
-        // Some browsers throw if called without a user gesture — fall through.
+        // Some browsers throw outside a user gesture — fall through to focus.
+        input.focus();
       }
+    } else {
+      input.focus();
     }
-    input.focus();
-    input.click();
   };
 
   return (
@@ -84,20 +82,12 @@ export function DateNavigator({ selectedDate, onDateChange }: DateNavigatorProps
           <button
             type="button"
             onClick={openPicker}
-            className="flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-sm font-semibold transition-colors hover:bg-white/[0.04]"
+            className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-0.5 text-sm font-semibold transition-colors hover:bg-white/[0.04]"
             aria-label="Jump to date"
           >
             <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
             {monthYear}
           </button>
-          {!isToday && (
-            <button
-              onClick={() => onDateChange(today)}
-              className="rounded-full bg-primary/15 px-2.5 py-0.5 text-[11px] font-bold text-primary transition-all hover:bg-primary/25 glow-primary-sm"
-            >
-              Today
-            </button>
-          )}
           <input
             ref={dateInputRef}
             type="date"
@@ -108,10 +98,18 @@ export function DateNavigator({ selectedDate, onDateChange }: DateNavigatorProps
               const [y, m, d] = v.split("-").map(Number);
               onDateChange(new Date(y, m - 1, d));
             }}
-            className="pointer-events-none absolute h-0 w-0 opacity-0"
             tabIndex={-1}
             aria-hidden="true"
+            className="sr-only"
           />
+          {!isToday && (
+            <button
+              onClick={() => onDateChange(today)}
+              className="rounded-full bg-primary/15 px-2.5 py-0.5 text-[11px] font-bold text-primary transition-all hover:bg-primary/25 glow-primary-sm"
+            >
+              Today
+            </button>
+          )}
         </div>
         <Button
           variant="ghost"

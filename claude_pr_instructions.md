@@ -105,6 +105,15 @@ If the PR adds or modifies server-rendered components, check for:
 
 List specific issues, suggestions, or questions about particular lines of code. Reference file paths and line numbers.
 
+When you flag an item, prefix it with one of these tags so it's easy to triage:
+
+- **[Blocker]** — must be fixed before merge (data loss, security, broken functionality, missing user scoping, breaking API change). Maps to **Request Changes**.
+- **[Scaling Enhancement]** — fine at current scale but will become a problem as usage grows (unbounded queries, transactions that loop over user-scoped data, missing index `CONCURRENTLY`, synchronous bulk operations that should be background jobs, etc.). These belong in the README's **Scaling Backlog** section. Never block a merge on a Scaling Enhancement.
+- **[Nit]** — stylistic or minor (naming, key={i}, optional comments, accessibility polish). Never block a merge on a Nit.
+- **[Question]** — you want clarification, not a change.
+
+If a finding doesn't clearly fit one of these tags, it's probably a Nit or Question — be honest about that rather than escalating.
+
 ### Verdict
 
 Choose one:
@@ -157,6 +166,10 @@ Before flagging an issue, verify it's a real problem:
 8. **Don't suggest list virtualization for user-scoped lists in this app.** A single user's races, workouts, plans, and benchmarks are inherently small (dozens, not thousands). Virtualization is unnecessary complexity for these views. Only flag virtualization concerns for genuinely unbounded lists like community feeds or admin dashboards.
 9. **Don't suggest jitter / thundering-herd mitigations for one-shot scripts** in `scripts/` that are run manually by a single operator. Thundering herd is a fleet-of-clients problem, not a single-script problem.
 10. **Don't suggest "consider extracting to a utility" or "consider a stronger type" as blocking changes.** These are stylistic; if you mention them at all, mark them clearly as **Nit** or **Optional**, never under "Request Changes".
+11. **New migration files ARE in the diff — read them.** A newly added migration shows up as an added file in the PR diff. Never write phrases like "the migration SQL file body isn't in the diff" or "confirm RLS is enabled" as a blocker without opening the file. If you can't find the migration body, that's a tooling failure on your end, not a reason to escalate to **Request Changes** — fall back to **Comment** with a verification ask, not a block.
+12. **`NOT NULL` without a default is often intentional.** Columns capturing user-provided action timestamps (`disclaimer_acked_at`, `signed_at`, `accepted_at`, etc.) deliberately have no default — the value must come from an explicit user action. Do not flag these as "inserts will fail at runtime" unless you've actually traced the insert paths and found one that omits the field.
+13. **Same name ≠ duplicate implementation.** Before flagging a "duplicate function" as a blocker, open both files and compare signatures and return types. Two functions named `parseRepScheme` that return different shapes (`RepSchemeParsed | null` vs `number | null`) are different functions with a naming collision — suggest a rename as **Nit**, never as **Request Changes**. Only flag as a real issue if both implementations have the same signature and overlapping behavior.
+14. **Next.js App Router handles unhandled rejections.** A thrown error in an App Router route handler returns a clean 500 — no `try/catch` is required for that. Only flag missing `try/catch` when there's specific recovery logic the route should perform (e.g. translating a unique-constraint violation into a 409, retrying a transient failure, surfacing a user-facing error message). "Add try/catch so errors return a clean 500" is a false alarm — that already happens.
 
 ### Verdict discipline
 

@@ -28,8 +28,7 @@ export async function GET(req: NextRequest) {
     .select()
     .from(movements)
     .where(whereClause)
-    .orderBy(movements.canonicalName)
-    .limit(100);
+    .orderBy(movements.canonicalName);
 
   return NextResponse.json(rows);
 }

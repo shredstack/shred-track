@@ -12,6 +12,7 @@ import {
   index,
   foreignKey,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import type { TimeLossEntry, FocusEntry } from "@/types/hyrox-race-report";
 
 // ============================================
@@ -583,6 +584,7 @@ export const hyroxPublicResults = pgTable(
     fieldSizeDivision: integer("field_size_division").notNull(),
     percentile: numeric("percentile", { precision: 5, scale: 2 }).notNull(),
     isDnf: boolean("is_dnf").notNull().default(false),
+    athleteNamesNormalized: text("athlete_names_normalized").array().notNull().default([]),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -591,6 +593,7 @@ export const hyroxPublicResults = pgTable(
     index("idx_hyrox_public_results_division_event").on(table.divisionKey, table.eventId),
     index("idx_hyrox_public_results_division_time").on(table.divisionKey, table.finishTimeSeconds),
     index("idx_hyrox_public_results_athlete").on(table.externalAthleteHash),
+    index("idx_hyrox_public_results_names_gin").using("gin", table.athleteNamesNormalized),
   ]
 );
 
@@ -617,6 +620,24 @@ export const hyroxPublicSplits = pgTable(
 
 // Materialized view `hyrox_public_division_aggregates` is defined in the SQL migration.
 // Query it with db.execute(sql`SELECT ... FROM hyrox_public_division_aggregates ...`).
+
+export const userPublicRaceClaims = pgTable(
+  "user_public_race_claims",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    publicResultId: uuid("public_result_id").notNull().references(() => hyroxPublicResults.id, { onDelete: "cascade" }),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }).defaultNow().notNull(),
+    disclaimerAckedAt: timestamp("disclaimer_acked_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("user_public_race_claims_user_result_unique").on(table.userId, table.publicResultId),
+    index("idx_user_public_race_claims_user").on(table.userId),
+    index("idx_user_public_race_claims_result").on(table.publicResultId),
+  ]
+);
 
 // ============================================
 // HYROX: Predictor Models & User Predictions

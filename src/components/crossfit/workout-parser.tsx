@@ -32,14 +32,19 @@ import {
   WORKOUT_TYPE_LABELS,
   WORKOUT_TYPE_COLORS,
 } from "@/types/crossfit";
+import {
+  WorkoutDateInput,
+  localTodayString,
+} from "@/components/crossfit/workout-date-input";
 
 // ============================================
 // Props
 // ============================================
 
 interface WorkoutParserProps {
-  onSave?: (parsed: ParsedWorkout) => void;
+  onSave?: (parsed: ParsedWorkout, workoutDate: string) => void;
   onCancel?: () => void;
+  defaultWorkoutDate?: string;
 }
 
 // ============================================
@@ -75,9 +80,16 @@ function ConfidenceBadge({ confidence }: { confidence: number }) {
 // Component
 // ============================================
 
-export function WorkoutParser({ onSave, onCancel }: WorkoutParserProps) {
+export function WorkoutParser({
+  onSave,
+  onCancel,
+  defaultWorkoutDate,
+}: WorkoutParserProps) {
   const [rawText, setRawText] = useState("");
   const [parsed, setParsed] = useState<ParsedWorkout | null>(null);
+  const [workoutDate, setWorkoutDate] = useState(
+    defaultWorkoutDate || localTodayString()
+  );
 
   const handleParse = useCallback(() => {
     if (!rawText.trim()) return;
@@ -121,7 +133,7 @@ export function WorkoutParser({ onSave, onCancel }: WorkoutParserProps) {
 
   const handleSave = () => {
     if (parsed) {
-      onSave?.(parsed);
+      onSave?.(parsed, workoutDate);
     }
   };
 
@@ -201,6 +213,13 @@ Time Cap: 10 min`}
           placeholder="Workout title (optional)"
         />
       </div>
+
+      {/* Date */}
+      <WorkoutDateInput
+        id="wp-date"
+        value={workoutDate}
+        onChange={setWorkoutDate}
+      />
 
       {/* Workout Type */}
       <div className="space-y-2">
