@@ -20,6 +20,10 @@ import {
   Loader2,
 } from "lucide-react";
 import { WorkoutPartConfig } from "@/components/crossfit/workout-part-config";
+import {
+  WorkoutDateInput,
+  localTodayString,
+} from "@/components/crossfit/workout-date-input";
 import type {
   WorkoutBuilderForm,
   WorkoutBuilderPart,
@@ -64,19 +68,10 @@ function emptyPart(): WorkoutBuilderPart {
 }
 
 function createEmptyForm(workoutDate?: string): WorkoutBuilderForm {
-  // Fall back to local-today (NOT toISOString, which is UTC and can drift
-  // the date by one in positive timezones).
-  const fallback = (() => {
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
-  })();
   return {
     title: "",
     description: "",
-    workoutDate: workoutDate || fallback,
+    workoutDate: workoutDate || localTodayString(),
     parts: [emptyPart()],
   };
 }
@@ -668,17 +663,15 @@ export function SmartBuilder({
           </div>
 
           {/* Date */}
-          <div className="space-y-2">
-            <Label htmlFor="sb-date">Date</Label>
-            <Input
-              id="sb-date"
-              type="date"
-              value={form.workoutDate}
-              onChange={(e) =>
-                setForm((prev) => ({ ...prev, workoutDate: e.target.value }))
-              }
-            />
-          </div>
+          <WorkoutDateInput
+            id="sb-date"
+            label="Date"
+            value={form.workoutDate}
+            onChange={(value) =>
+              setForm((prev) => ({ ...prev, workoutDate: value }))
+            }
+          />
+
 
           {/* Notes */}
           <div className="space-y-2">

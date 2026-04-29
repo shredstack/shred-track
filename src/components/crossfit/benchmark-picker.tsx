@@ -8,8 +8,13 @@ import { Search, Plus, Loader2 } from "lucide-react";
 import { useBenchmarks, useCreateBenchmark, useCreateWorkoutFromBenchmark } from "@/hooks/useBenchmarks";
 import { BenchmarkPreview } from "@/components/crossfit/benchmark-preview";
 import { BenchmarkForm } from "@/components/crossfit/benchmark-form";
-import type { BenchmarkWorkout, BenchmarkCategory } from "@/types/crossfit";
-import { WORKOUT_TYPE_LABELS, WORKOUT_TYPE_COLORS } from "@/types/crossfit";
+import type { BenchmarkWorkout, BenchmarkCategoryName } from "@/types/crossfit";
+import {
+  WORKOUT_TYPE_LABELS,
+  WORKOUT_TYPE_COLORS,
+  BENCHMARK_CATEGORY_SHORT_LABELS,
+  BENCHMARK_CATEGORY_COLORS,
+} from "@/types/crossfit";
 
 interface BenchmarkPickerProps {
   onWorkoutCreated: () => void;
@@ -18,9 +23,20 @@ interface BenchmarkPickerProps {
 
 type View = "list" | "preview" | "create";
 
-const CATEGORY_PILLS: { value: BenchmarkCategory | "all"; label: string }[] = [
+// Pills mix two filter axes:
+//   - "all" / "custom" filter by ownership (the /api/benchmarks `category`
+//     param: system|custom|community).
+//   - The named slugs (girls, heroes, …) filter by the benchmark's intrinsic
+//     category column via the `benchmarkCategory` param.
+type PillValue = "all" | "custom" | BenchmarkCategoryName;
+
+const CATEGORY_PILLS: { value: PillValue; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "system", label: "The Girls & Heroes" },
+  { value: "girls", label: "Girls" },
+  { value: "heroes", label: "Hero" },
+  { value: "open", label: "CF Open" },
+  { value: "weightlifting", label: "Weightlifting" },
+  { value: "gym_benchmark", label: "Gym" },
   { value: "custom", label: "Custom" },
 ];
 
@@ -30,13 +46,17 @@ export function BenchmarkPicker({
 }: BenchmarkPickerProps) {
   const [view, setView] = useState<View>("list");
   const [search, setSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<BenchmarkCategory | "all">("all");
+  const [pillFilter, setPillFilter] = useState<PillValue>("all");
   const [selectedBenchmark, setSelectedBenchmark] = useState<BenchmarkWorkout | null>(null);
 
-  const queryCategory = categoryFilter === "all" ? undefined : categoryFilter;
+  const ownershipFilter = pillFilter === "custom" ? "custom" : undefined;
+  const benchmarkCategoryFilter =
+    pillFilter !== "all" && pillFilter !== "custom" ? pillFilter : undefined;
+
   const { data: benchmarks, isLoading } = useBenchmarks({
     search: search || undefined,
-    category: queryCategory,
+    category: ownershipFilter,
+    benchmarkCategory: benchmarkCategoryFilter,
   });
 
   const createBenchmark = useCreateBenchmark();
@@ -84,6 +104,7 @@ export function BenchmarkPicker({
         onAdd={handleAddWorkout}
         onBack={() => setView("list")}
         isLoading={createWorkout.isPending}
+        defaultWorkoutDate={workoutDate}
       />
     );
   }
@@ -107,9 +128,9 @@ export function BenchmarkPicker({
           <button
             key={value}
             type="button"
-            onClick={() => setCategoryFilter(value)}
+            onClick={() => setPillFilter(value)}
             className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-              categoryFilter === value
+              pillFilter === value
                 ? "bg-primary text-primary-foreground"
                 : "bg-muted/50 text-muted-foreground hover:bg-muted"
             }`}
@@ -133,14 +154,24 @@ export function BenchmarkPicker({
               onClick={() => handleSelectBenchmark(benchmark)}
               className="flex w-full flex-col gap-1 rounded-lg border border-border/50 bg-muted/20 p-3 text-left transition-colors hover:bg-muted/40"
             >
-              <div className="flex items-center justify-between">
+              <div className="flex items-start justify-between gap-2">
                 <span className="font-semibold">{benchmark.name}</span>
-                <Badge
-                  variant="outline"
-                  className={`text-[10px] ${WORKOUT_TYPE_COLORS[benchmark.workoutType]}`}
-                >
-                  {WORKOUT_TYPE_LABELS[benchmark.workoutType]}
-                </Badge>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <Badge
+                    variant="outline"
+                    className={`text-[10px] ${WORKOUT_TYPE_COLORS[benchmark.workoutType]}`}
+                  >
+                    {WORKOUT_TYPE_LABELS[benchmark.workoutType]}
+                  </Badge>
+                  {benchmark.category && (
+                    <Badge
+                      variant="outline"
+                      className={`text-[10px] ${BENCHMARK_CATEGORY_COLORS[benchmark.category]}`}
+                    >
+                      {BENCHMARK_CATEGORY_SHORT_LABELS[benchmark.category]}
+                    </Badge>
+                  )}
+                </div>
               </div>
               <p className="text-xs text-muted-foreground">
                 {benchmark.repScheme && `${benchmark.repScheme}: `}

@@ -22,6 +22,7 @@ import {
 import { getSessionUser } from "@/lib/session";
 
 export interface MovementHistoryEntry {
+  detailId: string;
   scoreId: string;
   workoutId: string;
   workoutPartId: string | null;
@@ -61,6 +62,7 @@ export async function GET(
 
   const logs = await db
     .select({
+      detailId: scoreMovementDetails.id,
       scoreId: scores.id,
       workoutId: workouts.id,
       workoutPartId: scores.workoutPartId,

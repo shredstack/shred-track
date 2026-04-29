@@ -215,7 +215,7 @@ export default function MovementDetailPage({
         ) : (
           <div className="space-y-2">
             {logs.map((log) => (
-              <Card key={log.scoreId}>
+              <Card key={log.detailId}>
                 <CardContent className="flex items-center justify-between gap-2 py-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
