@@ -531,10 +531,10 @@ export async function listScoresNeedingExtraction(
   for (const c of candidateRows) {
     if (out.length >= limit) break;
 
-    const movements = movementsByScore.get(c.scoreId) ?? [];
+    const scoreMovements = movementsByScore.get(c.scoreId) ?? [];
     const trimmedScoreNote = c.scoreNote?.trim() ?? "";
     const hasScoreNote = trimmedScoreNote.length >= MIN_NOTE_CHARS;
-    const hasMovementNote = movements.some(
+    const hasMovementNote = scoreMovements.some(
       (m) => m.movementNote && m.movementNote.trim().length >= MIN_NOTE_CHARS
     );
     if (!hasScoreNote && !hasMovementNote) continue;
@@ -546,7 +546,7 @@ export async function listScoresNeedingExtraction(
       workoutType: c.workoutType,
       athleteGender,
       scoreNote: hasScoreNote ? c.scoreNote : null,
-      movements,
+      movements: scoreMovements,
     };
 
     const prompt = formatNotesForPrompt(candidate);

@@ -945,10 +945,19 @@ export default function ProfilePage() {
                   As a VIP, the free-text notes you write on each score are
                   sent to Anthropic&apos;s Claude API once a day so we can
                   surface recurring complaints, scaling patterns, and
-                  milestones on the CrossFit Insights tab. Notes never leave
-                  Anthropic&apos;s API; nothing is shared with other athletes.
-                  This will become an opt-in subscription later — for now
-                  it&apos;s on by default for VIPs.
+                  milestones on the CrossFit Insights tab. Notes are processed
+                  under Anthropic&apos;s{" "}
+                  <a
+                    href="https://www.anthropic.com/legal/privacy"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline underline-offset-2 hover:text-foreground"
+                  >
+                    privacy policy
+                  </a>{" "}
+                  and are never shared with other athletes. This will become
+                  an opt-in subscription later — for now it&apos;s on by
+                  default for VIPs.
                 </p>
               </div>
             </div>
