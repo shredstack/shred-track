@@ -144,6 +144,54 @@ export function formatStationPace(
   return null;
 }
 
+/**
+ * Compute the average run pace (seconds per kilometer) across the run
+ * splits of a saved race. Per pace spec §3, weights by measured
+ * `distanceMeters` when available, falling back to the division's
+ * nominal `runDistanceM`. Returns null if there are no run splits.
+ */
+export function computeAvgRunPaceSecPerKm(
+  splits: ReadonlyArray<{
+    segmentType: "run" | "station";
+    timeSeconds: string | number;
+    distanceMeters: number | null;
+  }>,
+  fallbackRunDistanceM?: number,
+): number | null {
+  let totalSeconds = 0;
+  let totalMeters = 0;
+  for (const s of splits) {
+    if (s.segmentType !== "run") continue;
+    const time = typeof s.timeSeconds === "string"
+      ? parseFloat(s.timeSeconds)
+      : s.timeSeconds;
+    const meters = s.distanceMeters ?? fallbackRunDistanceM ?? 0;
+    if (time > 0 && meters > 0) {
+      totalSeconds += time;
+      totalMeters += meters;
+    }
+  }
+  if (totalMeters === 0) return null;
+  return (totalSeconds / totalMeters) * 1000;
+}
+
+/**
+ * Format a sec/km pace value for display, in the user's preferred unit.
+ * Returns "—" for null/non-finite values.
+ */
+export function formatRunPace(
+  secPerKm: number | null,
+  unit: "km" | "mi" = "km",
+): string {
+  if (secPerKm == null || !isFinite(secPerKm) || secPerKm <= 0) return "—";
+  const perUnit = unit === "mi" ? secPerKm * 1.609344 : secPerKm;
+  const minutes = Math.floor(perUnit / 60);
+  const seconds = Math.round(perUnit % 60);
+  // Edge case: rounding can produce 60s — bump the minute.
+  if (seconds === 60) return `${minutes + 1}:00 /${unit}`;
+  return `${minutes}:${seconds.toString().padStart(2, "0")} /${unit}`;
+}
+
 // Youngstars have different station names for some age groups
 export const YOUNGSTARS_STATION_ORDER_8_9 = [
   "SkiErg", "Sled Push", "Sled Drag", "Frogger Jumps",

@@ -802,9 +802,13 @@ export const hyroxPracticeRaces = pgTable(
     completedAt: timestamp("completed_at", { withTimezone: true }).notNull(),
     notes: text("notes"),
     raceType: text("race_type").notNull().default("practice"), // 'practice' | 'actual'
+    planSessionId: uuid("plan_session_id").references(() => hyroxPlanSessions.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index("practice_races_user").on(table.userId)],
+  (table) => [
+    index("practice_races_user").on(table.userId),
+    index("practice_races_plan_session").on(table.planSessionId),
+  ],
 );
 
 export const hyroxPracticeRaceSplits = pgTable(

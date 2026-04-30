@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { createClient } from "@/lib/supabase/client";
+import { SignInWithAppleButton } from "@/components/auth/sign-in-with-apple-button";
 
 export default function SignupPage() {
   const [name, setName] = useState("");
@@ -145,6 +146,9 @@ export default function SignupPage() {
                   )}
                   Continue with Google
                 </Button>
+
+                {/* Apple sign-in renders only inside the iOS native shell. */}
+                <SignInWithAppleButton onError={setError} />
 
                 <div className="flex items-center gap-3">
                   <Separator className="flex-1" />

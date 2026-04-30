@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import {
   LogOut,
   User,
@@ -17,6 +18,7 @@ import {
   Shield,
   ChevronRight,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -25,6 +27,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { createClient } from "@/lib/supabase/client";
 import {
   useUserProfile,
@@ -998,7 +1008,111 @@ export default function ProfilePage() {
         </CardContent>
       </Card>
 
+      {/* Delete account — required by Apple App Store guidelines. */}
+      <DeleteAccountSection />
+
       <p className="text-center text-[11px] text-muted-foreground/40">ShredTrack v0.1.0</p>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Delete Account
+// ---------------------------------------------------------------------------
+
+function DeleteAccountSection() {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const onConfirm = async () => {
+    if (confirmText.trim().toUpperCase() !== "DELETE") {
+      toast.error('Type "DELETE" to confirm.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/account/delete", { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? "Failed to delete account");
+      }
+      // Sign out client-side too so the cookie session is cleared.
+      const supabase = createClient();
+      await supabase.auth.signOut();
+      toast.success("Account deleted. Goodbye!");
+      router.push("/login");
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete account");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <>
+      <Card className="border-destructive/30">
+        <CardContent className="pt-4">
+          <button
+            onClick={() => setOpen(true)}
+            className="flex w-full items-center gap-3 rounded-lg px-2 py-3.5 text-sm text-destructive transition-colors hover:bg-destructive/5 group"
+          >
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-destructive/10">
+              <Trash2 className="h-4 w-4" />
+            </div>
+            <span className="flex-1 text-left">Delete Account</span>
+            <ChevronRight className="h-4 w-4 opacity-50" />
+          </button>
+        </CardContent>
+      </Card>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete your ShredTrack account?</DialogTitle>
+            <DialogDescription>
+              Your name and email are erased and you will be signed out
+              permanently. Workouts you posted to a community stay visible to
+              other athletes (so we don&apos;t pull the rug out from
+              under them) but are no longer linked to your name. This cannot
+              be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="confirm-delete" className="text-xs">
+              Type <span className="font-mono font-bold">DELETE</span> to confirm
+            </Label>
+            <Input
+              id="confirm-delete"
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder="DELETE"
+              autoComplete="off"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setOpen(false)}
+              disabled={submitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={onConfirm}
+              disabled={submitting || confirmText.trim().toUpperCase() !== "DELETE"}
+            >
+              {submitting && (
+                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+              )}
+              Delete account
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

@@ -7,6 +7,7 @@ import { TimerSetup } from "./timer-setup";
 import { TimerActive } from "./timer-active";
 import { TimerComplete } from "./timer-complete";
 import { useRaceTimer } from "./use-race-timer";
+import { usePaceFromHealthKit } from "./use-pace-from-healthkit";
 import { buildFullRaceSegments } from "./race-segments";
 import type { RaceSegment, RaceTemplate, PracticeRaceResult } from "./types";
 import type { DivisionKey } from "@/lib/hyrox-data";
@@ -77,6 +78,21 @@ export function RaceTimerFlow() {
   const defaultSegments = buildFullRaceSegments("women_open");
   const timer = useRaceTimer(defaultSegments);
 
+  // iOS-only: live pace from HealthKit. Returns nulls on web / non-iOS,
+  // which the UI uses to hide the pace block. Per pace spec §5.
+  const currentSegment =
+    timer.state.segments[timer.state.currentSegmentIndex] ?? null;
+  const pace = usePaceFromHealthKit({
+    status: timer.state.status,
+    segmentStartedAt: timer.state.segmentStartedAt,
+    currentSegmentType: currentSegment?.segmentType ?? null,
+    segmentElapsedMs: timer.segmentElapsedMs,
+    completedSegments: timer.state.completedSegments,
+  });
+  const completedRunCount = timer.state.completedSegments.filter(
+    (s) => s.segmentType === "run",
+  ).length;
+
   // Handle recovery prompt
   useEffect(() => {
     if (timer.recovered) {
@@ -101,9 +117,17 @@ export function RaceTimerFlow() {
     [timer],
   );
 
-  const handleSplit = useCallback(() => {
-    timer.split();
-  }, [timer]);
+  const handleSplit = useCallback(async () => {
+    // On iOS native + run segment, capture the HealthKit-measured
+    // distance for the just-completed run before advancing. captureSegmentDistance()
+    // returns null on web / stations and the timer falls back to no
+    // distance — preserves existing web behavior unchanged.
+    const distanceMeters =
+      currentSegment?.segmentType === "run"
+        ? await pace.captureSegmentDistance()
+        : null;
+    timer.split({ distanceMeters });
+  }, [timer, currentSegment, pace]);
 
   // Watch for race completion via the timer state
   useEffect(() => {
@@ -112,11 +136,15 @@ export function RaceTimerFlow() {
     }
   }, [timer.state.status, screen]);
 
-  const handleEndRace = useCallback(() => {
-    const result = timer.endRace();
+  const handleEndRace = useCallback(async () => {
+    const distanceMeters =
+      currentSegment?.segmentType === "run"
+        ? await pace.captureSegmentDistance()
+        : null;
+    const result = timer.endRace({ distanceMeters });
     setRaceResult(result);
     setScreen("complete");
-  }, [timer]);
+  }, [timer, currentSegment, pace]);
 
   const handleSave = useCallback(
     async (
@@ -145,6 +173,9 @@ export function RaceTimerFlow() {
             segmentType: s.segmentType,
             segmentLabel: s.label,
             timeSeconds: s.timeMs / 1000,
+            ...(typeof s.distanceMeters === "number"
+              ? { distanceMeters: s.distanceMeters }
+              : {}),
           })),
         };
 
@@ -308,6 +339,9 @@ export function RaceTimerFlow() {
         onPause={timer.pause}
         onResume={timer.resume}
         onEndRace={handleEndRace}
+        currentRunPaceSecPerKm={pace.currentRunPaceSecPerKm}
+        avgRunPaceSecPerKm={pace.avgRunPaceSecPerKm}
+        completedRunCount={completedRunCount}
       />
     );
   }

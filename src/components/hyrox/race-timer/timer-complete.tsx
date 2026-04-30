@@ -12,6 +12,12 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  computeAvgRunPaceSecPerKm,
+  formatRunPace,
+  DIVISIONS,
+  type DivisionKey,
+} from "@/lib/hyrox-data";
 import type { CompletedSegment, RaceTemplate } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -107,6 +113,19 @@ export function TimerComplete({
     () => stationSegments.reduce((sum, s) => sum + s.timeMs, 0),
     [stationSegments],
   );
+  const fallbackRunDistanceM = DIVISIONS[divisionKey as DivisionKey]?.runDistanceM;
+  const avgRunPaceSecPerKm = useMemo(
+    () =>
+      computeAvgRunPaceSecPerKm(
+        completedSegments.map((s) => ({
+          segmentType: s.segmentType,
+          timeSeconds: s.timeMs / 1000,
+          distanceMeters: s.distanceMeters ?? null,
+        })),
+        fallbackRunDistanceM,
+      ),
+    [completedSegments, fallbackRunDistanceM],
+  );
 
   // Find slowest and fastest stations
   const sortedStations = useMemo(
@@ -160,6 +179,30 @@ export function TimerComplete({
           </CardContent>
         </Card>
       </div>
+
+      {/* Avg run pace top-line stat (pace spec §9 q3). Web-saved races
+          have no measured distance so this falls back to the division's
+          nominal `runDistanceM` — a projection but useful as a glance. */}
+      {avgRunPaceSecPerKm != null && (
+        <div className="px-1">
+          <Card>
+            <CardContent className="py-3 flex items-center justify-between">
+              <div>
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Avg run pace
+                </p>
+                <p className="text-lg font-mono font-bold tabular-nums text-blue-400">
+                  {formatRunPace(avgRunPaceSecPerKm, "km")}
+                </p>
+              </div>
+              <p className="text-[10px] text-muted-foreground/80 max-w-[55%] text-right">
+                projected from division distance — measured pace lands with the
+                Apple Watch app
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Insights */}
       {stationSegments.length > 1 && (

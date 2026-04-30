@@ -17,6 +17,8 @@ export interface CompletedSegment {
   segmentType: "run" | "station";
   label: string;
   timeMs: number;
+  /** Measured distance for run segments on iOS (HealthKit). Null on web / stations. */
+  distanceMeters?: number | null;
 }
 
 export type TimerStatus = "idle" | "countdown" | "running" | "paused" | "complete";

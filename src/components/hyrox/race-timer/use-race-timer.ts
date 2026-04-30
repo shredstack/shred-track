@@ -70,14 +70,17 @@ export interface UseRaceTimerReturn {
   totalElapsedMs: number;
   /** Start the race (from idle) */
   start: () => void;
-  /** Advance to the next segment (split) */
-  split: () => void;
+  /** Advance to the next segment (split). On iOS native, pass the
+   *  HealthKit-measured distance for the just-completed run segment so
+   *  it's persisted on the CompletedSegment. */
+  split: (opts?: { distanceMeters?: number | null }) => void;
   /** Pause the timer */
   pause: () => void;
   /** Resume from pause */
   resume: () => void;
-  /** End the race early */
-  endRace: () => PracticeRaceResult;
+  /** End the race early. On iOS native, pass the HealthKit-measured
+   *  distance for the in-progress run segment if it's a run. */
+  endRace: (opts?: { distanceMeters?: number | null }) => PracticeRaceResult;
   /** Reset everything back to idle with new segments */
   reset: (segments: RaceSegment[]) => void;
   /** Whether a saved in-progress race was recovered from localStorage */
@@ -186,33 +189,40 @@ export function useRaceTimer(initialSegments: RaceSegment[]): UseRaceTimerReturn
     }));
   }, []);
 
-  const split = useCallback(() => {
-    setState((prev) => {
-      if (prev.status !== "running" || !prev.segmentStartedAt) return prev;
+  const split = useCallback(
+    (opts?: { distanceMeters?: number | null }) => {
+      setState((prev) => {
+        if (prev.status !== "running" || !prev.segmentStartedAt) return prev;
 
-      const now = Date.now();
-      const segTime = now - prev.segmentStartedAt;
-      const seg = prev.segments[prev.currentSegmentIndex];
+        const now = Date.now();
+        const segTime = now - prev.segmentStartedAt;
+        const seg = prev.segments[prev.currentSegmentIndex];
 
-      const completed: CompletedSegment = {
-        segmentOrder: prev.currentSegmentIndex + 1,
-        segmentType: seg.segmentType,
-        label: seg.label,
-        timeMs: segTime,
-      };
+        const completed: CompletedSegment = {
+          segmentOrder: prev.currentSegmentIndex + 1,
+          segmentType: seg.segmentType,
+          label: seg.label,
+          timeMs: segTime,
+          distanceMeters:
+            seg.segmentType === "run" && typeof opts?.distanceMeters === "number"
+              ? Math.round(opts.distanceMeters)
+              : null,
+        };
 
-      const nextIndex = prev.currentSegmentIndex + 1;
-      const isLast = nextIndex >= prev.segments.length;
+        const nextIndex = prev.currentSegmentIndex + 1;
+        const isLast = nextIndex >= prev.segments.length;
 
-      return {
-        ...prev,
-        status: isLast ? ("complete" as TimerStatus) : ("running" as TimerStatus),
-        completedSegments: [...prev.completedSegments, completed],
-        currentSegmentIndex: nextIndex,
-        segmentStartedAt: isLast ? null : now,
-      };
-    });
-  }, []);
+        return {
+          ...prev,
+          status: isLast ? ("complete" as TimerStatus) : ("running" as TimerStatus),
+          completedSegments: [...prev.completedSegments, completed],
+          currentSegmentIndex: nextIndex,
+          segmentStartedAt: isLast ? null : now,
+        };
+      });
+    },
+    [],
+  );
 
   const pause = useCallback(() => {
     setState((prev) => {
@@ -250,43 +260,51 @@ export function useRaceTimer(initialSegments: RaceSegment[]): UseRaceTimerReturn
     [],
   );
 
-  const endRace = useCallback((): PracticeRaceResult => {
-    let result: PracticeRaceResult | null = null;
+  const endRace = useCallback(
+    (opts?: { distanceMeters?: number | null }): PracticeRaceResult => {
+      let result: PracticeRaceResult | null = null;
 
-    setState((prev) => {
-      // Complete the current segment if running
-      const now = Date.now();
-      let completed = [...prev.completedSegments];
+      setState((prev) => {
+        // Complete the current segment if running
+        const now = Date.now();
+        let completed = [...prev.completedSegments];
 
-      if (
-        prev.status === "running" &&
-        prev.segmentStartedAt &&
-        prev.currentSegmentIndex < prev.segments.length
-      ) {
-        const seg = prev.segments[prev.currentSegmentIndex];
-        completed.push({
-          segmentOrder: prev.currentSegmentIndex + 1,
-          segmentType: seg.segmentType,
-          label: seg.label,
-          timeMs: now - prev.segmentStartedAt,
-        });
-      }
+        if (
+          prev.status === "running" &&
+          prev.segmentStartedAt &&
+          prev.currentSegmentIndex < prev.segments.length
+        ) {
+          const seg = prev.segments[prev.currentSegmentIndex];
+          completed.push({
+            segmentOrder: prev.currentSegmentIndex + 1,
+            segmentType: seg.segmentType,
+            label: seg.label,
+            timeMs: now - prev.segmentStartedAt,
+            distanceMeters:
+              seg.segmentType === "run" &&
+              typeof opts?.distanceMeters === "number"
+                ? Math.round(opts.distanceMeters)
+                : null,
+          });
+        }
 
-      const next: TimerState = {
-        ...prev,
-        status: "complete",
-        completedSegments: completed,
-        segmentStartedAt: null,
-        pausedAt: null,
-      };
+        const next: TimerState = {
+          ...prev,
+          status: "complete",
+          completedSegments: completed,
+          segmentStartedAt: null,
+          pausedAt: null,
+        };
 
-      result = buildResult(next);
-      return next;
-    });
+        result = buildResult(next);
+        return next;
+      });
 
-    // result will be set synchronously by the setState callback
-    return result!;
-  }, [buildResult]);
+      // result will be set synchronously by the setState callback
+      return result!;
+    },
+    [buildResult],
+  );
 
   const reset = useCallback((segments: RaceSegment[]) => {
     clearState();
