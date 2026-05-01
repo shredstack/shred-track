@@ -53,6 +53,7 @@ final class RaceTimerViewModel: ObservableObject {
 
     private var tickTask: Task<Void, Never>?
     private var segmentStartedAt: Date?
+    private var lastDistanceRefreshSecond: Int = -1
     private var extendedSession: WKExtendedRuntimeSession?
     private let hk = HealthKitWorkoutService.shared
 
@@ -99,6 +100,7 @@ final class RaceTimerViewModel: ObservableObject {
         let now = Date()
         state.raceStartedAt = now
         segmentStartedAt = now
+        lastDistanceRefreshSecond = -1
         state.status = .running
         startTick()
     }
@@ -137,6 +139,7 @@ final class RaceTimerViewModel: ObservableObject {
         } else {
             state.currentSegmentIndex = nextIdx
             segmentStartedAt = now
+            lastDistanceRefreshSecond = -1
             liveSegmentDistanceMeters = 0
         }
     }
@@ -203,9 +206,9 @@ final class RaceTimerViewModel: ObservableObject {
         // the cost down (HealthKit queries aren't free).
         let segIdx = state.currentSegmentIndex
         if segIdx < state.segments.count, state.segments[segIdx].segmentType == .run {
-            // Sample every ~1s rather than every 100ms tick.
-            let shouldRefresh = Int(segmentElapsedMs / 1000) % 1 == 0
-            if shouldRefresh {
+            let currentSecond = Int(segmentElapsedMs / 1000)
+            if currentSecond != lastDistanceRefreshSecond {
+                lastDistanceRefreshSecond = currentSecond
                 liveSegmentDistanceMeters = await hk.distanceMeters(from: segStart, to: now)
             }
         } else {
