@@ -18,10 +18,6 @@ export const metadata: Metadata = {
   description:
     "Track your workouts, crush your HYROX goals, and compete with your community.",
   manifest: "/manifest.json",
-  icons: {
-    icon: "/shredtrack_logo.png",
-    apple: "/shredtrack_logo.png",
-  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",

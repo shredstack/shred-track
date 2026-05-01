@@ -1,6 +1,6 @@
 // ShredTrack Service Worker — focused on caching the Race Timer for offline use
 
-const CACHE_NAME = "shredtrack-timer-v1";
+const CACHE_NAME = "shredtrack-timer-v2";
 
 // Pre-cache the timer page shell and key assets on install
 const PRECACHE_URLS = [

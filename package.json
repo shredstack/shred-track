@@ -15,6 +15,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
+    "logo:generate": "bash scripts/generate-logo-assets.sh && rm -rf .next/cache/images",
     "postinstall": "patch-package"
   },
   "dependencies": {
