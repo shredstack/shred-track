@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select";
 import { Search, Plus, Pencil, Trash2, Loader2, Star } from "lucide-react";
 import { WorkoutPartConfig } from "@/components/crossfit/workout-part-config";
+import { VestRequirements } from "@/components/crossfit/vest-requirements";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -58,6 +59,10 @@ interface BenchmarkFormState {
   description: string;
   category: BenchmarkCategoryName | null;
   isSystem: boolean;
+  // Vest requirement applies to the whole benchmark (Murph, Chad).
+  requiresVest: boolean;
+  vestWeightMaleLb: string;
+  vestWeightFemaleLb: string;
   // Part configuration (workout type, time cap, AMRAP duration, EMOM
   // interval, rounds, structure, repScheme, movements) is held in the same
   // shape the Smart Builder uses, so the WorkoutPartConfig component can
@@ -77,6 +82,8 @@ function emptyPart(): WorkoutBuilderPart {
     timeCapMinutes: "",
     amrapDurationMinutes: "",
     emomIntervalSeconds: "",
+    intervalWorkSeconds: "",
+    intervalRestSeconds: "",
     repScheme: "",
     rounds: "",
     movements: [],
@@ -88,6 +95,9 @@ const emptyForm: BenchmarkFormState = {
   description: "",
   category: null,
   isSystem: false,
+  requiresVest: false,
+  vestWeightMaleLb: "",
+  vestWeightFemaleLb: "",
   part: emptyPart(),
 };
 
@@ -111,6 +121,12 @@ function benchmarkToForm(b: BenchmarkWorkout): BenchmarkFormState {
       prescribedCaloriesFemale: "",
       prescribedDistanceMale: "",
       prescribedDistanceFemale: "",
+      prescribedDurationSecondsMale: "",
+      prescribedDurationSecondsFemale: "",
+      prescribedHeightInches: "",
+      prescribedWeightMaleBwMultiplier: "",
+      prescribedWeightFemaleBwMultiplier: "",
+      tempo: "",
       rxStandard: m.rxStandard || "",
       notes: "",
     };
@@ -121,6 +137,11 @@ function benchmarkToForm(b: BenchmarkWorkout): BenchmarkFormState {
     description: b.description || "",
     category: b.category,
     isSystem: b.isSystem,
+    requiresVest: !!b.requiresVest,
+    vestWeightMaleLb:
+      b.vestWeightMaleLb != null ? String(b.vestWeightMaleLb) : "",
+    vestWeightFemaleLb:
+      b.vestWeightFemaleLb != null ? String(b.vestWeightFemaleLb) : "",
     part: {
       tempId: generateId("part"),
       label: "",
@@ -132,6 +153,8 @@ function benchmarkToForm(b: BenchmarkWorkout): BenchmarkFormState {
         ? String(Math.floor(b.amrapDurationSeconds / 60))
         : "",
       emomIntervalSeconds: "",
+      intervalWorkSeconds: "",
+      intervalRestSeconds: "",
       repScheme: b.repScheme || "",
       rounds: "",
       movements,
@@ -154,6 +177,13 @@ function formToPayload(form: BenchmarkFormState) {
       ? parseInt(form.part.amrapDurationMinutes, 10) * 60
       : undefined,
     repScheme: form.part.repScheme || undefined,
+    requiresVest: form.requiresVest,
+    vestWeightMaleLb: form.vestWeightMaleLb
+      ? Number(form.vestWeightMaleLb)
+      : undefined,
+    vestWeightFemaleLb: form.vestWeightFemaleLb
+      ? Number(form.vestWeightFemaleLb)
+      : undefined,
     movements: form.part.movements
       .filter((m) => m.movementId)
       .map((m, i) => ({
@@ -458,6 +488,16 @@ export function AdminBenchmarks() {
               onChange={updatePart}
               onMovementsChange={updatePartMovements}
               showRepScheme
+            />
+
+            <VestRequirements
+              requiresVest={form.requiresVest}
+              vestWeightMaleLb={form.vestWeightMaleLb}
+              vestWeightFemaleLb={form.vestWeightFemaleLb}
+              onChange={(updates) =>
+                setForm((prev) => ({ ...prev, ...updates }))
+              }
+              compact
             />
 
             {error && (

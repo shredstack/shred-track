@@ -63,9 +63,12 @@ function builderPartToPayload(part: WorkoutBuilderPart): CreatePartInput | null 
     emomIntervalSeconds: part.emomIntervalSeconds
       ? parseInt(part.emomIntervalSeconds)
       : undefined,
+    intervalWorkSeconds: part.intervalWorkSeconds || undefined,
+    intervalRestSeconds: part.intervalRestSeconds || undefined,
     repScheme: part.repScheme || undefined,
     rounds:
-      part.workoutType === "for_time" && part.rounds
+      (part.workoutType === "for_time" || part.workoutType === "intervals") &&
+      part.rounds
         ? parseInt(part.rounds)
         : undefined,
     structure:
@@ -77,12 +80,14 @@ function builderPartToPayload(part: WorkoutBuilderPart): CreatePartInput | null 
       movementId: m.movementId!,
       orderIndex: i,
       prescribedReps: m.prescribedReps || undefined,
-      prescribedWeightMale: m.prescribedWeightMale
-        ? parseFloat(m.prescribedWeightMale)
-        : undefined,
-      prescribedWeightFemale: m.prescribedWeightFemale
-        ? parseFloat(m.prescribedWeightFemale)
-        : undefined,
+      prescribedWeightMale:
+        !m.useBwMultiplier && m.prescribedWeightMale
+          ? parseFloat(m.prescribedWeightMale)
+          : undefined,
+      prescribedWeightFemale:
+        !m.useBwMultiplier && m.prescribedWeightFemale
+          ? parseFloat(m.prescribedWeightFemale)
+          : undefined,
       prescribedCaloriesMale: m.prescribedCaloriesMale
         ? parseInt(m.prescribedCaloriesMale, 10)
         : undefined,
@@ -95,6 +100,21 @@ function builderPartToPayload(part: WorkoutBuilderPart): CreatePartInput | null 
       prescribedDistanceFemale: m.prescribedDistanceFemale
         ? parseInt(m.prescribedDistanceFemale, 10)
         : undefined,
+      prescribedDurationSecondsMale:
+        m.prescribedDurationSecondsMale?.trim() || undefined,
+      prescribedDurationSecondsFemale:
+        m.prescribedDurationSecondsFemale?.trim() || undefined,
+      prescribedHeightInches: m.prescribedHeightInches || undefined,
+      prescribedWeightMaleBwMultiplier:
+        m.useBwMultiplier && m.prescribedWeightMaleBwMultiplier
+          ? parseFloat(m.prescribedWeightMaleBwMultiplier)
+          : undefined,
+      prescribedWeightFemaleBwMultiplier:
+        m.useBwMultiplier && m.prescribedWeightFemaleBwMultiplier
+          ? parseFloat(m.prescribedWeightFemaleBwMultiplier)
+          : undefined,
+      tempo: m.tempo?.trim() || undefined,
+      isMaxReps: !!m.isMaxReps,
       promoteSequenceToLadder: m.promoteSequenceToLadder || undefined,
       equipmentCount: m.equipmentCount,
       rxStandard: m.rxStandard || undefined,
@@ -116,6 +136,11 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
     description: w.description ?? "",
     workoutDate: w.workoutDate,
     benchmarkWorkoutId: w.benchmarkWorkoutId ?? null,
+    requiresVest: !!w.requiresVest,
+    vestWeightMaleLb:
+      w.vestWeightMaleLb != null ? String(w.vestWeightMaleLb) : "",
+    vestWeightFemaleLb:
+      w.vestWeightFemaleLb != null ? String(w.vestWeightFemaleLb) : "",
     parts: w.parts.map((p): WorkoutBuilderPart => {
       const timeCapMinutes = p.timeCapSeconds
         ? String(Math.round(p.timeCapSeconds / 60))
@@ -133,6 +158,14 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
         emomIntervalSeconds: p.emomIntervalSeconds
           ? String(p.emomIntervalSeconds)
           : "",
+        intervalWorkSeconds:
+          p.intervalWorkSeconds != null
+            ? String(p.intervalWorkSeconds)
+            : "",
+        intervalRestSeconds:
+          p.intervalRestSeconds != null
+            ? String(p.intervalRestSeconds)
+            : "",
         repScheme: p.repScheme ?? "",
         rounds: p.rounds ? String(p.rounds) : "",
         structure: p.structure,
@@ -164,6 +197,31 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
               m.prescribedDistanceFemale != null
                 ? String(m.prescribedDistanceFemale)
                 : "",
+            prescribedDurationSecondsMale:
+              m.prescribedDurationSecondsMale != null
+                ? String(m.prescribedDurationSecondsMale)
+                : "",
+            prescribedDurationSecondsFemale:
+              m.prescribedDurationSecondsFemale != null
+                ? String(m.prescribedDurationSecondsFemale)
+                : "",
+            prescribedHeightInches:
+              m.prescribedHeightInches != null
+                ? String(m.prescribedHeightInches)
+                : "",
+            useBwMultiplier:
+              m.prescribedWeightMaleBwMultiplier != null ||
+              m.prescribedWeightFemaleBwMultiplier != null,
+            prescribedWeightMaleBwMultiplier:
+              m.prescribedWeightMaleBwMultiplier != null
+                ? String(m.prescribedWeightMaleBwMultiplier)
+                : "",
+            prescribedWeightFemaleBwMultiplier:
+              m.prescribedWeightFemaleBwMultiplier != null
+                ? String(m.prescribedWeightFemaleBwMultiplier)
+                : "",
+            tempo: m.tempo ?? "",
+            isMaxReps: !!m.isMaxReps,
             equipmentCount: m.equipmentCount,
             rxStandard: m.rxStandard ?? "",
             notes: m.notes ?? "",
@@ -231,6 +289,13 @@ export default function CrossfitPage() {
         description: form.description || undefined,
         workoutDate: form.workoutDate || dateStr,
         benchmarkWorkoutId: form.benchmarkWorkoutId ?? undefined,
+        requiresVest: !!form.requiresVest,
+        vestWeightMaleLb: form.vestWeightMaleLb
+          ? parseFloat(form.vestWeightMaleLb)
+          : undefined,
+        vestWeightFemaleLb: form.vestWeightFemaleLb
+          ? parseFloat(form.vestWeightFemaleLb)
+          : undefined,
         parts,
       });
       setShowAddWorkout(false);
@@ -332,6 +397,13 @@ export default function CrossfitPage() {
           title: form.title || undefined,
           description: form.description || undefined,
           workoutDate: form.workoutDate || dateStr,
+          requiresVest: !!form.requiresVest,
+          vestWeightMaleLb: form.vestWeightMaleLb
+            ? parseFloat(form.vestWeightMaleLb)
+            : undefined,
+          vestWeightFemaleLb: form.vestWeightFemaleLb
+            ? parseFloat(form.vestWeightFemaleLb)
+            : undefined,
           parts,
         },
       });
@@ -505,6 +577,7 @@ export default function CrossfitPage() {
           workoutId={scoringWorkout.id}
           workoutTitle={scoringWorkout.title}
           parts={scoringWorkout.parts}
+          workout={scoringWorkout}
           onSubmit={handlePartScoreSubmit}
         />
       )}

@@ -27,6 +27,12 @@ type BenchmarkSeed = {
   amrapDurationSeconds?: number;
   repScheme?: string;
   category: BenchmarkCategory;
+  // Workout-level vest prescription. Set on Murph, Chad, etc. so the
+  // builder, score-entry, and benchmark match all see it as first-class
+  // data instead of buried in the description.
+  requiresVest?: boolean;
+  vestWeightMaleLb?: number;
+  vestWeightFemaleLb?: number;
   movements: {
     canonicalName: string;
     prescribedReps?: string;
@@ -203,9 +209,12 @@ const benchmarkSeeds: BenchmarkSeed[] = [
   // ============================================
   {
     name: "Murph",
-    description: "In honor of Navy Lt. Michael Murphy. Wear a 20/14 lb vest if possible.",
+    description: "In honor of Navy Lt. Michael Murphy.",
     workoutType: "for_time",
     category: "heroes",
+    requiresVest: true,
+    vestWeightMaleLb: 20,
+    vestWeightFemaleLb: 14,
     movements: [
       { canonicalName: "Run", prescribedReps: "1 mile" },
       { canonicalName: "Pull-Up", prescribedReps: "100" },
@@ -219,6 +228,11 @@ const benchmarkSeeds: BenchmarkSeed[] = [
     description: "Half of Murph. A common scaled version for rest days or shorter sessions.",
     workoutType: "for_time",
     category: "heroes",
+    // Half is typically without the vest; defaults still surface in the
+    // builder if the user wants to add one.
+    requiresVest: false,
+    vestWeightMaleLb: 20,
+    vestWeightFemaleLb: 14,
     movements: [
       { canonicalName: "Run", prescribedReps: "800m" },
       { canonicalName: "Pull-Up", prescribedReps: "50" },
@@ -288,12 +302,15 @@ const benchmarkSeeds: BenchmarkSeed[] = [
   },
   {
     name: "Chad",
-    description: "In honor of Navy SEAL Lt. Cmdr. Chad Wilkinson. 1,000 step-ups for time with a 45/35 lb ruck or 20/14 lb vest.",
+    description: "In honor of Navy SEAL Lt. Cmdr. Chad Wilkinson. 1,000 step-ups for time.",
     workoutType: "for_time",
     repScheme: "1000 reps",
     category: "heroes",
+    requiresVest: true,
+    vestWeightMaleLb: 20,
+    vestWeightFemaleLb: 14,
     movements: [
-      { canonicalName: "Box Step-Up", prescribedReps: "1000", notes: "20 inch box, 45/35 lb ruck or 20/14 lb vest" },
+      { canonicalName: "Box Step-Up", prescribedReps: "1000", notes: "20 inch box. 45/35 lb ruck is also acceptable." },
     ],
   },
 
@@ -505,6 +522,15 @@ async function upsertBenchmark(
           timeCapSeconds: benchmark.timeCapSeconds || null,
           amrapDurationSeconds: benchmark.amrapDurationSeconds || null,
           repScheme: benchmark.repScheme || null,
+          requiresVest: !!benchmark.requiresVest,
+          vestWeightMaleLb:
+            benchmark.vestWeightMaleLb != null
+              ? String(benchmark.vestWeightMaleLb)
+              : null,
+          vestWeightFemaleLb:
+            benchmark.vestWeightFemaleLb != null
+              ? String(benchmark.vestWeightFemaleLb)
+              : null,
           updatedAt: new Date(),
         })
         .where(eq(schema.benchmarkWorkouts.id, benchmarkId));
@@ -523,6 +549,15 @@ async function upsertBenchmark(
           timeCapSeconds: benchmark.timeCapSeconds || null,
           amrapDurationSeconds: benchmark.amrapDurationSeconds || null,
           repScheme: benchmark.repScheme || null,
+          requiresVest: !!benchmark.requiresVest,
+          vestWeightMaleLb:
+            benchmark.vestWeightMaleLb != null
+              ? String(benchmark.vestWeightMaleLb)
+              : null,
+          vestWeightFemaleLb:
+            benchmark.vestWeightFemaleLb != null
+              ? String(benchmark.vestWeightFemaleLb)
+              : null,
           createdBy: null,
           communityId: null,
           isSystem: true,

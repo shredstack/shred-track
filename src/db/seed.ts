@@ -19,6 +19,9 @@ type MovementSeed = {
   is1rmApplicable: boolean;
   commonRxWeightMale?: string;
   commonRxWeightFemale?: string;
+  // Optional override. When unset the DB default ('reps') applies for
+  // legacy seeds; the migration backfills duration for hold movements.
+  metricType?: "reps" | "weight" | "calories" | "distance" | "duration";
 };
 
 const movementSeeds: MovementSeed[] = [
@@ -83,7 +86,10 @@ const movementSeeds: MovementSeed[] = [
   { canonicalName: "Rope Climb", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
   { canonicalName: "Ring Dip", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
   { canonicalName: "Pistol Squat", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
-  { canonicalName: "L-Sit", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
+  { canonicalName: "L-Sit", category: "gymnastics", isWeighted: false, is1rmApplicable: false, metricType: "duration" },
+  { canonicalName: "Dead Hang", category: "gymnastics", isWeighted: false, is1rmApplicable: false, metricType: "duration" },
+  { canonicalName: "Handstand Hold", category: "gymnastics", isWeighted: false, is1rmApplicable: false, metricType: "duration" },
+  { canonicalName: "Deficit Handstand Push-Up", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
   { canonicalName: "Strict Pull-Up", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
   { canonicalName: "Kipping Pull-Up", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
   { canonicalName: "Ring Row", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
@@ -106,6 +112,10 @@ const movementSeeds: MovementSeed[] = [
   { canonicalName: "Single-Under", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
   { canonicalName: "Wall Ball", category: "bodyweight", isWeighted: true, is1rmApplicable: false, commonRxWeightMale: "20", commonRxWeightFemale: "14" },
   { canonicalName: "V-Up", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
+  { canonicalName: "Plank", category: "bodyweight", isWeighted: false, is1rmApplicable: false, metricType: "duration" },
+  { canonicalName: "Hollow Hold", category: "bodyweight", isWeighted: false, is1rmApplicable: false, metricType: "duration" },
+  { canonicalName: "Wall Sit", category: "bodyweight", isWeighted: false, is1rmApplicable: false, metricType: "duration" },
+  { canonicalName: "Deficit Push-Up", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
 
   // Monostructural
   { canonicalName: "Run", category: "monostructural", isWeighted: false, is1rmApplicable: false },
@@ -118,6 +128,9 @@ const movementSeeds: MovementSeed[] = [
   { canonicalName: "Sled Pull", category: "monostructural", isWeighted: true, is1rmApplicable: false },
   { canonicalName: "Farmers Carry", category: "monostructural", isWeighted: true, is1rmApplicable: false },
   { canonicalName: "Sandbag Lunges", category: "monostructural", isWeighted: true, is1rmApplicable: false },
+
+  // Accessory / structural
+  { canonicalName: "Rest", category: "accessory", isWeighted: false, is1rmApplicable: false, metricType: "duration" },
 ];
 
 // ============================================
@@ -440,7 +453,20 @@ async function seed() {
   console.log("Seeding movements...");
   await db
     .insert(schema.movements)
-    .values(movementSeeds.map((m) => ({ ...m, isValidated: true })))
+    .values(
+      movementSeeds.map((m) => ({
+        canonicalName: m.canonicalName,
+        category: m.category,
+        isWeighted: m.isWeighted,
+        is1rmApplicable: m.is1rmApplicable,
+        commonRxWeightMale: m.commonRxWeightMale,
+        commonRxWeightFemale: m.commonRxWeightFemale,
+        // Explicit metric_type when the seed declares one — keeps new
+        // hold-style movements from defaulting to "reps".
+        ...(m.metricType ? { metricType: m.metricType } : {}),
+        isValidated: true,
+      }))
+    )
     .onConflictDoNothing();
   console.log(`  -> ${movementSeeds.length} movements seeded.`);
 

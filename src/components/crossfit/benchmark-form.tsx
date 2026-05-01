@@ -55,6 +55,8 @@ function emptyPart(): WorkoutBuilderPart {
     timeCapMinutes: "",
     amrapDurationMinutes: "",
     emomIntervalSeconds: "",
+    intervalWorkSeconds: "",
+    intervalRestSeconds: "",
     repScheme: "",
     rounds: "",
     movements: [],

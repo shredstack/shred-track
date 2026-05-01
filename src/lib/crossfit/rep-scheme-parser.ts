@@ -17,6 +17,15 @@ export function inferDefaultMetricType(
   category: MovementCategory,
   isWeighted: boolean
 ): MovementMetricType {
+  // Static-hold / rest movements: anything that's measured by time-held
+  // rather than reps. Checked first so a name like "Wall Sit" doesn't fall
+  // through to bodyweight reps. Matches "Rest", "Plank", "Hollow Hold",
+  // "Wall Sit", "Handstand Hold", "Dead Hang", "L-Sit", etc.
+  if (/^rest$/i.test(canonicalName)) return "duration";
+  if (/(plank|wall\s*sit|l-?sit|hollow\s*hold|dead\s*hang|handstand\s*hold|hold|hang)$/i.test(canonicalName)) {
+    return "duration";
+  }
+
   if (category === "monostructural") {
     if (/(row|ski|bike|echo)/i.test(canonicalName)) return "calories";
     if (/run/i.test(canonicalName)) return "distance";

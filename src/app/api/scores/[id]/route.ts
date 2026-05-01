@@ -15,6 +15,9 @@ interface MovementDetailInput {
   modification?: string;
   substitutionMovementId?: string;
   setEntries?: Array<SetEntry | number>;
+  actualDurationSeconds?: number;
+  actualHeightInches?: number;
+  actualRepsPerRound?: number[];
   notes?: string;
 }
 
@@ -70,6 +73,11 @@ export async function PUT(
         hitTimeCap: body.hitTimeCap ?? existing.hitTimeCap,
         notes: body.notes ?? existing.notes,
         rpe: body.rpe ?? existing.rpe,
+        woreVest: body.woreVest !== undefined ? body.woreVest : existing.woreVest,
+        vestWeightLb:
+          body.vestWeightLb != null
+            ? body.vestWeightLb.toString()
+            : existing.vestWeightLb,
         updatedAt: new Date(),
       })
       .where(eq(scores.id, id))
@@ -91,6 +99,19 @@ export async function PUT(
               substitutionMovementId: d.substitutionMovementId ?? null,
               setEntries:
                 d.setEntries && d.setEntries.length > 0 ? d.setEntries : null,
+              actualDurationSeconds:
+                d.actualDurationSeconds != null
+                  ? Math.round(d.actualDurationSeconds)
+                  : null,
+              actualHeightInches:
+                d.actualHeightInches != null
+                  ? d.actualHeightInches.toString()
+                  : null,
+              actualRepsPerRound:
+                Array.isArray(d.actualRepsPerRound) &&
+                d.actualRepsPerRound.length > 0
+                  ? d.actualRepsPerRound.map((n) => Math.max(0, Math.round(n)))
+                  : null,
               notes: d.notes ?? null,
             }))
         );

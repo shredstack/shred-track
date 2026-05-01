@@ -26,6 +26,9 @@ interface MovementDetailInput {
   // Accept either the canonical shape or the legacy number[] for backward
   // compatibility — old clients that haven't shipped yet may still send it.
   setEntries?: Array<SetEntry | number>;
+  actualDurationSeconds?: number;
+  actualHeightInches?: number;
+  actualRepsPerRound?: number[];
   notes?: string;
 }
 
@@ -42,6 +45,8 @@ interface ScorePostBody {
   hitTimeCap?: boolean;
   notes?: string;
   rpe?: number;
+  woreVest?: boolean;
+  vestWeightLb?: number;
   movementDetails?: MovementDetailInput[];
   // Legacy name used by client before multi-part landed.
   movementScalings?: MovementDetailInput[];
@@ -175,6 +180,9 @@ export async function POST(req: NextRequest) {
           hitTimeCap: body.hitTimeCap ?? false,
           notes: body.notes ?? null,
           rpe: body.rpe ?? null,
+          woreVest: body.woreVest ?? null,
+          vestWeightLb:
+            body.vestWeightLb != null ? body.vestWeightLb.toString() : null,
         })
         .returning();
 
@@ -192,6 +200,19 @@ export async function POST(req: NextRequest) {
               substitutionMovementId: d.substitutionMovementId ?? null,
               setEntries:
                 d.setEntries && d.setEntries.length > 0 ? d.setEntries : null,
+              actualDurationSeconds:
+                d.actualDurationSeconds != null
+                  ? Math.round(d.actualDurationSeconds)
+                  : null,
+              actualHeightInches:
+                d.actualHeightInches != null
+                  ? d.actualHeightInches.toString()
+                  : null,
+              actualRepsPerRound:
+                Array.isArray(d.actualRepsPerRound) &&
+                d.actualRepsPerRound.length > 0
+                  ? d.actualRepsPerRound.map((n) => Math.max(0, Math.round(n)))
+                  : null,
               notes: d.notes ?? null,
             }))
         );

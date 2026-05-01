@@ -279,6 +279,7 @@ export default function CrossfitSearchPage() {
           workoutId={scoringWorkout.id}
           workoutTitle={scoringWorkout.title}
           parts={scoringWorkout.parts}
+          workout={scoringWorkout}
           onSubmit={handlePartScoreSubmit}
         />
       )}

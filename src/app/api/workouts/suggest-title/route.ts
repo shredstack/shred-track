@@ -30,6 +30,12 @@ interface SuggestPartInput {
 
 interface SuggestBody {
   parts: SuggestPartInput[];
+  // Workout-level signal used for benchmark exact-match comparison.
+  // Murph-without-vest should not match canonical Murph; it slides into
+  // the (modified) near-match instead.
+  requiresVest?: boolean;
+  vestWeightMaleLb?: number | null;
+  vestWeightFemaleLb?: number | null;
 }
 
 // ============================================
@@ -67,7 +73,12 @@ function normalizeRepScheme(raw: string | null | undefined): string {
 // single-part submissions.
 
 async function findBenchmarkMatch(
-  part: SuggestPartInput
+  part: SuggestPartInput,
+  workoutVest: {
+    requiresVest?: boolean;
+    vestWeightMaleLb?: number | null;
+    vestWeightFemaleLb?: number | null;
+  }
 ): Promise<{ exact?: { id: string; name: string }; near?: { id: string; name: string } }> {
   if (part.movementIds.length === 0) return {};
 
@@ -96,6 +107,15 @@ async function findBenchmarkMatch(
 
   const wantMultiset = [...part.movementIds].sort();
   const wantRepScheme = normalizeRepScheme(part.repScheme);
+  const wantVest = !!workoutVest.requiresVest;
+  const wantVestM =
+    workoutVest.vestWeightMaleLb != null
+      ? Number(workoutVest.vestWeightMaleLb)
+      : null;
+  const wantVestF =
+    workoutVest.vestWeightFemaleLb != null
+      ? Number(workoutVest.vestWeightFemaleLb)
+      : null;
 
   let exact: { id: string; name: string } | undefined;
   let near: { id: string; name: string } | undefined;
@@ -108,7 +128,15 @@ async function findBenchmarkMatch(
 
     if (sameMultiset) {
       const bwRepScheme = normalizeRepScheme(bw.repScheme);
-      if (bwRepScheme === wantRepScheme) {
+      const bwVestM =
+        bw.vestWeightMaleLb != null ? Number(bw.vestWeightMaleLb) : null;
+      const bwVestF =
+        bw.vestWeightFemaleLb != null ? Number(bw.vestWeightFemaleLb) : null;
+      const vestMatches =
+        !!bw.requiresVest === wantVest &&
+        bwVestM === wantVestM &&
+        bwVestF === wantVestF;
+      if (bwRepScheme === wantRepScheme && vestMatches) {
         exact = { id: bw.id, name: bw.name };
         break;
       }
@@ -225,7 +253,11 @@ export async function POST(req: NextRequest) {
 
   // 1. Exact benchmark match (only meaningful for single-part workouts).
   if (parts.length === 1) {
-    const { exact, near } = await findBenchmarkMatch(parts[0]);
+    const { exact, near } = await findBenchmarkMatch(parts[0], {
+      requiresVest: body.requiresVest,
+      vestWeightMaleLb: body.vestWeightMaleLb,
+      vestWeightFemaleLb: body.vestWeightFemaleLb,
+    });
     if (exact) {
       const result: SuggestionResult = {
         title: exact.name,

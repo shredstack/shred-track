@@ -87,26 +87,31 @@ function GeneralSection() {
   const [name, setName] = useState("");
   // "" represents "unset" in the form; on save we send null.
   const [gender, setGender] = useState<"" | "male" | "female" | "other">("");
+  const [bodyWeightLb, setBodyWeightLb] = useState<string>("");
 
   const startEditing = useCallback(() => {
     if (user) {
       setName(user.name);
       const g = user.gender;
       setGender(g === "male" || g === "female" || g === "other" ? g : "");
+      setBodyWeightLb(user.bodyWeightLb != null ? String(user.bodyWeightLb) : "");
       setEditing(true);
     }
   }, [user]);
 
   const save = useCallback(() => {
     if (!name.trim()) return;
+    const bw = bodyWeightLb.trim();
+    const parsedBw = bw ? parseFloat(bw) : null;
     updateUser.mutate(
       {
         name: name.trim(),
         gender: gender === "" ? null : gender,
+        bodyWeightLb: parsedBw,
       },
       { onSuccess: () => setEditing(false) }
     );
-  }, [name, gender, updateUser]);
+  }, [name, gender, bodyWeightLb, updateUser]);
 
   if (isLoading) {
     return (
@@ -160,6 +165,23 @@ function GeneralSection() {
               </p>
             </div>
             <div className="space-y-2">
+              <Label>Bodyweight (lb)</Label>
+              <Input
+                type="number"
+                min={0}
+                max={1000}
+                step="0.5"
+                value={bodyWeightLb}
+                onChange={(e) => setBodyWeightLb(e.target.value)}
+                placeholder="e.g. 165"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Used to resolve % bodyweight Rx prescriptions (e.g. a workout
+                that calls for &quot;deadlift @ 1.5 × BW&quot; renders as a
+                concrete weight in lb).
+              </p>
+            </div>
+            <div className="space-y-2">
               <Label className="text-muted-foreground">Email</Label>
               <p className="text-sm">{user.email}</p>
             </div>
@@ -188,6 +210,12 @@ function GeneralSection() {
               <p className="text-xs text-muted-foreground">Gender</p>
               <p className="text-sm font-medium capitalize">
                 {user.gender ?? "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Bodyweight</p>
+              <p className="text-sm font-medium">
+                {user.bodyWeightLb != null ? `${user.bodyWeightLb} lb` : "—"}
               </p>
             </div>
             <div>

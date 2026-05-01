@@ -38,7 +38,13 @@ import type {
 //        athlete gender) so phrases like "the other two DB movements" are
 //        interpretable; also adds content_hash so note edits trigger
 //        re-extraction without bumping the version
-export const NOTES_MODEL_VERSION = "claude-sonnet-4-6.v3";
+//   v4 — PushPress Parity: adds duration/height/tempo prescribed +
+//        actual signals, and resolves BW-multiplier RX prescriptions
+//        against athlete bodyweight before the prompt is built.
+//   v5 — Adds is_max_reps + per-round actual rep counts so the LLM can
+//        attribute "fade across rounds" / "saved gas for round 8" to
+//        the score-bearing movement.
+export const NOTES_MODEL_VERSION = "claude-sonnet-4-6.v5";
 
 const CLAUDE_MODEL =
   process.env.CROSSFIT_NOTES_MODEL?.trim() || "claude-sonnet-4-6";
@@ -134,8 +140,22 @@ export type MovementContext = {
   prescribedReps: string | null;
   prescribedRxWeightLb: number | null; // gender-resolved RX weight in lb
   rxStandard: string | null;
+  // PushPress Parity additions — extra prescribed signal the LLM uses to
+  // attribute "the deadlifts felt heavy" / "couldn't hold the L-sit".
+  prescribedDurationSeconds: number | null;
+  prescribedHeightInches: number | null;
+  tempo: string | null;
+  // True when the movement is the score-bearing "max reps" movement of
+  // the part. The LLM can attribute "fade across rounds" / "saved gas
+  // for round 8" comments to it.
+  isMaxReps: boolean;
   wasRx: boolean;
   actualWeightLb: number | null;
+  actualDurationSeconds: number | null;
+  actualHeightInches: number | null;
+  // Per-round rep counts when this is a max-reps movement. Same length
+  // as part.rounds.
+  actualRepsPerRound: number[] | null;
   modification: string | null;
   substitutionMovementName: string | null;
   movementNote: string | null;
@@ -154,13 +174,25 @@ export type RawScoreNote = {
 function describeMovement(m: MovementContext): string {
   const bits: string[] = [];
 
-  // Prescribed side
+  // Prescribed side. We compose this directly from MovementContext (rather
+  // than calling formatMovementPrescription) because the context shape
+  // already carries the resolved RX weight (BW multipliers handled at
+  // listScoresNeedingExtraction time, with the athlete's stored
+  // body_weight_lb).
   const prescribed: string[] = [];
+  if (m.isMaxReps) prescribed.push("MAX reps (score-bearing)");
   if (m.prescribedReps) prescribed.push(m.prescribedReps);
+  if (m.prescribedDurationSeconds != null) {
+    prescribed.push(`${m.prescribedDurationSeconds}s prescribed`);
+  }
   if (m.prescribedRxWeightLb != null) {
     prescribed.push(`RX ${m.prescribedRxWeightLb} lb`);
   } else if (m.rxStandard) {
     prescribed.push(`RX: ${m.rxStandard}`);
+  }
+  if (m.tempo) prescribed.push(`tempo ${m.tempo}`);
+  if (m.prescribedHeightInches != null) {
+    prescribed.push(`${m.prescribedHeightInches} in height`);
   }
   const prescribedStr = prescribed.length > 0 ? ` (${prescribed.join(", ")})` : "";
 
@@ -173,6 +205,18 @@ function describeMovement(m: MovementContext): string {
   }
   if (m.actualWeightLb != null) {
     actual.push(`used ${m.actualWeightLb} lb`);
+  }
+  if (m.actualDurationSeconds != null) {
+    actual.push(`held ${m.actualDurationSeconds}s`);
+  }
+  if (m.actualHeightInches != null) {
+    actual.push(`actual height ${m.actualHeightInches} in`);
+  }
+  if (m.actualRepsPerRound && m.actualRepsPerRound.length > 0) {
+    const total = m.actualRepsPerRound.reduce((a, b) => a + b, 0);
+    actual.push(
+      `per-round reps: [${m.actualRepsPerRound.join(", ")}] (total ${total})`
+    );
   }
   if (m.modification) {
     actual.push(`modification: ${m.modification}`);
@@ -384,17 +428,37 @@ type ExistingExtraction = {
   contentHash: string | null;
 };
 
-// Resolve the gender-appropriate prescribed RX weight for a movement. We
-// fall back to the male RX when gender is unknown (best-effort).
+// Resolve the gender-appropriate prescribed RX weight for a movement.
+// Falls back to the male RX when gender is unknown. Now also resolves
+// % bodyweight prescriptions when the athlete has logged their bodyweight.
 function resolveRxWeight(
   gender: "male" | "female" | "other" | null,
   male: number | null,
-  female: number | null
+  female: number | null,
+  maleBwMultiplier: number | null = null,
+  femaleBwMultiplier: number | null = null,
+  bodyWeightLb: number | null = null
 ): number | null {
-  if (gender === "female") return female ?? male ?? null;
-  // "male" | "other" | null all default to male prescribed weight when
-  // available, then female. RX is symmetric for "other".
-  return male ?? female ?? null;
+  if (gender === "female") {
+    if (female != null) return female;
+    if (femaleBwMultiplier != null && bodyWeightLb != null) {
+      return Math.round(femaleBwMultiplier * bodyWeightLb);
+    }
+    if (male != null) return male;
+    if (maleBwMultiplier != null && bodyWeightLb != null) {
+      return Math.round(maleBwMultiplier * bodyWeightLb);
+    }
+    return null;
+  }
+  if (male != null) return male;
+  if (maleBwMultiplier != null && bodyWeightLb != null) {
+    return Math.round(maleBwMultiplier * bodyWeightLb);
+  }
+  if (female != null) return female;
+  if (femaleBwMultiplier != null && bodyWeightLb != null) {
+    return Math.round(femaleBwMultiplier * bodyWeightLb);
+  }
+  return null;
 }
 
 export async function listScoresNeedingExtraction(
@@ -402,14 +466,16 @@ export async function listScoresNeedingExtraction(
   modelVersion: string,
   limit: number
 ): Promise<RawScoreNote[]> {
-  // Step 1: athlete's gender (drives RX weight resolution below).
+  // Step 1: athlete's gender + bodyweight (both drive RX weight resolution).
   const [athleteRow] = await db
-    .select({ gender: users.gender })
+    .select({ gender: users.gender, bodyWeightLb: users.bodyWeightLb })
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);
 
   const athleteGender = normalizeGender(athleteRow?.gender ?? null);
+  const athleteBodyWeightLb =
+    athleteRow?.bodyWeightLb != null ? Number(athleteRow.bodyWeightLb) : null;
 
   // Step 2: candidate scores — those that have either a score-level note OR
   // at least one movement-level note. Order by date desc so newest-first.
@@ -465,9 +531,23 @@ export async function listScoresNeedingExtraction(
       prescribedReps: workoutMovements.prescribedReps,
       prescribedWeightMale: workoutMovements.prescribedWeightMale,
       prescribedWeightFemale: workoutMovements.prescribedWeightFemale,
+      prescribedDurationSecondsMale:
+        workoutMovements.prescribedDurationSecondsMale,
+      prescribedDurationSecondsFemale:
+        workoutMovements.prescribedDurationSecondsFemale,
+      prescribedHeightInches: workoutMovements.prescribedHeightInches,
+      prescribedWeightMaleBwMultiplier:
+        workoutMovements.prescribedWeightMaleBwMultiplier,
+      prescribedWeightFemaleBwMultiplier:
+        workoutMovements.prescribedWeightFemaleBwMultiplier,
+      tempo: workoutMovements.tempo,
+      isMaxReps: workoutMovements.isMaxReps,
       rxStandard: workoutMovements.rxStandard,
       wasRx: scoreMovementDetails.wasRx,
       actualWeight: scoreMovementDetails.actualWeight,
+      actualDurationSeconds: scoreMovementDetails.actualDurationSeconds,
+      actualHeightInches: scoreMovementDetails.actualHeightInches,
+      actualRepsPerRound: scoreMovementDetails.actualRepsPerRound,
       modification: scoreMovementDetails.modification,
       substitutionMovementId: scoreMovementDetails.substitutionMovementId,
       movementNote: scoreMovementDetails.notes,
@@ -496,6 +576,14 @@ export async function listScoresNeedingExtraction(
   // Step 6: shape per-score MovementContext lists, ordered by orderIndex.
   const movementsByScore = new Map<string, MovementContext[]>();
   for (const r of movementRows) {
+    const prescribedDuration =
+      athleteGender === "female"
+        ? r.prescribedDurationSecondsFemale ??
+          r.prescribedDurationSecondsMale ??
+          null
+        : r.prescribedDurationSecondsMale ??
+          r.prescribedDurationSecondsFemale ??
+          null;
     const ctx: MovementContext = {
       movementName: r.canonicalName,
       prescribedReps: r.prescribedReps,
@@ -504,11 +592,32 @@ export async function listScoresNeedingExtraction(
         r.prescribedWeightMale != null ? Number(r.prescribedWeightMale) : null,
         r.prescribedWeightFemale != null
           ? Number(r.prescribedWeightFemale)
-          : null
+          : null,
+        r.prescribedWeightMaleBwMultiplier != null
+          ? Number(r.prescribedWeightMaleBwMultiplier)
+          : null,
+        r.prescribedWeightFemaleBwMultiplier != null
+          ? Number(r.prescribedWeightFemaleBwMultiplier)
+          : null,
+        athleteBodyWeightLb
       ),
       rxStandard: r.rxStandard,
+      prescribedDurationSeconds: prescribedDuration,
+      prescribedHeightInches:
+        r.prescribedHeightInches != null
+          ? Number(r.prescribedHeightInches)
+          : null,
+      tempo: r.tempo,
+      isMaxReps: !!r.isMaxReps,
       wasRx: r.wasRx,
       actualWeightLb: r.actualWeight != null ? Number(r.actualWeight) : null,
+      actualDurationSeconds: r.actualDurationSeconds,
+      actualHeightInches:
+        r.actualHeightInches != null ? Number(r.actualHeightInches) : null,
+      actualRepsPerRound:
+        r.actualRepsPerRound && r.actualRepsPerRound.length > 0
+          ? r.actualRepsPerRound
+          : null,
       modification: r.modification,
       substitutionMovementName:
         r.substitutionMovementId

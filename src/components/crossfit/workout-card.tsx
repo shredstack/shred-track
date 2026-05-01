@@ -18,6 +18,7 @@ import {
   Flame,
   Trash2,
   Pencil,
+  Shield,
 } from "lucide-react";
 import type {
   WorkoutDisplay,
@@ -31,6 +32,8 @@ import {
 import { formatTime } from "@/lib/workout-parser";
 import { SetWeightBreakdown } from "@/components/crossfit/set-weight-breakdown";
 import { AmrapScoreBreakdown } from "@/components/crossfit/amrap-score-breakdown";
+import { formatSecondsAsClock } from "@/lib/crossfit/duration-parser";
+import { formatMovementPrescription } from "@/lib/crossfit/prescription";
 
 interface WorkoutCardProps {
   workout: WorkoutDisplay;
@@ -84,6 +87,27 @@ function ScoreRow({ part }: { part: WorkoutPartDisplay }) {
         >
           {DIVISION_LABELS[s.division]}
         </Badge>
+        {/* Vest badge — only meaningful when the workout requires a vest.
+            Shows "Vest" / "No vest" so the leaderboard reflects whether
+            this Rx Murph was wearing the vest or not. */}
+        {s.woreVest === true && (
+          <Badge
+            variant="outline"
+            className="text-[10px] bg-amber-500/15 text-amber-300 border-amber-500/30"
+          >
+            <Shield className="size-2.5 mr-0.5" />
+            Vest
+            {s.vestWeightLb != null ? ` ${s.vestWeightLb}` : ""}
+          </Badge>
+        )}
+        {s.woreVest === false && (
+          <Badge
+            variant="outline"
+            className="text-[10px] bg-zinc-500/15 text-zinc-300 border-zinc-500/30"
+          >
+            No vest
+          </Badge>
+        )}
         {s.rpe && (
           <span className="ml-auto text-[10px] text-muted-foreground font-mono">
             RPE {s.rpe}
@@ -133,33 +157,21 @@ function ScoreRow({ part }: { part: WorkoutPartDisplay }) {
   );
 }
 
-// Formats the gendered metric pair for display ("135/95 lb",
-// "15/12 cal", "400/320 m"), or null if no metric is set on the
-// movement. The unit is implied by the movement's metric type.
+// Returns the "details" portion of a prescription (everything after the
+// movement name). All formatting flows through the single source of
+// truth in `lib/crossfit/prescription.ts`. The reps prefix is filtered
+// out because the workout-card renders it next to the movement name.
 function formatMovementMetric(mov: WorkoutMovementDisplay): string | null {
-  if (mov.metricType === "calories") {
-    if (mov.prescribedCaloriesMale == null && mov.prescribedCaloriesFemale == null)
-      return null;
-    return `${mov.prescribedCaloriesMale ?? "?"}${
-      mov.prescribedCaloriesFemale != null ? `/${mov.prescribedCaloriesFemale}` : ""
-    } cal`;
+  const full = formatMovementPrescription(mov, null, null);
+  if (!full) return null;
+  // The reps segment is rendered separately on the card. Strip it so we
+  // don't duplicate "21" once before the name and again in parens.
+  const reps = (mov.prescribedReps ?? "").trim();
+  let cleaned = full;
+  if (reps && cleaned.startsWith(reps)) {
+    cleaned = cleaned.slice(reps.length).replace(/^\s*·\s*/, "").trim();
   }
-  if (mov.metricType === "distance") {
-    if (mov.prescribedDistanceMale == null && mov.prescribedDistanceFemale == null)
-      return null;
-    return `${mov.prescribedDistanceMale ?? "?"}${
-      mov.prescribedDistanceFemale != null ? `/${mov.prescribedDistanceFemale}` : ""
-    } m`;
-  }
-  // weight is the catch-all (also covers older rows where metric_type
-  // wasn't set when the workout was created — they default to "reps" but
-  // may still carry weight values for legacy reasons).
-  if (mov.prescribedWeightMale || mov.prescribedWeightFemale) {
-    return `${mov.prescribedWeightMale || "?"}${
-      mov.prescribedWeightFemale ? `/${mov.prescribedWeightFemale}` : ""
-    } lb`;
-  }
-  return null;
+  return cleaned || null;
 }
 
 function parseRepsPerSet(repScheme: string): number | undefined {
@@ -219,6 +231,25 @@ function PartSection({
       </span>
     );
   }
+  if (part.workoutType === "intervals") {
+    const work =
+      part.intervalWorkSeconds != null
+        ? formatSecondsAsClock(part.intervalWorkSeconds)
+        : null;
+    const rest =
+      part.intervalRestSeconds != null
+        ? formatSecondsAsClock(part.intervalRestSeconds)
+        : null;
+    if (work || rest || part.rounds) {
+      metaBits.push(
+        <span key="intervals" className="text-muted-foreground font-mono">
+          {part.rounds ? `${part.rounds} × ` : ""}
+          {work || "?"}
+          {rest ? ` work / ${rest} rest` : " work"}
+        </span>
+      );
+    }
+  }
   if (part.repScheme) {
     metaBits.push(
       <span key="reps" className="text-muted-foreground font-mono">
@@ -258,10 +289,16 @@ function PartSection({
                 <Dumbbell className="size-3 text-primary/70" />
               </div>
               <span className="flex-1">
-                {mov.prescribedReps && (
-                  <span className="font-mono font-bold text-foreground">
-                    {mov.prescribedReps}{" "}
+                {mov.isMaxReps ? (
+                  <span className="mr-1 inline-flex items-center rounded bg-amber-500/15 px-1 py-px text-[10px] font-bold text-amber-300">
+                    MAX
                   </span>
+                ) : (
+                  mov.prescribedReps && (
+                    <span className="font-mono font-bold text-foreground">
+                      {mov.prescribedReps}{" "}
+                    </span>
+                  )
                 )}
                 <span className="text-foreground/85">{mov.movementName}</span>
                 {metricText && (
@@ -314,6 +351,17 @@ export function WorkoutCard({
           <p className="text-xs text-muted-foreground/80 italic leading-relaxed">
             {workout.description}
           </p>
+        )}
+
+        {workout.requiresVest && (
+          <div className="flex items-center gap-1.5 text-[11px] text-amber-300/90">
+            <Shield className="size-3.5" />
+            <span>
+              {workout.vestWeightMaleLb || workout.vestWeightFemaleLb
+                ? `${workout.vestWeightMaleLb ?? "?"}/${workout.vestWeightFemaleLb ?? "?"} lb vest required`
+                : "Weighted vest required"}
+            </span>
+          </div>
         )}
 
         {parts.map((part, idx) => (

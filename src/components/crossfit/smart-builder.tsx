@@ -20,6 +20,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { WorkoutPartConfig } from "@/components/crossfit/workout-part-config";
+import { VestRequirements } from "@/components/crossfit/vest-requirements";
 import {
   WorkoutDateInput,
   localTodayString,
@@ -61,6 +62,8 @@ function emptyPart(): WorkoutBuilderPart {
     timeCapMinutes: "",
     amrapDurationMinutes: "",
     emomIntervalSeconds: "",
+    intervalWorkSeconds: "",
+    intervalRestSeconds: "",
     repScheme: "",
     rounds: "",
     movements: [],
@@ -73,6 +76,9 @@ function createEmptyForm(workoutDate?: string): WorkoutBuilderForm {
     description: "",
     workoutDate: workoutDate || localTodayString(),
     parts: [emptyPart()],
+    requiresVest: false,
+    vestWeightMaleLb: "",
+    vestWeightFemaleLb: "",
   };
 }
 
@@ -113,6 +119,14 @@ function partSummary(part: WorkoutBuilderPart, idx: number): string {
     parts.push(`${part.rounds} rds`);
   if (part.workoutType === "for_reps" && part.structure === "tabata")
     parts.push("Tabata");
+  if (part.workoutType === "intervals") {
+    if (part.rounds) parts.push(`${part.rounds} rds`);
+    if (part.intervalWorkSeconds && part.intervalRestSeconds) {
+      parts.push(
+        `${part.intervalWorkSeconds} work / ${part.intervalRestSeconds} rest`
+      );
+    }
+  }
   if (part.repScheme) parts.push(part.repScheme);
   if (part.workoutType === "amrap" && part.amrapDurationMinutes)
     parts.push(`${part.amrapDurationMinutes} min`);
@@ -364,13 +378,18 @@ export function SmartBuilder({
   // ============================================
 
   const specHash = useMemo(() => {
-    const payload = form.parts.map((p) => ({
-      type: p.workoutType,
-      rep: p.repScheme || null,
-      ms: p.movements.map((m) => m.movementId || m.movementName).sort(),
-    }));
+    const payload = {
+      parts: form.parts.map((p) => ({
+        type: p.workoutType,
+        rep: p.repScheme || null,
+        ms: p.movements.map((m) => m.movementId || m.movementName).sort(),
+      })),
+      vest: !!form.requiresVest,
+      vm: form.vestWeightMaleLb || null,
+      vf: form.vestWeightFemaleLb || null,
+    };
     return JSON.stringify(payload);
-  }, [form.parts]);
+  }, [form.parts, form.requiresVest, form.vestWeightMaleLb, form.vestWeightFemaleLb]);
 
   const requestSuggestion = useCallback(async () => {
     // Bail if there's nothing to suggest for.
@@ -396,6 +415,13 @@ export function SmartBuilder({
             .filter((m) => !m.movementId && m.movementName)
             .map((m) => m.movementName),
         })),
+        requiresVest: !!form.requiresVest,
+        vestWeightMaleLb: form.vestWeightMaleLb
+          ? Number(form.vestWeightMaleLb)
+          : null,
+        vestWeightFemaleLb: form.vestWeightFemaleLb
+          ? Number(form.vestWeightFemaleLb)
+          : null,
       };
       const res = await fetch("/api/workouts/suggest-title", {
         method: "POST",
@@ -672,6 +698,15 @@ export function SmartBuilder({
             }
           />
 
+          {/* Workout requirements (vest) */}
+          <VestRequirements
+            requiresVest={!!form.requiresVest}
+            vestWeightMaleLb={form.vestWeightMaleLb ?? ""}
+            vestWeightFemaleLb={form.vestWeightFemaleLb ?? ""}
+            onChange={(updates) =>
+              setForm((prev) => ({ ...prev, ...updates }))
+            }
+          />
 
           {/* Notes */}
           <div className="space-y-2">
