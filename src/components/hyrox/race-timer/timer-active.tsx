@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Pause, Play, Square, ChevronRight } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { setRaceMode } from "@/hooks/useRaceMode";
+import { formatRunPace } from "@/lib/hyrox-data";
+import { useUnits } from "@/hooks/useUnits";
 import type { RaceSegment, TimerStatus } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -45,6 +47,13 @@ interface TimerActiveProps {
   onPause: () => void;
   onResume: () => void;
   onEndRace: () => void;
+  /** Live current-run pace in sec/km (iOS native only). Null on web /
+   *  stations / before any distance is recorded. */
+  currentRunPaceSecPerKm?: number | null;
+  /** Avg run pace across completed runs in sec/km (iOS native only). */
+  avgRunPaceSecPerKm?: number | null;
+  /** Count of completed run segments (for caption beneath avg pace). */
+  completedRunCount?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -62,8 +71,18 @@ export function TimerActive({
   onPause,
   onResume,
   onEndRace,
+  currentRunPaceSecPerKm = null,
+  avgRunPaceSecPerKm = null,
+  completedRunCount = 0,
 }: TimerActiveProps) {
   const [showEndConfirm, setShowEndConfirm] = useState(false);
+  const { isMixed } = useUnits();
+  const paceUnit = isMixed ? "mi" : "km";
+
+  // Hide the pace block entirely on web (where both values are null
+  // because there's no distance signal). Per pace spec §1, §10.
+  const showPaceBlock =
+    currentRunPaceSecPerKm !== null || avgRunPaceSecPerKm !== null;
 
   const currentSegment = segments[currentSegmentIndex];
   const nextSegment =
@@ -165,6 +184,44 @@ export function TimerActive({
           </p>
         </div>
       </div>
+
+      {/* Live pace block (iOS native only — hidden on web) */}
+      {showPaceBlock && (
+        <div className="mx-4 mb-3 grid grid-cols-2 gap-3">
+          <div className="rounded-xl bg-white/[0.04] border border-white/[0.06] px-3 py-2 text-center">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+              Current Pace
+            </p>
+            <span
+              className={`block text-[28px] landscape:text-[22px] leading-none font-mono font-bold tabular-nums mt-1 ${
+                isRun && currentRunPaceSecPerKm !== null
+                  ? "text-blue-400"
+                  : "text-muted-foreground"
+              }`}
+            >
+              {isRun
+                ? formatRunPace(currentRunPaceSecPerKm, paceUnit)
+                : "—"}
+            </span>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              {isRun ? "live" : "no pace this segment"}
+            </p>
+          </div>
+          <div className="rounded-xl bg-white/[0.04] border border-white/[0.06] px-3 py-2 text-center">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+              Avg Run Pace
+            </p>
+            <span className="block text-[28px] landscape:text-[22px] leading-none font-mono font-bold tabular-nums mt-1 text-muted-foreground">
+              {formatRunPace(avgRunPaceSecPerKm, paceUnit)}
+            </span>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              {completedRunCount > 0
+                ? `across ${completedRunCount} run${completedRunCount === 1 ? "" : "s"}`
+                : "after first run"}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Next up preview */}
       {nextSegment && (

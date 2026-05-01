@@ -49,6 +49,8 @@ interface RacePayload {
   divisionKey?: string;
   template?: string;
   raceType?: "practice" | "actual";
+  planSessionId?: string;
+  source?: "web" | "phone" | "watch";
   totalTimeSeconds: number;
   startedAt: string;
   completedAt: string;
@@ -88,6 +90,7 @@ export async function POST(request: Request) {
         completedAt: new Date(body.completedAt),
         notes: body.notes,
         raceType,
+        planSessionId: body.planSessionId ?? null,
       })
       .returning();
 

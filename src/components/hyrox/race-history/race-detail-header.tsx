@@ -4,7 +4,14 @@ import { useMemo } from "react";
 import { Trophy, Calendar } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { formatTime, formatLongTime, DIVISIONS, type DivisionKey } from "@/lib/hyrox-data";
+import {
+  formatTime,
+  formatLongTime,
+  DIVISIONS,
+  computeAvgRunPaceSecPerKm,
+  formatRunPace,
+  type DivisionKey,
+} from "@/lib/hyrox-data";
 import { EditableTitle } from "./editable-title";
 import type { PracticeRaceWithSplits } from "@/hooks/usePracticeRaces";
 
@@ -20,24 +27,37 @@ export function RaceDetailHeader({ race, onTitleSave }: Props) {
       ? DIVISIONS[race.divisionKey as DivisionKey].label
       : null;
 
-  const { runTotal, stationTotal, slowest, fastest } = useMemo(() => {
-    const runs = race.splits.filter((s) => s.segmentType === "run");
-    const stations = race.splits.filter((s) => s.segmentType === "station");
-    const sumRuns = runs.reduce((sum, s) => sum + parseFloat(s.timeSeconds), 0);
-    const sumStations = stations.reduce(
-      (sum, s) => sum + parseFloat(s.timeSeconds),
-      0,
-    );
-    const sortedStations = [...stations].sort(
-      (a, b) => parseFloat(b.timeSeconds) - parseFloat(a.timeSeconds),
-    );
-    return {
-      runTotal: sumRuns,
-      stationTotal: sumStations,
-      slowest: sortedStations[0] ?? null,
-      fastest: sortedStations[sortedStations.length - 1] ?? null,
-    };
-  }, [race.splits]);
+  const fallbackRunDistanceM =
+    race.divisionKey && DIVISIONS[race.divisionKey as DivisionKey]
+      ? DIVISIONS[race.divisionKey as DivisionKey].runDistanceM
+      : undefined;
+
+  const { runTotal, stationTotal, slowest, fastest, avgRunPaceSecPerKm } =
+    useMemo(() => {
+      const runs = race.splits.filter((s) => s.segmentType === "run");
+      const stations = race.splits.filter((s) => s.segmentType === "station");
+      const sumRuns = runs.reduce(
+        (sum, s) => sum + parseFloat(s.timeSeconds),
+        0,
+      );
+      const sumStations = stations.reduce(
+        (sum, s) => sum + parseFloat(s.timeSeconds),
+        0,
+      );
+      const sortedStations = [...stations].sort(
+        (a, b) => parseFloat(b.timeSeconds) - parseFloat(a.timeSeconds),
+      );
+      return {
+        runTotal: sumRuns,
+        stationTotal: sumStations,
+        slowest: sortedStations[0] ?? null,
+        fastest: sortedStations[sortedStations.length - 1] ?? null,
+        avgRunPaceSecPerKm: computeAvgRunPaceSecPerKm(
+          race.splits,
+          fallbackRunDistanceM,
+        ),
+      };
+    }, [race.splits, fallbackRunDistanceM]);
 
   return (
     <Card className="gradient-border overflow-visible">
@@ -97,6 +117,15 @@ export function RaceDetailHeader({ race, onTitleSave }: Props) {
             </p>
           </div>
         </div>
+
+        {avgRunPaceSecPerKm != null && (
+          <div className="mt-2 rounded-lg bg-blue-500/[0.05] px-3 py-2 text-center">
+            <p className="text-[10px] text-muted-foreground">Avg run pace</p>
+            <p className="text-sm font-mono font-semibold tabular-nums">
+              {formatRunPace(avgRunPaceSecPerKm, "km")}
+            </p>
+          </div>
+        )}
 
         {slowest && fastest && slowest.id !== fastest.id && (
           <div className="flex items-center justify-between gap-2 mt-3 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.06] text-[11px]">
