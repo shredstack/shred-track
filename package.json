@@ -14,7 +14,8 @@
     "db:seed:deploy": "npx tsx src/db/seeds/run-all.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.85.0",
@@ -63,6 +64,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.2",
+    "patch-package": "^8.0.1",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.5"

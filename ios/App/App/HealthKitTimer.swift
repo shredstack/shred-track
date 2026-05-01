@@ -2,21 +2,7 @@ import Foundation
 import Capacitor
 import HealthKit
 
-// HealthKitTimer — Capacitor plugin that owns the iPhone-side
-// `HKWorkoutSession` while a HYROX race runs in the WebView.
-//
-// The JS side calls these methods via:
-//   Capacitor.Plugins.HealthKitTimer.requestPermissions()
-//   Capacitor.Plugins.HealthKitTimer.startWorkout()
-//   Capacitor.Plugins.HealthKitTimer.pauseWorkout()
-//   Capacitor.Plugins.HealthKitTimer.resumeWorkout()
-//   Capacitor.Plugins.HealthKitTimer.endWorkout()
-//   Capacitor.Plugins.HealthKitTimer.getDistanceMeters({ from, to })
-//
-// Mirrors the watch-side `HealthKitWorkoutService.swift`. Same
-// `HKWorkoutSession` lifecycle (.running, .unknown so HealthKit picks
-// GPS vs. accelerometer based on signal availability), same
-// per-window cumulative distance query via `HKStatisticsQuery`.
+// No HKWorkoutSession on iPhone: it requires iOS 17 and HKLiveWorkoutBuilder requires iOS 26. HKStatisticsQuery covers what the pace UI needs and works on iOS 15+. The watch app still runs a real workout session via its own service.
 
 @objc(HealthKitTimer)
 public class HealthKitTimer: CAPPlugin, CAPBridgedPlugin {
@@ -32,8 +18,6 @@ public class HealthKitTimer: CAPPlugin, CAPBridgedPlugin {
     ]
 
     private let healthStore = HKHealthStore()
-    private var session: HKWorkoutSession?
-    private var builder: HKLiveWorkoutBuilder?
 
     private static var isAvailable: Bool {
         HKHealthStore.isHealthDataAvailable()
@@ -41,101 +25,41 @@ public class HealthKitTimer: CAPPlugin, CAPBridgedPlugin {
 
     // MARK: - Permissions
 
-    @objc func requestPermissions(_ call: CAPPluginCall) {
+    @objc public override func requestPermissions(_ call: CAPPluginCall) {
         guard Self.isAvailable else {
             call.resolve(["granted": false, "available": false])
             return
         }
-        let typesToShare: Set = [
-            HKObjectType.workoutType(),
-            HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!,
-        ]
-        let typesToRead: Set<HKObjectType> = [
-            HKObjectType.workoutType(),
-            HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!,
-            HKQuantityType.quantityType(forIdentifier: .heartRate)!,
-            HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!,
-        ]
-        healthStore.requestAuthorization(toShare: typesToShare, read: typesToRead) { success, error in
+        guard let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) else {
+            call.resolve(["granted": false, "available": true, "error": "distanceWalkingRunning unavailable"])
+            return
+        }
+        healthStore.requestAuthorization(toShare: [], read: [distanceType]) { success, error in
             if let error = error {
                 call.resolve(["granted": false, "available": true, "error": error.localizedDescription])
                 return
             }
-            // Apple blocks introspecting read-permissions, so we report
-            // success if the prompt didn't error. Empty distance reads at
-            // run time are how the JS side detects denial.
+            // Apple blocks introspecting read-permission grants; empty distance reads at runtime are how the JS side detects denial.
             call.resolve(["granted": success, "available": true])
         }
     }
 
-    // MARK: - Workout session lifecycle
+    // MARK: - Workout-session lifecycle (intentional no-ops; see file header)
 
     @objc func startWorkout(_ call: CAPPluginCall) {
-        guard Self.isAvailable else {
-            call.reject("HealthKit not available on this device")
-            return
-        }
-        if session != nil {
-            // Already running — idempotent.
-            call.resolve()
-            return
-        }
-
-        let config = HKWorkoutConfiguration()
-        config.activityType = .running
-        config.locationType = .unknown
-
-        do {
-            let session = try HKWorkoutSession(
-                healthStore: healthStore,
-                configuration: config
-            )
-            let builder = session.associatedWorkoutBuilder()
-            builder.dataSource = HKLiveWorkoutDataSource(
-                healthStore: healthStore,
-                workoutConfiguration: config
-            )
-            self.session = session
-            self.builder = builder
-
-            let startDate = Date()
-            session.startActivity(with: startDate)
-            builder.beginCollection(withStart: startDate) { success, error in
-                if let error = error {
-                    call.reject("beginCollection failed: \(error.localizedDescription)")
-                    return
-                }
-                call.resolve(["started": success])
-            }
-        } catch {
-            call.reject("Failed to create workout session: \(error.localizedDescription)")
-        }
+        call.resolve(["started": true])
     }
 
     @objc func pauseWorkout(_ call: CAPPluginCall) {
-        session?.pause()
         call.resolve()
     }
 
     @objc func resumeWorkout(_ call: CAPPluginCall) {
-        session?.resume()
         call.resolve()
     }
 
     @objc func endWorkout(_ call: CAPPluginCall) {
-        guard let session = self.session, let builder = self.builder else {
-            call.resolve()
-            return
-        }
-        session.end()
-        let endDate = Date()
-        builder.endCollection(withEnd: endDate) { [weak self] _, _ in
-            builder.finishWorkout { _, _ in
-                self?.session = nil
-                self?.builder = nil
-                call.resolve()
-            }
-        }
+        call.resolve()
     }
 
     // MARK: - Distance queries

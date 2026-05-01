@@ -265,3 +265,60 @@ Seeds live in one of two places — the location determines whether they auto-de
 - Wrap each logical entity's delete+rebuild in `db.transaction()` so readers never see a window where the entity is missing.
 - Import the schema via `../schema` (not `./schema`) since the file lives one level deeper than the root seeds.
 - The workflow also triggers on changes to any library the seed imports from (e.g. `src/lib/hyrox-generic-plans/**`). When adding a seed that reads from a new lib, update the `paths` filter in `.github/workflows/deploy_database_migrations.yml`.
+
+## Local iOS Testing via ngrok
+
+The native iOS shell loads `https://shredtrack.shredstack.net` in production. To test local code changes on a real iPhone (or simulator), point the shell at the local Next.js dev server through an ngrok tunnel, and proxy local Supabase via a Next.js rewrite so the iPhone can reach it without a second tunnel.
+
+### Why each piece exists
+
+- **ngrok webapp tunnel** — gives the WKWebView an HTTPS URL it trusts (no iOS App Transport Security exceptions, no Info.plist edits). On the free tier, ngrok grants one static domain, which is what you'll pin so the URL stays stable across restarts.
+- **Next.js rewrite for `/supabase-proxy/*`** — local Supabase listens on `127.0.0.1:54351`, which from the phone's perspective is its own loopback (unreachable). Free-tier ngrok only routes one domain, so a second tunnel won't work. Instead, the webapp tunnel forwards `/supabase-proxy/*` to local Supabase, and the Supabase JS client is configured to call that path.
+- **Middleware matcher exclusion** — `src/proxy.ts` runs `updateSession()` (Supabase auth) on every request and redirects unauthenticated callers to `/login`. Without an exclusion, every Supabase API call hitting the proxy path gets caught by middleware before the rewrite fires.
+
+### Setup checklist
+
+Five files change for local iOS testing. **All five must be reverted before merging to `main`** — see `claude_pr_instructions.md` for the PR-time checks. The `.env.local` change is gitignored but still needs to be reverted manually.
+
+1. **`capacitor.config.ts`** — set `server.url` to your ngrok URL (e.g. `https://<your-domain>.ngrok-free.dev`). Run `npx cap sync ios` after editing so the iOS bundle picks it up.
+2. **`next.config.ts`** — add `allowedDevOrigins` (so Next 16 will serve `/_next/*` resources to the ngrok host) AND a `rewrites()` block:
+   ```ts
+   const nextConfig: NextConfig = {
+     allowedDevOrigins: ["<your-domain>.ngrok-free.dev"],
+     async rewrites() {
+       return [
+         {
+           source: "/supabase-proxy/:path*",
+           destination: "http://127.0.0.1:54351/:path*",
+         },
+       ];
+     },
+   };
+   ```
+3. **`src/proxy.ts`** — add `supabase-proxy` to the negated group in the matcher so middleware skips proxied Supabase calls:
+   ```
+   "/((?!_next/static|_next/image|supabase-proxy|favicon.ico|sitemap.xml|robots.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"
+   ```
+4. **`.env.local`** — point `NEXT_PUBLIC_SUPABASE_URL` at the proxy path:
+   ```
+   NEXT_PUBLIC_SUPABASE_URL=https://<your-domain>.ngrok-free.dev/supabase-proxy
+   ```
+5. **`~/Library/Application Support/ngrok/ngrok.yml`** — leave at default (just `agent: authtoken: ...`). Then start the tunnel pinned to the static domain:
+   ```bash
+   ngrok http 3000 --url=https://<your-domain>.ngrok-free.dev
+   ```
+
+After all of the above, restart the Next dev server (env var changes need a restart), `npx cap sync ios`, then **force-quit and relaunch** the app from the iPhone home screen — a normal Cmd+R from Xcode does not always reload the WKWebView's cached JS bundle.
+
+### Email confirmation gotcha
+
+Local Supabase signups send a confirmation email to **Mailpit** (`http://127.0.0.1:54354` on the Mac), which the phone cannot reach. Three options:
+
+1. Set `enable_confirmations = false` under `[auth]` in `supabase/config.toml`, then `supabase stop && supabase start`. Easiest for iterating on auth flows.
+2. View the email in Mailpit on the Mac, then AirDrop or paste the confirmation link to the phone. The link redirects through the ngrok URL → `/auth/callback`, so it'll work as long as the tunnel is alive.
+3. Skip signup entirely and log in with an existing local account (or seed one).
+
+### What stays broken under this setup
+
+- **Google OAuth** — the Supabase OAuth client and Google Cloud OAuth client are configured for the production redirect URL, not the ngrok URL. Email/password and Apple Sign-In (iOS only) work; Google does not. To test Google login, do it against the production app separately.
+- **Realtime subscriptions** — Next.js rewrites are HTTP-only. Supabase Realtime uses WebSockets, which won't traverse the rewrite. This affects features that subscribe to live database changes; basic auth + REST queries are unaffected.

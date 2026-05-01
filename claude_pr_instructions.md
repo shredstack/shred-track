@@ -93,6 +93,31 @@ Check that client-side data fetching follows React Query patterns:
 - [ ] **Cache invalidation**: Mutations should invalidate related queries in `onSuccess` to keep UI updated
 - [ ] **Error/loading states**: Components handle loading, error, and empty data states
 
+### Native App Configuration Review (if applicable)
+
+When testing the native iOS/Android shell against a local Next.js dev server, contributors typically apply a set of dev-only overrides that route traffic through an ngrok tunnel and proxy local Supabase via a Next.js rewrite. Each of these overrides MUST be reverted before merging to `main` — otherwise the production app will load the wrong host or expose dev-only paths. See the "Local iOS Testing via ngrok" section in `CLAUDE.md` for the full setup.
+
+If the PR modifies `capacitor.config.ts`:
+
+- [ ] **Production URL**: `server.url` MUST be `https://shredtrack.shredstack.net` before merging to `main`. Any other value (ngrok tunnel, `http://192.168.x.x:3000`, `http://localhost:3000`, etc.) is a development override and will break the production iOS/Android build by pointing the native shell at an unreachable or wrong host. **Flag as [Blocker].**
+- [ ] **`cleartext: false`**: Production should never allow cleartext HTTP. If a PR sets `cleartext: true`, flag as [Blocker] unless there's a clearly stated and accepted reason.
+- [ ] **No dev-only ATS exceptions in `ios/App/App/Info.plist`**: `NSAllowsArbitraryLoads` and similar permissive ATS keys should not be present in a merge to `main`. If added for local debugging, they must be reverted before merge. Flag as [Blocker].
+
+If the PR modifies `next.config.ts`:
+
+- [ ] **No `allowedDevOrigins` for ngrok hosts**: An entry like `allowedDevOrigins: ["*.ngrok-free.dev", "*.ngrok-free.app", "<subdomain>.ngrok-free.dev"]` is a dev-only override. It should be removed (the property left absent) before merging. Flag as [Blocker].
+- [ ] **No `/supabase-proxy/*` rewrite**: A `rewrites()` block that proxies `/supabase-proxy/:path*` to a local Supabase URL (e.g. `http://127.0.0.1:54351/:path*`) is dev-only. Production Supabase is reached directly via `NEXT_PUBLIC_SUPABASE_URL`. Remove the rewrite before merge. Flag as [Blocker].
+
+If the PR modifies `src/proxy.ts`:
+
+- [ ] **Middleware matcher does not exclude `supabase-proxy`**: The exclusion is only needed when the dev-only `/supabase-proxy/*` rewrite is in place. The default matcher in `main` is:
+  ```
+  "/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"
+  ```
+  If `supabase-proxy` appears in the negated group, it's a dev leftover. Flag as [Blocker].
+
+Note: `.env.local` is gitignored and will not appear in PR diffs, so contributors must remember to revert `NEXT_PUBLIC_SUPABASE_URL` to `http://127.0.0.1:54351` themselves. Reviewers cannot enforce this from the diff alone.
+
 ### Hydration Safety Review
 
 If the PR adds or modifies server-rendered components, check for:

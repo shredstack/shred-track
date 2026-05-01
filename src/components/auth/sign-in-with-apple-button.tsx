@@ -12,7 +12,7 @@
 // stay the only web options. On iOS, it renders Apple's button below the
 // Google button per Apple's HIG.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -56,11 +56,17 @@ export function SignInWithAppleButton({
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  // Server and first client render must match. Capacitor's `window`
+  // globals only exist post-mount, so we gate the native check on a
+  // mounted flag — otherwise SSR ('null') and hydrated client (button)
+  // disagree and React tears down the tree.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   // Hide on web and on Android. Apple sign-in is iOS-only by Apple
   // policy; Android has its own sign-in story (Google) which we already
   // expose via the Google OAuth button.
-  if (!isNativeApp() || nativePlatform() !== "ios") {
+  if (!mounted || !isNativeApp() || nativePlatform() !== "ios") {
     return null;
   }
 
