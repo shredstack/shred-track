@@ -18,6 +18,7 @@ import {
   type RepSchemeParsed,
 } from "@/lib/crossfit/rep-scheme-parser";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
+import { parseDurationToSeconds } from "@/lib/crossfit/duration-parser";
 
 // ============================================
 // Types
@@ -40,6 +41,15 @@ interface PartMovementInput {
   equipmentCount?: number;
   rxStandard?: string;
   notes?: string;
+  // PushPress Parity: free text from the builder (parsed here) or a
+  // pre-parsed seconds value from API integrations.
+  prescribedDurationSecondsMale?: number | string;
+  prescribedDurationSecondsFemale?: number | string;
+  prescribedHeightInches?: number | string;
+  prescribedWeightMaleBwMultiplier?: number | string;
+  prescribedWeightFemaleBwMultiplier?: number | string;
+  tempo?: string;
+  isMaxReps?: boolean;
 }
 
 interface PartInput {
@@ -48,6 +58,8 @@ interface PartInput {
   timeCapSeconds?: number;
   amrapDurationSeconds?: number;
   emomIntervalSeconds?: number;
+  intervalWorkSeconds?: number | string;
+  intervalRestSeconds?: number | string;
   repScheme?: string;
   rounds?: number;
   structure?: string;
@@ -140,6 +152,17 @@ export async function GET(req: NextRequest) {
         prescribedCaloriesFemale: workoutMovements.prescribedCaloriesFemale,
         prescribedDistanceMale: workoutMovements.prescribedDistanceMale,
         prescribedDistanceFemale: workoutMovements.prescribedDistanceFemale,
+        prescribedDurationSecondsMale:
+          workoutMovements.prescribedDurationSecondsMale,
+        prescribedDurationSecondsFemale:
+          workoutMovements.prescribedDurationSecondsFemale,
+        prescribedHeightInches: workoutMovements.prescribedHeightInches,
+        prescribedWeightMaleBwMultiplier:
+          workoutMovements.prescribedWeightMaleBwMultiplier,
+        prescribedWeightFemaleBwMultiplier:
+          workoutMovements.prescribedWeightFemaleBwMultiplier,
+        tempo: workoutMovements.tempo,
+        isMaxReps: workoutMovements.isMaxReps,
         repSchemeParsed: workoutMovements.repSchemeParsed,
         equipmentCount: workoutMovements.equipmentCount,
         rxStandard: workoutMovements.rxStandard,
@@ -199,6 +222,11 @@ export async function GET(req: NextRequest) {
 
   const result = workoutRows.map((w) => ({
     ...w,
+    requiresVest: w.requiresVest,
+    vestWeightMaleLb:
+      w.vestWeightMaleLb != null ? Number(w.vestWeightMaleLb) : null,
+    vestWeightFemaleLb:
+      w.vestWeightFemaleLb != null ? Number(w.vestWeightFemaleLb) : null,
     parts: (partsByWorkout.get(w.id) ?? []).map((p) => {
       const score = scoreByPart.get(p.id);
       return {
@@ -209,6 +237,8 @@ export async function GET(req: NextRequest) {
         timeCapSeconds: p.timeCapSeconds,
         amrapDurationSeconds: p.amrapDurationSeconds,
         emomIntervalSeconds: p.emomIntervalSeconds,
+        intervalWorkSeconds: p.intervalWorkSeconds,
+        intervalRestSeconds: p.intervalRestSeconds,
         repScheme: p.repScheme,
         rounds: p.rounds,
         structure: p.structure,
@@ -228,6 +258,24 @@ export async function GET(req: NextRequest) {
           prescribedCaloriesFemale: m.prescribedCaloriesFemale,
           prescribedDistanceMale: m.prescribedDistanceMale,
           prescribedDistanceFemale: m.prescribedDistanceFemale,
+          prescribedDurationSecondsMale:
+            m.prescribedDurationSecondsMale ?? undefined,
+          prescribedDurationSecondsFemale:
+            m.prescribedDurationSecondsFemale ?? undefined,
+          prescribedHeightInches:
+            m.prescribedHeightInches != null
+              ? Number(m.prescribedHeightInches)
+              : undefined,
+          prescribedWeightMaleBwMultiplier:
+            m.prescribedWeightMaleBwMultiplier != null
+              ? Number(m.prescribedWeightMaleBwMultiplier)
+              : undefined,
+          prescribedWeightFemaleBwMultiplier:
+            m.prescribedWeightFemaleBwMultiplier != null
+              ? Number(m.prescribedWeightFemaleBwMultiplier)
+              : undefined,
+          tempo: m.tempo ?? undefined,
+          isMaxReps: !!m.isMaxReps,
           repSchemeParsed: m.repSchemeParsed,
           equipmentCount: m.equipmentCount,
           rxStandard: m.rxStandard,
@@ -247,6 +295,11 @@ export async function GET(req: NextRequest) {
               hitTimeCap: score.hitTimeCap,
               notes: score.notes ?? undefined,
               rpe: score.rpe ?? undefined,
+              woreVest: score.woreVest ?? undefined,
+              vestWeightLb:
+                score.vestWeightLb != null
+                  ? Number(score.vestWeightLb)
+                  : undefined,
               movementDetails: (detailsByScore.get(score.id) ?? []).map((d) => {
                 const entries = normalizeSetEntries(d.setEntries);
                 return {
@@ -257,6 +310,15 @@ export async function GET(req: NextRequest) {
                   modification: d.modification ?? undefined,
                   substitutionMovementId: d.substitutionMovementId ?? undefined,
                   setEntries: entries.length > 0 ? entries : undefined,
+                  actualDurationSeconds: d.actualDurationSeconds ?? undefined,
+                  actualHeightInches:
+                    d.actualHeightInches != null
+                      ? Number(d.actualHeightInches)
+                      : undefined,
+                  actualRepsPerRound:
+                    d.actualRepsPerRound && d.actualRepsPerRound.length > 0
+                      ? d.actualRepsPerRound
+                      : undefined,
                   notes: d.notes ?? undefined,
                 };
               }),
@@ -284,7 +346,25 @@ export async function POST(req: NextRequest) {
     published,
     source,
     benchmarkWorkoutId,
+    requiresVest,
+    vestWeightMaleLb,
+    vestWeightFemaleLb,
   } = body;
+
+  // Vest validation: if the workout claims it requires a vest, at least
+  // one of the gendered weights must be set. We won't trust a "true"
+  // toggle with no weight on either side.
+  if (requiresVest === true) {
+    if (
+      vestWeightMaleLb == null &&
+      vestWeightFemaleLb == null
+    ) {
+      return NextResponse.json(
+        { error: "Vest weight is required when requiresVest is true" },
+        { status: 400 }
+      );
+    }
+  }
 
   // ============================================
   // Benchmark fast path — single part copied from benchmark
@@ -335,6 +415,10 @@ export async function POST(req: NextRequest) {
           published: published ?? false,
           source: "benchmark",
           benchmarkWorkoutId,
+          // Inherit vest prescription from the benchmark.
+          requiresVest: !!benchmark.requiresVest,
+          vestWeightMaleLb: benchmark.vestWeightMaleLb ?? null,
+          vestWeightFemaleLb: benchmark.vestWeightFemaleLb ?? null,
         })
         .returning();
 
@@ -413,11 +497,25 @@ export async function POST(req: NextRequest) {
         workoutDate,
         published: published ?? false,
         source: source || "manual",
+        requiresVest: !!requiresVest,
+        vestWeightMaleLb: toNumericOrNull(vestWeightMaleLb),
+        vestWeightFemaleLb: toNumericOrNull(vestWeightFemaleLb),
       })
       .returning();
 
     for (let i = 0; i < parts.length; i++) {
       const p = parts[i];
+
+      if (p.workoutType === "intervals") {
+        const work = toDurationSecondsOrNull(p.intervalWorkSeconds);
+        const rest = toDurationSecondsOrNull(p.intervalRestSeconds);
+        if (!p.rounds || work == null || rest == null) {
+          throw new Error(
+            "Intervals parts require rounds, intervalWorkSeconds, and intervalRestSeconds"
+          );
+        }
+      }
+
       const [part] = await tx
         .insert(workoutParts)
         .values({
@@ -428,6 +526,8 @@ export async function POST(req: NextRequest) {
           timeCapSeconds: p.timeCapSeconds || null,
           amrapDurationSeconds: p.amrapDurationSeconds || null,
           emomIntervalSeconds: p.emomIntervalSeconds || null,
+          intervalWorkSeconds: toDurationSecondsOrNull(p.intervalWorkSeconds),
+          intervalRestSeconds: toDurationSecondsOrNull(p.intervalRestSeconds),
           repScheme: p.repScheme || null,
           rounds: p.rounds ?? null,
           structure: p.structure || null,
@@ -449,6 +549,21 @@ export async function POST(req: NextRequest) {
             prescribedCaloriesFemale: toIntOrNull(m.prescribedCaloriesFemale),
             prescribedDistanceMale: toIntOrNull(m.prescribedDistanceMale),
             prescribedDistanceFemale: toIntOrNull(m.prescribedDistanceFemale),
+            prescribedDurationSecondsMale: toDurationSecondsOrNull(
+              m.prescribedDurationSecondsMale
+            ),
+            prescribedDurationSecondsFemale: toDurationSecondsOrNull(
+              m.prescribedDurationSecondsFemale
+            ),
+            prescribedHeightInches: toNumericOrNull(m.prescribedHeightInches),
+            prescribedWeightMaleBwMultiplier: toNumericOrNull(
+              m.prescribedWeightMaleBwMultiplier
+            ),
+            prescribedWeightFemaleBwMultiplier: toNumericOrNull(
+              m.prescribedWeightFemaleBwMultiplier
+            ),
+            tempo: m.tempo?.trim() || null,
+            isMaxReps: !!m.isMaxReps,
             // Server is the single source of truth for the parsed shape —
             // we ignore any client-provided value to avoid drift if the
             // parser changes.
@@ -479,6 +594,29 @@ function toIntOrNull(value: number | string | undefined | null): number | null {
   const n = typeof value === "number" ? value : parseInt(value, 10);
   if (!Number.isFinite(n) || n < 0) return null;
   return n;
+}
+
+// Accepts seconds-as-number or a free-text duration ("1:30", ":30", "90s",
+// "1m30s"). Returns null when unparseable. Used for the new
+// prescribedDuration* fields and intervalWork/Rest seconds.
+function toDurationSecondsOrNull(
+  value: number | string | undefined | null
+): number | null {
+  if (value == null || value === "") return null;
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
+  }
+  return parseDurationToSeconds(value);
+}
+
+// String → numeric (for height inches, BW multipliers).
+function toNumericOrNull(
+  value: number | string | undefined | null
+): string | null {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : parseFloat(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return String(n);
 }
 
 // Parse + apply the "Continue as ladder?" promotion the builder may have

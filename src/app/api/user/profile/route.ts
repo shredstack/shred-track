@@ -17,6 +17,7 @@ export async function GET() {
       email: users.email,
       gender: users.gender,
       unitPreference: users.unitPreference,
+      bodyWeightLb: users.bodyWeightLb,
       isAdmin: users.isAdmin,
       isVip: users.isVip,
       createdAt: users.createdAt,
@@ -29,6 +30,7 @@ export async function GET() {
 
   return NextResponse.json({
     ...user,
+    bodyWeightLb: user.bodyWeightLb != null ? Number(user.bodyWeightLb) : null,
     isAdmin: user.isAdmin || isAdminEmail(user.email),
   });
 }
@@ -59,6 +61,23 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "Invalid gender" }, { status: 400 });
     }
   }
+  if ("bodyWeightLb" in body) {
+    if (body.bodyWeightLb === null || body.bodyWeightLb === "") {
+      updates.bodyWeightLb = null;
+    } else {
+      const n =
+        typeof body.bodyWeightLb === "number"
+          ? body.bodyWeightLb
+          : parseFloat(body.bodyWeightLb);
+      if (!Number.isFinite(n) || n <= 0 || n > 1000) {
+        return NextResponse.json(
+          { error: "Invalid bodyWeightLb (expect 0–1000 lb)" },
+          { status: 400 }
+        );
+      }
+      updates.bodyWeightLb = String(n);
+    }
+  }
 
   const [updated] = await db
     .update(users)
@@ -70,8 +89,13 @@ export async function PUT(req: Request) {
       email: users.email,
       gender: users.gender,
       unitPreference: users.unitPreference,
+      bodyWeightLb: users.bodyWeightLb,
       createdAt: users.createdAt,
     });
 
-  return NextResponse.json(updated);
+  return NextResponse.json({
+    ...updated,
+    bodyWeightLb:
+      updated.bodyWeightLb != null ? Number(updated.bodyWeightLb) : null,
+  });
 }

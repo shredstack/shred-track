@@ -35,6 +35,8 @@ export const users = pgTable("users", {
   emailVerified: timestamp("email_verified", { mode: "date" }),
   isAdmin: boolean("is_admin").default(false).notNull(),
   isVip: boolean("is_vip").default(false).notNull(),
+  // Canonical store: lb. Drives BW-multiplier Rx resolution.
+  bodyWeightLb: numeric("body_weight_lb"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -139,6 +141,11 @@ export const workouts = pgTable("workouts", {
   published: boolean("published").default(false).notNull(),
   source: text("source").default("manual").notNull(), // 'manual' | 'parsed' | 'import' | 'benchmark'
   benchmarkWorkoutId: uuid("benchmark_workout_id").references(() => benchmarkWorkouts.id, { onDelete: "set null" }),
+  // Vest prescription. Vest is workout-level (Murph wants the vest the
+  // whole way) — not per-part.
+  requiresVest: boolean("requires_vest").default(false).notNull(),
+  vestWeightMaleLb: numeric("vest_weight_male_lb"),
+  vestWeightFemaleLb: numeric("vest_weight_female_lb"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -160,6 +167,10 @@ export const workoutParts = pgTable(
     // null otherwise). Lets a "For Reps" part declare a Tabata cadence without
     // creating a new workout_type.
     structure: text("structure"),
+    // Populated only on the new "intervals" workout type — work + rest
+    // alternation per round (e.g. 8 rounds × 1:00 work / 3:00 rest).
+    intervalWorkSeconds: integer("interval_work_seconds"),
+    intervalRestSeconds: integer("interval_rest_seconds"),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -182,6 +193,22 @@ export const workoutMovements = pgTable("workout_movements", {
   prescribedCaloriesFemale: integer("prescribed_calories_female"),
   prescribedDistanceMale: integer("prescribed_distance_male"), // meters
   prescribedDistanceFemale: integer("prescribed_distance_female"), // meters
+  prescribedDurationSecondsMale: integer("prescribed_duration_seconds_male"),
+  prescribedDurationSecondsFemale: integer("prescribed_duration_seconds_female"),
+  // Override height for deficit pushups, box jumps, etc. (inches).
+  prescribedHeightInches: numeric("prescribed_height_inches"),
+  // BW-multiplier Rx (e.g. 1.5 means "1.5 × bodyweight"). Mutually
+  // exclusive with the absolute lb fields per gender — enforced in the
+  // builder, not the DB.
+  prescribedWeightMaleBwMultiplier: numeric("prescribed_weight_male_bw_multiplier"),
+  prescribedWeightFemaleBwMultiplier: numeric("prescribed_weight_female_bw_multiplier"),
+  // Free-text tempo prescription, e.g. "30X1".
+  tempo: text("tempo"),
+  // When true the movement is the score-bearing movement of its part:
+  // the athlete logs per-round rep counts during score entry, and we sum
+  // them into totalReps. Mutually exclusive with prescribedReps at the
+  // UI layer.
+  isMaxReps: boolean("is_max_reps").default(false).notNull(),
   repSchemeParsed: jsonb("rep_scheme_parsed"), // RepSchemeParsed | null — see lib/crossfit/rep-scheme-parser.ts
   equipmentCount: integer("equipment_count"),
   rxStandard: text("rx_standard"),
@@ -209,6 +236,11 @@ export const scores = pgTable(
     hitTimeCap: boolean("hit_time_cap").default(false).notNull(),
     notes: text("notes"),
     rpe: integer("rpe"), // 1-10
+    // Vest the athlete actually wore (only meaningful when the workout
+    // requires a vest). Lets a Murph-without-vest score show a badge
+    // without flipping the division to scaled.
+    woreVest: boolean("wore_vest"),
+    vestWeightLb: numeric("vest_weight_lb"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -231,6 +263,11 @@ export const scoreMovementDetails = pgTable("score_movement_details", {
   // name kept as `set_weights` for migration simplicity. Use `setEntries`
   // when reading/writing in code.
   setEntries: jsonb("set_weights").$type<SetEntry[]>(),
+  // "I held the L-sit for :22" / "did 3" deficit instead of 4""
+  actualDurationSeconds: integer("actual_duration_seconds"),
+  actualHeightInches: numeric("actual_height_inches"),
+  // Per-round rep counts for max-reps movements. Length matches part.rounds.
+  actualRepsPerRound: integer("actual_reps_per_round").array(),
   notes: text("notes"),
 }, (table) => [
   foreignKey({
@@ -258,6 +295,11 @@ export const benchmarkWorkouts = pgTable("benchmark_workouts", {
   createdBy: uuid("created_by").references(() => users.id),
   communityId: uuid("community_id").references(() => communities.id),
   isSystem: boolean("is_system").default(false).notNull(),
+  // Vest fields mirror the workouts table so benchmark seeds (Murph, Chad)
+  // can prescribe the vest as a first-class field.
+  requiresVest: boolean("requires_vest").default(false).notNull(),
+  vestWeightMaleLb: numeric("vest_weight_male_lb"),
+  vestWeightFemaleLb: numeric("vest_weight_female_lb"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -294,6 +336,7 @@ export const benchmarkWorkoutMovements = pgTable("benchmark_workout_movements", 
   prescribedReps: text("prescribed_reps"),
   prescribedWeightMale: numeric("prescribed_weight_male"),
   prescribedWeightFemale: numeric("prescribed_weight_female"),
+  isMaxReps: boolean("is_max_reps").default(false).notNull(),
   rxStandard: text("rx_standard"),
   notes: text("notes"),
 });

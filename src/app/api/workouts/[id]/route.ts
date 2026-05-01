@@ -16,6 +16,7 @@ import {
 } from "@/lib/crossfit/rep-scheme-parser";
 import type { WorkoutType } from "@/types/crossfit";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
+import { parseDurationToSeconds } from "@/lib/crossfit/duration-parser";
 
 // GET /api/workouts/[id] — single workout with its parts, movements, and
 // (if the requester has one) the caller's scores per part.
@@ -55,6 +56,17 @@ export async function GET(
       prescribedCaloriesFemale: workoutMovements.prescribedCaloriesFemale,
       prescribedDistanceMale: workoutMovements.prescribedDistanceMale,
       prescribedDistanceFemale: workoutMovements.prescribedDistanceFemale,
+      prescribedDurationSecondsMale:
+        workoutMovements.prescribedDurationSecondsMale,
+      prescribedDurationSecondsFemale:
+        workoutMovements.prescribedDurationSecondsFemale,
+      prescribedHeightInches: workoutMovements.prescribedHeightInches,
+      prescribedWeightMaleBwMultiplier:
+        workoutMovements.prescribedWeightMaleBwMultiplier,
+      prescribedWeightFemaleBwMultiplier:
+        workoutMovements.prescribedWeightFemaleBwMultiplier,
+      tempo: workoutMovements.tempo,
+      isMaxReps: workoutMovements.isMaxReps,
       repSchemeParsed: workoutMovements.repSchemeParsed,
       equipmentCount: workoutMovements.equipmentCount,
       rxStandard: workoutMovements.rxStandard,
@@ -92,6 +104,9 @@ export async function GET(
     modification: string | null;
     substitutionMovementId: string | null;
     setEntries: unknown;
+    actualDurationSeconds: number | null;
+    actualHeightInches: string | null;
+    actualRepsPerRound: number[] | null;
     notes: string | null;
   }>>();
 
@@ -124,6 +139,9 @@ export async function GET(
           modification: d.modification,
           substitutionMovementId: d.substitutionMovementId,
           setEntries: d.setEntries,
+          actualDurationSeconds: d.actualDurationSeconds,
+          actualHeightInches: d.actualHeightInches,
+          actualRepsPerRound: d.actualRepsPerRound,
           notes: d.notes,
         });
         detailsByScore.set(d.scoreId, list);
@@ -150,6 +168,8 @@ export async function GET(
       timeCapSeconds: p.timeCapSeconds,
       amrapDurationSeconds: p.amrapDurationSeconds,
       emomIntervalSeconds: p.emomIntervalSeconds,
+      intervalWorkSeconds: p.intervalWorkSeconds,
+      intervalRestSeconds: p.intervalRestSeconds,
       repScheme: p.repScheme,
       rounds: p.rounds,
       structure: p.structure,
@@ -169,6 +189,24 @@ export async function GET(
         prescribedCaloriesFemale: m.prescribedCaloriesFemale,
         prescribedDistanceMale: m.prescribedDistanceMale,
         prescribedDistanceFemale: m.prescribedDistanceFemale,
+        prescribedDurationSecondsMale:
+          m.prescribedDurationSecondsMale ?? undefined,
+        prescribedDurationSecondsFemale:
+          m.prescribedDurationSecondsFemale ?? undefined,
+        prescribedHeightInches:
+          m.prescribedHeightInches != null
+            ? Number(m.prescribedHeightInches)
+            : undefined,
+        prescribedWeightMaleBwMultiplier:
+          m.prescribedWeightMaleBwMultiplier != null
+            ? Number(m.prescribedWeightMaleBwMultiplier)
+            : undefined,
+        prescribedWeightFemaleBwMultiplier:
+          m.prescribedWeightFemaleBwMultiplier != null
+            ? Number(m.prescribedWeightFemaleBwMultiplier)
+            : undefined,
+        tempo: m.tempo ?? undefined,
+        isMaxReps: !!m.isMaxReps,
         repSchemeParsed: m.repSchemeParsed,
         equipmentCount: m.equipmentCount,
         rxStandard: m.rxStandard,
@@ -198,6 +236,15 @@ export async function GET(
                 modification: d.modification ?? undefined,
                 substitutionMovementId: d.substitutionMovementId ?? undefined,
                 setEntries: entries.length > 0 ? entries : undefined,
+                actualDurationSeconds: d.actualDurationSeconds ?? undefined,
+                actualHeightInches:
+                  d.actualHeightInches != null
+                    ? Number(d.actualHeightInches)
+                    : undefined,
+                actualRepsPerRound:
+                  d.actualRepsPerRound && d.actualRepsPerRound.length > 0
+                    ? d.actualRepsPerRound
+                    : undefined,
                 notes: d.notes ?? undefined,
               };
             }),
@@ -206,7 +253,19 @@ export async function GET(
     };
   });
 
-  return NextResponse.json({ ...workout, parts: partsPayload });
+  return NextResponse.json({
+    ...workout,
+    requiresVest: workout.requiresVest,
+    vestWeightMaleLb:
+      workout.vestWeightMaleLb != null
+        ? Number(workout.vestWeightMaleLb)
+        : null,
+    vestWeightFemaleLb:
+      workout.vestWeightFemaleLb != null
+        ? Number(workout.vestWeightFemaleLb)
+        : null,
+    parts: partsPayload,
+  });
 }
 
 interface UpdatePartMovementInput {
@@ -220,6 +279,13 @@ interface UpdatePartMovementInput {
   prescribedCaloriesFemale?: number | string;
   prescribedDistanceMale?: number | string;
   prescribedDistanceFemale?: number | string;
+  prescribedDurationSecondsMale?: number | string;
+  prescribedDurationSecondsFemale?: number | string;
+  prescribedHeightInches?: number | string;
+  prescribedWeightMaleBwMultiplier?: number | string;
+  prescribedWeightFemaleBwMultiplier?: number | string;
+  tempo?: string;
+  isMaxReps?: boolean;
   promoteSequenceToLadder?: boolean;
   equipmentCount?: number;
   rxStandard?: string;
@@ -233,6 +299,8 @@ interface UpdatePartInput {
   timeCapSeconds?: number;
   amrapDurationSeconds?: number;
   emomIntervalSeconds?: number;
+  intervalWorkSeconds?: number | string;
+  intervalRestSeconds?: number | string;
   repScheme?: string;
   rounds?: number;
   structure?: string;
@@ -276,6 +344,15 @@ export async function PUT(
         rawText: body.rawText ?? existing.rawText,
         workoutDate: body.workoutDate ?? existing.workoutDate,
         published: body.published ?? existing.published,
+        ...(body.requiresVest !== undefined
+          ? { requiresVest: !!body.requiresVest }
+          : {}),
+        ...(body.vestWeightMaleLb !== undefined
+          ? { vestWeightMaleLb: toNumericOrNull(body.vestWeightMaleLb) }
+          : {}),
+        ...(body.vestWeightFemaleLb !== undefined
+          ? { vestWeightFemaleLb: toNumericOrNull(body.vestWeightFemaleLb) }
+          : {}),
         updatedAt: new Date(),
       })
       .where(eq(workouts.id, id))
@@ -305,6 +382,15 @@ export async function PUT(
         amrapDurationSeconds: firstPart.amrapDurationSeconds || null,
         repScheme: firstPart.repScheme || null,
         rounds: firstPart.rounds ?? null,
+        ...(body.requiresVest !== undefined
+          ? { requiresVest: !!body.requiresVest }
+          : {}),
+        ...(body.vestWeightMaleLb !== undefined
+          ? { vestWeightMaleLb: toNumericOrNull(body.vestWeightMaleLb) }
+          : {}),
+        ...(body.vestWeightFemaleLb !== undefined
+          ? { vestWeightFemaleLb: toNumericOrNull(body.vestWeightFemaleLb) }
+          : {}),
         updatedAt: new Date(),
       })
       .where(eq(workouts.id, id))
@@ -333,21 +419,24 @@ export async function PUT(
       const p = incomingParts[i];
       let partId: string;
 
+      const partValues = {
+        label: p.label || null,
+        workoutType: p.workoutType,
+        timeCapSeconds: p.timeCapSeconds || null,
+        amrapDurationSeconds: p.amrapDurationSeconds || null,
+        emomIntervalSeconds: p.emomIntervalSeconds || null,
+        intervalWorkSeconds: toDurationSecondsOrNull(p.intervalWorkSeconds),
+        intervalRestSeconds: toDurationSecondsOrNull(p.intervalRestSeconds),
+        repScheme: p.repScheme || null,
+        rounds: p.rounds ?? null,
+        structure: p.structure || null,
+        notes: p.notes || null,
+      };
+
       if (p.id) {
         const [updatedPart] = await tx
           .update(workoutParts)
-          .set({
-            orderIndex: i,
-            label: p.label || null,
-            workoutType: p.workoutType,
-            timeCapSeconds: p.timeCapSeconds || null,
-            amrapDurationSeconds: p.amrapDurationSeconds || null,
-            emomIntervalSeconds: p.emomIntervalSeconds || null,
-            repScheme: p.repScheme || null,
-            rounds: p.rounds ?? null,
-            structure: p.structure || null,
-            notes: p.notes || null,
-          })
+          .set({ orderIndex: i, ...partValues })
           .where(
             and(eq(workoutParts.id, p.id), eq(workoutParts.workoutId, id))
           )
@@ -357,19 +446,7 @@ export async function PUT(
           // as a new part rather than silently dropping the data.
           const [inserted] = await tx
             .insert(workoutParts)
-            .values({
-              workoutId: id,
-              orderIndex: i,
-              label: p.label || null,
-              workoutType: p.workoutType,
-              timeCapSeconds: p.timeCapSeconds || null,
-              amrapDurationSeconds: p.amrapDurationSeconds || null,
-              emomIntervalSeconds: p.emomIntervalSeconds || null,
-              repScheme: p.repScheme || null,
-              rounds: p.rounds ?? null,
-              structure: p.structure || null,
-              notes: p.notes || null,
-            })
+            .values({ workoutId: id, orderIndex: i, ...partValues })
             .returning();
           partId = inserted.id;
         } else {
@@ -378,19 +455,7 @@ export async function PUT(
       } else {
         const [inserted] = await tx
           .insert(workoutParts)
-          .values({
-            workoutId: id,
-            orderIndex: i,
-            label: p.label || null,
-            workoutType: p.workoutType,
-            timeCapSeconds: p.timeCapSeconds || null,
-            amrapDurationSeconds: p.amrapDurationSeconds || null,
-            emomIntervalSeconds: p.emomIntervalSeconds || null,
-            repScheme: p.repScheme || null,
-            rounds: p.rounds ?? null,
-            structure: p.structure || null,
-            notes: p.notes || null,
-          })
+          .values({ workoutId: id, orderIndex: i, ...partValues })
           .returning();
         partId = inserted.id;
       }
@@ -430,6 +495,21 @@ export async function PUT(
           prescribedCaloriesFemale: toIntOrNull(m.prescribedCaloriesFemale),
           prescribedDistanceMale: toIntOrNull(m.prescribedDistanceMale),
           prescribedDistanceFemale: toIntOrNull(m.prescribedDistanceFemale),
+          prescribedDurationSecondsMale: toDurationSecondsOrNull(
+            m.prescribedDurationSecondsMale
+          ),
+          prescribedDurationSecondsFemale: toDurationSecondsOrNull(
+            m.prescribedDurationSecondsFemale
+          ),
+          prescribedHeightInches: toNumericOrNull(m.prescribedHeightInches),
+          prescribedWeightMaleBwMultiplier: toNumericOrNull(
+            m.prescribedWeightMaleBwMultiplier
+          ),
+          prescribedWeightFemaleBwMultiplier: toNumericOrNull(
+            m.prescribedWeightFemaleBwMultiplier
+          ),
+          tempo: m.tempo?.trim() || null,
+          isMaxReps: !!m.isMaxReps,
           repSchemeParsed,
           equipmentCount: m.equipmentCount ?? null,
           rxStandard: m.rxStandard || null,
@@ -479,6 +559,25 @@ function toIntOrNull(value: number | string | undefined | null): number | null {
   const n = typeof value === "number" ? value : parseInt(value, 10);
   if (!Number.isFinite(n) || n < 0) return null;
   return n;
+}
+
+function toDurationSecondsOrNull(
+  value: number | string | undefined | null
+): number | null {
+  if (value == null || value === "") return null;
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
+  }
+  return parseDurationToSeconds(value);
+}
+
+function toNumericOrNull(
+  value: number | string | undefined | null
+): string | null {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : parseFloat(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return String(n);
 }
 
 function parseAndPromote(

@@ -42,6 +42,9 @@ export async function PUT(
     amrapDurationSeconds,
     repScheme,
     isSystem,
+    requiresVest,
+    vestWeightMaleLb,
+    vestWeightFemaleLb,
     movements: movementsList,
   } = body;
 
@@ -81,6 +84,23 @@ export async function PUT(
         amrapDurationSeconds: amrapDurationSeconds !== undefined ? (amrapDurationSeconds || null) : existing.amrapDurationSeconds,
         repScheme: repScheme !== undefined ? (repScheme || null) : existing.repScheme,
         isSystem: isSystem !== undefined ? !!isSystem : existing.isSystem,
+        ...(requiresVest !== undefined ? { requiresVest: !!requiresVest } : {}),
+        ...(vestWeightMaleLb !== undefined
+          ? {
+              vestWeightMaleLb:
+                vestWeightMaleLb != null && vestWeightMaleLb !== ""
+                  ? String(vestWeightMaleLb)
+                  : null,
+            }
+          : {}),
+        ...(vestWeightFemaleLb !== undefined
+          ? {
+              vestWeightFemaleLb:
+                vestWeightFemaleLb != null && vestWeightFemaleLb !== ""
+                  ? String(vestWeightFemaleLb)
+                  : null,
+            }
+          : {}),
         updatedAt: new Date(),
       })
       .where(eq(benchmarkWorkouts.id, id))
@@ -130,6 +150,9 @@ export async function PUT(
           timeCapSeconds: updated.timeCapSeconds,
           amrapDurationSeconds: updated.amrapDurationSeconds,
           repScheme: updated.repScheme,
+          requiresVest: updated.requiresVest,
+          vestWeightMaleLb: updated.vestWeightMaleLb,
+          vestWeightFemaleLb: updated.vestWeightFemaleLb,
           updatedAt: new Date(),
         })
         .where(inArray(workouts.id, workoutIds));

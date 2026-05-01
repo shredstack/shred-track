@@ -44,6 +44,11 @@ export async function GET(_req: NextRequest) {
 
   const result = rows.map((bw) => ({
     ...bw,
+    requiresVest: bw.requiresVest,
+    vestWeightMaleLb:
+      bw.vestWeightMaleLb != null ? Number(bw.vestWeightMaleLb) : null,
+    vestWeightFemaleLb:
+      bw.vestWeightFemaleLb != null ? Number(bw.vestWeightFemaleLb) : null,
     movements: (movementsByBenchmark.get(bw.id) || []).map((m) => ({
       id: m.id,
       movementId: m.movementId,
@@ -74,6 +79,9 @@ export async function POST(req: NextRequest) {
     amrapDurationSeconds,
     repScheme,
     isSystem,
+    requiresVest,
+    vestWeightMaleLb,
+    vestWeightFemaleLb,
     movements: movementsList,
   } = body;
 
@@ -111,6 +119,11 @@ export async function POST(req: NextRequest) {
         repScheme: repScheme || null,
         createdBy: isSystem ? null : user.id,
         isSystem: isSystem ?? false,
+        requiresVest: !!requiresVest,
+        vestWeightMaleLb:
+          vestWeightMaleLb != null ? String(vestWeightMaleLb) : null,
+        vestWeightFemaleLb:
+          vestWeightFemaleLb != null ? String(vestWeightFemaleLb) : null,
       })
       .returning();
 

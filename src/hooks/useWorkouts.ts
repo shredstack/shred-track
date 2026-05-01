@@ -232,6 +232,15 @@ export interface CreatePartMovementInput {
   prescribedCaloriesFemale?: number;
   prescribedDistanceMale?: number;
   prescribedDistanceFemale?: number;
+  // PushPress Parity additions. Server parses free-text strings via
+  // duration-parser; numeric values are written as-is.
+  prescribedDurationSecondsMale?: number | string;
+  prescribedDurationSecondsFemale?: number | string;
+  prescribedHeightInches?: number | string;
+  prescribedWeightMaleBwMultiplier?: number | string;
+  prescribedWeightFemaleBwMultiplier?: number | string;
+  tempo?: string;
+  isMaxReps?: boolean;
   promoteSequenceToLadder?: boolean;
   equipmentCount?: number;
   rxStandard?: string;
@@ -246,6 +255,8 @@ export interface CreatePartInput {
   timeCapSeconds?: number;
   amrapDurationSeconds?: number;
   emomIntervalSeconds?: number;
+  intervalWorkSeconds?: number | string;
+  intervalRestSeconds?: number | string;
   repScheme?: string;
   rounds?: number;
   structure?: WorkoutPartStructure;
@@ -258,6 +269,9 @@ export interface CreateWorkoutInput {
   description?: string;
   workoutDate: string;
   benchmarkWorkoutId?: string;
+  requiresVest?: boolean;
+  vestWeightMaleLb?: number;
+  vestWeightFemaleLb?: number;
   parts: CreatePartInput[];
 }
 
@@ -265,6 +279,9 @@ export interface UpdateWorkoutInput {
   title?: string;
   description?: string;
   workoutDate: string;
+  requiresVest?: boolean;
+  vestWeightMaleLb?: number;
+  vestWeightFemaleLb?: number;
   parts: CreatePartInput[];
 }
 

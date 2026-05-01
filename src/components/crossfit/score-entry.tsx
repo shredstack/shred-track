@@ -24,8 +24,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Save, Trophy } from "lucide-react";
+import { Save, Trophy, Shield, AlertTriangle } from "lucide-react";
 import { SetWeightBreakdown } from "@/components/crossfit/set-weight-breakdown";
+import {
+  formatSecondsAsClock,
+  parseDurationToSeconds,
+} from "@/lib/crossfit/duration-parser";
+import { resolveRxWeightLb } from "@/lib/crossfit/prescription";
+import { useUserProfile } from "@/hooks/useProfile";
 import type {
   WorkoutPartDisplay,
   WorkoutMovementDisplay,
@@ -33,6 +39,7 @@ import type {
   MovementScaling,
   ScoreDisplay,
   SetEntry,
+  WorkoutDisplay,
 } from "@/types/crossfit";
 import { WORKOUT_TYPE_LABELS } from "@/types/crossfit";
 
@@ -50,7 +57,11 @@ type ScalingFieldType = "weight" | "reps" | "none";
 // field based on the movement's metric type. Re-uses the `actualWeight`
 // numeric column to store the value regardless of unit (the unit is
 // recovered at read time from the movement's metric type).
-function scaledMetricCopy(mov: WorkoutMovementDisplay): {
+function scaledMetricCopy(
+  mov: WorkoutMovementDisplay,
+  userBodyWeightLb: number | null,
+  gender: "male" | "female" | "other" | null
+): {
   label: string;
   unit: string;
   placeholder: string;
@@ -71,12 +82,52 @@ function scaledMetricCopy(mov: WorkoutMovementDisplay): {
       placeholder: rx != null ? `Rx: ${rx} m` : "Distance completed",
     };
   }
+  if (mov.metricType === "duration") {
+    const rxSec =
+      mov.prescribedDurationSecondsMale ?? mov.prescribedDurationSecondsFemale;
+    return {
+      label: "Duration held (sec)",
+      unit: "sec",
+      placeholder:
+        rxSec != null ? `Rx: ${formatSecondsAsClock(rxSec)}` : "Time held",
+    };
+  }
+
+  // Weight — prefer absolute lb, fall back to BW multiplier resolved
+  // against the athlete's logged bodyweight.
+  const resolved = resolveRxWeightLb(gender, mov, userBodyWeightLb);
+  let placeholder = "Weight used";
+  if (resolved != null) {
+    const mult =
+      gender === "female"
+        ? mov.prescribedWeightFemaleBwMultiplier ??
+          mov.prescribedWeightMaleBwMultiplier
+        : mov.prescribedWeightMaleBwMultiplier ??
+          mov.prescribedWeightFemaleBwMultiplier;
+    if (mov.prescribedWeightMale || mov.prescribedWeightFemale) {
+      placeholder = `Rx: ${resolved} lb`;
+    } else if (mult != null) {
+      placeholder = `Rx: ${mult}× BW = ${resolved} lb`;
+    } else {
+      placeholder = `Rx: ${resolved} lb`;
+    }
+  } else {
+    const mult =
+      gender === "female"
+        ? mov.prescribedWeightFemaleBwMultiplier ??
+          mov.prescribedWeightMaleBwMultiplier
+        : mov.prescribedWeightMaleBwMultiplier ??
+          mov.prescribedWeightFemaleBwMultiplier;
+    if (mult != null) {
+      placeholder = `Rx: ${mult}× bodyweight (set bodyweight to resolve)`;
+    } else if (mov.prescribedWeightMale) {
+      placeholder = `Rx: ${mov.prescribedWeightMale} lb`;
+    }
+  }
   return {
     label: "Weight used (lb)",
     unit: "lb",
-    placeholder: mov.prescribedWeightMale
-      ? `Rx: ${mov.prescribedWeightMale} lb`
-      : "Weight used",
+    placeholder,
   };
 }
 
@@ -141,6 +192,13 @@ interface PartState {
   // per barbell per set in a for_load part). Drafts hold strings so the
   // user can type without losing focus; commit to numbers on save.
   setEntriesMap: Record<string, SetEntryDraft[]>;
+  // Per-occurrence (workout_movement_id) drafts for the new fields. Held
+  // as strings so the user can type freely and we parse on save.
+  durationDrafts: Record<string, string>;
+  heightDrafts: Record<string, string>;
+  // Per-occurrence per-round rep drafts for max-reps movements.
+  // map[workoutMovementId] = ["8", "7", "6", ...] — one slot per round.
+  maxRepsDrafts: Record<string, string[]>;
 }
 
 export interface SetEntryDraft {
@@ -155,6 +213,9 @@ function emptyPartState(
 ): PartState {
   const scalings: Record<string, Partial<MovementScaling>> = {};
   const setEntriesMap: Record<string, SetEntryDraft[]> = {};
+  const durationDrafts: Record<string, string> = {};
+  const heightDrafts: Record<string, string> = {};
+  const maxRepsDrafts: Record<string, string[]> = {};
 
   // Walk existing movementDetails (keyed by workout_movement_id) and collapse
   // down to one entry per movement_id. Different occurrences of the same
@@ -182,8 +243,32 @@ function emptyPartState(
           rpe: e.rpe != null ? e.rpe.toString() : "",
         }));
       }
+      if (d.actualDurationSeconds != null) {
+        durationDrafts[d.workoutMovementId] = formatSecondsAsClock(
+          d.actualDurationSeconds
+        );
+      }
+      if (d.actualHeightInches != null) {
+        heightDrafts[d.workoutMovementId] = String(d.actualHeightInches);
+      }
+      if (d.actualRepsPerRound && d.actualRepsPerRound.length > 0) {
+        maxRepsDrafts[d.workoutMovementId] = d.actualRepsPerRound.map((n) =>
+          String(n)
+        );
+      }
     }
   }
+
+  // Seed height drafts from the prescribed values when the athlete hasn't
+  // entered anything yet — most often they used what was prescribed.
+  if (part && !existing) {
+    for (const mov of part.movements) {
+      if (mov.prescribedHeightInches != null) {
+        heightDrafts[mov.id] = String(mov.prescribedHeightInches);
+      }
+    }
+  }
+
   return {
     division: existing?.division ?? null,
     timeSeconds: existing?.timeSeconds,
@@ -197,6 +282,9 @@ function emptyPartState(
     notes: existing?.notes ?? "",
     movementScalings: scalings,
     setEntriesMap,
+    durationDrafts,
+    heightDrafts,
+    maxRepsDrafts,
   };
 }
 
@@ -344,6 +432,12 @@ interface ScoreEntryProps {
   parts: WorkoutPartDisplay[];
   initialPartId?: string;
   onSubmit?: (partId: string, score: ScoreInput) => void;
+  // Workout-level signal for the vest toggle. Pass when the workout has
+  // a vest prescription (e.g. Murph). If omitted, the vest UI is hidden.
+  workout?: Pick<
+    WorkoutDisplay,
+    "requiresVest" | "vestWeightMaleLb" | "vestWeightFemaleLb"
+  >;
 }
 
 // ============================================
@@ -358,11 +452,36 @@ export function ScoreEntry({
   parts,
   initialPartId,
   onSubmit,
+  workout,
 }: ScoreEntryProps) {
   const [activePartId, setActivePartId] = useState<string>(
     () => initialPartId ?? parts[0]?.id ?? ""
   );
   const [divisionError, setDivisionError] = useState<string | null>(null);
+  const { data: profile } = useUserProfile();
+  const userBodyWeightLb = profile?.bodyWeightLb ?? null;
+  const gender =
+    profile?.gender === "male" ||
+    profile?.gender === "female" ||
+    profile?.gender === "other"
+      ? profile.gender
+      : null;
+
+  const requiresVest = !!workout?.requiresVest;
+  const defaultVestWeightLb =
+    gender === "female"
+      ? workout?.vestWeightFemaleLb ?? workout?.vestWeightMaleLb ?? null
+      : workout?.vestWeightMaleLb ?? workout?.vestWeightFemaleLb ?? null;
+
+  // Workout-level vest state. The toggle defaults to "wore the vest" =
+  // true when the workout requires one — matches the intuition that an
+  // athlete logging a Murph score with vest on by default is the common
+  // case. Switching to "false" surfaces an inline warning but doesn't
+  // auto-flip division.
+  const [woreVest, setWoreVest] = useState<boolean>(true);
+  const [vestWeightLbDraft, setVestWeightLbDraft] = useState<string>(
+    defaultVestWeightLb != null ? String(defaultVestWeightLb) : ""
+  );
 
   // One state slot per part, seeded from each part's existing score.
   // The parent remounts ScoreEntry for each target workout, so initial seeding
@@ -472,6 +591,21 @@ export function ScoreEntry({
             };
           })
           .filter((e): e is SetEntry => e !== null);
+        const durDraft = st.durationDrafts[mov.id];
+        const durSec = durDraft ? parseDurationToSeconds(durDraft) : null;
+        const heightDraft = st.heightDrafts[mov.id];
+        const heightInches = heightDraft ? parseFloat(heightDraft) : NaN;
+        // Max-reps per-round drafts → INTEGER[]. Empty rounds become 0
+        // (so an athlete who DNF'd round 7 still gets a contiguous array
+        // matching part.rounds).
+        const maxDrafts = st.maxRepsDrafts[mov.id];
+        let actualRepsPerRound: number[] | undefined;
+        if (mov.isMaxReps && maxDrafts && maxDrafts.length > 0) {
+          actualRepsPerRound = maxDrafts.map((s) => {
+            const n = parseInt(s, 10);
+            return Number.isFinite(n) && n >= 0 ? n : 0;
+          });
+        }
         return {
           workoutMovementId: mov.id,
           wasRx: includeScalingDetails ? (scaling.wasRx ?? true) : true,
@@ -482,10 +616,26 @@ export function ScoreEntry({
             ? scaling.substitutionMovementId
             : undefined,
           setEntries: setEntries.length > 0 ? setEntries : undefined,
+          actualDurationSeconds: durSec ?? undefined,
+          actualHeightInches:
+            Number.isFinite(heightInches) && heightInches > 0
+              ? heightInches
+              : undefined,
+          actualRepsPerRound,
           notes: includeScalingDetails ? scaling.notes : undefined,
         };
       });
 
+      // Auto-sum totalReps from max-reps movements when the part has any.
+      // The user can still override via the "Total Reps" input — we
+      // prefer their explicit value when set.
+      const sumFromMaxReps = scalings.reduce((acc, s) => {
+        if (!s.actualRepsPerRound) return acc;
+        return acc + s.actualRepsPerRound.reduce((a, b) => a + b, 0);
+      }, 0);
+      const partHasMaxReps = part.movements.some((m) => m.isMaxReps);
+
+      const vestWeightNumeric = parseFloat(vestWeightLbDraft);
       const score: ScoreInput = {
         workoutId,
         workoutPartId: part.id,
@@ -494,6 +644,15 @@ export function ScoreEntry({
         notes: st.notes || undefined,
         rpe: st.rpe,
         movementScalings: scalings,
+        ...(requiresVest
+          ? {
+              woreVest,
+              vestWeightLb:
+                woreVest && Number.isFinite(vestWeightNumeric) && vestWeightNumeric > 0
+                  ? vestWeightNumeric
+                  : undefined,
+            }
+          : {}),
       };
 
       switch (part.workoutType) {
@@ -522,8 +681,16 @@ export function ScoreEntry({
         }
         case "for_reps":
         case "for_calories":
+        case "intervals":
         case "max_effort":
-          score.totalReps = st.totalReps ? parseInt(st.totalReps) : undefined;
+          // Prefer explicit total when typed; otherwise sum the max-reps
+          // movement contributions. This is what "8 rounds × max C&Js" workouts
+          // score by — the athlete enters per-round, we compute the total.
+          score.totalReps = st.totalReps
+            ? parseInt(st.totalReps)
+            : partHasMaxReps && sumFromMaxReps > 0
+              ? sumFromMaxReps
+              : undefined;
           break;
         case "emom":
         case "tabata":
@@ -535,7 +702,7 @@ export function ScoreEntry({
 
       return score;
     },
-    [workoutId]
+    [workoutId, requiresVest, woreVest, vestWeightLbDraft]
   );
 
   const partHasData = useCallback(
@@ -554,8 +721,17 @@ export function ScoreEntry({
           );
         case "for_reps":
         case "for_calories":
+        case "intervals":
         case "max_effort":
-          return !!st.totalReps;
+          return (
+            !!st.totalReps ||
+            // Per-round entries on a max-reps movement count as data — the
+            // user shouldn't have to also type the total in the explicit
+            // input when they've been clicking through round inputs.
+            Object.values(st.maxRepsDrafts).some((rounds) =>
+              rounds.some((r) => parseInt(r, 10) > 0)
+            )
+          );
         default:
           return !!st.scoreText;
       }
@@ -830,11 +1006,18 @@ export function ScoreEntry({
 
       case "for_reps":
       case "for_calories":
-      case "max_effort":
+      case "intervals":
+      case "max_effort": {
+        const partHasMax = activePart.movements.some((m) => m.isMaxReps);
         return (
           <div className="space-y-2">
             <Label htmlFor="se-total">
               {workoutType === "for_calories" ? "Total Calories" : "Total Reps"}
+              {partHasMax && (
+                <span className="ml-1 text-xs text-muted-foreground font-normal">
+                  (auto from per-round inputs)
+                </span>
+              )}
             </Label>
             <Input
               id="se-total"
@@ -844,11 +1027,12 @@ export function ScoreEntry({
               onChange={(e) =>
                 updateState(activePart.id, { totalReps: e.target.value })
               }
-              placeholder="e.g. 150"
+              placeholder={partHasMax ? "Auto-summed below" : "e.g. 150"}
               className="font-mono text-lg"
             />
           </div>
         );
+      }
 
       case "emom":
         return (
@@ -974,8 +1158,254 @@ export function ScoreEntry({
             )}
           </div>
 
+          {/* Workout-level vest toggle. Only renders when the workout
+              prescribes a vest. */}
+          {requiresVest && (
+            <div className="space-y-2 rounded-lg border border-border/40 bg-muted/20 p-3">
+              <div className="flex items-center gap-2">
+                <Shield className="size-4 text-amber-400" />
+                <Label className="text-sm font-medium flex-1">
+                  Wore the vest?
+                </Label>
+                <Switch
+                  checked={woreVest}
+                  onCheckedChange={(checked) => setWoreVest(!!checked)}
+                />
+              </div>
+              {woreVest && (
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">
+                    Vest weight (lb)
+                  </Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.5"
+                    value={vestWeightLbDraft}
+                    onChange={(e) => setVestWeightLbDraft(e.target.value)}
+                    placeholder={
+                      defaultVestWeightLb != null
+                        ? `Rx: ${defaultVestWeightLb} lb`
+                        : "e.g. 20"
+                    }
+                    className="h-7 text-xs font-mono"
+                  />
+                </div>
+              )}
+              {!woreVest && state.division === "rx" && (
+                <p className="flex items-start gap-1.5 text-[11px] text-amber-300/90">
+                  <AlertTriangle className="size-3 mt-0.5 shrink-0" />
+                  Without the vest this typically logs as Scaled. The score
+                  will keep Rx and surface a &quot;No vest&quot; badge — the
+                  leaderboard will reflect both signals.
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Type-specific inputs */}
           {renderScoreInputs()}
+
+          {/* Max-reps per-round inputs. For each movement flagged
+              isMaxReps, render N inputs (N = part.rounds, fall back to 1
+              if rounds is unset). Sum is shown live and feeds the
+              part-level totalReps on save. */}
+          {(() => {
+            const maxMovements = activePart.movements.filter(
+              (m) => m.isMaxReps
+            );
+            if (maxMovements.length === 0) return null;
+            const rounds = activePart.rounds && activePart.rounds > 0
+              ? activePart.rounds
+              : 1;
+            const totalAcrossMovements = maxMovements.reduce((acc, mov) => {
+              const drafts = state.maxRepsDrafts[mov.id] ?? [];
+              const movSum = drafts.reduce((a, s) => {
+                const n = parseInt(s, 10);
+                return a + (Number.isFinite(n) && n > 0 ? n : 0);
+              }, 0);
+              return acc + movSum;
+            }, 0);
+            return (
+              <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm font-medium flex-1">
+                    Max reps {rounds > 1 ? "per round" : ""}
+                  </Label>
+                  <span className="font-mono text-sm font-bold text-amber-300">
+                    Total: {totalAcrossMovements}
+                  </span>
+                </div>
+                {maxMovements.map((mov) => {
+                  const drafts = state.maxRepsDrafts[mov.id] ?? [];
+                  const movSum = drafts.reduce((a, s) => {
+                    const n = parseInt(s, 10);
+                    return a + (Number.isFinite(n) && n > 0 ? n : 0);
+                  }, 0);
+                  return (
+                    <div key={mov.id} className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-medium">
+                          {mov.movementName}
+                        </Label>
+                        {maxMovements.length > 1 && (
+                          <span className="text-[10px] text-muted-foreground font-mono">
+                            sub-total: {movSum}
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        className="grid gap-1.5"
+                        style={{
+                          gridTemplateColumns: `repeat(${Math.min(rounds, 5)}, minmax(0, 1fr))`,
+                        }}
+                      >
+                        {Array.from({ length: rounds }, (_, i) => (
+                          <div key={i} className="space-y-0.5">
+                            <Label className="text-[10px] text-muted-foreground text-center block">
+                              {rounds > 1 ? `R${i + 1}` : "Reps"}
+                            </Label>
+                            <Input
+                              type="number"
+                              min={0}
+                              value={drafts[i] ?? ""}
+                              onChange={(e) =>
+                                setPartStates((prev) => {
+                                  const current =
+                                    prev[activePart.id].maxRepsDrafts[mov.id] ?? [];
+                                  const updated = [...current];
+                                  for (let j = updated.length; j <= i; j++) {
+                                    updated[j] = "";
+                                  }
+                                  updated[i] = e.target.value;
+                                  return {
+                                    ...prev,
+                                    [activePart.id]: {
+                                      ...prev[activePart.id],
+                                      maxRepsDrafts: {
+                                        ...prev[activePart.id].maxRepsDrafts,
+                                        [mov.id]: updated,
+                                      },
+                                    },
+                                  };
+                                })
+                              }
+                              placeholder="0"
+                              className="h-8 text-center font-mono text-xs"
+                              aria-label={`${mov.movementName} round ${i + 1} reps`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+                <p className="text-[10px] text-muted-foreground">
+                  Sum auto-fills the workout total. Type a value in &quot;Total
+                  Reps&quot; above to override.
+                </p>
+              </div>
+            );
+          })()}
+
+          {/* Per-movement duration / height fields. Surface whenever the
+              prescription includes one of these — they're not "scaling"
+              fields, they're the canonical record of what was held / how
+              high the deficit was. Drafts persist independent of the
+              division pick. */}
+          {(() => {
+            const fields = activePart.movements
+              .map((mov) => ({
+                mov,
+                wantsDuration: mov.metricType === "duration",
+                wantsHeight: mov.prescribedHeightInches != null,
+              }))
+              .filter((f) => f.wantsDuration || f.wantsHeight);
+            if (fields.length === 0) return null;
+            return (
+              <div className="space-y-2">
+                <Label className="text-sm">Per-movement details</Label>
+                <div className="space-y-2">
+                  {fields.map(({ mov, wantsDuration, wantsHeight }) => {
+                    const durDraft = state.durationDrafts[mov.id] ?? "";
+                    const heightDraft = state.heightDrafts[mov.id] ?? "";
+                    const rxSec =
+                      mov.prescribedDurationSecondsMale ??
+                      mov.prescribedDurationSecondsFemale;
+                    return (
+                      <div
+                        key={mov.id}
+                        className="rounded-lg border border-border/40 bg-muted/20 p-2 space-y-1.5"
+                      >
+                        <div className="text-xs font-medium">
+                          {mov.movementName}
+                        </div>
+                        {wantsDuration && (
+                          <div className="space-y-0.5">
+                            <Label className="text-xs text-muted-foreground">
+                              Duration held (sec)
+                            </Label>
+                            <Input
+                              value={durDraft}
+                              onChange={(e) =>
+                                setPartStates((prev) => ({
+                                  ...prev,
+                                  [activePart.id]: {
+                                    ...prev[activePart.id],
+                                    durationDrafts: {
+                                      ...prev[activePart.id].durationDrafts,
+                                      [mov.id]: e.target.value,
+                                    },
+                                  },
+                                }))
+                              }
+                              placeholder={
+                                rxSec != null
+                                  ? `Rx: ${formatSecondsAsClock(rxSec)}`
+                                  : "Time held (e.g. :22)"
+                              }
+                              className="h-7 text-xs"
+                            />
+                          </div>
+                        )}
+                        {wantsHeight && (
+                          <div className="space-y-0.5">
+                            <Label className="text-xs text-muted-foreground">
+                              Actual height (in)
+                            </Label>
+                            <Input
+                              type="number"
+                              min={0}
+                              step="0.5"
+                              value={heightDraft}
+                              onChange={(e) =>
+                                setPartStates((prev) => ({
+                                  ...prev,
+                                  [activePart.id]: {
+                                    ...prev[activePart.id],
+                                    heightDrafts: {
+                                      ...prev[activePart.id].heightDrafts,
+                                      [mov.id]: e.target.value,
+                                    },
+                                  },
+                                }))
+                              }
+                              placeholder={
+                                mov.prescribedHeightInches != null
+                                  ? `Rx: ${mov.prescribedHeightInches} in`
+                                  : "Height used"
+                              }
+                              className="h-7 text-xs"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
 
           <Separator />
 
@@ -1080,7 +1510,11 @@ export function ScoreEntry({
                               <div className="space-y-1">
                                 {(() => {
                                   const { label, unit, placeholder } =
-                                    scaledMetricCopy(mov);
+                                    scaledMetricCopy(
+                                      mov,
+                                      userBodyWeightLb,
+                                      gender
+                                    );
                                   return (
                                     <>
                                       <Label className="text-xs text-muted-foreground">

@@ -11,8 +11,11 @@ import {
   ChevronRight,
   Loader2,
   Check,
+  Plus,
+  X,
 } from "lucide-react";
 import { MovementSearch } from "@/components/crossfit/movement-search";
+import { DurationInput } from "@/components/crossfit/duration-input";
 import { useCreateMovement } from "@/hooks/useMovements";
 import {
   parseRepScheme,
@@ -64,6 +67,7 @@ export function MovementListBuilder({
         movementName: movement.canonicalName,
         category: movement.category,
         isWeighted: movement.isWeighted,
+        is1rmApplicable: movement.is1rmApplicable,
         metricType: movement.metricType,
         prescribedReps: "",
         prescribedWeightMale: movement.commonRxWeightMale || "",
@@ -72,6 +76,13 @@ export function MovementListBuilder({
         prescribedCaloriesFemale: "",
         prescribedDistanceMale: "",
         prescribedDistanceFemale: "",
+        prescribedDurationSecondsMale: "",
+        prescribedDurationSecondsFemale: "",
+        prescribedHeightInches: "",
+        prescribedWeightMaleBwMultiplier: "",
+        prescribedWeightFemaleBwMultiplier: "",
+        tempo: "",
+        isMaxReps: false,
         rxStandard: "",
         notes: "",
       };
@@ -95,6 +106,7 @@ export function MovementListBuilder({
           movementName: created.canonicalName,
           category: created.category,
           isWeighted: created.isWeighted,
+          is1rmApplicable: created.is1rmApplicable,
           metricType: created.metricType,
           prescribedReps: "",
           prescribedWeightMale: created.commonRxWeightMale || "",
@@ -103,6 +115,13 @@ export function MovementListBuilder({
           prescribedCaloriesFemale: "",
           prescribedDistanceMale: "",
           prescribedDistanceFemale: "",
+          prescribedDurationSecondsMale: "",
+          prescribedDurationSecondsFemale: "",
+          prescribedHeightInches: "",
+          prescribedWeightMaleBwMultiplier: "",
+          prescribedWeightFemaleBwMultiplier: "",
+          tempo: "",
+          isMaxReps: false,
           rxStandard: "",
           notes: "",
         };
@@ -218,56 +237,75 @@ export function MovementListBuilder({
                 </div>
               </div>
 
-              {/* Reps — always visible. For_load uses the per-movement rep
-                  scheme (e.g. "10-10-7-7-3-3-3" for a deadlift wave). */}
-              <RepSchemeField
-                value={mov.prescribedReps}
-                onChange={(reps) =>
-                  updateMovement(mov.tempId, { prescribedReps: reps })
-                }
-                promoteSequenceToLadder={!!mov.promoteSequenceToLadder}
-                onPromoteChange={(promote) =>
-                  updateMovement(mov.tempId, {
-                    promoteSequenceToLadder: promote,
-                  })
-                }
-                workoutType={workoutType}
-              />
+              {/* Reps — visible for everything except duration-only
+                  movements (Rest, Plank, etc.). For_load uses the
+                  per-movement rep scheme (e.g. "10-10-7-7-3-3-3" for a
+                  deadlift wave). Suppressed entirely when isMaxReps is
+                  on (the count comes from score-entry, per round). */}
+              {mov.metricType !== "duration" && !mov.isMaxReps && (
+                <RepSchemeField
+                  value={mov.prescribedReps}
+                  onChange={(reps) =>
+                    updateMovement(mov.tempId, { prescribedReps: reps })
+                  }
+                  promoteSequenceToLadder={!!mov.promoteSequenceToLadder}
+                  onPromoteChange={(promote) =>
+                    updateMovement(mov.tempId, {
+                      promoteSequenceToLadder: promote,
+                    })
+                  }
+                  workoutType={workoutType}
+                  hasTimeCap={
+                    !!mov.prescribedDurationSecondsMale ||
+                    !!mov.prescribedDurationSecondsFemale
+                  }
+                  onAddTimeCap={() =>
+                    // Tap reveals duration inputs by default-seeding empty
+                    // strings the user can type into. We use ":30" as a
+                    // hint by leaving the field empty so the placeholder
+                    // shows.
+                    updateMovement(mov.tempId, {
+                      prescribedDurationSecondsMale: " ",
+                    })
+                  }
+                />
+              )}
+
+              {/* Max reps toggle — when on, this movement IS the score.
+                  Hides the reps integer; surfaces a MAX badge. */}
+              <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!!mov.isMaxReps}
+                  onChange={(e) =>
+                    updateMovement(mov.tempId, {
+                      isMaxReps: e.target.checked,
+                      // When toggling on, clear the reps prefix so it
+                      // doesn't render alongside the MAX badge. When
+                      // toggling off, the user can re-type as needed.
+                      ...(e.target.checked
+                        ? { prescribedReps: "" }
+                        : {}),
+                    })
+                  }
+                  className="size-3 cursor-pointer"
+                />
+                Max reps (score)
+                {mov.isMaxReps && (
+                  <span className="rounded bg-amber-500/15 px-1 py-px text-[10px] font-bold text-amber-300">
+                    MAX
+                  </span>
+                )}
+              </label>
 
               {/* Metric inputs — gender-split, metric-type-aware. */}
               {mov.metricType === "weight" && showRxWeights && (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">
-                      Rx Weight (M)
-                    </Label>
-                    <Input
-                      value={mov.prescribedWeightMale}
-                      onChange={(e) =>
-                        updateMovement(mov.tempId, {
-                          prescribedWeightMale: e.target.value,
-                        })
-                      }
-                      placeholder="e.g. 135"
-                      className="h-7 text-xs"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">
-                      Rx Weight (F)
-                    </Label>
-                    <Input
-                      value={mov.prescribedWeightFemale}
-                      onChange={(e) =>
-                        updateMovement(mov.tempId, {
-                          prescribedWeightFemale: e.target.value,
-                        })
-                      }
-                      placeholder="e.g. 95"
-                      className="h-7 text-xs"
-                    />
-                  </div>
-                </div>
+                <WeightOrBwInputs
+                  movement={mov}
+                  onUpdate={(updates) =>
+                    updateMovement(mov.tempId, updates)
+                  }
+                />
               )}
 
               {mov.metricType === "calories" && (
@@ -348,6 +386,21 @@ export function MovementListBuilder({
                 </div>
               )}
 
+              {/* Duration metric inputs — gender-split. Visible whenever
+                  the movement is "duration"-typed OR the user opted in to
+                  a time cap on a reps movement. */}
+              {(mov.metricType === "duration" ||
+                mov.prescribedDurationSecondsMale ||
+                mov.prescribedDurationSecondsFemale) && (
+                <DurationFields
+                  movement={mov}
+                  onUpdate={(updates) =>
+                    updateMovement(mov.tempId, updates)
+                  }
+                  showClearButton={mov.metricType !== "duration"}
+                />
+              )}
+
               {/* Implements per rep — only relevant for handheld pairs (1 vs 2
                   dumbbells/kettlebells). Barbells, sandbags, machines have an
                   implicit count of 1, so the toggle is just noise. */}
@@ -386,7 +439,8 @@ export function MovementListBuilder({
                   </div>
                 )}
 
-              {/* Expanded fields — metric type, weighted toggle, rx standard */}
+              {/* Expanded fields — metric type, weighted toggle, tempo,
+                  height, rx standard */}
               {isExpanded && (
                 <div className="space-y-2 pt-1">
                   <div className="space-y-1">
@@ -395,7 +449,13 @@ export function MovementListBuilder({
                     </Label>
                     <div className="flex flex-wrap gap-1">
                       {(
-                        ["reps", "weight", "calories", "distance"] as const
+                        [
+                          "reps",
+                          "weight",
+                          "calories",
+                          "distance",
+                          "duration",
+                        ] as const
                       ).map((mt) => {
                         const selected = mov.metricType === mt;
                         return (
@@ -410,7 +470,11 @@ export function MovementListBuilder({
                               // for_load per-set weight UI continues to surface
                               // for weighted movements without a separate toggle.
                               if (mt === "weight") updates.isWeighted = true;
-                              if (mt === "calories" || mt === "distance")
+                              if (
+                                mt === "calories" ||
+                                mt === "distance" ||
+                                mt === "duration"
+                              )
                                 updates.isWeighted = false;
                               updateMovement(mov.tempId, updates);
                             }}
@@ -426,6 +490,45 @@ export function MovementListBuilder({
                       })}
                     </div>
                   </div>
+
+                  {/* Tempo — free text. Renders inline next to reps in
+                      display surfaces ("10 BS @ 30X1"). */}
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">
+                      Tempo (optional)
+                    </Label>
+                    <Input
+                      value={mov.tempo}
+                      onChange={(e) =>
+                        updateMovement(mov.tempId, { tempo: e.target.value })
+                      }
+                      placeholder="e.g. 30X1, 21X1"
+                      className="h-7 text-xs"
+                    />
+                  </div>
+
+                  {/* Height — relevant on deficit pushups, box jumps, etc.
+                      Always available in expanded; the field is just text
+                      so users can type "4" or "4.5". */}
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">
+                      Height (in) — optional
+                    </Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.5"
+                      value={mov.prescribedHeightInches}
+                      onChange={(e) =>
+                        updateMovement(mov.tempId, {
+                          prescribedHeightInches: e.target.value,
+                        })
+                      }
+                      placeholder="e.g. 4 (deficit), 24 (box)"
+                      className="h-7 text-xs"
+                    />
+                  </div>
+
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">
                       Rx Standard / Notes
@@ -485,6 +588,8 @@ interface RepSchemeFieldProps {
   promoteSequenceToLadder: boolean;
   onPromoteChange: (next: boolean) => void;
   workoutType?: WorkoutType;
+  hasTimeCap?: boolean;
+  onAddTimeCap?: () => void;
 }
 
 function RepSchemeField({
@@ -493,6 +598,8 @@ function RepSchemeField({
   promoteSequenceToLadder,
   onPromoteChange,
   workoutType,
+  hasTimeCap,
+  onAddTimeCap,
 }: RepSchemeFieldProps) {
   const parsed = parseRepScheme(value);
   const promotable = !!(parsed && canPromoteSequenceToLadder(parsed));
@@ -574,6 +681,207 @@ function RepSchemeField({
               </span>
             )}
         </label>
+      )}
+      {/* + Time cap — surface only on reps-metric movements that don't
+          already carry a duration. Lets users prescribe "10 BS in :40" or
+          "15 burpees in :40". */}
+      {!hasTimeCap && onAddTimeCap && workoutType !== "for_load" && (
+        <button
+          type="button"
+          onClick={onAddTimeCap}
+          className="inline-flex items-center gap-1 text-[11px] text-primary/80 hover:text-primary"
+        >
+          <Plus className="size-3" />
+          Add time cap
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ============================================
+// WeightOrBwInputs
+// ============================================
+//
+// The weight metric block. Default mode shows the gendered lb pair; the
+// "Use × BW" toggle (only available on 1RM-applicable barbell lifts)
+// swaps to the BW-multiplier inputs. Mutually exclusive at the UI level
+// so users can't accidentally set both.
+
+function WeightOrBwInputs({
+  movement,
+  onUpdate,
+}: {
+  movement: WorkoutBuilderMovement;
+  onUpdate: (updates: Partial<WorkoutBuilderMovement>) => void;
+}) {
+  const useBw = !!movement.useBwMultiplier;
+  // BW multiplier notation only makes sense on barbell 1RMs ("1.5× BW
+  // back squat"). Hide the toggle elsewhere so users don't tag a
+  // pull-up as "1.5× BW".
+  const canUseBw = !!movement.is1rmApplicable;
+
+  return (
+    <div className="space-y-1.5">
+      {!useBw ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">
+              Rx Weight (M)
+            </Label>
+            <Input
+              value={movement.prescribedWeightMale}
+              onChange={(e) =>
+                onUpdate({ prescribedWeightMale: e.target.value })
+              }
+              placeholder="e.g. 135"
+              className="h-7 text-xs"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">
+              Rx Weight (F)
+            </Label>
+            <Input
+              value={movement.prescribedWeightFemale}
+              onChange={(e) =>
+                onUpdate({ prescribedWeightFemale: e.target.value })
+              }
+              placeholder="e.g. 95"
+              className="h-7 text-xs"
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">
+              × Bodyweight (M)
+            </Label>
+            <Input
+              type="number"
+              min={0}
+              step="0.05"
+              value={movement.prescribedWeightMaleBwMultiplier}
+              onChange={(e) =>
+                onUpdate({
+                  prescribedWeightMaleBwMultiplier: e.target.value,
+                })
+              }
+              placeholder="e.g. 1.5"
+              className="h-7 text-xs"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">
+              × Bodyweight (F)
+            </Label>
+            <Input
+              type="number"
+              min={0}
+              step="0.05"
+              value={movement.prescribedWeightFemaleBwMultiplier}
+              onChange={(e) =>
+                onUpdate({
+                  prescribedWeightFemaleBwMultiplier: e.target.value,
+                })
+              }
+              placeholder="e.g. 1.25"
+              className="h-7 text-xs"
+            />
+          </div>
+        </div>
+      )}
+      {canUseBw && (
+        <button
+          type="button"
+          onClick={() =>
+            onUpdate(
+              useBw
+                ? {
+                    useBwMultiplier: false,
+                    prescribedWeightMaleBwMultiplier: "",
+                    prescribedWeightFemaleBwMultiplier: "",
+                  }
+                : {
+                    useBwMultiplier: true,
+                    prescribedWeightMale: "",
+                    prescribedWeightFemale: "",
+                  }
+            )
+          }
+          className="text-[11px] text-primary/80 hover:text-primary"
+        >
+          {useBw ? "Use lb instead" : "Use × BW instead"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ============================================
+// DurationFields
+// ============================================
+//
+// Gender-split duration inputs. Used for "duration"-metric movements
+// (Rest, Plank, etc.) and for time-capped reps movements (the "+ Time
+// cap" path).
+
+function DurationFields({
+  movement,
+  onUpdate,
+  showClearButton,
+}: {
+  movement: WorkoutBuilderMovement;
+  onUpdate: (updates: Partial<WorkoutBuilderMovement>) => void;
+  showClearButton: boolean;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">
+            Duration (M)
+          </Label>
+          <DurationInput
+            value={movement.prescribedDurationSecondsMale ?? ""}
+            onChange={(v) =>
+              onUpdate({ prescribedDurationSecondsMale: v })
+            }
+            placeholder=":30 or 1:30"
+            className="h-7 text-xs"
+            ariaLabel="Prescribed duration (male)"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">
+            Duration (F)
+          </Label>
+          <DurationInput
+            value={movement.prescribedDurationSecondsFemale ?? ""}
+            onChange={(v) =>
+              onUpdate({ prescribedDurationSecondsFemale: v })
+            }
+            placeholder=":30 or 1:30"
+            className="h-7 text-xs"
+            ariaLabel="Prescribed duration (female)"
+          />
+        </div>
+      </div>
+      {showClearButton && (
+        <button
+          type="button"
+          onClick={() =>
+            onUpdate({
+              prescribedDurationSecondsMale: "",
+              prescribedDurationSecondsFemale: "",
+            })
+          }
+          className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+        >
+          <X className="size-3" />
+          Remove time cap
+        </button>
       )}
     </div>
   );

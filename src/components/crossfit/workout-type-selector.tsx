@@ -9,6 +9,7 @@ import {
   Flame,
   BarChart3,
   Zap,
+  Repeat,
   MoreHorizontal,
 } from "lucide-react";
 import type { WorkoutType } from "@/types/crossfit";
@@ -26,6 +27,7 @@ const WORKOUT_TYPE_OPTIONS: {
   { value: "for_reps", label: "For Reps", icon: Hash, color: "bg-green-500/20 text-green-400 border-green-500/30" },
   { value: "for_calories", label: "For Calories", icon: Flame, color: "bg-orange-500/20 text-orange-400 border-orange-500/30" },
   { value: "tabata", label: "Tabata", icon: BarChart3, color: "bg-pink-500/20 text-pink-400 border-pink-500/30" },
+  { value: "intervals", label: "Intervals", icon: Repeat, color: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30" },
   { value: "max_effort", label: "Max Effort", icon: Zap, color: "bg-rose-500/20 text-rose-400 border-rose-500/30" },
   { value: "other", label: "Other", icon: MoreHorizontal, color: "bg-zinc-500/20 text-zinc-400 border-zinc-500/30" },
 ];

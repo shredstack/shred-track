@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { WorkoutTypeSelector } from "@/components/crossfit/workout-type-selector";
 import { MovementListBuilder } from "@/components/crossfit/movement-list-builder";
+import { IntervalsConfig } from "@/components/crossfit/intervals-config";
 import type {
   WorkoutBuilderMovement,
   WorkoutBuilderPart,
@@ -166,6 +167,22 @@ export function WorkoutPartConfig({
             placeholder="e.g. 5"
             className={inputHeight}
           />
+        </div>
+      )}
+
+      {part.workoutType === "intervals" && (
+        <div className="space-y-1.5">
+          <Label className={labelClass}>Interval cadence</Label>
+          <IntervalsConfig
+            rounds={part.rounds}
+            intervalWorkSeconds={part.intervalWorkSeconds}
+            intervalRestSeconds={part.intervalRestSeconds}
+            onChange={onChange}
+            compact={compact}
+          />
+          <p className="text-[11px] text-muted-foreground pt-1">
+            EMOM-style work + rest cadence. Score is total reps across all rounds.
+          </p>
         </div>
       )}
 

@@ -119,14 +119,28 @@ function emptyMovement(name: string, overrides?: Partial<{
   substitutionMovementName: string | null;
   rxStandard: string | null;
   prescribedReps: string | null;
+  prescribedDurationSeconds: number | null;
+  prescribedHeightInches: number | null;
+  tempo: string | null;
+  isMaxReps: boolean;
+  actualDurationSeconds: number | null;
+  actualHeightInches: number | null;
+  actualRepsPerRound: number[] | null;
 }>) {
   return {
     movementName: name,
     prescribedReps: overrides?.prescribedReps ?? null,
     prescribedRxWeightLb: overrides?.prescribedRxWeightLb ?? null,
     rxStandard: overrides?.rxStandard ?? null,
+    prescribedDurationSeconds: overrides?.prescribedDurationSeconds ?? null,
+    prescribedHeightInches: overrides?.prescribedHeightInches ?? null,
+    tempo: overrides?.tempo ?? null,
+    isMaxReps: overrides?.isMaxReps ?? false,
     wasRx: overrides?.wasRx ?? true,
     actualWeightLb: overrides?.actualWeightLb ?? null,
+    actualDurationSeconds: overrides?.actualDurationSeconds ?? null,
+    actualHeightInches: overrides?.actualHeightInches ?? null,
+    actualRepsPerRound: overrides?.actualRepsPerRound ?? null,
     modification: overrides?.modification ?? null,
     substitutionMovementName: overrides?.substitutionMovementName ?? null,
     movementNote: overrides?.movementNote ?? null,

@@ -12,6 +12,7 @@ export const MOVEMENT_METRIC_TYPES = [
   "weight",
   "calories",
   "distance",
+  "duration",
 ] as const;
 
 export type MovementMetricType = (typeof MOVEMENT_METRIC_TYPES)[number];
@@ -28,6 +29,7 @@ export const WORKOUT_TYPES = [
   "for_calories",
   "emom",
   "tabata",
+  "intervals",
   "max_effort",
   "other",
 ] as const;
@@ -42,6 +44,7 @@ export const WORKOUT_TYPE_LABELS: Record<WorkoutType, string> = {
   for_calories: "For Calories",
   emom: "EMOM",
   tabata: "Tabata",
+  intervals: "Intervals",
   max_effort: "Max Effort",
   other: "Other",
 };
@@ -54,6 +57,7 @@ export const WORKOUT_TYPE_COLORS: Record<WorkoutType, string> = {
   for_calories: "bg-orange-500/20 text-orange-400 border-orange-500/30",
   emom: "bg-purple-500/20 text-purple-400 border-purple-500/30",
   tabata: "bg-pink-500/20 text-pink-400 border-pink-500/30",
+  intervals: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30",
   max_effort: "bg-rose-500/20 text-rose-400 border-rose-500/30",
   other: "bg-zinc-500/20 text-zinc-400 border-zinc-500/30",
 };
@@ -239,6 +243,9 @@ export interface BenchmarkWorkout {
   isSystem: boolean;
   createdBy: string | null;
   communityId: string | null;
+  requiresVest?: boolean;
+  vestWeightMaleLb?: number | null;
+  vestWeightFemaleLb?: number | null;
   movements: BenchmarkMovement[];
   userStats?: BenchmarkUserStats;
 }
@@ -251,6 +258,7 @@ export interface BenchmarkMovement {
   prescribedReps: string | null;
   prescribedWeightMale: number | null;
   prescribedWeightFemale: number | null;
+  isMaxReps?: boolean;
   rxStandard: string | null;
 }
 
@@ -273,6 +281,13 @@ export interface WorkoutMovementDisplay {
   prescribedCaloriesFemale?: number;
   prescribedDistanceMale?: number;
   prescribedDistanceFemale?: number;
+  prescribedDurationSecondsMale?: number;
+  prescribedDurationSecondsFemale?: number;
+  prescribedHeightInches?: number;
+  prescribedWeightMaleBwMultiplier?: number;
+  prescribedWeightFemaleBwMultiplier?: number;
+  tempo?: string;
+  isMaxReps?: boolean;
   equipmentCount?: number;
   rxStandard?: string;
   notes?: string;
@@ -291,6 +306,8 @@ export interface WorkoutPartDisplay {
   timeCapSeconds?: number;
   amrapDurationSeconds?: number;
   emomIntervalSeconds?: number;
+  intervalWorkSeconds?: number;
+  intervalRestSeconds?: number;
   repScheme?: string;
   rounds?: number;
   structure?: WorkoutPartStructure;
@@ -308,6 +325,9 @@ export interface WorkoutDisplay {
   createdBy: string;
   createdByName?: string;
   benchmarkWorkoutId?: string | null;
+  requiresVest?: boolean;
+  vestWeightMaleLb?: number;
+  vestWeightFemaleLb?: number;
 }
 
 export interface ScoreDisplay {
@@ -323,6 +343,11 @@ export interface ScoreDisplay {
   hitTimeCap: boolean;
   notes?: string;
   rpe?: number;
+  // Vest the athlete actually wore. Only meaningful when the workout
+  // requires a vest. Surfaces as a "Wore vest" / "No vest" badge in the
+  // score row.
+  woreVest?: boolean | null;
+  vestWeightLb?: number;
   userName?: string;
   scalingDetails?: MovementScalingDisplay[];
   movementDetails?: ScoreMovementDetailDisplay[];
@@ -346,6 +371,10 @@ export interface ScoreMovementDetailDisplay {
   modification?: string;
   substitutionMovementId?: string;
   setEntries?: SetEntry[];
+  actualDurationSeconds?: number;
+  actualHeightInches?: number;
+  // Per-round rep counts when this is a max-reps movement.
+  actualRepsPerRound?: number[];
   notes?: string;
 }
 
@@ -376,6 +405,8 @@ export interface ScoreInput {
   hitTimeCap: boolean;
   notes?: string;
   rpe?: number;
+  woreVest?: boolean;
+  vestWeightLb?: number;
   movementScalings: MovementScaling[];
 }
 
@@ -387,6 +418,9 @@ export interface MovementScaling {
   modification?: string;
   substitutionMovementId?: string;
   setEntries?: SetEntry[];
+  actualDurationSeconds?: number;
+  actualHeightInches?: number;
+  actualRepsPerRound?: number[];
   notes?: string;
 }
 
@@ -403,6 +437,7 @@ export interface WorkoutBuilderMovement {
   movementName: string;
   category?: MovementCategory;
   isWeighted: boolean;
+  is1rmApplicable?: boolean;
   metricType: MovementMetricType;
   prescribedReps: string;
   // When true and `prescribedReps` is a closed arithmetic sequence (e.g.
@@ -416,6 +451,20 @@ export interface WorkoutBuilderMovement {
   prescribedCaloriesFemale: string;
   prescribedDistanceMale: string;
   prescribedDistanceFemale: string;
+  // Free-text duration (parsed at save). Accepts "30", ":30", "1:30", etc.
+  prescribedDurationSecondsMale: string;
+  prescribedDurationSecondsFemale: string;
+  prescribedHeightInches: string;
+  // Builder-only flag: when true, the BW-multiplier inputs are surfaced
+  // and the absolute lb fields are ignored on save. Lets the user pick
+  // one notation explicitly without forcing them to clear the other.
+  useBwMultiplier?: boolean;
+  prescribedWeightMaleBwMultiplier: string;
+  prescribedWeightFemaleBwMultiplier: string;
+  tempo: string;
+  // When true, the prescribedReps field is suppressed and the score-entry
+  // surfaces per-round rep inputs that auto-sum into the part's total.
+  isMaxReps?: boolean;
   equipmentCount?: number;
   rxStandard: string;
   notes: string;
@@ -432,6 +481,10 @@ export interface WorkoutBuilderPart {
   timeCapMinutes: string;
   amrapDurationMinutes: string;
   emomIntervalSeconds: string;
+  // "Intervals" workout type: per-round work + rest cadence (free-text
+  // mm:ss-style strings; parsed on save).
+  intervalWorkSeconds: string;
+  intervalRestSeconds: string;
   // Workout-level rep scheme. Retained on the type for legacy / parsed
   // workouts; the Smart Builder no longer surfaces it directly — for_load
   // expresses its scheme per-movement via `prescribedReps`, and round-based
@@ -448,6 +501,10 @@ export interface WorkoutBuilderForm {
   workoutDate: string;
   parts: WorkoutBuilderPart[];
   benchmarkWorkoutId?: string | null;
+  // Workout-level vest fields (Murph requires_vest = true / 20 / 14).
+  requiresVest?: boolean;
+  vestWeightMaleLb?: string;
+  vestWeightFemaleLb?: string;
 }
 
 // ============================================

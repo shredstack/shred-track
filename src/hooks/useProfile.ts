@@ -10,6 +10,9 @@ export interface UserProfile {
   email: string;
   gender: string | null;
   unitPreference: string;
+  // Pounds. Used to resolve "1.5× BW" Rx prescriptions to a concrete
+  // weight; null means BW prescriptions display symbolically.
+  bodyWeightLb: number | null;
   isAdmin: boolean;
   isVip: boolean;
   createdAt: string;
@@ -32,6 +35,7 @@ export function useUpdateUserProfile() {
     mutationFn: async (data: {
       name?: string;
       gender?: "male" | "female" | "other" | null;
+      bodyWeightLb?: number | null;
     }) => {
       const res = await fetch("/api/user/profile", {
         method: "PUT",
