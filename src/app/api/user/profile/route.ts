@@ -71,7 +71,7 @@ export async function PUT(req: Request) {
           : parseFloat(body.bodyWeightLb);
       if (!Number.isFinite(n) || n <= 0 || n > 1000) {
         return NextResponse.json(
-          { error: "Invalid bodyWeightLb (expect 0–1000 lb)" },
+          { error: "Invalid bodyWeightLb (expect 1–1000 lb)" },
           { status: 400 }
         );
       }

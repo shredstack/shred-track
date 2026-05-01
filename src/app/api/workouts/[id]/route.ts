@@ -333,6 +333,27 @@ export async function PUT(
     return NextResponse.json({ error: "Workout not found or not owned by you" }, { status: 404 });
   }
 
+  // Vest validation: same rule as POST — if the resulting state has
+  // requiresVest=true, at least one gendered vest weight must be set.
+  // Compute the *final* values (incoming if provided, else existing) so a
+  // partial PUT can't leave the row in an inconsistent state.
+  if (body.requiresVest === true) {
+    const finalMaleLb =
+      body.vestWeightMaleLb !== undefined
+        ? toNumericOrNull(body.vestWeightMaleLb)
+        : existing.vestWeightMaleLb;
+    const finalFemaleLb =
+      body.vestWeightFemaleLb !== undefined
+        ? toNumericOrNull(body.vestWeightFemaleLb)
+        : existing.vestWeightFemaleLb;
+    if (finalMaleLb == null && finalFemaleLb == null) {
+      return NextResponse.json(
+        { error: "Vest weight is required when requiresVest is true" },
+        { status: 400 }
+      );
+    }
+  }
+
   // Metadata-only update path (no parts in body) — preserves the original
   // narrow PUT behavior so existing callers keep working.
   if (!Array.isArray(body.parts)) {

@@ -145,7 +145,6 @@ async function findBenchmarkMatch(
     if (!near) {
       const diff = multisetSymmetricDiff(bwMovements, wantMultiset);
       if (diff <= 1) near = { id: bw.id, name: bw.name };
-      else if (diff === 0) near = { id: bw.id, name: bw.name };
     }
   }
 
