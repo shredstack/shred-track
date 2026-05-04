@@ -348,34 +348,51 @@ function parseMovementLine(line: string): ParsedMovement | null {
   }
 
   let reps: string | undefined;
+  let caloriesMale: number | undefined;
+  let caloriesFemale: number | undefined;
+  let distanceMaleMeters: number | undefined;
+  let distanceFemaleMeters: number | undefined;
   let movementText = trimmed;
   let confidence = 0.5;
 
-  // Extract reps from the beginning: "21 Thrusters", "15 Pull-Ups"
-  const repsMatch = movementText.match(
-    /^(\d+(?:\s*[x×]\s*\d+)?(?:\s*(?:ea(?:ch)?|per\s+(?:side|arm|leg)))?)\s+(.+)/i
-  );
-  if (repsMatch) {
-    reps = repsMatch[1];
-    movementText = repsMatch[2];
-  }
-
-  // Extract distance-based reps: "400m Run", "1 mile Run"
-  const distanceMatch = movementText.match(
-    /^(\d+(?:\.\d+)?\s*(?:m|meter|meters|ft|feet|mi(?:le)?s?|km|k))\s+(.+)/i
-  );
-  if (distanceMatch) {
-    reps = distanceMatch[1];
-    movementText = distanceMatch[2];
-  }
-
-  // Extract calorie-based: "30 Cal Row", "20/15 Cal Bike"
+  // Extract calorie-based: "30 Cal Row", "20/15 Cal Bike", "Row 21/15 cal"
+  // (run before the generic reps matcher so "21 Cal Row" doesn't get
+  // captured as reps="21" + movement="Cal Row").
   const calMatch = movementText.match(
-    /^(\d+(?:\/\d+)?)\s*cal(?:orie)?s?\s+(.+)/i
+    /^(\d+)(?:\/(\d+))?\s*cal(?:orie)?s?\s+(.+)/i
   );
+  const calTrailingMatch = !calMatch
+    ? movementText.match(/^(.+?)\s+(\d+)(?:\/(\d+))?\s*cal(?:orie)?s?\s*$/i)
+    : null;
   if (calMatch) {
-    reps = `${calMatch[1]} Cal`;
-    movementText = calMatch[2];
+    caloriesMale = parseInt(calMatch[1], 10);
+    if (calMatch[2]) caloriesFemale = parseInt(calMatch[2], 10);
+    movementText = calMatch[3];
+  } else if (calTrailingMatch) {
+    movementText = calTrailingMatch[1];
+    caloriesMale = parseInt(calTrailingMatch[2], 10);
+    if (calTrailingMatch[3]) caloriesFemale = parseInt(calTrailingMatch[3], 10);
+  } else {
+    // Extract distance-based: "400m Run", "1 mile Run", "800/600 m Run"
+    const distanceMatch = movementText.match(
+      /^(\d+(?:\.\d+)?)(?:\/(\d+(?:\.\d+)?))?\s*(m|meter|meters|ft|feet|mi(?:le)?s?|km|k)\b\s+(.+)/i
+    );
+    if (distanceMatch) {
+      const unit = distanceMatch[3].toLowerCase();
+      distanceMaleMeters = toMeters(parseFloat(distanceMatch[1]), unit);
+      if (distanceMatch[2])
+        distanceFemaleMeters = toMeters(parseFloat(distanceMatch[2]), unit);
+      movementText = distanceMatch[4];
+    } else {
+      // Generic reps prefix: "21 Thrusters", "15 Pull-Ups"
+      const repsMatch = movementText.match(
+        /^(\d+(?:\s*[x×]\s*\d+)?(?:\s*(?:ea(?:ch)?|per\s+(?:side|arm|leg)))?)\s+(.+)/i
+      );
+      if (repsMatch) {
+        reps = repsMatch[1];
+        movementText = repsMatch[2];
+      }
+    }
   }
 
   // Extract weight from the movement text
@@ -432,11 +449,24 @@ function parseMovementLine(line: string): ParsedMovement | null {
     name: movementText,
     matchedCanonicalName: matchedName,
     reps,
+    caloriesMale,
+    caloriesFemale,
+    distanceMaleMeters,
+    distanceFemaleMeters,
     weightMale: weight?.male,
     weightFemale: weight?.female,
     weightUnit: weight?.unit,
     confidence,
   };
+}
+
+function toMeters(value: number, unit: string): number {
+  const u = unit.toLowerCase();
+  if (u.startsWith("km") || u === "k") return Math.round(value * 1000);
+  if (u.startsWith("mi")) return Math.round(value * 1609.344);
+  if (u.startsWith("ft") || u.startsWith("feet")) return Math.round(value * 0.3048);
+  // m | meter | meters
+  return Math.round(value);
 }
 
 // ============================================

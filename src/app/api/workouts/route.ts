@@ -5,6 +5,7 @@ import {
   workoutParts,
   workoutMovements,
   benchmarkWorkouts,
+  benchmarkWorkoutParts,
   benchmarkWorkoutMovements,
   movements,
   scores,
@@ -46,10 +47,13 @@ interface PartMovementInput {
   prescribedDurationSecondsMale?: number | string;
   prescribedDurationSecondsFemale?: number | string;
   prescribedHeightInches?: number | string;
+  prescribedHeightInchesMale?: number | string;
+  prescribedHeightInchesFemale?: number | string;
   prescribedWeightMaleBwMultiplier?: number | string;
   prescribedWeightFemaleBwMultiplier?: number | string;
   tempo?: string;
   isMaxReps?: boolean;
+  isSideCadence?: boolean;
 }
 
 interface PartInput {
@@ -60,6 +64,9 @@ interface PartInput {
   emomIntervalSeconds?: number;
   intervalWorkSeconds?: number | string;
   intervalRestSeconds?: number | string;
+  intervalRounds?: { workSeconds: number | string; restSeconds: number | string }[];
+  sideCadenceIntervalSeconds?: number | string;
+  sideCadenceOpenEnded?: boolean;
   repScheme?: string;
   rounds?: number;
   structure?: string;
@@ -157,12 +164,17 @@ export async function GET(req: NextRequest) {
         prescribedDurationSecondsFemale:
           workoutMovements.prescribedDurationSecondsFemale,
         prescribedHeightInches: workoutMovements.prescribedHeightInches,
+        prescribedHeightInchesMale:
+          workoutMovements.prescribedHeightInchesMale,
+        prescribedHeightInchesFemale:
+          workoutMovements.prescribedHeightInchesFemale,
         prescribedWeightMaleBwMultiplier:
           workoutMovements.prescribedWeightMaleBwMultiplier,
         prescribedWeightFemaleBwMultiplier:
           workoutMovements.prescribedWeightFemaleBwMultiplier,
         tempo: workoutMovements.tempo,
         isMaxReps: workoutMovements.isMaxReps,
+        isSideCadence: workoutMovements.isSideCadence,
         repSchemeParsed: workoutMovements.repSchemeParsed,
         equipmentCount: workoutMovements.equipmentCount,
         rxStandard: workoutMovements.rxStandard,
@@ -227,6 +239,8 @@ export async function GET(req: NextRequest) {
       w.vestWeightMaleLb != null ? Number(w.vestWeightMaleLb) : null,
     vestWeightFemaleLb:
       w.vestWeightFemaleLb != null ? Number(w.vestWeightFemaleLb) : null,
+    isPartner: w.isPartner,
+    partnerCount: w.partnerCount,
     parts: (partsByWorkout.get(w.id) ?? []).map((p) => {
       const score = scoreByPart.get(p.id);
       return {
@@ -239,6 +253,9 @@ export async function GET(req: NextRequest) {
         emomIntervalSeconds: p.emomIntervalSeconds,
         intervalWorkSeconds: p.intervalWorkSeconds,
         intervalRestSeconds: p.intervalRestSeconds,
+        intervalRounds: p.intervalRounds,
+        sideCadenceIntervalSeconds: p.sideCadenceIntervalSeconds,
+        sideCadenceOpenEnded: p.sideCadenceOpenEnded,
         repScheme: p.repScheme,
         rounds: p.rounds,
         structure: p.structure,
@@ -266,6 +283,14 @@ export async function GET(req: NextRequest) {
             m.prescribedHeightInches != null
               ? Number(m.prescribedHeightInches)
               : undefined,
+          prescribedHeightInchesMale:
+            m.prescribedHeightInchesMale != null
+              ? Number(m.prescribedHeightInchesMale)
+              : undefined,
+          prescribedHeightInchesFemale:
+            m.prescribedHeightInchesFemale != null
+              ? Number(m.prescribedHeightInchesFemale)
+              : undefined,
           prescribedWeightMaleBwMultiplier:
             m.prescribedWeightMaleBwMultiplier != null
               ? Number(m.prescribedWeightMaleBwMultiplier)
@@ -276,6 +301,7 @@ export async function GET(req: NextRequest) {
               : undefined,
           tempo: m.tempo ?? undefined,
           isMaxReps: !!m.isMaxReps,
+          isSideCadence: !!m.isSideCadence,
           repSchemeParsed: m.repSchemeParsed,
           equipmentCount: m.equipmentCount,
           rxStandard: m.rxStandard,
@@ -349,6 +375,8 @@ export async function POST(req: NextRequest) {
     requiresVest,
     vestWeightMaleLb,
     vestWeightFemaleLb,
+    isPartner,
+    partnerCount,
   } = body;
 
   // Vest validation: if the workout claims it requires a vest, at least
@@ -381,10 +409,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Benchmark not found" }, { status: 404 });
     }
 
+    // Multi-part benchmark support — when the benchmark has explicit
+    // parts (newer / Drew-style), copy each part to the new workout. The
+    // legacy single-part path is preserved as a fallback for benchmarks
+    // that haven't been migrated to parts.
+    const bmParts = await db
+      .select()
+      .from(benchmarkWorkoutParts)
+      .where(eq(benchmarkWorkoutParts.benchmarkWorkoutId, benchmarkWorkoutId))
+      .orderBy(benchmarkWorkoutParts.orderIndex);
+
     const bmMovements = await db
       .select({
         movementId: benchmarkWorkoutMovements.movementId,
         orderIndex: benchmarkWorkoutMovements.orderIndex,
+        benchmarkWorkoutPartId: benchmarkWorkoutMovements.benchmarkWorkoutPartId,
         prescribedReps: benchmarkWorkoutMovements.prescribedReps,
         prescribedWeightMale: benchmarkWorkoutMovements.prescribedWeightMale,
         prescribedWeightFemale: benchmarkWorkoutMovements.prescribedWeightFemale,
@@ -419,38 +458,99 @@ export async function POST(req: NextRequest) {
           requiresVest: !!benchmark.requiresVest,
           vestWeightMaleLb: benchmark.vestWeightMaleLb ?? null,
           vestWeightFemaleLb: benchmark.vestWeightFemaleLb ?? null,
+          // Inherit partner flag from the benchmark.
+          isPartner: !!benchmark.isPartner,
+          partnerCount: benchmark.partnerCount ?? null,
         })
         .returning();
 
-      const [part] = await tx
-        .insert(workoutParts)
-        .values({
-          workoutId: workout.id,
-          orderIndex: 0,
-          workoutType: benchmark.workoutType,
-          timeCapSeconds: benchmark.timeCapSeconds,
-          amrapDurationSeconds: benchmark.amrapDurationSeconds,
-          repScheme: benchmark.repScheme,
-        })
-        .returning();
+      // Either copy each benchmark part 1:1, or fall back to a single
+      // synthetic part on legacy single-part benchmarks.
+      const partsToInsert =
+        bmParts.length > 0
+          ? bmParts.map((bp) => ({
+              workoutId: workout.id,
+              orderIndex: bp.orderIndex,
+              label: bp.label,
+              workoutType: bp.workoutType,
+              timeCapSeconds: bp.timeCapSeconds,
+              amrapDurationSeconds: bp.amrapDurationSeconds,
+              emomIntervalSeconds: bp.emomIntervalSeconds,
+              repScheme: bp.repScheme,
+              rounds: bp.rounds,
+              structure: bp.structure,
+              intervalWorkSeconds: bp.intervalWorkSeconds,
+              intervalRestSeconds: bp.intervalRestSeconds,
+              intervalRounds: bp.intervalRounds,
+              sideCadenceIntervalSeconds: bp.sideCadenceIntervalSeconds,
+              sideCadenceOpenEnded: bp.sideCadenceOpenEnded,
+              notes: bp.notes,
+              // Carry the source part id so we can wire movements back to
+              // the right part below.
+              sourceBenchmarkPartId: bp.id,
+            }))
+          : [
+              {
+                workoutId: workout.id,
+                orderIndex: 0,
+                label: null,
+                workoutType: benchmark.workoutType,
+                timeCapSeconds: benchmark.timeCapSeconds,
+                amrapDurationSeconds: benchmark.amrapDurationSeconds,
+                emomIntervalSeconds: null,
+                repScheme: benchmark.repScheme,
+                rounds: null,
+                structure: null,
+                intervalWorkSeconds: null,
+                intervalRestSeconds: null,
+                intervalRounds: null,
+                sideCadenceIntervalSeconds: null,
+                sideCadenceOpenEnded: false,
+                notes: null,
+                sourceBenchmarkPartId: null as string | null,
+              },
+            ];
+
+      const benchmarkPartIdToWorkoutPartId = new Map<string, string>();
+      let firstWorkoutPartId: string | null = null;
+      for (const p of partsToInsert) {
+        const { sourceBenchmarkPartId, ...insertValues } = p;
+        const [insertedPart] = await tx
+          .insert(workoutParts)
+          .values(insertValues)
+          .returning();
+        if (firstWorkoutPartId == null) firstWorkoutPartId = insertedPart.id;
+        if (sourceBenchmarkPartId) {
+          benchmarkPartIdToWorkoutPartId.set(
+            sourceBenchmarkPartId,
+            insertedPart.id
+          );
+        }
+      }
 
       if (bmMovements.length > 0) {
         await tx.insert(workoutMovements).values(
-          bmMovements.map((m) => ({
-            workoutId: workout.id,
-            workoutPartId: part.id,
-            movementId: m.movementId,
-            orderIndex: m.orderIndex,
-            prescribedReps: m.prescribedReps,
-            prescribedWeightMale: m.prescribedWeightMale,
-            prescribedWeightFemale: m.prescribedWeightFemale,
-            // Parse benchmark rep schemes too — benchmarks like "Cindy"
-            // (5-10-15 ladder territory) get the same structured shape as
-            // user-built workouts.
-            repSchemeParsed: parseAndPromote(m.prescribedReps, false),
-            rxStandard: m.rxStandard,
-            notes: m.notes,
-          }))
+          bmMovements.map((m) => {
+            const partId = m.benchmarkWorkoutPartId
+              ? benchmarkPartIdToWorkoutPartId.get(m.benchmarkWorkoutPartId) ??
+                firstWorkoutPartId!
+              : firstWorkoutPartId!;
+            return {
+              workoutId: workout.id,
+              workoutPartId: partId,
+              movementId: m.movementId,
+              orderIndex: m.orderIndex,
+              prescribedReps: m.prescribedReps,
+              prescribedWeightMale: m.prescribedWeightMale,
+              prescribedWeightFemale: m.prescribedWeightFemale,
+              // Parse benchmark rep schemes too — benchmarks like "Cindy"
+              // (5-10-15 ladder territory) get the same structured shape as
+              // user-built workouts.
+              repSchemeParsed: parseAndPromote(m.prescribedReps, false),
+              rxStandard: m.rxStandard,
+              notes: m.notes,
+            };
+          })
         );
       }
 
@@ -500,6 +600,8 @@ export async function POST(req: NextRequest) {
         requiresVest: !!requiresVest,
         vestWeightMaleLb: toNumericOrNull(vestWeightMaleLb),
         vestWeightFemaleLb: toNumericOrNull(vestWeightFemaleLb),
+        isPartner: !!isPartner,
+        partnerCount: toIntOrNull(partnerCount),
       })
       .returning();
 
@@ -507,12 +609,15 @@ export async function POST(req: NextRequest) {
       const p = parts[i];
 
       if (p.workoutType === "intervals") {
-        const work = toDurationSecondsOrNull(p.intervalWorkSeconds);
-        const rest = toDurationSecondsOrNull(p.intervalRestSeconds);
-        if (!p.rounds || work == null || rest == null) {
-          throw new Error(
-            "Intervals parts require rounds, intervalWorkSeconds, and intervalRestSeconds"
-          );
+        const normalizedRounds = normalizeIntervalRounds(p.intervalRounds);
+        if (!normalizedRounds) {
+          const work = toDurationSecondsOrNull(p.intervalWorkSeconds);
+          const rest = toDurationSecondsOrNull(p.intervalRestSeconds);
+          if (!p.rounds || work == null || rest == null) {
+            throw new Error(
+              "Intervals parts require rounds plus either intervalWorkSeconds/Rest or a per-round intervalRounds array"
+            );
+          }
         }
       }
 
@@ -528,6 +633,11 @@ export async function POST(req: NextRequest) {
           emomIntervalSeconds: p.emomIntervalSeconds || null,
           intervalWorkSeconds: toDurationSecondsOrNull(p.intervalWorkSeconds),
           intervalRestSeconds: toDurationSecondsOrNull(p.intervalRestSeconds),
+          intervalRounds: normalizeIntervalRounds(p.intervalRounds),
+          sideCadenceIntervalSeconds: toDurationSecondsOrNull(
+            p.sideCadenceIntervalSeconds
+          ),
+          sideCadenceOpenEnded: !!p.sideCadenceOpenEnded,
           repScheme: p.repScheme || null,
           rounds: p.rounds ?? null,
           structure: p.structure || null,
@@ -545,10 +655,10 @@ export async function POST(req: NextRequest) {
             prescribedReps: m.prescribedReps || null,
             prescribedWeightMale: m.prescribedWeightMale?.toString() || null,
             prescribedWeightFemale: m.prescribedWeightFemale?.toString() || null,
-            prescribedCaloriesMale: toIntOrNull(m.prescribedCaloriesMale),
-            prescribedCaloriesFemale: toIntOrNull(m.prescribedCaloriesFemale),
-            prescribedDistanceMale: toIntOrNull(m.prescribedDistanceMale),
-            prescribedDistanceFemale: toIntOrNull(m.prescribedDistanceFemale),
+            prescribedCaloriesMale: toTextOrNull(m.prescribedCaloriesMale),
+            prescribedCaloriesFemale: toTextOrNull(m.prescribedCaloriesFemale),
+            prescribedDistanceMale: toTextOrNull(m.prescribedDistanceMale),
+            prescribedDistanceFemale: toTextOrNull(m.prescribedDistanceFemale),
             prescribedDurationSecondsMale: toDurationSecondsOrNull(
               m.prescribedDurationSecondsMale
             ),
@@ -556,6 +666,12 @@ export async function POST(req: NextRequest) {
               m.prescribedDurationSecondsFemale
             ),
             prescribedHeightInches: toNumericOrNull(m.prescribedHeightInches),
+            prescribedHeightInchesMale: toNumericOrNull(
+              m.prescribedHeightInchesMale
+            ),
+            prescribedHeightInchesFemale: toNumericOrNull(
+              m.prescribedHeightInchesFemale
+            ),
             prescribedWeightMaleBwMultiplier: toNumericOrNull(
               m.prescribedWeightMaleBwMultiplier
             ),
@@ -564,6 +680,7 @@ export async function POST(req: NextRequest) {
             ),
             tempo: m.tempo?.trim() || null,
             isMaxReps: !!m.isMaxReps,
+            isSideCadence: !!m.isSideCadence,
             // Server is the single source of truth for the parsed shape —
             // we ignore any client-provided value to avoid drift if the
             // parser changes.
@@ -596,6 +713,16 @@ function toIntOrNull(value: number | string | undefined | null): number | null {
   return n;
 }
 
+// Text/scheme columns (calories, distance) accept either a scalar or a
+// rep-scheme string ("21", "75-50-25"). We trim and reject empty.
+function toTextOrNull(
+  value: number | string | undefined | null
+): string | null {
+  if (value == null) return null;
+  const s = String(value).trim();
+  return s === "" ? null : s;
+}
+
 // Accepts seconds-as-number or a free-text duration ("1:30", ":30", "90s",
 // "1m30s"). Returns null when unparseable. Used for the new
 // prescribedDuration* fields and intervalWork/Rest seconds.
@@ -607,6 +734,23 @@ function toDurationSecondsOrNull(
     return Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
   }
   return parseDurationToSeconds(value);
+}
+
+function normalizeIntervalRounds(
+  rounds:
+    | { workSeconds: number | string; restSeconds: number | string }[]
+    | null
+    | undefined
+): { workSeconds: number; restSeconds: number }[] | null {
+  if (!Array.isArray(rounds) || rounds.length === 0) return null;
+  const out: { workSeconds: number; restSeconds: number }[] = [];
+  for (const r of rounds) {
+    const w = toDurationSecondsOrNull(r.workSeconds);
+    const rest = toDurationSecondsOrNull(r.restSeconds);
+    if (w == null || rest == null) return null;
+    out.push({ workSeconds: w, restSeconds: rest });
+  }
+  return out;
 }
 
 // String → numeric (for height inches, BW multipliers).

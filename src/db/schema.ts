@@ -146,6 +146,9 @@ export const workouts = pgTable("workouts", {
   requiresVest: boolean("requires_vest").default(false).notNull(),
   vestWeightMaleLb: numeric("vest_weight_male_lb"),
   vestWeightFemaleLb: numeric("vest_weight_female_lb"),
+  // Partner / team workouts. Description carries the split strategy.
+  isPartner: boolean("is_partner").default(false).notNull(),
+  partnerCount: integer("partner_count"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -169,8 +172,18 @@ export const workoutParts = pgTable(
     structure: text("structure"),
     // Populated only on the new "intervals" workout type — work + rest
     // alternation per round (e.g. 8 rounds × 1:00 work / 3:00 rest).
+    // Legacy: single (work, rest) pair applied uniformly across `rounds`.
+    // When the user wants per-round variance (4:00/4:00 → 3:00/3:00 →
+    // 2:00/2:00 etc.), `intervalRounds` carries the array and the legacy
+    // columns are ignored.
     intervalWorkSeconds: integer("interval_work_seconds"),
     intervalRestSeconds: integer("interval_rest_seconds"),
+    intervalRounds: jsonb("interval_rounds"),
+    // Side-cadence: a per-minute (or other interval) burst-movement that
+    // runs concurrently with the part's main task. Lets the builder
+    // express "150 DB hang power cleans for time, EMOM 5 burpees".
+    sideCadenceIntervalSeconds: integer("side_cadence_interval_seconds"),
+    sideCadenceOpenEnded: boolean("side_cadence_open_ended").default(false).notNull(),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -189,14 +202,22 @@ export const workoutMovements = pgTable("workout_movements", {
   prescribedReps: text("prescribed_reps"),
   prescribedWeightMale: numeric("prescribed_weight_male"),
   prescribedWeightFemale: numeric("prescribed_weight_female"),
-  prescribedCaloriesMale: integer("prescribed_calories_male"),
-  prescribedCaloriesFemale: integer("prescribed_calories_female"),
-  prescribedDistanceMale: integer("prescribed_distance_male"), // meters
-  prescribedDistanceFemale: integer("prescribed_distance_female"), // meters
+  // Free-text so rep schemes ("75-50-25") work alongside scalar values
+  // ("21"). Parsed via the rep-scheme parser at display / score-entry
+  // time.
+  prescribedCaloriesMale: text("prescribed_calories_male"),
+  prescribedCaloriesFemale: text("prescribed_calories_female"),
+  prescribedDistanceMale: text("prescribed_distance_male"), // meters
+  prescribedDistanceFemale: text("prescribed_distance_female"), // meters
   prescribedDurationSecondsMale: integer("prescribed_duration_seconds_male"),
   prescribedDurationSecondsFemale: integer("prescribed_duration_seconds_female"),
   // Override height for deficit pushups, box jumps, etc. (inches).
+  // The legacy single-column field is retained as a read fallback; new
+  // writes go to the gendered pair below so box jump 24"/20" is
+  // expressible without the user having to scale at score-entry time.
   prescribedHeightInches: numeric("prescribed_height_inches"),
+  prescribedHeightInchesMale: numeric("prescribed_height_inches_male"),
+  prescribedHeightInchesFemale: numeric("prescribed_height_inches_female"),
   // BW-multiplier Rx (e.g. 1.5 means "1.5 × bodyweight"). Mutually
   // exclusive with the absolute lb fields per gender — enforced in the
   // builder, not the DB.
@@ -209,6 +230,9 @@ export const workoutMovements = pgTable("workout_movements", {
   // them into totalReps. Mutually exclusive with prescribedReps at the
   // UI layer.
   isMaxReps: boolean("is_max_reps").default(false).notNull(),
+  // When true, this movement is the side-cadence movement (performed at
+  // the part's cadence) rather than part of the main task. See workout_parts.
+  isSideCadence: boolean("is_side_cadence").default(false).notNull(),
   repSchemeParsed: jsonb("rep_scheme_parsed"), // RepSchemeParsed | null — see lib/crossfit/rep-scheme-parser.ts
   equipmentCount: integer("equipment_count"),
   rxStandard: text("rx_standard"),
@@ -300,6 +324,10 @@ export const benchmarkWorkouts = pgTable("benchmark_workouts", {
   requiresVest: boolean("requires_vest").default(false).notNull(),
   vestWeightMaleLb: numeric("vest_weight_male_lb"),
   vestWeightFemaleLb: numeric("vest_weight_female_lb"),
+  // Partner / team flag — inherited onto user workouts created from this
+  // benchmark.
+  isPartner: boolean("is_partner").default(false).notNull(),
+  partnerCount: integer("partner_count"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -328,9 +356,49 @@ export const scoreNotesExtractions = pgTable("score_notes_extractions", {
   contentHash: text("content_hash"),
 });
 
+export const benchmarkWorkoutParts = pgTable(
+  "benchmark_workout_parts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    benchmarkWorkoutId: uuid("benchmark_workout_id")
+      .notNull()
+      .references(() => benchmarkWorkouts.id, { onDelete: "cascade" }),
+    orderIndex: integer("order_index").notNull(),
+    label: text("label"),
+    workoutType: text("workout_type").notNull(),
+    timeCapSeconds: integer("time_cap_seconds"),
+    amrapDurationSeconds: integer("amrap_duration_seconds"),
+    emomIntervalSeconds: integer("emom_interval_seconds"),
+    repScheme: text("rep_scheme"),
+    rounds: integer("rounds"),
+    structure: text("structure"),
+    intervalWorkSeconds: integer("interval_work_seconds"),
+    intervalRestSeconds: integer("interval_rest_seconds"),
+    intervalRounds: jsonb("interval_rounds"),
+    sideCadenceIntervalSeconds: integer("side_cadence_interval_seconds"),
+    sideCadenceOpenEnded: boolean("side_cadence_open_ended").default(false).notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("benchmark_workout_parts_workout_order_unique").on(
+      table.benchmarkWorkoutId,
+      table.orderIndex
+    ),
+    index("benchmark_workout_parts_benchmark_id_idx").on(table.benchmarkWorkoutId),
+  ]
+);
+
 export const benchmarkWorkoutMovements = pgTable("benchmark_workout_movements", {
   id: uuid("id").defaultRandom().primaryKey(),
   benchmarkWorkoutId: uuid("benchmark_workout_id").notNull().references(() => benchmarkWorkouts.id, { onDelete: "cascade" }),
+  // FK to the part. Backfilled to point at the synthetic order-0 part on
+  // existing single-part benchmarks. New benchmarks should always set
+  // this; nullable today for legacy compatibility.
+  benchmarkWorkoutPartId: uuid("benchmark_workout_part_id").references(
+    () => benchmarkWorkoutParts.id,
+    { onDelete: "cascade" }
+  ),
   movementId: uuid("movement_id").notNull().references(() => movements.id),
   orderIndex: integer("order_index").notNull(),
   prescribedReps: text("prescribed_reps"),

@@ -65,6 +65,20 @@ function builderPartToPayload(part: WorkoutBuilderPart): CreatePartInput | null 
       : undefined,
     intervalWorkSeconds: part.intervalWorkSeconds || undefined,
     intervalRestSeconds: part.intervalRestSeconds || undefined,
+    intervalRounds:
+      part.workoutType === "intervals" &&
+      part.intervalRounds &&
+      part.intervalRounds.length > 0 &&
+      part.intervalRounds.some(
+        (r) => r.workSeconds.trim() || r.restSeconds.trim()
+      )
+        ? part.intervalRounds.map((r) => ({
+            workSeconds: r.workSeconds,
+            restSeconds: r.restSeconds,
+          }))
+        : undefined,
+    sideCadenceIntervalSeconds: part.sideCadenceIntervalSeconds || undefined,
+    sideCadenceOpenEnded: !!part.sideCadenceOpenEnded,
     repScheme: part.repScheme || undefined,
     rounds:
       (part.workoutType === "for_time" || part.workoutType === "intervals") &&
@@ -88,23 +102,20 @@ function builderPartToPayload(part: WorkoutBuilderPart): CreatePartInput | null 
         !m.useBwMultiplier && m.prescribedWeightFemale
           ? parseFloat(m.prescribedWeightFemale)
           : undefined,
-      prescribedCaloriesMale: m.prescribedCaloriesMale
-        ? parseInt(m.prescribedCaloriesMale, 10)
-        : undefined,
-      prescribedCaloriesFemale: m.prescribedCaloriesFemale
-        ? parseInt(m.prescribedCaloriesFemale, 10)
-        : undefined,
-      prescribedDistanceMale: m.prescribedDistanceMale
-        ? parseInt(m.prescribedDistanceMale, 10)
-        : undefined,
-      prescribedDistanceFemale: m.prescribedDistanceFemale
-        ? parseInt(m.prescribedDistanceFemale, 10)
-        : undefined,
+      // Cals/distance are now free text (scalar or scheme expression).
+      // Pass through as strings; the API trims and persists.
+      prescribedCaloriesMale: m.prescribedCaloriesMale || undefined,
+      prescribedCaloriesFemale: m.prescribedCaloriesFemale || undefined,
+      prescribedDistanceMale: m.prescribedDistanceMale || undefined,
+      prescribedDistanceFemale: m.prescribedDistanceFemale || undefined,
       prescribedDurationSecondsMale:
         m.prescribedDurationSecondsMale?.trim() || undefined,
       prescribedDurationSecondsFemale:
         m.prescribedDurationSecondsFemale?.trim() || undefined,
       prescribedHeightInches: m.prescribedHeightInches || undefined,
+      prescribedHeightInchesMale: m.prescribedHeightInchesMale || undefined,
+      prescribedHeightInchesFemale:
+        m.prescribedHeightInchesFemale || undefined,
       prescribedWeightMaleBwMultiplier:
         m.useBwMultiplier && m.prescribedWeightMaleBwMultiplier
           ? parseFloat(m.prescribedWeightMaleBwMultiplier)
@@ -115,6 +126,7 @@ function builderPartToPayload(part: WorkoutBuilderPart): CreatePartInput | null 
           : undefined,
       tempo: m.tempo?.trim() || undefined,
       isMaxReps: !!m.isMaxReps,
+      isSideCadence: !!m.isSideCadence,
       promoteSequenceToLadder: m.promoteSequenceToLadder || undefined,
       equipmentCount: m.equipmentCount,
       rxStandard: m.rxStandard || undefined,
@@ -141,6 +153,8 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
       w.vestWeightMaleLb != null ? String(w.vestWeightMaleLb) : "",
     vestWeightFemaleLb:
       w.vestWeightFemaleLb != null ? String(w.vestWeightFemaleLb) : "",
+    isPartner: !!w.isPartner,
+    partnerCount: w.partnerCount != null ? String(w.partnerCount) : "",
     parts: w.parts.map((p): WorkoutBuilderPart => {
       const timeCapMinutes = p.timeCapSeconds
         ? String(Math.round(p.timeCapSeconds / 60))
@@ -166,6 +180,18 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
           p.intervalRestSeconds != null
             ? String(p.intervalRestSeconds)
             : "",
+        intervalRounds:
+          Array.isArray(p.intervalRounds) && p.intervalRounds.length > 0
+            ? p.intervalRounds.map((r) => ({
+                workSeconds: String(r.workSeconds),
+                restSeconds: String(r.restSeconds),
+              }))
+            : undefined,
+        sideCadenceIntervalSeconds:
+          p.sideCadenceIntervalSeconds != null
+            ? String(p.sideCadenceIntervalSeconds)
+            : "",
+        sideCadenceOpenEnded: !!p.sideCadenceOpenEnded,
         repScheme: p.repScheme ?? "",
         rounds: p.rounds ? String(p.rounds) : "",
         structure: p.structure,
@@ -209,6 +235,14 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
               m.prescribedHeightInches != null
                 ? String(m.prescribedHeightInches)
                 : "",
+            prescribedHeightInchesMale:
+              m.prescribedHeightInchesMale != null
+                ? String(m.prescribedHeightInchesMale)
+                : "",
+            prescribedHeightInchesFemale:
+              m.prescribedHeightInchesFemale != null
+                ? String(m.prescribedHeightInchesFemale)
+                : "",
             useBwMultiplier:
               m.prescribedWeightMaleBwMultiplier != null ||
               m.prescribedWeightFemaleBwMultiplier != null,
@@ -222,6 +256,7 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
                 : "",
             tempo: m.tempo ?? "",
             isMaxReps: !!m.isMaxReps,
+            isSideCadence: !!m.isSideCadence,
             equipmentCount: m.equipmentCount,
             rxStandard: m.rxStandard ?? "",
             notes: m.notes ?? "",
@@ -296,6 +331,10 @@ export default function CrossfitPage() {
         vestWeightFemaleLb: form.vestWeightFemaleLb
           ? parseFloat(form.vestWeightFemaleLb)
           : undefined,
+        isPartner: !!form.isPartner,
+        partnerCount: form.partnerCount
+          ? parseInt(form.partnerCount, 10)
+          : undefined,
         parts,
       });
       setShowAddWorkout(false);
@@ -362,9 +401,16 @@ export default function CrossfitPage() {
             movements: usable.map((r, i) => ({
               movementId: r.movement!.id,
               orderIndex: i,
+              // For cal/distance movements, the parser populates dedicated
+              // fields and leaves `reps` empty so we don't double-write
+              // "21 Cal" into prescribedReps for a calorie-typed movement.
               prescribedReps: r.parsed.reps,
               prescribedWeightMale: r.parsed.weightMale,
               prescribedWeightFemale: r.parsed.weightFemale,
+              prescribedCaloriesMale: r.parsed.caloriesMale,
+              prescribedCaloriesFemale: r.parsed.caloriesFemale,
+              prescribedDistanceMale: r.parsed.distanceMaleMeters,
+              prescribedDistanceFemale: r.parsed.distanceFemaleMeters,
             })),
           },
         ],
@@ -403,6 +449,10 @@ export default function CrossfitPage() {
             : undefined,
           vestWeightFemaleLb: form.vestWeightFemaleLb
             ? parseFloat(form.vestWeightFemaleLb)
+            : undefined,
+          isPartner: !!form.isPartner,
+          partnerCount: form.partnerCount
+            ? parseInt(form.partnerCount, 10)
             : undefined,
           parts,
         },

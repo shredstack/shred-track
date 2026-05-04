@@ -126,6 +126,14 @@ export interface ParsedMovement {
   weightMale?: number;
   weightFemale?: number;
   weightUnit?: "lb" | "kg";
+  // When the input line describes a calorie- or distance-bound movement
+  // (e.g. "Row 21/15 cal", "400m Run"), the parser populates these
+  // dedicated fields rather than stuffing the value into `reps`. The save
+  // path then routes them to the matching prescribed_* columns.
+  caloriesMale?: number;
+  caloriesFemale?: number;
+  distanceMaleMeters?: number;
+  distanceFemaleMeters?: number;
   notes?: string;
   confidence: number; // 0-1
 }
@@ -277,17 +285,22 @@ export interface WorkoutMovementDisplay {
   prescribedReps?: string;
   prescribedWeightMale?: string;
   prescribedWeightFemale?: string;
-  prescribedCaloriesMale?: number;
-  prescribedCaloriesFemale?: number;
-  prescribedDistanceMale?: number;
-  prescribedDistanceFemale?: number;
+  prescribedCaloriesMale?: string;
+  prescribedCaloriesFemale?: string;
+  prescribedDistanceMale?: string;
+  prescribedDistanceFemale?: string;
   prescribedDurationSecondsMale?: number;
   prescribedDurationSecondsFemale?: number;
   prescribedHeightInches?: number;
+  prescribedHeightInchesMale?: number;
+  prescribedHeightInchesFemale?: number;
   prescribedWeightMaleBwMultiplier?: number;
   prescribedWeightFemaleBwMultiplier?: number;
   tempo?: string;
   isMaxReps?: boolean;
+  // When true, this movement runs on the part's side-cadence rather than
+  // contributing to the main task.
+  isSideCadence?: boolean;
   equipmentCount?: number;
   rxStandard?: string;
   notes?: string;
@@ -297,6 +310,11 @@ export interface WorkoutMovementDisplay {
 }
 
 export type WorkoutPartStructure = "tabata";
+
+export interface IntervalRoundSpec {
+  workSeconds: number;
+  restSeconds: number;
+}
 
 export interface WorkoutPartDisplay {
   id: string;
@@ -308,9 +326,17 @@ export interface WorkoutPartDisplay {
   emomIntervalSeconds?: number;
   intervalWorkSeconds?: number;
   intervalRestSeconds?: number;
+  // Per-round (work, rest) array. When set, supersedes the single-pair
+  // legacy columns. Length should equal `rounds`.
+  intervalRounds?: IntervalRoundSpec[];
   repScheme?: string;
   rounds?: number;
   structure?: WorkoutPartStructure;
+  // Side-cadence config (Kalsu-style "150 DB cleans for time, EMOM 5
+  // burpees"). When set, the movements flagged as `isSideCadence`
+  // are performed on this cadence while the others form the main task.
+  sideCadenceIntervalSeconds?: number;
+  sideCadenceOpenEnded?: boolean;
   notes?: string;
   movements: WorkoutMovementDisplay[];
   score?: ScoreDisplay | null;
@@ -328,6 +354,8 @@ export interface WorkoutDisplay {
   requiresVest?: boolean;
   vestWeightMaleLb?: number;
   vestWeightFemaleLb?: number;
+  isPartner?: boolean;
+  partnerCount?: number | null;
 }
 
 export interface ScoreDisplay {
@@ -455,6 +483,11 @@ export interface WorkoutBuilderMovement {
   prescribedDurationSecondsMale: string;
   prescribedDurationSecondsFemale: string;
   prescribedHeightInches: string;
+  // Gendered Rx heights (e.g. box jump 24"/20"). When populated, take
+  // precedence over the legacy single-value `prescribedHeightInches` at
+  // save time.
+  prescribedHeightInchesMale: string;
+  prescribedHeightInchesFemale: string;
   // Builder-only flag: when true, the BW-multiplier inputs are surfaced
   // and the absolute lb fields are ignored on save. Lets the user pick
   // one notation explicitly without forcing them to clear the other.
@@ -465,6 +498,9 @@ export interface WorkoutBuilderMovement {
   // When true, the prescribedReps field is suppressed and the score-entry
   // surfaces per-round rep inputs that auto-sum into the part's total.
   isMaxReps?: boolean;
+  // When true, this movement is the part's side-cadence movement (runs
+  // on the part's cadence rather than contributing to the main task).
+  isSideCadence?: boolean;
   equipmentCount?: number;
   rxStandard: string;
   notes: string;
@@ -482,9 +518,19 @@ export interface WorkoutBuilderPart {
   amrapDurationMinutes: string;
   emomIntervalSeconds: string;
   // "Intervals" workout type: per-round work + rest cadence (free-text
-  // mm:ss-style strings; parsed on save).
+  // mm:ss-style strings; parsed on save). When `intervalRounds` is
+  // populated the per-round array takes precedence over these uniform
+  // values.
   intervalWorkSeconds: string;
   intervalRestSeconds: string;
+  // Per-round (work, rest) override. Each entry's strings are mm:ss-style
+  // and get parsed on save. Length should equal `rounds`. Use this when
+  // the rounds aren't uniform (e.g. 4:00/4:00 → 3:00/3:00 → 2:00/2:00).
+  intervalRounds?: { workSeconds: string; restSeconds: string }[];
+  // Side-cadence: pairs the part with a recurring side movement (e.g.
+  // EMOM 5 burpees). Free-text mm:ss like the duration fields.
+  sideCadenceIntervalSeconds?: string;
+  sideCadenceOpenEnded?: boolean;
   // Workout-level rep scheme. Retained on the type for legacy / parsed
   // workouts; the Smart Builder no longer surfaces it directly — for_load
   // expresses its scheme per-movement via `prescribedReps`, and round-based
@@ -505,6 +551,9 @@ export interface WorkoutBuilderForm {
   requiresVest?: boolean;
   vestWeightMaleLb?: string;
   vestWeightFemaleLb?: string;
+  // Partner / team workout flag. Description carries the split strategy.
+  isPartner?: boolean;
+  partnerCount?: string;
 }
 
 // ============================================
