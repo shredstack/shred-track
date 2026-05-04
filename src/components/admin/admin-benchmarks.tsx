@@ -124,6 +124,8 @@ function benchmarkToForm(b: BenchmarkWorkout): BenchmarkFormState {
       prescribedDurationSecondsMale: "",
       prescribedDurationSecondsFemale: "",
       prescribedHeightInches: "",
+      prescribedHeightInchesMale: "",
+      prescribedHeightInchesFemale: "",
       prescribedWeightMaleBwMultiplier: "",
       prescribedWeightFemaleBwMultiplier: "",
       tempo: "",

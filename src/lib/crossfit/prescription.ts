@@ -31,10 +31,10 @@ interface PrescriptionLikeMovement {
   prescribedReps?: string | null;
   prescribedWeightMale?: string | number | null;
   prescribedWeightFemale?: string | number | null;
-  prescribedCaloriesMale?: number | null;
-  prescribedCaloriesFemale?: number | null;
-  prescribedDistanceMale?: number | null;
-  prescribedDistanceFemale?: number | null;
+  prescribedCaloriesMale?: string | number | null;
+  prescribedCaloriesFemale?: string | number | null;
+  prescribedDistanceMale?: string | number | null;
+  prescribedDistanceFemale?: string | number | null;
   prescribedDurationSecondsMale?: number | null;
   prescribedDurationSecondsFemale?: number | null;
   prescribedHeightInches?: number | string | null;
@@ -177,21 +177,33 @@ export function formatMovementPrescription(
     }
   }
 
-  // Calories
-  const calMale = mov.prescribedCaloriesMale ?? null;
-  const calFemale = mov.prescribedCaloriesFemale ?? null;
+  // Calories — values may be scalars ("21") or rep schemes ("75-50-25").
+  const calMale =
+    mov.prescribedCaloriesMale != null && String(mov.prescribedCaloriesMale).trim() !== ""
+      ? String(mov.prescribedCaloriesMale)
+      : null;
+  const calFemale =
+    mov.prescribedCaloriesFemale != null && String(mov.prescribedCaloriesFemale).trim() !== ""
+      ? String(mov.prescribedCaloriesFemale)
+      : null;
   if (calMale != null || calFemale != null) {
-    const m = calMale != null ? `${calMale}` : "?";
-    const f = calFemale != null ? `${calFemale}` : null;
+    const m = calMale ?? "?";
+    const f = calFemale ?? null;
     segments.push(`${m}${f ? `/${f}` : ""} cal`);
   }
 
-  // Distance (m)
-  const dMale = mov.prescribedDistanceMale ?? null;
-  const dFemale = mov.prescribedDistanceFemale ?? null;
+  // Distance (m) — values may be scalars ("400") or schemes ("800-400-200").
+  const dMale =
+    mov.prescribedDistanceMale != null && String(mov.prescribedDistanceMale).trim() !== ""
+      ? String(mov.prescribedDistanceMale)
+      : null;
+  const dFemale =
+    mov.prescribedDistanceFemale != null && String(mov.prescribedDistanceFemale).trim() !== ""
+      ? String(mov.prescribedDistanceFemale)
+      : null;
   if (dMale != null || dFemale != null) {
-    const m = dMale != null ? `${dMale}` : "?";
-    const f = dFemale != null ? `${dFemale}` : null;
+    const m = dMale ?? "?";
+    const f = dFemale ?? null;
     segments.push(`${m}${f ? `/${f}` : ""} m`);
   }
 

@@ -37,12 +37,17 @@ interface MovementListBuilderProps {
   // For Load workouts have no prescribed weight (the athlete is *finding* the
   // load), so we suppress the Rx weight inputs in that mode.
   workoutType?: WorkoutType;
+  // When the parent part has a side-cadence configured, show a toggle
+  // per movement that lets the user mark it as the side-cadence movement
+  // (runs on the cadence rather than as part of the main task).
+  showSideCadence?: boolean;
 }
 
 export function MovementListBuilder({
   movements,
   onChange,
   workoutType,
+  showSideCadence = false,
 }: MovementListBuilderProps) {
   const showRxWeights = workoutType !== "for_load";
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -61,6 +66,7 @@ export function MovementListBuilder({
 
   const addMovement = useCallback(
     (movement: MovementOption) => {
+      const heightDefaults = defaultHeightForMovement(movement.canonicalName);
       const newMovement: WorkoutBuilderMovement = {
         tempId: generateTempId(),
         movementId: movement.id,
@@ -79,10 +85,13 @@ export function MovementListBuilder({
         prescribedDurationSecondsMale: "",
         prescribedDurationSecondsFemale: "",
         prescribedHeightInches: "",
+        prescribedHeightInchesMale: heightDefaults?.male ?? "",
+        prescribedHeightInchesFemale: heightDefaults?.female ?? "",
         prescribedWeightMaleBwMultiplier: "",
         prescribedWeightFemaleBwMultiplier: "",
         tempo: "",
         isMaxReps: false,
+        isSideCadence: false,
         rxStandard: "",
         notes: "",
       };
@@ -118,10 +127,13 @@ export function MovementListBuilder({
           prescribedDurationSecondsMale: "",
           prescribedDurationSecondsFemale: "",
           prescribedHeightInches: "",
+          prescribedHeightInchesMale: "",
+          prescribedHeightInchesFemale: "",
           prescribedWeightMaleBwMultiplier: "",
           prescribedWeightFemaleBwMultiplier: "",
           tempo: "",
           isMaxReps: false,
+          isSideCadence: false,
           rxStandard: "",
           notes: "",
         };
@@ -271,8 +283,35 @@ export function MovementListBuilder({
                 />
               )}
 
-              {/* Max reps toggle — when on, this movement IS the score.
-                  Hides the reps integer; surfaces a MAX badge. */}
+              {/* Side-cadence toggle — only visible when the part has a
+                  side-cadence configured. Marks this movement as the
+                  EMOM-style side movement instead of part of the main
+                  task (e.g. EMOM 5 burpees while grinding 150 cleans). */}
+              {showSideCadence && (
+                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!mov.isSideCadence}
+                    onChange={(e) =>
+                      updateMovement(mov.tempId, {
+                        isSideCadence: e.target.checked,
+                      })
+                    }
+                    className="size-3 cursor-pointer"
+                  />
+                  Side cadence (every interval)
+                  {mov.isSideCadence && (
+                    <span className="rounded bg-cyan-500/15 px-1 py-px text-[10px] font-bold text-cyan-300">
+                      EMOM
+                    </span>
+                  )}
+                </label>
+              )}
+
+              {/* Max-X toggle — when on, this movement IS the score.
+                  Label adapts to the metric type so calorie/distance/duration
+                  movements get the right wording (e.g. "Max calories (score)"
+                  for a cal row in Fight Gone Bad). */}
               <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
                 <input
                   type="checkbox"
@@ -290,7 +329,13 @@ export function MovementListBuilder({
                   }
                   className="size-3 cursor-pointer"
                 />
-                Max reps (score)
+                {mov.metricType === "calories"
+                  ? "Max calories (score)"
+                  : mov.metricType === "distance"
+                    ? "Max distance (score)"
+                    : mov.metricType === "duration"
+                      ? "Max duration (score)"
+                      : "Max reps (score)"}
                 {mov.isMaxReps && (
                   <span className="rounded bg-amber-500/15 px-1 py-px text-[10px] font-bold text-amber-300">
                     MAX
@@ -308,6 +353,9 @@ export function MovementListBuilder({
                 />
               )}
 
+              {/* Calories — free text so rep schemes ("75-50-25") work
+                  alongside scalars ("21"). Useful for round-based for_time
+                  workouts where the cal count varies per round. */}
               {mov.metricType === "calories" && (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
@@ -315,15 +363,13 @@ export function MovementListBuilder({
                       Cals (M)
                     </Label>
                     <Input
-                      type="number"
-                      min={0}
                       value={mov.prescribedCaloriesMale}
                       onChange={(e) =>
                         updateMovement(mov.tempId, {
                           prescribedCaloriesMale: e.target.value,
                         })
                       }
-                      placeholder="e.g. 15"
+                      placeholder="e.g. 15 or 75-50-25"
                       className="h-7 text-xs"
                     />
                   </div>
@@ -332,15 +378,13 @@ export function MovementListBuilder({
                       Cals (F)
                     </Label>
                     <Input
-                      type="number"
-                      min={0}
                       value={mov.prescribedCaloriesFemale}
                       onChange={(e) =>
                         updateMovement(mov.tempId, {
                           prescribedCaloriesFemale: e.target.value,
                         })
                       }
-                      placeholder="e.g. 12"
+                      placeholder="e.g. 12 or 60-40-20"
                       className="h-7 text-xs"
                     />
                   </div>
@@ -354,15 +398,13 @@ export function MovementListBuilder({
                       Distance (M) — meters
                     </Label>
                     <Input
-                      type="number"
-                      min={0}
                       value={mov.prescribedDistanceMale}
                       onChange={(e) =>
                         updateMovement(mov.tempId, {
                           prescribedDistanceMale: e.target.value,
                         })
                       }
-                      placeholder="e.g. 400"
+                      placeholder="e.g. 400 or 800-400-200"
                       className="h-7 text-xs"
                     />
                   </div>
@@ -371,8 +413,6 @@ export function MovementListBuilder({
                       Distance (F) — meters
                     </Label>
                     <Input
-                      type="number"
-                      min={0}
                       value={mov.prescribedDistanceFemale}
                       onChange={(e) =>
                         updateMovement(mov.tempId, {
@@ -388,18 +428,98 @@ export function MovementListBuilder({
 
               {/* Duration metric inputs — gender-split. Visible whenever
                   the movement is "duration"-typed OR the user opted in to
-                  a time cap on a reps movement. */}
-              {(mov.metricType === "duration" ||
-                mov.prescribedDurationSecondsMale ||
-                mov.prescribedDurationSecondsFemale) && (
-                <DurationFields
+                  a time cap on a reps movement. Rest is special-cased to a
+                  single (non-gendered) input — gender splits on rest are
+                  theatre. */}
+              {isRestMovement(mov) ? (
+                <RestDurationField
                   movement={mov}
                   onUpdate={(updates) =>
                     updateMovement(mov.tempId, updates)
                   }
-                  showClearButton={mov.metricType !== "duration"}
                 />
+              ) : (
+                (mov.metricType === "duration" ||
+                  mov.prescribedDurationSecondsMale ||
+                  mov.prescribedDurationSecondsFemale) && (
+                  <DurationFields
+                    movement={mov}
+                    onUpdate={(updates) =>
+                      updateMovement(mov.tempId, updates)
+                    }
+                    showClearButton={mov.metricType !== "duration"}
+                  />
+                )
               )}
+
+              {/* Height — surfaced inline for box jumps / step-ups / deficit
+                  pushups, where the prescription is a first-class number.
+                  Deficits are typically gender-agnostic so we render a
+                  single input; box jumps render the M/F pair (24"/20"). */}
+              {isHeightBearing(mov.movementName) &&
+                (isHeightDeficit(mov.movementName) ? (
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">
+                      Height (in)
+                    </Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.5"
+                      value={
+                        mov.prescribedHeightInchesMale ||
+                        mov.prescribedHeightInches
+                      }
+                      onChange={(e) =>
+                        updateMovement(mov.tempId, {
+                          prescribedHeightInchesMale: e.target.value,
+                          prescribedHeightInchesFemale: e.target.value,
+                        })
+                      }
+                      placeholder="e.g. 4"
+                      className="h-7 text-xs"
+                    />
+                  </div>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">
+                        Height (M) — in
+                      </Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.5"
+                        value={mov.prescribedHeightInchesMale}
+                        onChange={(e) =>
+                          updateMovement(mov.tempId, {
+                            prescribedHeightInchesMale: e.target.value,
+                          })
+                        }
+                        placeholder="e.g. 24"
+                        className="h-7 text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">
+                        Height (F) — in
+                      </Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.5"
+                        value={mov.prescribedHeightInchesFemale}
+                        onChange={(e) =>
+                          updateMovement(mov.tempId, {
+                            prescribedHeightInchesFemale: e.target.value,
+                          })
+                        }
+                        placeholder="e.g. 20"
+                        className="h-7 text-xs"
+                      />
+                    </div>
+                  </div>
+                ))}
 
               {/* Implements per rep — only relevant for handheld pairs (1 vs 2
                   dumbbells/kettlebells). Barbells, sandbags, machines have an
@@ -883,6 +1003,75 @@ function DurationFields({
           Remove time cap
         </button>
       )}
+    </div>
+  );
+}
+
+// Movements where an Rx height is meaningful (box jump, step-up, deficit
+// pushup/HSPU). The list is intentionally narrow — not every movement
+// gets a height field surfaced in the picker.
+const HEIGHT_BEARING_NAME = /^(box jump( over)?|box step-?up|step-?up|deficit (push-?up|hspu|handstand push-?up))$/i;
+
+function isHeightBearing(name: string | undefined): boolean {
+  if (!name) return false;
+  return HEIGHT_BEARING_NAME.test(name.trim());
+}
+
+function defaultHeightForMovement(
+  name: string
+): { male: string; female: string } | null {
+  const n = name.trim().toLowerCase();
+  if (/^(box jump( over)?|box step-?up|step-?up)$/.test(n)) {
+    return { male: "24", female: "20" };
+  }
+  if (/^deficit (push-?up|hspu|handstand push-?up)$/.test(n)) {
+    return { male: "4", female: "4" };
+  }
+  return null;
+}
+
+function isHeightDeficit(name: string | undefined): boolean {
+  return !!name && /^deficit /i.test(name.trim());
+}
+
+// Rest is a duration-typed movement whose gender split has no meaning —
+// athletes just rest. We render a single input and mirror the value into
+// both gendered columns on save so the existing API path persists it.
+function isRestMovement(m: WorkoutBuilderMovement): boolean {
+  return (
+    m.metricType === "duration" &&
+    /^rest$/i.test((m.movementName ?? "").trim())
+  );
+}
+
+function RestDurationField({
+  movement,
+  onUpdate,
+}: {
+  movement: WorkoutBuilderMovement;
+  onUpdate: (updates: Partial<WorkoutBuilderMovement>) => void;
+}) {
+  // Surface whichever side has a value so reopening an existing rest works
+  // even if only one column was populated by an older write path.
+  const value =
+    movement.prescribedDurationSecondsMale ||
+    movement.prescribedDurationSecondsFemale ||
+    "";
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs text-muted-foreground">Rest duration</Label>
+      <DurationInput
+        value={value}
+        onChange={(v) =>
+          onUpdate({
+            prescribedDurationSecondsMale: v,
+            prescribedDurationSecondsFemale: v,
+          })
+        }
+        placeholder="e.g. 1:00 between rounds"
+        className="h-7 text-xs"
+        ariaLabel="Rest duration"
+      />
     </div>
   );
 }

@@ -8,6 +8,7 @@
 // parsed shape.
 
 import {
+  parseRepScheme,
   repsForRound,
   type RepSchemeParsed,
 } from "@/lib/crossfit/rep-scheme-parser";
@@ -59,20 +60,41 @@ function prescribedForMovement(
   const m = mov.metricType;
   if (m === "calories") {
     const v = pickGendered(
-      mov.prescribedCaloriesMale,
-      mov.prescribedCaloriesFemale,
+      coerceScalar(mov.prescribedCaloriesMale),
+      coerceScalar(mov.prescribedCaloriesFemale),
       gender
     );
-    if (v == null) return null;
+    if (v == null) {
+      // Scheme expression: walk it like the rep scheme.
+      const schemeNum = walkScheme(
+        mov.prescribedCaloriesMale,
+        mov.prescribedCaloriesFemale,
+        gender,
+        roundIndex
+      );
+      if (schemeNum != null)
+        return { value: schemeNum.value, unit: "cal", certain: schemeNum.certain };
+      return null;
+    }
     return { value: v.value, unit: "cal", certain: v.certain };
   }
   if (m === "distance") {
     const v = pickGendered(
-      mov.prescribedDistanceMale,
-      mov.prescribedDistanceFemale,
+      coerceScalar(mov.prescribedDistanceMale),
+      coerceScalar(mov.prescribedDistanceFemale),
       gender
     );
-    if (v == null) return null;
+    if (v == null) {
+      const schemeNum = walkScheme(
+        mov.prescribedDistanceMale,
+        mov.prescribedDistanceFemale,
+        gender,
+        roundIndex
+      );
+      if (schemeNum != null)
+        return { value: schemeNum.value, unit: "m", certain: schemeNum.certain };
+      return null;
+    }
     return { value: v.value, unit: "m", certain: v.certain };
   }
   // reps / weight: round walking comes from the parsed scheme. If the
@@ -89,6 +111,38 @@ function prescribedForMovement(
       unit: "reps",
       certain: true,
     };
+  }
+  return null;
+}
+
+// Cal / distance fields are now free-text (scalar or scheme). When the
+// value is a clean integer we treat it as a scalar; otherwise we
+// attempt to walk it as a rep scheme.
+function coerceScalar(
+  value: string | number | null | undefined
+): number | null {
+  if (value == null) return null;
+  const s = typeof value === "number" ? String(value) : value.trim();
+  if (!/^-?\d+(?:\.\d+)?$/.test(s)) return null;
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+function walkScheme(
+  male: string | number | null | undefined,
+  female: string | number | null | undefined,
+  gender: AthleteGender,
+  roundIndex: number
+): { value: number; certain: boolean } | null {
+  const own = gender === "M" ? male : female;
+  const other = gender === "M" ? female : male;
+  const ownParsed = own != null ? parseRepScheme(String(own)) : null;
+  if (ownParsed) {
+    return { value: repsForRound(ownParsed, roundIndex), certain: true };
+  }
+  const otherParsed = other != null ? parseRepScheme(String(other)) : null;
+  if (otherParsed) {
+    return { value: repsForRound(otherParsed, roundIndex), certain: false };
   }
   return null;
 }

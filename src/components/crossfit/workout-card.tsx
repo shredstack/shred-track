@@ -19,6 +19,7 @@ import {
   Trash2,
   Pencil,
   Shield,
+  Users,
 } from "lucide-react";
 import type {
   WorkoutDisplay,
@@ -232,28 +233,51 @@ function PartSection({
     );
   }
   if (part.workoutType === "intervals") {
-    const work =
-      part.intervalWorkSeconds != null
-        ? formatSecondsAsClock(part.intervalWorkSeconds)
-        : null;
-    const rest =
-      part.intervalRestSeconds != null
-        ? formatSecondsAsClock(part.intervalRestSeconds)
-        : null;
-    if (work || rest || part.rounds) {
+    if (part.intervalRounds && part.intervalRounds.length > 0) {
+      // Per-round display: "4:00/4:00 → 3:00/3:00 → 2:00/2:00".
+      const segs = part.intervalRounds
+        .map(
+          (r) =>
+            `${formatSecondsAsClock(r.workSeconds)}/${formatSecondsAsClock(r.restSeconds)}`
+        )
+        .join(" → ");
       metaBits.push(
         <span key="intervals" className="text-muted-foreground font-mono">
-          {part.rounds ? `${part.rounds} × ` : ""}
-          {work || "?"}
-          {rest ? ` work / ${rest} rest` : " work"}
+          {segs}
         </span>
       );
+    } else {
+      const work =
+        part.intervalWorkSeconds != null
+          ? formatSecondsAsClock(part.intervalWorkSeconds)
+          : null;
+      const rest =
+        part.intervalRestSeconds != null
+          ? formatSecondsAsClock(part.intervalRestSeconds)
+          : null;
+      if (work || rest || part.rounds) {
+        metaBits.push(
+          <span key="intervals" className="text-muted-foreground font-mono">
+            {part.rounds ? `${part.rounds} × ` : ""}
+            {work || "?"}
+            {rest ? ` work / ${rest} rest` : " work"}
+          </span>
+        );
+      }
     }
   }
   if (part.repScheme) {
     metaBits.push(
       <span key="reps" className="text-muted-foreground font-mono">
         {part.repScheme}
+      </span>
+    );
+  }
+  if (part.sideCadenceIntervalSeconds) {
+    metaBits.push(
+      <span key="side-cadence" className="text-cyan-300/90 font-mono">
+        EMOM {formatSecondsAsClock(part.sideCadenceIntervalSeconds)}
+        {part.sideCadenceOpenEnded ? " (open-ended)" : ""}
       </span>
     );
   }
@@ -360,6 +384,18 @@ export function WorkoutCard({
               {workout.vestWeightMaleLb || workout.vestWeightFemaleLb
                 ? `${workout.vestWeightMaleLb ?? "?"}/${workout.vestWeightFemaleLb ?? "?"} lb vest required`
                 : "Weighted vest required"}
+            </span>
+          </div>
+        )}
+
+        {workout.isPartner && (
+          <div className="flex items-center gap-1.5 text-[11px] text-cyan-300/90">
+            <Users className="size-3.5" />
+            <span>
+              Partner workout
+              {workout.partnerCount && workout.partnerCount > 2
+                ? ` (${workout.partnerCount}-person team)`
+                : ""}
             </span>
           </div>
         )}

@@ -61,12 +61,17 @@ export async function GET(
       prescribedDurationSecondsFemale:
         workoutMovements.prescribedDurationSecondsFemale,
       prescribedHeightInches: workoutMovements.prescribedHeightInches,
+      prescribedHeightInchesMale:
+        workoutMovements.prescribedHeightInchesMale,
+      prescribedHeightInchesFemale:
+        workoutMovements.prescribedHeightInchesFemale,
       prescribedWeightMaleBwMultiplier:
         workoutMovements.prescribedWeightMaleBwMultiplier,
       prescribedWeightFemaleBwMultiplier:
         workoutMovements.prescribedWeightFemaleBwMultiplier,
       tempo: workoutMovements.tempo,
       isMaxReps: workoutMovements.isMaxReps,
+      isSideCadence: workoutMovements.isSideCadence,
       repSchemeParsed: workoutMovements.repSchemeParsed,
       equipmentCount: workoutMovements.equipmentCount,
       rxStandard: workoutMovements.rxStandard,
@@ -170,6 +175,9 @@ export async function GET(
       emomIntervalSeconds: p.emomIntervalSeconds,
       intervalWorkSeconds: p.intervalWorkSeconds,
       intervalRestSeconds: p.intervalRestSeconds,
+      intervalRounds: p.intervalRounds,
+      sideCadenceIntervalSeconds: p.sideCadenceIntervalSeconds,
+      sideCadenceOpenEnded: p.sideCadenceOpenEnded,
       repScheme: p.repScheme,
       rounds: p.rounds,
       structure: p.structure,
@@ -197,6 +205,14 @@ export async function GET(
           m.prescribedHeightInches != null
             ? Number(m.prescribedHeightInches)
             : undefined,
+        prescribedHeightInchesMale:
+          m.prescribedHeightInchesMale != null
+            ? Number(m.prescribedHeightInchesMale)
+            : undefined,
+        prescribedHeightInchesFemale:
+          m.prescribedHeightInchesFemale != null
+            ? Number(m.prescribedHeightInchesFemale)
+            : undefined,
         prescribedWeightMaleBwMultiplier:
           m.prescribedWeightMaleBwMultiplier != null
             ? Number(m.prescribedWeightMaleBwMultiplier)
@@ -207,6 +223,7 @@ export async function GET(
             : undefined,
         tempo: m.tempo ?? undefined,
         isMaxReps: !!m.isMaxReps,
+        isSideCadence: !!m.isSideCadence,
         repSchemeParsed: m.repSchemeParsed,
         equipmentCount: m.equipmentCount,
         rxStandard: m.rxStandard,
@@ -264,6 +281,8 @@ export async function GET(
       workout.vestWeightFemaleLb != null
         ? Number(workout.vestWeightFemaleLb)
         : null,
+    isPartner: workout.isPartner,
+    partnerCount: workout.partnerCount,
     parts: partsPayload,
   });
 }
@@ -282,10 +301,13 @@ interface UpdatePartMovementInput {
   prescribedDurationSecondsMale?: number | string;
   prescribedDurationSecondsFemale?: number | string;
   prescribedHeightInches?: number | string;
+  prescribedHeightInchesMale?: number | string;
+  prescribedHeightInchesFemale?: number | string;
   prescribedWeightMaleBwMultiplier?: number | string;
   prescribedWeightFemaleBwMultiplier?: number | string;
   tempo?: string;
   isMaxReps?: boolean;
+  isSideCadence?: boolean;
   promoteSequenceToLadder?: boolean;
   equipmentCount?: number;
   rxStandard?: string;
@@ -301,6 +323,9 @@ interface UpdatePartInput {
   emomIntervalSeconds?: number;
   intervalWorkSeconds?: number | string;
   intervalRestSeconds?: number | string;
+  intervalRounds?: { workSeconds: number | string; restSeconds: number | string }[];
+  sideCadenceIntervalSeconds?: number | string;
+  sideCadenceOpenEnded?: boolean;
   repScheme?: string;
   rounds?: number;
   structure?: string;
@@ -374,6 +399,12 @@ export async function PUT(
         ...(body.vestWeightFemaleLb !== undefined
           ? { vestWeightFemaleLb: toNumericOrNull(body.vestWeightFemaleLb) }
           : {}),
+        ...(body.isPartner !== undefined
+          ? { isPartner: !!body.isPartner }
+          : {}),
+        ...(body.partnerCount !== undefined
+          ? { partnerCount: toIntOrNull(body.partnerCount) }
+          : {}),
         updatedAt: new Date(),
       })
       .where(eq(workouts.id, id))
@@ -412,6 +443,12 @@ export async function PUT(
         ...(body.vestWeightFemaleLb !== undefined
           ? { vestWeightFemaleLb: toNumericOrNull(body.vestWeightFemaleLb) }
           : {}),
+        ...(body.isPartner !== undefined
+          ? { isPartner: !!body.isPartner }
+          : {}),
+        ...(body.partnerCount !== undefined
+          ? { partnerCount: toIntOrNull(body.partnerCount) }
+          : {}),
         updatedAt: new Date(),
       })
       .where(eq(workouts.id, id))
@@ -448,6 +485,11 @@ export async function PUT(
         emomIntervalSeconds: p.emomIntervalSeconds || null,
         intervalWorkSeconds: toDurationSecondsOrNull(p.intervalWorkSeconds),
         intervalRestSeconds: toDurationSecondsOrNull(p.intervalRestSeconds),
+        intervalRounds: normalizeIntervalRounds(p.intervalRounds),
+        sideCadenceIntervalSeconds: toDurationSecondsOrNull(
+          p.sideCadenceIntervalSeconds
+        ),
+        sideCadenceOpenEnded: !!p.sideCadenceOpenEnded,
         repScheme: p.repScheme || null,
         rounds: p.rounds ?? null,
         structure: p.structure || null,
@@ -512,10 +554,10 @@ export async function PUT(
           prescribedReps: m.prescribedReps || null,
           prescribedWeightMale: m.prescribedWeightMale?.toString() || null,
           prescribedWeightFemale: m.prescribedWeightFemale?.toString() || null,
-          prescribedCaloriesMale: toIntOrNull(m.prescribedCaloriesMale),
-          prescribedCaloriesFemale: toIntOrNull(m.prescribedCaloriesFemale),
-          prescribedDistanceMale: toIntOrNull(m.prescribedDistanceMale),
-          prescribedDistanceFemale: toIntOrNull(m.prescribedDistanceFemale),
+          prescribedCaloriesMale: toTextOrNull(m.prescribedCaloriesMale),
+          prescribedCaloriesFemale: toTextOrNull(m.prescribedCaloriesFemale),
+          prescribedDistanceMale: toTextOrNull(m.prescribedDistanceMale),
+          prescribedDistanceFemale: toTextOrNull(m.prescribedDistanceFemale),
           prescribedDurationSecondsMale: toDurationSecondsOrNull(
             m.prescribedDurationSecondsMale
           ),
@@ -523,6 +565,12 @@ export async function PUT(
             m.prescribedDurationSecondsFemale
           ),
           prescribedHeightInches: toNumericOrNull(m.prescribedHeightInches),
+          prescribedHeightInchesMale: toNumericOrNull(
+            m.prescribedHeightInchesMale
+          ),
+          prescribedHeightInchesFemale: toNumericOrNull(
+            m.prescribedHeightInchesFemale
+          ),
           prescribedWeightMaleBwMultiplier: toNumericOrNull(
             m.prescribedWeightMaleBwMultiplier
           ),
@@ -531,6 +579,7 @@ export async function PUT(
           ),
           tempo: m.tempo?.trim() || null,
           isMaxReps: !!m.isMaxReps,
+          isSideCadence: !!m.isSideCadence,
           repSchemeParsed,
           equipmentCount: m.equipmentCount ?? null,
           rxStandard: m.rxStandard || null,
@@ -582,6 +631,14 @@ function toIntOrNull(value: number | string | undefined | null): number | null {
   return n;
 }
 
+function toTextOrNull(
+  value: number | string | undefined | null
+): string | null {
+  if (value == null) return null;
+  const s = String(value).trim();
+  return s === "" ? null : s;
+}
+
 function toDurationSecondsOrNull(
   value: number | string | undefined | null
 ): number | null {
@@ -590,6 +647,23 @@ function toDurationSecondsOrNull(
     return Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
   }
   return parseDurationToSeconds(value);
+}
+
+function normalizeIntervalRounds(
+  rounds:
+    | { workSeconds: number | string; restSeconds: number | string }[]
+    | null
+    | undefined
+): { workSeconds: number; restSeconds: number }[] | null {
+  if (!Array.isArray(rounds) || rounds.length === 0) return null;
+  const out: { workSeconds: number; restSeconds: number }[] = [];
+  for (const r of rounds) {
+    const w = toDurationSecondsOrNull(r.workSeconds);
+    const rest = toDurationSecondsOrNull(r.restSeconds);
+    if (w == null || rest == null) return null;
+    out.push({ workSeconds: w, restSeconds: rest });
+  }
+  return out;
 }
 
 function toNumericOrNull(

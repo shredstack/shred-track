@@ -260,11 +260,17 @@ function emptyPartState(
   }
 
   // Seed height drafts from the prescribed values when the athlete hasn't
-  // entered anything yet — most often they used what was prescribed.
+  // entered anything yet — most often they used what was prescribed. The
+  // gendered columns (when populated) take precedence over the legacy
+  // single column.
   if (part && !existing) {
     for (const mov of part.movements) {
-      if (mov.prescribedHeightInches != null) {
-        heightDrafts[mov.id] = String(mov.prescribedHeightInches);
+      const seed =
+        mov.prescribedHeightInchesMale ??
+        mov.prescribedHeightInchesFemale ??
+        mov.prescribedHeightInches;
+      if (seed != null) {
+        heightDrafts[mov.id] = String(seed);
       }
     }
   }
@@ -1315,18 +1321,29 @@ export function ScoreEntry({
               division pick. */}
           {(() => {
             const fields = activePart.movements
-              .map((mov) => ({
-                mov,
-                wantsDuration: mov.metricType === "duration",
-                wantsHeight: mov.prescribedHeightInches != null,
-              }))
+              .map((mov) => {
+                const heightRx =
+                  gender === "female"
+                    ? mov.prescribedHeightInchesFemale ??
+                      mov.prescribedHeightInchesMale ??
+                      mov.prescribedHeightInches
+                    : mov.prescribedHeightInchesMale ??
+                      mov.prescribedHeightInchesFemale ??
+                      mov.prescribedHeightInches;
+                return {
+                  mov,
+                  wantsDuration: mov.metricType === "duration",
+                  wantsHeight: heightRx != null,
+                  heightRx,
+                };
+              })
               .filter((f) => f.wantsDuration || f.wantsHeight);
             if (fields.length === 0) return null;
             return (
               <div className="space-y-2">
                 <Label className="text-sm">Per-movement details</Label>
                 <div className="space-y-2">
-                  {fields.map(({ mov, wantsDuration, wantsHeight }) => {
+                  {fields.map(({ mov, wantsDuration, wantsHeight, heightRx }) => {
                     const durDraft = state.durationDrafts[mov.id] ?? "";
                     const heightDraft = state.heightDrafts[mov.id] ?? "";
                     const rxSec =
@@ -1391,8 +1408,8 @@ export function ScoreEntry({
                                 }))
                               }
                               placeholder={
-                                mov.prescribedHeightInches != null
-                                  ? `Rx: ${mov.prescribedHeightInches} in`
+                                heightRx != null
+                                  ? `Rx: ${heightRx} in`
                                   : "Height used"
                               }
                               className="h-7 text-xs"

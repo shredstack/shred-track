@@ -28,10 +28,12 @@ interface WireMovement {
   prescribedReps: string | null;
   prescribedWeightMale: string | null;
   prescribedWeightFemale: string | null;
-  prescribedCaloriesMale: number | null;
-  prescribedCaloriesFemale: number | null;
-  prescribedDistanceMale: number | null;
-  prescribedDistanceFemale: number | null;
+  // Free-text so rep schemes ("75-50-25") and scalars ("21") are both
+  // valid. The wire keeps the raw string; display formatting parses it.
+  prescribedCaloriesMale: string | null;
+  prescribedCaloriesFemale: string | null;
+  prescribedDistanceMale: string | null;
+  prescribedDistanceFemale: string | null;
   repSchemeParsed: RepSchemeParsed | null;
   equipmentCount: number | null;
   rxStandard: string | null;
@@ -228,19 +230,22 @@ export interface CreatePartMovementInput {
   prescribedReps?: string;
   prescribedWeightMale?: number;
   prescribedWeightFemale?: number;
-  prescribedCaloriesMale?: number;
-  prescribedCaloriesFemale?: number;
-  prescribedDistanceMale?: number;
-  prescribedDistanceFemale?: number;
+  prescribedCaloriesMale?: number | string;
+  prescribedCaloriesFemale?: number | string;
+  prescribedDistanceMale?: number | string;
+  prescribedDistanceFemale?: number | string;
   // PushPress Parity additions. Server parses free-text strings via
   // duration-parser; numeric values are written as-is.
   prescribedDurationSecondsMale?: number | string;
   prescribedDurationSecondsFemale?: number | string;
   prescribedHeightInches?: number | string;
+  prescribedHeightInchesMale?: number | string;
+  prescribedHeightInchesFemale?: number | string;
   prescribedWeightMaleBwMultiplier?: number | string;
   prescribedWeightFemaleBwMultiplier?: number | string;
   tempo?: string;
   isMaxReps?: boolean;
+  isSideCadence?: boolean;
   promoteSequenceToLadder?: boolean;
   equipmentCount?: number;
   rxStandard?: string;
@@ -257,6 +262,9 @@ export interface CreatePartInput {
   emomIntervalSeconds?: number;
   intervalWorkSeconds?: number | string;
   intervalRestSeconds?: number | string;
+  intervalRounds?: { workSeconds: number | string; restSeconds: number | string }[];
+  sideCadenceIntervalSeconds?: number | string;
+  sideCadenceOpenEnded?: boolean;
   repScheme?: string;
   rounds?: number;
   structure?: WorkoutPartStructure;
@@ -272,6 +280,8 @@ export interface CreateWorkoutInput {
   requiresVest?: boolean;
   vestWeightMaleLb?: number;
   vestWeightFemaleLb?: number;
+  isPartner?: boolean;
+  partnerCount?: number;
   parts: CreatePartInput[];
 }
 
@@ -282,6 +292,8 @@ export interface UpdateWorkoutInput {
   requiresVest?: boolean;
   vestWeightMaleLb?: number;
   vestWeightFemaleLb?: number;
+  isPartner?: boolean;
+  partnerCount?: number;
   parts: CreatePartInput[];
 }
 

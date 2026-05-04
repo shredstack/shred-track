@@ -278,6 +278,17 @@ export function SmartBuilder({
   const [form, setForm] = useState<WorkoutBuilderForm>(
     () => initialForm ?? createEmptyForm(defaultWorkoutDate)
   );
+
+  // Resync the form when the parent recomputes `initialForm` (e.g. the
+  // editing target changed). Without this, the form's useState initializer
+  // only fires on first mount, so editing workout A → workout B kept the
+  // first form's state. Guarded by `step !== "review"` so we don't blow
+  // away in-flight review edits when a parent prop changes mid-session.
+  useEffect(() => {
+    if (!initialForm) return;
+    if (step === "review") return;
+    setForm(initialForm);
+  }, [initialForm, step]);
   // Always start with every part expanded — collapsed parts hide the edit
   // surface and confuse users into thinking parts can only be reordered or
   // deleted. The user can collapse manually via the chevron.
@@ -707,6 +718,57 @@ export function SmartBuilder({
               setForm((prev) => ({ ...prev, ...updates }))
             }
           />
+
+          {/* Partner / team workout. Description carries the split
+              strategy — we don't try to model "tag your partner" yet. */}
+          <div className="space-y-2 rounded-lg border border-border/50 bg-muted/20 p-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!form.isPartner}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    isPartner: e.target.checked,
+                    // Default to 2 (partner) when toggling on; clear count
+                    // when toggling off so we don't carry stale state.
+                    partnerCount: e.target.checked
+                      ? prev.partnerCount || "2"
+                      : "",
+                  }))
+                }
+                className="size-4 cursor-pointer"
+              />
+              <span className="text-sm font-medium">
+                Partner / team workout
+              </span>
+            </label>
+            {form.isPartner && (
+              <div className="space-y-1.5 pl-6">
+                <Label className="text-xs text-muted-foreground">
+                  Team size
+                </Label>
+                <Input
+                  type="number"
+                  min={2}
+                  max={20}
+                  value={form.partnerCount ?? ""}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      partnerCount: e.target.value,
+                    }))
+                  }
+                  placeholder="e.g. 2"
+                  className="h-8 max-w-[120px] text-sm"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Use the notes below to explain how partners split the
+                  work (e.g. &quot;one works while the other rests&quot;).
+                </p>
+              </div>
+            )}
+          </div>
 
           {/* Notes */}
           <div className="space-y-2">
