@@ -100,6 +100,7 @@ const movementSeeds: MovementSeed[] = [
   { canonicalName: "Air Squat", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
   { canonicalName: "Burpee", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
   { canonicalName: "Burpee Box Jump Over", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
+  { canonicalName: "Burpee Pull-Up", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
   { canonicalName: "Box Jump", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
   { canonicalName: "Box Step-Up", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
   { canonicalName: "Lunge", category: "bodyweight", isWeighted: false, is1rmApplicable: false },

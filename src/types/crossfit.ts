@@ -243,6 +243,10 @@ export interface BenchmarkWorkout {
   id: string;
   name: string;
   description: string | null;
+  // Legacy single-part fields. Retained for one release as a read-only
+  // fallback so callers that haven't been updated to consume `parts`
+  // (preview cards, leaderboard headers, etc.) keep rendering. New writes
+  // should always populate `parts`.
   workoutType: WorkoutType;
   category: BenchmarkCategoryName | null;
   timeCapSeconds: number | null;
@@ -254,8 +258,36 @@ export interface BenchmarkWorkout {
   requiresVest?: boolean;
   vestWeightMaleLb?: number | null;
   vestWeightFemaleLb?: number | null;
+  isPartner?: boolean;
+  partnerCount?: number | null;
+  // Deprecated flat movement list. Mirrors the movements of the first
+  // part for backward compatibility; new code should iterate `parts`.
   movements: BenchmarkMovement[];
+  // Multi-part shape. Always populated by the API: legacy single-part
+  // benchmarks are wrapped in a synthetic one-part array on read so this
+  // field is the single source of truth for renderers going forward.
+  parts: BenchmarkWorkoutPart[];
   userStats?: BenchmarkUserStats;
+}
+
+export interface BenchmarkWorkoutPart {
+  id: string;
+  orderIndex: number;
+  label: string | null;
+  workoutType: WorkoutType;
+  timeCapSeconds: number | null;
+  amrapDurationSeconds: number | null;
+  emomIntervalSeconds: number | null;
+  repScheme: string | null;
+  rounds: number | null;
+  structure: WorkoutPartStructure | null;
+  intervalWorkSeconds: number | null;
+  intervalRestSeconds: number | null;
+  intervalRounds: IntervalRoundSpec[] | null;
+  sideCadenceIntervalSeconds: number | null;
+  sideCadenceOpenEnded: boolean;
+  notes: string | null;
+  movements: BenchmarkMovement[];
 }
 
 export interface BenchmarkMovement {
@@ -263,11 +295,31 @@ export interface BenchmarkMovement {
   movementId: string;
   movementName: string;
   orderIndex: number;
+  // Joined from the movements library so the admin/edit form can render
+  // the right inputs (cals vs. weight vs. distance) without re-deriving.
+  category?: MovementCategory;
+  isWeighted?: boolean;
+  metricType?: MovementMetricType;
   prescribedReps: string | null;
   prescribedWeightMale: number | null;
   prescribedWeightFemale: number | null;
+  prescribedCaloriesMale?: string | null;
+  prescribedCaloriesFemale?: string | null;
+  prescribedDistanceMale?: string | null;
+  prescribedDistanceFemale?: string | null;
+  prescribedDurationSecondsMale?: number | null;
+  prescribedDurationSecondsFemale?: number | null;
+  prescribedHeightInches?: number | null;
+  prescribedHeightInchesMale?: number | null;
+  prescribedHeightInchesFemale?: number | null;
+  prescribedWeightMaleBwMultiplier?: number | null;
+  prescribedWeightFemaleBwMultiplier?: number | null;
+  tempo?: string | null;
   isMaxReps?: boolean;
+  isSideCadence?: boolean;
+  equipmentCount?: number | null;
   rxStandard: string | null;
+  notes?: string | null;
 }
 
 export type BenchmarkCategory = "system" | "custom" | "community";

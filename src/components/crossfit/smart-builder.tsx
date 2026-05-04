@@ -10,16 +10,14 @@ import { Separator } from "@/components/ui/separator";
 import {
   ArrowLeft,
   ArrowRight,
-  Plus,
   Save,
   Sparkles,
-  Trash2,
-  ChevronUp,
-  ChevronDown,
-  ChevronRight,
   Loader2,
 } from "lucide-react";
-import { WorkoutPartConfig } from "@/components/crossfit/workout-part-config";
+import {
+  MultiPartConfig,
+  emptyPart,
+} from "@/components/crossfit/multi-part-config";
 import { VestRequirements } from "@/components/crossfit/vest-requirements";
 import {
   WorkoutDateInput,
@@ -47,28 +45,6 @@ interface SmartBuilderProps {
 }
 
 type Step = "build" | "review";
-
-const MAX_PARTS = 6;
-
-function generatePartId() {
-  return `part-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-}
-
-function emptyPart(): WorkoutBuilderPart {
-  return {
-    tempId: generatePartId(),
-    label: "",
-    workoutType: "for_time",
-    timeCapMinutes: "",
-    amrapDurationMinutes: "",
-    emomIntervalSeconds: "",
-    intervalWorkSeconds: "",
-    intervalRestSeconds: "",
-    repScheme: "",
-    rounds: "",
-    movements: [],
-  };
-}
 
 function createEmptyForm(workoutDate?: string): WorkoutBuilderForm {
   return {
@@ -111,158 +87,6 @@ function formatBuilderMovementMetric(
   return null;
 }
 
-function partSummary(part: WorkoutBuilderPart, idx: number): string {
-  const parts: string[] = [];
-  parts.push(part.label || `Part ${String.fromCharCode(65 + idx)}`);
-  parts.push(WORKOUT_TYPE_LABELS[part.workoutType]);
-  if (part.workoutType === "for_time" && part.rounds)
-    parts.push(`${part.rounds} rds`);
-  if (part.workoutType === "for_reps" && part.structure === "tabata")
-    parts.push("Tabata");
-  if (part.workoutType === "intervals") {
-    if (part.rounds) parts.push(`${part.rounds} rds`);
-    if (part.intervalWorkSeconds && part.intervalRestSeconds) {
-      parts.push(
-        `${part.intervalWorkSeconds} work / ${part.intervalRestSeconds} rest`
-      );
-    }
-  }
-  if (part.repScheme) parts.push(part.repScheme);
-  if (part.workoutType === "amrap" && part.amrapDurationMinutes)
-    parts.push(`${part.amrapDurationMinutes} min`);
-  if (
-    (part.workoutType === "for_time" ||
-      part.workoutType === "emom" ||
-      part.workoutType === "for_reps") &&
-    part.timeCapMinutes
-  )
-    parts.push(`${part.timeCapMinutes} min`);
-  const movs = part.movements
-    .slice(0, 2)
-    .map((m) => m.movementName)
-    .filter(Boolean)
-    .join(", ");
-  if (movs) parts.push(movs);
-  return parts.join(" · ");
-}
-
-// ============================================
-// PartCard
-// ============================================
-
-interface PartCardProps {
-  part: WorkoutBuilderPart;
-  index: number;
-  totalParts: number;
-  isCollapsed: boolean;
-  onToggleCollapse: () => void;
-  onChange: (updates: Partial<WorkoutBuilderPart>) => void;
-  onMovementsChange: (movements: WorkoutBuilderMovement[]) => void;
-  onMove: (direction: "up" | "down") => void;
-  onDelete: () => void;
-}
-
-function PartCard({
-  part,
-  index,
-  totalParts,
-  isCollapsed,
-  onToggleCollapse,
-  onChange,
-  onMovementsChange,
-  onMove,
-  onDelete,
-}: PartCardProps) {
-  const defaultLabel = `Part ${String.fromCharCode(65 + index)}`;
-
-  return (
-    <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-3">
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          className="flex flex-1 items-center gap-2 text-left min-w-0"
-          onClick={onToggleCollapse}
-          aria-expanded={!isCollapsed}
-          aria-label={isCollapsed ? "Expand part" : "Collapse part"}
-        >
-          <ChevronRight
-            className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${
-              isCollapsed ? "" : "rotate-90"
-            }`}
-          />
-          <Badge
-            variant="outline"
-            className={WORKOUT_TYPE_COLORS[part.workoutType]}
-          >
-            {part.label || defaultLabel}
-          </Badge>
-          {isCollapsed && (
-            <span className="truncate text-xs text-muted-foreground">
-              {partSummary(part, index)}
-            </span>
-          )}
-        </button>
-        {totalParts > 1 && (
-          <div className="flex items-center gap-0.5">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => onMove("up")}
-              disabled={index === 0}
-            >
-              <ChevronUp className="size-3.5" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => onMove("down")}
-              disabled={index === totalParts - 1}
-            >
-              <ChevronDown className="size-3.5" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={onDelete}
-              className="text-destructive hover:text-destructive"
-            >
-              <Trash2 className="size-3.5" />
-            </Button>
-          </div>
-        )}
-      </div>
-
-      {!isCollapsed && (
-        <div className="space-y-3 pt-1">
-          {totalParts > 1 && (
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">
-                Label (optional)
-              </Label>
-              <Input
-                value={part.label}
-                onChange={(e) => onChange({ label: e.target.value })}
-                placeholder={`e.g. Strength, ${defaultLabel}`}
-                className="h-8 text-xs"
-              />
-            </div>
-          )}
-
-          <WorkoutPartConfig
-            part={part}
-            onChange={onChange}
-            onMovementsChange={onMovementsChange}
-            compact
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ============================================
 // Smart Builder
 // ============================================
@@ -289,10 +113,6 @@ export function SmartBuilder({
     if (step === "review") return;
     setForm(initialForm);
   }, [initialForm, step]);
-  // Always start with every part expanded — collapsed parts hide the edit
-  // surface and confuse users into thinking parts can only be reordered or
-  // deleted. The user can collapse manually via the chevron.
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [suggestion, setSuggestion] = useState<{
     title: string;
     source: string;
@@ -308,67 +128,12 @@ export function SmartBuilder({
     setStep((s) => (s === "build" ? "review" : s));
   }, []);
 
-  const updatePart = useCallback(
-    (tempId: string, updates: Partial<WorkoutBuilderPart>) => {
-      setForm((prev) => ({
-        ...prev,
-        parts: prev.parts.map((p) =>
-          p.tempId === tempId ? { ...p, ...updates } : p
-        ),
-      }));
+  const handlePartsChange = useCallback(
+    (parts: WorkoutBuilderPart[]) => {
+      setForm((prev) => ({ ...prev, parts }));
     },
     []
   );
-
-  const updatePartMovements = useCallback(
-    (tempId: string, movements: WorkoutBuilderMovement[]) => {
-      setForm((prev) => ({
-        ...prev,
-        parts: prev.parts.map((p) =>
-          p.tempId === tempId ? { ...p, movements } : p
-        ),
-      }));
-    },
-    []
-  );
-
-  const addPart = useCallback(() => {
-    setForm((prev) => {
-      if (prev.parts.length >= MAX_PARTS) return prev;
-      const newPart = emptyPart();
-      // Collapse all existing parts, expand the new one.
-      setCollapsed(new Set(prev.parts.map((p) => p.tempId)));
-      return { ...prev, parts: [...prev.parts, newPart] };
-    });
-  }, []);
-
-  const deletePart = useCallback((tempId: string) => {
-    setForm((prev) => {
-      if (prev.parts.length <= 1) return prev;
-      return { ...prev, parts: prev.parts.filter((p) => p.tempId !== tempId) };
-    });
-  }, []);
-
-  const movePart = useCallback((tempId: string, direction: "up" | "down") => {
-    setForm((prev) => {
-      const idx = prev.parts.findIndex((p) => p.tempId === tempId);
-      if (idx === -1) return prev;
-      const swap = direction === "up" ? idx - 1 : idx + 1;
-      if (swap < 0 || swap >= prev.parts.length) return prev;
-      const next = [...prev.parts];
-      [next[idx], next[swap]] = [next[swap], next[idx]];
-      return { ...prev, parts: next };
-    });
-  }, []);
-
-  const toggleCollapse = useCallback((tempId: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(tempId)) next.delete(tempId);
-      else next.add(tempId);
-      return next;
-    });
-  }, []);
 
   // Deterministic local fallback — keeps existing behavior when the
   // suggestion endpoint returns nothing or hasn't fired yet.
@@ -522,34 +287,10 @@ export function SmartBuilder({
         <div className="space-y-3">
           <h3 className="font-semibold">Build your workout</h3>
 
-          {form.parts.map((part, idx) => (
-            <PartCard
-              key={part.tempId}
-              part={part}
-              index={idx}
-              totalParts={form.parts.length}
-              isCollapsed={collapsed.has(part.tempId)}
-              onToggleCollapse={() => toggleCollapse(part.tempId)}
-              onChange={(updates) => updatePart(part.tempId, updates)}
-              onMovementsChange={(movements) =>
-                updatePartMovements(part.tempId, movements)
-              }
-              onMove={(direction) => movePart(part.tempId, direction)}
-              onDelete={() => deletePart(part.tempId)}
-            />
-          ))}
-
-          {form.parts.length < MAX_PARTS && (
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full border-dashed"
-              onClick={addPart}
-            >
-              <Plus className="size-4" />
-              Add another part
-            </Button>
-          )}
+          <MultiPartConfig
+            parts={form.parts}
+            onPartsChange={handlePartsChange}
+          />
 
           <div className="flex gap-2 pt-1">
             <Button
