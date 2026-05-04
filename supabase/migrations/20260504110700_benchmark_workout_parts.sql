@@ -52,3 +52,48 @@ FROM benchmark_workout_parts bp
 WHERE bp.benchmark_workout_id = bm.benchmark_workout_id
   AND bp.order_index = 0
   AND bm.benchmark_workout_part_id IS NULL;
+
+-- RLS: mirrors benchmark_workout_movements. Parts are readable when the
+-- parent benchmark is readable; writes require ownership of the parent
+-- (system benchmarks may be inserted into during seed, matching the
+-- existing movements policy).
+ALTER TABLE benchmark_workout_parts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Benchmark parts are readable with parent"
+  ON benchmark_workout_parts FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM benchmark_workouts
+      WHERE benchmark_workouts.id = benchmark_workout_parts.benchmark_workout_id
+    )
+  );
+
+CREATE POLICY "Benchmark parts insertable by benchmark owner"
+  ON benchmark_workout_parts FOR INSERT
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM benchmark_workouts
+      WHERE benchmark_workouts.id = benchmark_workout_parts.benchmark_workout_id
+        AND (benchmark_workouts.created_by = auth.uid() OR benchmark_workouts.is_system = true)
+    )
+  );
+
+CREATE POLICY "Benchmark parts updatable by benchmark owner"
+  ON benchmark_workout_parts FOR UPDATE
+  USING (
+    EXISTS (
+      SELECT 1 FROM benchmark_workouts
+      WHERE benchmark_workouts.id = benchmark_workout_parts.benchmark_workout_id
+        AND benchmark_workouts.created_by = auth.uid()
+    )
+  );
+
+CREATE POLICY "Benchmark parts deletable by benchmark owner"
+  ON benchmark_workout_parts FOR DELETE
+  USING (
+    EXISTS (
+      SELECT 1 FROM benchmark_workouts
+      WHERE benchmark_workouts.id = benchmark_workout_parts.benchmark_workout_id
+        AND benchmark_workouts.created_by = auth.uid()
+    )
+  );
