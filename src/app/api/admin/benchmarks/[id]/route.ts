@@ -3,27 +3,22 @@ import { db } from "@/db";
 import {
   benchmarkWorkouts,
   benchmarkWorkoutMovements,
+  benchmarkWorkoutParts,
   workouts,
   workoutParts,
   workoutMovements,
 } from "@/db/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, notInArray } from "drizzle-orm";
 import { getAdminUser } from "@/lib/admin";
-import { parseRepScheme } from "@/lib/crossfit/rep-scheme-parser";
+import {
+  coerceBenchmarkMovementValues,
+  coerceBenchmarkPartValues,
+  type BenchmarkPartInput,
+} from "@/lib/crossfit/benchmark-parts";
 
-// Shape of an incoming movement in the PUT payload. Mirrors the admin
-// benchmark form (formToPayload in components/admin/admin-benchmarks.tsx).
-type BenchmarkMovementInput = {
-  movementId: string;
-  orderIndex: number;
-  prescribedReps?: string;
-  prescribedWeightMale?: number;
-  prescribedWeightFemale?: number;
-  rxStandard?: string;
-  notes?: string;
-};
-
-// PUT /api/admin/benchmarks/[id] — update any benchmark (admin can edit system benchmarks)
+// PUT /api/admin/benchmarks/[id] — update any benchmark (admin can edit
+// system benchmarks). Accepts the multi-part shape; diffs parts &
+// movements like the workouts PUT route.
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -36,17 +31,26 @@ export async function PUT(
   const {
     name,
     description,
-    workoutType,
     category,
-    timeCapSeconds,
-    amrapDurationSeconds,
-    repScheme,
     isSystem,
     requiresVest,
     vestWeightMaleLb,
     vestWeightFemaleLb,
-    movements: movementsList,
-  } = body;
+    isPartner,
+    partnerCount,
+    parts,
+  } = body as {
+    name?: string;
+    description?: string;
+    category?: string | null;
+    isSystem?: boolean;
+    requiresVest?: boolean;
+    vestWeightMaleLb?: number | string | null;
+    vestWeightFemaleLb?: number | string | null;
+    isPartner?: boolean;
+    partnerCount?: number | string | null;
+    parts?: BenchmarkPartInput[];
+  };
 
   const VALID_CATEGORIES = new Set([
     "girls",
@@ -62,6 +66,22 @@ export async function PUT(
     );
   }
 
+  if (!Array.isArray(parts) || parts.length === 0) {
+    return NextResponse.json(
+      { error: "At least one part is required" },
+      { status: 400 }
+    );
+  }
+
+  for (const p of parts) {
+    if (!p.workoutType) {
+      return NextResponse.json(
+        { error: "Each part must have a workoutType" },
+        { status: 400 }
+      );
+    }
+  }
+
   const [existing] = await db
     .select()
     .from(benchmarkWorkouts)
@@ -72,17 +92,26 @@ export async function PUT(
     return NextResponse.json({ error: "Benchmark not found" }, { status: 404 });
   }
 
+  const firstPart = parts[0];
+  const firstPartValues = coerceBenchmarkPartValues(firstPart);
+
   const result = await db.transaction(async (tx) => {
     const [updated] = await tx
       .update(benchmarkWorkouts)
       .set({
         name: name?.trim() || existing.name,
-        description: description !== undefined ? (description || null) : existing.description,
-        workoutType: workoutType || existing.workoutType,
-        category: category !== undefined ? (category || null) : existing.category,
-        timeCapSeconds: timeCapSeconds !== undefined ? (timeCapSeconds || null) : existing.timeCapSeconds,
-        amrapDurationSeconds: amrapDurationSeconds !== undefined ? (amrapDurationSeconds || null) : existing.amrapDurationSeconds,
-        repScheme: repScheme !== undefined ? (repScheme || null) : existing.repScheme,
+        description:
+          description !== undefined
+            ? description?.trim() || null
+            : existing.description,
+        workoutType: firstPart.workoutType,
+        category:
+          category !== undefined
+            ? category || null
+            : existing.category,
+        timeCapSeconds: firstPartValues.timeCapSeconds,
+        amrapDurationSeconds: firstPartValues.amrapDurationSeconds,
+        repScheme: firstPartValues.repScheme,
         isSystem: isSystem !== undefined ? !!isSystem : existing.isSystem,
         ...(requiresVest !== undefined ? { requiresVest: !!requiresVest } : {}),
         ...(vestWeightMaleLb !== undefined
@@ -101,38 +130,150 @@ export async function PUT(
                   : null,
             }
           : {}),
+        ...(isPartner !== undefined ? { isPartner: !!isPartner } : {}),
+        ...(partnerCount !== undefined
+          ? {
+              partnerCount:
+                partnerCount != null && partnerCount !== ""
+                  ? Number(partnerCount)
+                  : null,
+            }
+          : {}),
         updatedAt: new Date(),
       })
       .where(eq(benchmarkWorkouts.id, id))
       .returning();
 
-    if (Array.isArray(movementsList)) {
+    // Diff benchmark parts: drop missing, upsert by id.
+    const keepPartIds = parts
+      .map((p) => p.id)
+      .filter((x): x is string => !!x && !x.startsWith("synthetic:"));
+    if (keepPartIds.length > 0) {
       await tx
-        .delete(benchmarkWorkoutMovements)
-        .where(eq(benchmarkWorkoutMovements.benchmarkWorkoutId, id));
-
-      if (movementsList.length > 0) {
-        await tx.insert(benchmarkWorkoutMovements).values(
-          (movementsList as BenchmarkMovementInput[]).map((m, i) => ({
-            benchmarkWorkoutId: id,
-            movementId: m.movementId,
-            orderIndex: m.orderIndex ?? i,
-            prescribedReps: m.prescribedReps || null,
-            prescribedWeightMale: m.prescribedWeightMale?.toString() || null,
-            prescribedWeightFemale: m.prescribedWeightFemale?.toString() || null,
-            rxStandard: m.rxStandard || null,
-            notes: m.notes || null,
-          }))
+        .delete(benchmarkWorkoutParts)
+        .where(
+          and(
+            eq(benchmarkWorkoutParts.benchmarkWorkoutId, id),
+            notInArray(benchmarkWorkoutParts.id, keepPartIds)
+          )
         );
+    } else {
+      await tx
+        .delete(benchmarkWorkoutParts)
+        .where(eq(benchmarkWorkoutParts.benchmarkWorkoutId, id));
+    }
+
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      const partValues = coerceBenchmarkPartValues(p);
+      let partId: string;
+
+      if (p.id && !p.id.startsWith("synthetic:")) {
+        const [updatedPart] = await tx
+          .update(benchmarkWorkoutParts)
+          .set({ orderIndex: i, ...partValues })
+          .where(
+            and(
+              eq(benchmarkWorkoutParts.id, p.id),
+              eq(benchmarkWorkoutParts.benchmarkWorkoutId, id)
+            )
+          )
+          .returning();
+        if (!updatedPart) {
+          const [inserted] = await tx
+            .insert(benchmarkWorkoutParts)
+            .values({
+              benchmarkWorkoutId: id,
+              orderIndex: i,
+              ...partValues,
+            })
+            .returning();
+          partId = inserted.id;
+        } else {
+          partId = updatedPart.id;
+        }
+      } else {
+        const [inserted] = await tx
+          .insert(benchmarkWorkoutParts)
+          .values({
+            benchmarkWorkoutId: id,
+            orderIndex: i,
+            ...partValues,
+          })
+          .returning();
+        partId = inserted.id;
+      }
+
+      const keepMovementIds = p.movements
+        .map((m) => m.id)
+        .filter((x): x is string => !!x);
+      if (keepMovementIds.length > 0) {
+        await tx
+          .delete(benchmarkWorkoutMovements)
+          .where(
+            and(
+              eq(benchmarkWorkoutMovements.benchmarkWorkoutPartId, partId),
+              notInArray(benchmarkWorkoutMovements.id, keepMovementIds)
+            )
+          );
+      } else {
+        await tx
+          .delete(benchmarkWorkoutMovements)
+          .where(eq(benchmarkWorkoutMovements.benchmarkWorkoutPartId, partId));
+      }
+
+      for (let j = 0; j < p.movements.length; j++) {
+        const m = p.movements[j];
+        const fields = coerceBenchmarkMovementValues(m, j);
+
+        if (m.id) {
+          const [updatedMov] = await tx
+            .update(benchmarkWorkoutMovements)
+            .set(fields)
+            .where(
+              and(
+                eq(benchmarkWorkoutMovements.id, m.id),
+                eq(benchmarkWorkoutMovements.benchmarkWorkoutPartId, partId)
+              )
+            )
+            .returning();
+          if (!updatedMov) {
+            await tx.insert(benchmarkWorkoutMovements).values({
+              benchmarkWorkoutId: id,
+              benchmarkWorkoutPartId: partId,
+              ...fields,
+            });
+          }
+        } else {
+          await tx.insert(benchmarkWorkoutMovements).values({
+            benchmarkWorkoutId: id,
+            benchmarkWorkoutPartId: partId,
+            ...fields,
+          });
+        }
       }
     }
 
-    // Propagate the edit to every workout that was added from this benchmark.
-    // Users explicitly opted into "edits flow everywhere" — score history (the
-    // `scores` row itself) survives, but per-movement detail rows that hang
-    // off removed/replaced workout_movements will cascade. We update existing
-    // workout_movements in place (matched by orderIndex) so score detail FKs
-    // stay attached when the shape lines up.
+    // ============================================
+    // Propagate edits to linked workouts.
+    // ============================================
+    //
+    // Users opted into "edits flow everywhere": when a benchmark changes,
+    // workouts created from it pick up the change. Score history (the
+    // `scores` row itself) survives. For each linked workout we sync:
+    //
+    //   1. Top-level `workouts.*` columns (mirroring the first part —
+    //      same legacy fallback the read path uses).
+    //   2. Each linked-workout part at orderIndex `i` < parts.length —
+    //      structural fields and per-movement diff, matching the
+    //      benchmark's part at the same orderIndex.
+    //
+    // Linked-workout parts beyond `parts.length` are left alone (the user
+    // may have added them on top of the benchmark). New benchmark parts
+    // at higher orderIndex are *not* inserted onto linked workouts —
+    // stale snapshots live with their original part count rather than us
+    // grafting in parts that have no score row attached. Re-adding the
+    // workout from the benchmark picks up any new parts.
     const linkedWorkouts = await tx
       .select({ id: workouts.id })
       .from(workouts)
@@ -153,42 +294,58 @@ export async function PUT(
           requiresVest: updated.requiresVest,
           vestWeightMaleLb: updated.vestWeightMaleLb,
           vestWeightFemaleLb: updated.vestWeightFemaleLb,
+          isPartner: updated.isPartner,
+          partnerCount: updated.partnerCount,
           updatedAt: new Date(),
         })
         .where(inArray(workouts.id, workoutIds));
 
-      // Benchmark workouts are created single-part (orderIndex 0). Sync that
-      // part's structural fields; leave any extra parts the user added alone.
-      await tx
-        .update(workoutParts)
-        .set({
-          workoutType: updated.workoutType,
-          timeCapSeconds: updated.timeCapSeconds,
-          amrapDurationSeconds: updated.amrapDurationSeconds,
-          repScheme: updated.repScheme,
-        })
-        .where(
-          and(
-            inArray(workoutParts.workoutId, workoutIds),
-            eq(workoutParts.orderIndex, 0)
-          )
-        );
+      for (let i = 0; i < parts.length; i++) {
+        const benchmarkPart = parts[i];
+        const benchmarkPartValues = coerceBenchmarkPartValues(benchmarkPart);
 
-      if (Array.isArray(movementsList)) {
-        const inputs = movementsList as BenchmarkMovementInput[];
+        // Sync structural fields on each linked workout's part at this
+        // orderIndex (no-op when the linked workout has fewer parts).
+        await tx
+          .update(workoutParts)
+          .set({
+            label: benchmarkPartValues.label,
+            workoutType: benchmarkPartValues.workoutType,
+            timeCapSeconds: benchmarkPartValues.timeCapSeconds,
+            amrapDurationSeconds: benchmarkPartValues.amrapDurationSeconds,
+            emomIntervalSeconds: benchmarkPartValues.emomIntervalSeconds,
+            repScheme: benchmarkPartValues.repScheme,
+            rounds: benchmarkPartValues.rounds,
+            structure: benchmarkPartValues.structure,
+            intervalWorkSeconds: benchmarkPartValues.intervalWorkSeconds,
+            intervalRestSeconds: benchmarkPartValues.intervalRestSeconds,
+            intervalRounds: benchmarkPartValues.intervalRounds,
+            sideCadenceIntervalSeconds:
+              benchmarkPartValues.sideCadenceIntervalSeconds,
+            sideCadenceOpenEnded: benchmarkPartValues.sideCadenceOpenEnded,
+          })
+          .where(
+            and(
+              inArray(workoutParts.workoutId, workoutIds),
+              eq(workoutParts.orderIndex, i)
+            )
+          );
 
+        // Diff per-part movements on each linked workout. Match by
+        // orderIndex within the part — preserves score_movement_details
+        // FKs when shape lines up.
         for (const wid of workoutIds) {
-          const [part] = await tx
+          const [linkedPart] = await tx
             .select({ id: workoutParts.id })
             .from(workoutParts)
             .where(
               and(
                 eq(workoutParts.workoutId, wid),
-                eq(workoutParts.orderIndex, 0)
+                eq(workoutParts.orderIndex, i)
               )
             )
             .limit(1);
-          if (!part) continue;
+          if (!linkedPart) continue;
 
           const existingMovs = await tx
             .select({
@@ -196,43 +353,31 @@ export async function PUT(
               orderIndex: workoutMovements.orderIndex,
             })
             .from(workoutMovements)
-            .where(eq(workoutMovements.workoutId, wid))
+            .where(eq(workoutMovements.workoutPartId, linkedPart.id))
             .orderBy(workoutMovements.orderIndex);
 
           const existingByOrder = new Map(
             existingMovs.map((m) => [m.orderIndex, m])
           );
 
-          for (let i = 0; i < inputs.length; i++) {
-            const m = inputs[i];
-            const orderIndex = m.orderIndex ?? i;
-            const values = {
-              movementId: m.movementId,
-              prescribedReps: m.prescribedReps || null,
-              prescribedWeightMale:
-                m.prescribedWeightMale != null
-                  ? String(m.prescribedWeightMale)
-                  : null,
-              prescribedWeightFemale:
-                m.prescribedWeightFemale != null
-                  ? String(m.prescribedWeightFemale)
-                  : null,
-              repSchemeParsed: parseRepScheme(m.prescribedReps ?? null),
-              rxStandard: m.rxStandard || null,
-              notes: m.notes || null,
-            };
-            const existing = existingByOrder.get(orderIndex);
-            if (existing) {
+          const inputs = benchmarkPart.movements;
+          for (let j = 0; j < inputs.length; j++) {
+            const m = inputs[j];
+            const orderIndex = m.orderIndex ?? j;
+            const fields = coerceBenchmarkMovementValues(m, orderIndex);
+            // workoutMovements has the same column set as benchmarkWorkoutMovements;
+            // the coerce helper produces the right shape.
+            const existingMov = existingByOrder.get(orderIndex);
+            if (existingMov) {
               await tx
                 .update(workoutMovements)
-                .set(values)
-                .where(eq(workoutMovements.id, existing.id));
+                .set(fields)
+                .where(eq(workoutMovements.id, existingMov.id));
             } else {
               await tx.insert(workoutMovements).values({
-                ...values,
                 workoutId: wid,
-                workoutPartId: part.id,
-                orderIndex,
+                workoutPartId: linkedPart.id,
+                ...fields,
               });
             }
           }

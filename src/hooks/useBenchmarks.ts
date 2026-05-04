@@ -5,6 +5,7 @@ import type {
   BenchmarkCategoryName,
   BenchmarkHistory,
 } from "@/types/crossfit";
+import type { CreatePartInput } from "@/hooks/useWorkouts";
 
 async function fetchBenchmarks(params?: {
   search?: string;
@@ -52,28 +53,21 @@ export function useBenchmarkHistory(benchmarkId: string | null) {
   });
 }
 
+export interface CreateBenchmarkInput {
+  name: string;
+  description?: string;
+  category?: BenchmarkCategoryName | null;
+  communityId?: string;
+  isPartner?: boolean;
+  partnerCount?: number;
+  parts: CreatePartInput[];
+}
+
 export function useCreateBenchmark() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: {
-      name: string;
-      description?: string;
-      workoutType: string;
-      category?: BenchmarkCategoryName | null;
-      timeCapSeconds?: number;
-      amrapDurationSeconds?: number;
-      repScheme?: string;
-      communityId?: string;
-      movements: {
-        movementId: string;
-        orderIndex: number;
-        prescribedReps?: string;
-        prescribedWeightMale?: number;
-        prescribedWeightFemale?: number;
-        rxStandard?: string;
-      }[];
-    }) => {
+    mutationFn: async (data: CreateBenchmarkInput) => {
       const response = await fetch("/api/benchmarks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

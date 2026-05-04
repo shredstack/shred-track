@@ -3,7 +3,7 @@ import { db } from "@/db";
 import {
   benchmarkWorkouts,
   benchmarkWorkoutMovements,
-  movements,
+  benchmarkWorkoutParts,
   communityMemberships,
   scores,
   workouts,
@@ -12,6 +12,13 @@ import { eq, and, or, ilike, inArray } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { pickBestScore, type ScoreRow } from "@/lib/crossfit/benchmark-stats";
 import type { WorkoutType } from "@/types/crossfit";
+import {
+  assembleBenchmarkParts,
+  coerceBenchmarkMovementValues,
+  coerceBenchmarkPartValues,
+  fetchBenchmarkPartsAndMovements,
+  type BenchmarkPartInput,
+} from "@/lib/crossfit/benchmark-parts";
 
 // GET /api/benchmarks — list benchmarks visible to the user
 export async function GET(req: NextRequest) {
@@ -24,7 +31,6 @@ export async function GET(req: NextRequest) {
   const communityId = req.nextUrl.searchParams.get("communityId");
   const includeStats = req.nextUrl.searchParams.get("includeStats") === "true";
 
-  // Build conditions for which benchmarks are visible
   const conditions = [];
 
   if (category === "system") {
@@ -39,7 +45,6 @@ export async function GET(req: NextRequest) {
   } else if (category === "community" && communityId) {
     conditions.push(eq(benchmarkWorkouts.communityId, communityId));
   } else {
-    // Default: show system + user's own + user's communities
     const userCommunities = await db
       .select({ communityId: communityMemberships.communityId })
       .from(communityMemberships)
@@ -61,12 +66,10 @@ export async function GET(req: NextRequest) {
     conditions.push(or(...visibilityConditions)!);
   }
 
-  // Add search filter
   if (search) {
     conditions.push(ilike(benchmarkWorkouts.name, `%${search}%`));
   }
 
-  // Filter by intrinsic benchmark category (girls / heroes / etc).
   if (benchmarkCategory) {
     conditions.push(eq(benchmarkWorkouts.category, benchmarkCategory));
   }
@@ -77,35 +80,9 @@ export async function GET(req: NextRequest) {
     .where(and(...conditions))
     .orderBy(benchmarkWorkouts.name);
 
-  // Fetch movements for each benchmark
   const benchmarkIds = rows.map((r) => r.id);
-  const allMovements =
-    benchmarkIds.length > 0
-      ? await db
-          .select({
-            id: benchmarkWorkoutMovements.id,
-            benchmarkWorkoutId: benchmarkWorkoutMovements.benchmarkWorkoutId,
-            movementId: benchmarkWorkoutMovements.movementId,
-            movementName: movements.canonicalName,
-            orderIndex: benchmarkWorkoutMovements.orderIndex,
-            prescribedReps: benchmarkWorkoutMovements.prescribedReps,
-            prescribedWeightMale: benchmarkWorkoutMovements.prescribedWeightMale,
-            prescribedWeightFemale: benchmarkWorkoutMovements.prescribedWeightFemale,
-            rxStandard: benchmarkWorkoutMovements.rxStandard,
-          })
-          .from(benchmarkWorkoutMovements)
-          .innerJoin(movements, eq(benchmarkWorkoutMovements.movementId, movements.id))
-          .where(inArray(benchmarkWorkoutMovements.benchmarkWorkoutId, benchmarkIds))
-          .orderBy(benchmarkWorkoutMovements.orderIndex)
-      : [];
-
-  // Group movements by benchmark
-  const movementsByBenchmark = new Map<string, typeof allMovements>();
-  for (const m of allMovements) {
-    const list = movementsByBenchmark.get(m.benchmarkWorkoutId) || [];
-    list.push(m);
-    movementsByBenchmark.set(m.benchmarkWorkoutId, list);
-  }
+  const { partsByBenchmark, movementsByBenchmark } =
+    await fetchBenchmarkPartsAndMovements(benchmarkIds);
 
   // Optional: aggregate user score stats per benchmark.
   const statsByBenchmark = new Map<
@@ -180,39 +157,42 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const result = rows.map((bw) => ({
-    id: bw.id,
-    name: bw.name,
-    description: bw.description,
-    workoutType: bw.workoutType,
-    category: bw.category,
-    timeCapSeconds: bw.timeCapSeconds,
-    amrapDurationSeconds: bw.amrapDurationSeconds,
-    repScheme: bw.repScheme,
-    isSystem: bw.isSystem,
-    createdBy: bw.createdBy,
-    communityId: bw.communityId,
-    movements: (movementsByBenchmark.get(bw.id) || []).map((m) => ({
-      id: m.id,
-      movementId: m.movementId,
-      movementName: m.movementName,
-      orderIndex: m.orderIndex,
-      prescribedReps: m.prescribedReps,
-      prescribedWeightMale: m.prescribedWeightMale ? Number(m.prescribedWeightMale) : null,
-      prescribedWeightFemale: m.prescribedWeightFemale ? Number(m.prescribedWeightFemale) : null,
-      rxStandard: m.rxStandard,
-    })),
-    userStats: includeStats
-      ? statsByBenchmark.get(bw.id) ?? { attempts: 0, bestScore: null, lastAttemptDate: null }
-      : undefined,
-  }));
+  const result = rows.map((bw) => {
+    const { parts, flatMovements } = assembleBenchmarkParts(
+      bw,
+      partsByBenchmark.get(bw.id) ?? [],
+      movementsByBenchmark.get(bw.id) ?? []
+    );
+    return {
+      id: bw.id,
+      name: bw.name,
+      description: bw.description,
+      workoutType: bw.workoutType,
+      category: bw.category,
+      timeCapSeconds: bw.timeCapSeconds,
+      amrapDurationSeconds: bw.amrapDurationSeconds,
+      repScheme: bw.repScheme,
+      isSystem: bw.isSystem,
+      createdBy: bw.createdBy,
+      communityId: bw.communityId,
+      requiresVest: bw.requiresVest,
+      vestWeightMaleLb:
+        bw.vestWeightMaleLb != null ? Number(bw.vestWeightMaleLb) : null,
+      vestWeightFemaleLb:
+        bw.vestWeightFemaleLb != null ? Number(bw.vestWeightFemaleLb) : null,
+      isPartner: bw.isPartner,
+      partnerCount: bw.partnerCount,
+      movements: flatMovements,
+      parts,
+      userStats: includeStats
+        ? statsByBenchmark.get(bw.id) ?? { attempts: 0, bestScore: null, lastAttemptDate: null }
+        : undefined,
+    };
+  });
 
   return NextResponse.json(result);
 }
 
-// Local helper so the route can format scores without importing the
-// formatter into the response object directly. Returns a structured
-// summary that the client can render however it wants.
 function formatBestScoreSafe(
   workoutType: string,
   score: ScoreRow | null
@@ -228,7 +208,6 @@ function formatBestScoreSafe(
   remainderReps: number | null;
 } | null {
   if (!score) return null;
-  // Inline format to avoid a circular import — mirrors lib/crossfit/benchmark-stats.formatBestScore.
   let display = score.scoreText ?? "";
   if (!display) {
     if (workoutType === "for_time" && score.timeSeconds != null) {
@@ -263,7 +242,11 @@ function formatBestScoreSafe(
   };
 }
 
-// POST /api/benchmarks — create a user or community benchmark
+// POST /api/benchmarks — create a user or community benchmark.
+//
+// Accepts the new multi-part shape: `{ name, description, parts: [...], ... }`.
+// The first part's type/timing/repScheme is mirrored onto the legacy
+// top-level columns on benchmark_workouts so older read paths keep working.
 export async function POST(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -272,26 +255,48 @@ export async function POST(req: NextRequest) {
   const {
     name,
     description,
-    workoutType,
     category,
-    timeCapSeconds,
-    amrapDurationSeconds,
-    repScheme,
     communityId,
-    movements: movementsList,
-  } = body;
+    isPartner,
+    partnerCount,
+    parts,
+  } = body as {
+    name?: string;
+    description?: string;
+    category?: string | null;
+    communityId?: string | null;
+    isPartner?: boolean;
+    partnerCount?: number | string | null;
+    parts?: BenchmarkPartInput[];
+  };
 
-  // Validation
   const trimmedName = name?.trim();
   if (!trimmedName || trimmedName.length > 100) {
     return NextResponse.json({ error: "Name is required (max 100 characters)" }, { status: 400 });
   }
 
-  if (!workoutType) {
-    return NextResponse.json({ error: "Workout type is required" }, { status: 400 });
+  if (!Array.isArray(parts) || parts.length === 0) {
+    return NextResponse.json(
+      { error: "At least one part is required" },
+      { status: 400 }
+    );
   }
 
-  // Optional category — must be one of the recognised values when present.
+  for (const p of parts) {
+    if (!p.workoutType) {
+      return NextResponse.json(
+        { error: "Each part must have a workoutType" },
+        { status: 400 }
+      );
+    }
+    if (!Array.isArray(p.movements) || p.movements.length === 0) {
+      return NextResponse.json(
+        { error: "Each part must have at least one movement" },
+        { status: 400 }
+      );
+    }
+  }
+
   const VALID_CATEGORIES = new Set([
     "girls",
     "heroes",
@@ -299,18 +304,14 @@ export async function POST(req: NextRequest) {
     "weightlifting",
     "gym_benchmark",
   ]);
-  if (category != null && !VALID_CATEGORIES.has(category)) {
+  if (category != null && category !== "" && !VALID_CATEGORIES.has(category)) {
     return NextResponse.json(
       { error: "Invalid benchmark category" },
       { status: 400 }
     );
   }
 
-  if (!Array.isArray(movementsList) || movementsList.length === 0) {
-    return NextResponse.json({ error: "At least one movement is required" }, { status: 400 });
-  }
-
-  // Check name doesn't conflict with system benchmarks
+  // Name uniqueness checks (system + own).
   const systemConflict = await db
     .select({ id: benchmarkWorkouts.id })
     .from(benchmarkWorkouts)
@@ -329,7 +330,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Check user uniqueness
   if (!communityId) {
     const userConflict = await db
       .select({ id: benchmarkWorkouts.id })
@@ -351,49 +351,53 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Create benchmark + movements in a transaction
+  const firstPart = parts[0];
+  const firstPartValues = coerceBenchmarkPartValues(firstPart);
+
   const result = await db.transaction(async (tx) => {
     const [bw] = await tx
       .insert(benchmarkWorkouts)
       .values({
         name: trimmedName,
-        description: description || null,
-        workoutType,
+        description: description?.trim() || null,
+        workoutType: firstPart.workoutType,
         category: category || null,
-        timeCapSeconds: timeCapSeconds || null,
-        amrapDurationSeconds: amrapDurationSeconds || null,
-        repScheme: repScheme || null,
+        timeCapSeconds: firstPartValues.timeCapSeconds,
+        amrapDurationSeconds: firstPartValues.amrapDurationSeconds,
+        repScheme: firstPartValues.repScheme,
         createdBy: user.id,
         communityId: communityId || null,
         isSystem: false,
+        isPartner: !!isPartner,
+        partnerCount:
+          partnerCount != null && partnerCount !== ""
+            ? Number(partnerCount)
+            : null,
       })
       .returning();
 
-    await tx.insert(benchmarkWorkoutMovements).values(
-      movementsList.map(
-        (
-          m: {
-            movementId: string;
-            orderIndex: number;
-            prescribedReps?: string;
-            prescribedWeightMale?: number;
-            prescribedWeightFemale?: number;
-            rxStandard?: string;
-            notes?: string;
-          },
-          i: number
-        ) => ({
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      const partValues = coerceBenchmarkPartValues(p);
+      const [insertedPart] = await tx
+        .insert(benchmarkWorkoutParts)
+        .values({
           benchmarkWorkoutId: bw.id,
-          movementId: m.movementId,
-          orderIndex: m.orderIndex ?? i,
-          prescribedReps: m.prescribedReps || null,
-          prescribedWeightMale: m.prescribedWeightMale?.toString() || null,
-          prescribedWeightFemale: m.prescribedWeightFemale?.toString() || null,
-          rxStandard: m.rxStandard || null,
-          notes: m.notes || null,
+          orderIndex: i,
+          ...partValues,
         })
-      )
-    );
+        .returning();
+
+      if (p.movements.length > 0) {
+        await tx.insert(benchmarkWorkoutMovements).values(
+          p.movements.map((m, j) => ({
+            benchmarkWorkoutId: bw.id,
+            benchmarkWorkoutPartId: insertedPart.id,
+            ...coerceBenchmarkMovementValues(m, j),
+          }))
+        );
+      }
+    }
 
     return bw;
   });

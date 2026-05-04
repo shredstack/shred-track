@@ -427,6 +427,32 @@ export async function POST(req: NextRequest) {
         prescribedReps: benchmarkWorkoutMovements.prescribedReps,
         prescribedWeightMale: benchmarkWorkoutMovements.prescribedWeightMale,
         prescribedWeightFemale: benchmarkWorkoutMovements.prescribedWeightFemale,
+        prescribedCaloriesMale:
+          benchmarkWorkoutMovements.prescribedCaloriesMale,
+        prescribedCaloriesFemale:
+          benchmarkWorkoutMovements.prescribedCaloriesFemale,
+        prescribedDistanceMale:
+          benchmarkWorkoutMovements.prescribedDistanceMale,
+        prescribedDistanceFemale:
+          benchmarkWorkoutMovements.prescribedDistanceFemale,
+        prescribedDurationSecondsMale:
+          benchmarkWorkoutMovements.prescribedDurationSecondsMale,
+        prescribedDurationSecondsFemale:
+          benchmarkWorkoutMovements.prescribedDurationSecondsFemale,
+        prescribedHeightInches:
+          benchmarkWorkoutMovements.prescribedHeightInches,
+        prescribedHeightInchesMale:
+          benchmarkWorkoutMovements.prescribedHeightInchesMale,
+        prescribedHeightInchesFemale:
+          benchmarkWorkoutMovements.prescribedHeightInchesFemale,
+        prescribedWeightMaleBwMultiplier:
+          benchmarkWorkoutMovements.prescribedWeightMaleBwMultiplier,
+        prescribedWeightFemaleBwMultiplier:
+          benchmarkWorkoutMovements.prescribedWeightFemaleBwMultiplier,
+        tempo: benchmarkWorkoutMovements.tempo,
+        isMaxReps: benchmarkWorkoutMovements.isMaxReps,
+        isSideCadence: benchmarkWorkoutMovements.isSideCadence,
+        equipmentCount: benchmarkWorkoutMovements.equipmentCount,
         rxStandard: benchmarkWorkoutMovements.rxStandard,
         notes: benchmarkWorkoutMovements.notes,
       })
@@ -543,6 +569,24 @@ export async function POST(req: NextRequest) {
               prescribedReps: m.prescribedReps,
               prescribedWeightMale: m.prescribedWeightMale,
               prescribedWeightFemale: m.prescribedWeightFemale,
+              prescribedCaloriesMale: m.prescribedCaloriesMale,
+              prescribedCaloriesFemale: m.prescribedCaloriesFemale,
+              prescribedDistanceMale: m.prescribedDistanceMale,
+              prescribedDistanceFemale: m.prescribedDistanceFemale,
+              prescribedDurationSecondsMale: m.prescribedDurationSecondsMale,
+              prescribedDurationSecondsFemale:
+                m.prescribedDurationSecondsFemale,
+              prescribedHeightInches: m.prescribedHeightInches,
+              prescribedHeightInchesMale: m.prescribedHeightInchesMale,
+              prescribedHeightInchesFemale: m.prescribedHeightInchesFemale,
+              prescribedWeightMaleBwMultiplier:
+                m.prescribedWeightMaleBwMultiplier,
+              prescribedWeightFemaleBwMultiplier:
+                m.prescribedWeightFemaleBwMultiplier,
+              tempo: m.tempo,
+              isMaxReps: m.isMaxReps,
+              isSideCadence: m.isSideCadence,
+              equipmentCount: m.equipmentCount,
               // Parse benchmark rep schemes too — benchmarks like "Cindy"
               // (5-10-15 ladder territory) get the same structured shape as
               // user-built workouts.

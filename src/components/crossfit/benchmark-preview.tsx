@@ -42,14 +42,16 @@ export function BenchmarkPreview({
       </button>
 
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <h3 className="text-lg font-bold">{benchmark.name}</h3>
-          <Badge
-            variant="outline"
-            className={WORKOUT_TYPE_COLORS[benchmark.workoutType]}
-          >
-            {WORKOUT_TYPE_LABELS[benchmark.workoutType]}
-          </Badge>
+          {benchmark.parts.length === 1 && (
+            <Badge
+              variant="outline"
+              className={WORKOUT_TYPE_COLORS[benchmark.workoutType]}
+            >
+              {WORKOUT_TYPE_LABELS[benchmark.workoutType]}
+            </Badge>
+          )}
         </div>
 
         {benchmark.description && (
@@ -57,53 +59,95 @@ export function BenchmarkPreview({
             {benchmark.description}
           </p>
         )}
-
-        {benchmark.repScheme && (
-          <p className="text-sm font-medium">{benchmark.repScheme}</p>
-        )}
-
-        {benchmark.timeCapSeconds && (
-          <p className="text-sm text-muted-foreground">
-            Time cap: {Math.floor(benchmark.timeCapSeconds / 60)} min
-          </p>
-        )}
-
-        {benchmark.amrapDurationSeconds && (
-          <p className="text-sm text-muted-foreground">
-            Duration: {Math.floor(benchmark.amrapDurationSeconds / 60)} min
-          </p>
-        )}
       </div>
 
       <Separator />
 
-      {/* Movement list */}
-      <div className="space-y-1.5">
-        {benchmark.movements.map((m, i) => (
-          <div key={m.id} className="flex items-baseline gap-2 text-sm">
-            <span className="text-xs text-muted-foreground w-4 text-right">
-              {i + 1}.
-            </span>
-            <span className="font-medium">{m.movementName}</span>
-            {m.prescribedReps && (
-              <span className="text-muted-foreground">{m.prescribedReps}</span>
-            )}
-            {(m.prescribedWeightMale || m.prescribedWeightFemale) && (
-              <span className="text-xs text-muted-foreground">
-                ({m.prescribedWeightMale}
-                {m.prescribedWeightFemale
-                  ? `/${m.prescribedWeightFemale}`
-                  : ""}{" "}
-                lb)
-              </span>
-            )}
-            {m.rxStandard && (
-              <span className="text-xs italic text-muted-foreground">
-                {m.rxStandard}
-              </span>
-            )}
-          </div>
-        ))}
+      {/* Per-part breakdown. Single-part benchmarks render flat, multi-part
+          benchmarks show one card per part with its own type badge. */}
+      <div className="space-y-3">
+        {benchmark.parts.map((part, idx) => {
+          const showPartHeader = benchmark.parts.length > 1;
+          const partLabel =
+            part.label || `Part ${String.fromCharCode(65 + idx)}`;
+          return (
+            <div
+              key={part.id}
+              className={
+                showPartHeader
+                  ? "rounded-md border border-border/40 bg-muted/20 p-3 space-y-2"
+                  : "space-y-2"
+              }
+            >
+              {showPartHeader && (
+                <div className="flex items-center gap-2">
+                  <Badge
+                    variant="outline"
+                    className={WORKOUT_TYPE_COLORS[part.workoutType]}
+                  >
+                    {partLabel}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {WORKOUT_TYPE_LABELS[part.workoutType]}
+                  </span>
+                </div>
+              )}
+
+              {part.repScheme && (
+                <p className="text-sm font-medium">{part.repScheme}</p>
+              )}
+              {part.rounds && (
+                <p className="text-xs text-muted-foreground">
+                  {part.rounds} rounds
+                </p>
+              )}
+              {part.timeCapSeconds && (
+                <p className="text-xs text-muted-foreground">
+                  Time cap: {Math.floor(part.timeCapSeconds / 60)} min
+                </p>
+              )}
+              {part.amrapDurationSeconds && (
+                <p className="text-xs text-muted-foreground">
+                  Duration: {Math.floor(part.amrapDurationSeconds / 60)} min
+                </p>
+              )}
+
+              <div className="space-y-1.5">
+                {part.movements.map((m, i) => (
+                  <div
+                    key={m.id}
+                    className="flex items-baseline gap-2 text-sm"
+                  >
+                    <span className="text-xs text-muted-foreground w-4 text-right">
+                      {i + 1}.
+                    </span>
+                    <span className="font-medium">{m.movementName}</span>
+                    {m.prescribedReps && (
+                      <span className="text-muted-foreground">
+                        {m.prescribedReps}
+                      </span>
+                    )}
+                    {(m.prescribedWeightMale ||
+                      m.prescribedWeightFemale) && (
+                      <span className="text-xs text-muted-foreground">
+                        ({m.prescribedWeightMale}
+                        {m.prescribedWeightFemale
+                          ? `/${m.prescribedWeightFemale}`
+                          : ""}{" "}
+                        lb)
+                      </span>
+                    )}
+                    {m.rxStandard && (
+                      <span className="text-xs italic text-muted-foreground">
+                        {m.rxStandard}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <Separator />

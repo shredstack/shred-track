@@ -8,31 +8,27 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, ArrowRight, Save } from "lucide-react";
-import { WorkoutPartConfig } from "@/components/crossfit/workout-part-config";
+import {
+  MultiPartConfig,
+  emptyPart,
+} from "@/components/crossfit/multi-part-config";
+import { builderPartToPayload } from "@/lib/crossfit/builder-payload";
 import type {
-  WorkoutType,
   WorkoutBuilderPart,
   WorkoutBuilderMovement,
 } from "@/types/crossfit";
 import { WORKOUT_TYPE_LABELS, WORKOUT_TYPE_COLORS } from "@/types/crossfit";
+import type { CreatePartInput } from "@/hooks/useWorkouts";
 
-// Payload shape kept stable so existing callers (BenchmarkPicker →
-// useCreateBenchmark) continue to work unchanged.
-interface BenchmarkFormData {
+// Multi-part payload shape sent to the benchmark API. Mirrors
+// CreateWorkoutInput's `parts` shape so the two callers (workout / benchmark)
+// can't drift apart on which part fields the server accepts.
+export interface BenchmarkFormData {
   name: string;
   description: string;
-  workoutType: WorkoutType;
-  timeCapSeconds?: number;
-  amrapDurationSeconds?: number;
-  repScheme: string;
-  movements: {
-    movementId: string;
-    orderIndex: number;
-    prescribedReps?: string;
-    prescribedWeightMale?: number;
-    prescribedWeightFemale?: number;
-    rxStandard?: string;
-  }[];
+  isPartner?: boolean;
+  partnerCount?: number;
+  parts: CreatePartInput[];
 }
 
 interface BenchmarkFormProps {
@@ -43,28 +39,6 @@ interface BenchmarkFormProps {
 
 type Step = "build" | "review";
 
-function generateId(prefix: string) {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function emptyPart(): WorkoutBuilderPart {
-  return {
-    tempId: generateId("part"),
-    label: "",
-    workoutType: "for_time",
-    timeCapMinutes: "",
-    amrapDurationMinutes: "",
-    emomIntervalSeconds: "",
-    intervalWorkSeconds: "",
-    intervalRestSeconds: "",
-    repScheme: "",
-    rounds: "",
-    movements: [],
-  };
-}
-
-// Single-line metric summary for the review screen, matching the Smart
-// Builder formatting so the review feels consistent across surfaces.
 function formatMovementMetric(m: WorkoutBuilderMovement): string | null {
   const prefix =
     m.equipmentCount && m.equipmentCount > 1 ? `${m.equipmentCount} × ` : "";
@@ -97,53 +71,36 @@ export function BenchmarkForm({
   const [step, setStep] = useState<Step>("build");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [part, setPart] = useState<WorkoutBuilderPart>(() => emptyPart());
+  const [isPartner, setIsPartner] = useState(false);
+  const [partnerCount, setPartnerCount] = useState("");
+  const [parts, setParts] = useState<WorkoutBuilderPart[]>(() => [emptyPart()]);
 
-  const updatePart = useCallback((updates: Partial<WorkoutBuilderPart>) => {
-    setPart((prev) => ({ ...prev, ...updates }));
+  const handlePartsChange = useCallback((next: WorkoutBuilderPart[]) => {
+    setParts(next);
   }, []);
-
-  const updateMovements = useCallback(
-    (movements: WorkoutBuilderMovement[]) => {
-      setPart((prev) => ({ ...prev, movements }));
-    },
-    []
-  );
 
   const canReview = useMemo(
     () =>
-      name.trim().length > 0 && part.movements.some((m) => m.movementId),
-    [name, part.movements]
+      name.trim().length > 0 &&
+      parts.length > 0 &&
+      parts.every((p) => p.movements.some((m) => m.movementId)),
+    [name, parts]
   );
 
   const handleSubmit = useCallback(() => {
+    const partsPayload = parts
+      .map(builderPartToPayload)
+      .filter((p): p is CreatePartInput => p !== null);
+    if (partsPayload.length === 0) return;
     onSave({
       name: name.trim(),
       description,
-      workoutType: part.workoutType,
-      timeCapSeconds: part.timeCapMinutes
-        ? parseInt(part.timeCapMinutes, 10) * 60
-        : undefined,
-      amrapDurationSeconds: part.amrapDurationMinutes
-        ? parseInt(part.amrapDurationMinutes, 10) * 60
-        : undefined,
-      repScheme: part.repScheme,
-      movements: part.movements
-        .filter((m) => m.movementId)
-        .map((m, i) => ({
-          movementId: m.movementId!,
-          orderIndex: i,
-          prescribedReps: m.prescribedReps || undefined,
-          prescribedWeightMale: m.prescribedWeightMale
-            ? Number(m.prescribedWeightMale)
-            : undefined,
-          prescribedWeightFemale: m.prescribedWeightFemale
-            ? Number(m.prescribedWeightFemale)
-            : undefined,
-          rxStandard: m.rxStandard || undefined,
-        })),
+      isPartner,
+      partnerCount:
+        isPartner && partnerCount ? parseInt(partnerCount, 10) : undefined,
+      parts: partsPayload,
     });
-  }, [name, description, part, onSave]);
+  }, [name, description, parts, isPartner, partnerCount, onSave]);
 
   return (
     <div className="space-y-4">
@@ -200,12 +157,44 @@ export function BenchmarkForm({
 
           <Separator />
 
-          <WorkoutPartConfig
-            part={part}
-            onChange={updatePart}
-            onMovementsChange={updateMovements}
+          <MultiPartConfig
+            parts={parts}
+            onPartsChange={handlePartsChange}
             showRepScheme
           />
+
+          {/* Partner / team flag */}
+          <div className="space-y-2 rounded-lg border border-border/50 bg-muted/20 p-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isPartner}
+                onChange={(e) => {
+                  setIsPartner(e.target.checked);
+                  if (!e.target.checked) setPartnerCount("");
+                  else if (!partnerCount) setPartnerCount("2");
+                }}
+                className="size-4 cursor-pointer"
+              />
+              <span className="text-sm font-medium">Partner / team workout</span>
+            </label>
+            {isPartner && (
+              <div className="space-y-1.5 pl-6">
+                <Label className="text-xs text-muted-foreground">
+                  Team size
+                </Label>
+                <Input
+                  type="number"
+                  min={2}
+                  max={20}
+                  value={partnerCount}
+                  onChange={(e) => setPartnerCount(e.target.value)}
+                  placeholder="e.g. 2"
+                  className="h-8 max-w-[120px] text-sm"
+                />
+              </div>
+            )}
+          </div>
 
           <div className="flex gap-2 pt-1">
             <Button
@@ -238,62 +227,81 @@ export function BenchmarkForm({
             <h3 className="font-semibold">Review Benchmark</h3>
           </div>
 
-          <div className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-2">
+          <div className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <p className="text-lg font-bold">{name}</p>
-              <Badge
-                variant="outline"
-                className={WORKOUT_TYPE_COLORS[part.workoutType]}
-              >
-                {WORKOUT_TYPE_LABELS[part.workoutType]}
-              </Badge>
+              {isPartner && (
+                <Badge variant="outline" className="text-[10px]">
+                  Partner
+                </Badge>
+              )}
             </div>
 
             {description && (
               <p className="text-sm text-muted-foreground">{description}</p>
             )}
 
-            {/* Configuration summary */}
-            <div className="text-xs text-muted-foreground">
-              {part.workoutType === "for_time" && part.rounds
-                ? `${part.rounds} rounds`
-                : ""}
-              {part.repScheme ? ` · ${part.repScheme}` : ""}
-              {part.workoutType === "amrap" && part.amrapDurationMinutes
-                ? ` · ${part.amrapDurationMinutes} min`
-                : ""}
-              {(part.workoutType === "for_time" ||
-                part.workoutType === "emom" ||
-                part.workoutType === "for_reps") &&
-              part.timeCapMinutes
-                ? ` · ${part.timeCapMinutes} min cap`
-                : ""}
-            </div>
-
-            <Separator />
-
-            {part.movements.map((m, i) => {
-              const metric = formatMovementMetric(m);
-              return (
-                <div
-                  key={m.tempId}
-                  className="flex items-center gap-2 text-sm"
-                >
-                  <span className="text-muted-foreground">{i + 1}.</span>
-                  <span className="font-medium">{m.movementName}</span>
-                  {m.prescribedReps && (
-                    <span className="text-muted-foreground">
-                      — {m.prescribedReps}
-                    </span>
-                  )}
-                  {metric && (
+            {parts.map((part, idx) => (
+              <div
+                key={part.tempId}
+                className="rounded-md border border-border/40 bg-background/30 p-3 space-y-2"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Badge
+                      variant="outline"
+                      className={WORKOUT_TYPE_COLORS[part.workoutType]}
+                    >
+                      {part.label || `Part ${String.fromCharCode(65 + idx)}`}
+                    </Badge>
                     <span className="text-xs text-muted-foreground">
-                      ({metric})
+                      {WORKOUT_TYPE_LABELS[part.workoutType]}
                     </span>
-                  )}
+                  </div>
                 </div>
-              );
-            })}
+
+                <div className="text-xs text-muted-foreground">
+                  {part.workoutType === "for_time" && part.rounds
+                    ? `${part.rounds} rounds`
+                    : ""}
+                  {part.repScheme ? ` · ${part.repScheme}` : ""}
+                  {part.workoutType === "amrap" && part.amrapDurationMinutes
+                    ? ` · ${part.amrapDurationMinutes} min`
+                    : ""}
+                  {(part.workoutType === "for_time" ||
+                    part.workoutType === "emom" ||
+                    part.workoutType === "for_reps") &&
+                  part.timeCapMinutes
+                    ? ` · ${part.timeCapMinutes} min cap`
+                    : ""}
+                </div>
+
+                <Separator />
+
+                {part.movements.map((m, i) => {
+                  const metric = formatMovementMetric(m);
+                  return (
+                    <div
+                      key={m.tempId}
+                      className="flex items-center gap-2 text-sm"
+                    >
+                      <span className="text-muted-foreground">{i + 1}.</span>
+                      <span className="font-medium">{m.movementName}</span>
+                      {m.prescribedReps && (
+                        <span className="text-muted-foreground">
+                          — {m.prescribedReps}
+                        </span>
+                      )}
+                      {metric && (
+                        <span className="text-xs text-muted-foreground">
+                          ({metric})
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
           </div>
 
           <div className="flex gap-2">

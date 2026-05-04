@@ -22,6 +22,7 @@ import {
   useUpdateScore,
   type CreatePartInput,
 } from "@/hooks/useWorkouts";
+import { builderPartToPayload } from "@/lib/crossfit/builder-payload";
 import { useMovements, useCreateMovement } from "@/hooks/useMovements";
 import type {
   WorkoutBuilderForm,
@@ -41,97 +42,6 @@ function toDateString(d: Date) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
-}
-
-// ============================================
-// Builder form → API payload
-// ============================================
-
-function builderPartToPayload(part: WorkoutBuilderPart): CreatePartInput | null {
-  const movements = part.movements.filter((m) => m.movementId);
-  if (movements.length === 0) return null;
-  return {
-    id: part.id,
-    label: part.label || undefined,
-    workoutType: part.workoutType,
-    timeCapSeconds: part.timeCapMinutes
-      ? parseInt(part.timeCapMinutes) * 60
-      : undefined,
-    amrapDurationSeconds: part.amrapDurationMinutes
-      ? parseInt(part.amrapDurationMinutes) * 60
-      : undefined,
-    emomIntervalSeconds: part.emomIntervalSeconds
-      ? parseInt(part.emomIntervalSeconds)
-      : undefined,
-    intervalWorkSeconds: part.intervalWorkSeconds || undefined,
-    intervalRestSeconds: part.intervalRestSeconds || undefined,
-    intervalRounds:
-      part.workoutType === "intervals" &&
-      part.intervalRounds &&
-      part.intervalRounds.length > 0 &&
-      part.intervalRounds.some(
-        (r) => r.workSeconds.trim() || r.restSeconds.trim()
-      )
-        ? part.intervalRounds.map((r) => ({
-            workSeconds: r.workSeconds,
-            restSeconds: r.restSeconds,
-          }))
-        : undefined,
-    sideCadenceIntervalSeconds: part.sideCadenceIntervalSeconds || undefined,
-    sideCadenceOpenEnded: !!part.sideCadenceOpenEnded,
-    repScheme: part.repScheme || undefined,
-    rounds:
-      (part.workoutType === "for_time" || part.workoutType === "intervals") &&
-      part.rounds
-        ? parseInt(part.rounds)
-        : undefined,
-    structure:
-      part.workoutType === "for_reps" && part.structure
-        ? part.structure
-        : undefined,
-    movements: movements.map((m, i) => ({
-      id: m.id,
-      movementId: m.movementId!,
-      orderIndex: i,
-      prescribedReps: m.prescribedReps || undefined,
-      prescribedWeightMale:
-        !m.useBwMultiplier && m.prescribedWeightMale
-          ? parseFloat(m.prescribedWeightMale)
-          : undefined,
-      prescribedWeightFemale:
-        !m.useBwMultiplier && m.prescribedWeightFemale
-          ? parseFloat(m.prescribedWeightFemale)
-          : undefined,
-      // Cals/distance are now free text (scalar or scheme expression).
-      // Pass through as strings; the API trims and persists.
-      prescribedCaloriesMale: m.prescribedCaloriesMale || undefined,
-      prescribedCaloriesFemale: m.prescribedCaloriesFemale || undefined,
-      prescribedDistanceMale: m.prescribedDistanceMale || undefined,
-      prescribedDistanceFemale: m.prescribedDistanceFemale || undefined,
-      prescribedDurationSecondsMale:
-        m.prescribedDurationSecondsMale?.trim() || undefined,
-      prescribedDurationSecondsFemale:
-        m.prescribedDurationSecondsFemale?.trim() || undefined,
-      prescribedHeightInches: m.prescribedHeightInches || undefined,
-      prescribedHeightInchesMale: m.prescribedHeightInchesMale || undefined,
-      prescribedHeightInchesFemale:
-        m.prescribedHeightInchesFemale || undefined,
-      prescribedWeightMaleBwMultiplier:
-        m.useBwMultiplier && m.prescribedWeightMaleBwMultiplier
-          ? parseFloat(m.prescribedWeightMaleBwMultiplier)
-          : undefined,
-      prescribedWeightFemaleBwMultiplier:
-        m.useBwMultiplier && m.prescribedWeightFemaleBwMultiplier
-          ? parseFloat(m.prescribedWeightFemaleBwMultiplier)
-          : undefined,
-      tempo: m.tempo?.trim() || undefined,
-      isMaxReps: !!m.isMaxReps,
-      isSideCadence: !!m.isSideCadence,
-      promoteSequenceToLadder: m.promoteSequenceToLadder || undefined,
-      equipmentCount: m.equipmentCount,
-      rxStandard: m.rxStandard || undefined,
-    })),
-  };
 }
 
 // ============================================

@@ -20,16 +20,22 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Search, Plus, Pencil, Trash2, Loader2, Star } from "lucide-react";
-import { WorkoutPartConfig } from "@/components/crossfit/workout-part-config";
+import {
+  MultiPartConfig,
+  emptyPart,
+} from "@/components/crossfit/multi-part-config";
 import { VestRequirements } from "@/components/crossfit/vest-requirements";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  benchmarkPartToBuilderPart,
+  builderPartToPayload,
+} from "@/lib/crossfit/builder-payload";
 import type {
   BenchmarkWorkout,
   BenchmarkCategoryName,
   WorkoutBuilderPart,
-  WorkoutBuilderMovement,
 } from "@/types/crossfit";
 import {
   WORKOUT_TYPE_LABELS,
@@ -39,6 +45,7 @@ import {
   BENCHMARK_CATEGORY_SHORT_LABELS,
   BENCHMARK_CATEGORY_COLORS,
 } from "@/types/crossfit";
+import type { CreatePartInput } from "@/hooks/useWorkouts";
 
 const NO_CATEGORY = "__none__";
 const NO_CATEGORY_FILTER = "__all__";
@@ -63,31 +70,12 @@ interface BenchmarkFormState {
   requiresVest: boolean;
   vestWeightMaleLb: string;
   vestWeightFemaleLb: string;
-  // Part configuration (workout type, time cap, AMRAP duration, EMOM
-  // interval, rounds, structure, repScheme, movements) is held in the same
-  // shape the Smart Builder uses, so the WorkoutPartConfig component can
-  // render it directly. A benchmark is always single-part.
-  part: WorkoutBuilderPart;
-}
-
-function generateId(prefix: string) {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function emptyPart(): WorkoutBuilderPart {
-  return {
-    tempId: generateId("part"),
-    label: "",
-    workoutType: "for_time",
-    timeCapMinutes: "",
-    amrapDurationMinutes: "",
-    emomIntervalSeconds: "",
-    intervalWorkSeconds: "",
-    intervalRestSeconds: "",
-    repScheme: "",
-    rounds: "",
-    movements: [],
-  };
+  isPartner: boolean;
+  partnerCount: string;
+  // Multi-part configuration. Each part holds its own workout type, timing,
+  // movement list, etc.; the API mirrors the first part to the legacy
+  // top-level columns for read-fallback.
+  parts: WorkoutBuilderPart[];
 }
 
 const emptyForm: BenchmarkFormState = {
@@ -98,42 +86,15 @@ const emptyForm: BenchmarkFormState = {
   requiresVest: false,
   vestWeightMaleLb: "",
   vestWeightFemaleLb: "",
-  part: emptyPart(),
+  isPartner: false,
+  partnerCount: "",
+  parts: [emptyPart()],
 };
 
-// Convert an existing benchmark into the BenchmarkFormState the form drives.
 function benchmarkToForm(b: BenchmarkWorkout): BenchmarkFormState {
-  const movements: WorkoutBuilderMovement[] = b.movements.map((m) => {
-    const isWeighted = !!(m.prescribedWeightMale || m.prescribedWeightFemale);
-    return {
-      tempId: generateId("mov"),
-      movementId: m.movementId,
-      movementName: m.movementName,
-      isWeighted,
-      // Best-effort metric type inference: benchmarks only carry the
-      // gendered weight pair, not the underlying movement's metric type.
-      // Anything with a weight is "weight"; everything else is "reps".
-      metricType: isWeighted ? "weight" : "reps",
-      prescribedReps: m.prescribedReps || "",
-      prescribedWeightMale: m.prescribedWeightMale?.toString() || "",
-      prescribedWeightFemale: m.prescribedWeightFemale?.toString() || "",
-      prescribedCaloriesMale: "",
-      prescribedCaloriesFemale: "",
-      prescribedDistanceMale: "",
-      prescribedDistanceFemale: "",
-      prescribedDurationSecondsMale: "",
-      prescribedDurationSecondsFemale: "",
-      prescribedHeightInches: "",
-      prescribedHeightInchesMale: "",
-      prescribedHeightInchesFemale: "",
-      prescribedWeightMaleBwMultiplier: "",
-      prescribedWeightFemaleBwMultiplier: "",
-      tempo: "",
-      rxStandard: m.rxStandard || "",
-      notes: "",
-    };
-  });
-
+  // Always prefer the multi-part shape. The API guarantees `parts[]` is
+  // populated (synthetic one-part wrap on legacy rows), so the form never
+  // has to fall back to reading legacy top-level columns.
   return {
     name: b.name,
     description: b.description || "",
@@ -144,41 +105,24 @@ function benchmarkToForm(b: BenchmarkWorkout): BenchmarkFormState {
       b.vestWeightMaleLb != null ? String(b.vestWeightMaleLb) : "",
     vestWeightFemaleLb:
       b.vestWeightFemaleLb != null ? String(b.vestWeightFemaleLb) : "",
-    part: {
-      tempId: generateId("part"),
-      label: "",
-      workoutType: b.workoutType,
-      timeCapMinutes: b.timeCapSeconds
-        ? String(Math.floor(b.timeCapSeconds / 60))
-        : "",
-      amrapDurationMinutes: b.amrapDurationSeconds
-        ? String(Math.floor(b.amrapDurationSeconds / 60))
-        : "",
-      emomIntervalSeconds: "",
-      intervalWorkSeconds: "",
-      intervalRestSeconds: "",
-      repScheme: b.repScheme || "",
-      rounds: "",
-      movements,
-    },
+    isPartner: !!b.isPartner,
+    partnerCount: b.partnerCount != null ? String(b.partnerCount) : "",
+    parts:
+      b.parts && b.parts.length > 0
+        ? b.parts.map(benchmarkPartToBuilderPart)
+        : [emptyPart()],
   };
 }
 
-// Convert the form state into the API payload.
 function formToPayload(form: BenchmarkFormState) {
+  const partsPayload = form.parts
+    .map(builderPartToPayload)
+    .filter((p): p is CreatePartInput => p !== null);
   return {
     name: form.name,
     description: form.description || undefined,
     category: form.category ?? null,
     isSystem: form.isSystem,
-    workoutType: form.part.workoutType,
-    timeCapSeconds: form.part.timeCapMinutes
-      ? parseInt(form.part.timeCapMinutes, 10) * 60
-      : undefined,
-    amrapDurationSeconds: form.part.amrapDurationMinutes
-      ? parseInt(form.part.amrapDurationMinutes, 10) * 60
-      : undefined,
-    repScheme: form.part.repScheme || undefined,
     requiresVest: form.requiresVest,
     vestWeightMaleLb: form.vestWeightMaleLb
       ? Number(form.vestWeightMaleLb)
@@ -186,20 +130,12 @@ function formToPayload(form: BenchmarkFormState) {
     vestWeightFemaleLb: form.vestWeightFemaleLb
       ? Number(form.vestWeightFemaleLb)
       : undefined,
-    movements: form.part.movements
-      .filter((m) => m.movementId)
-      .map((m, i) => ({
-        movementId: m.movementId!,
-        orderIndex: i,
-        prescribedReps: m.prescribedReps || undefined,
-        prescribedWeightMale: m.prescribedWeightMale
-          ? Number(m.prescribedWeightMale)
-          : undefined,
-        prescribedWeightFemale: m.prescribedWeightFemale
-          ? Number(m.prescribedWeightFemale)
-          : undefined,
-        rxStandard: m.rxStandard || undefined,
-      })),
+    isPartner: form.isPartner,
+    partnerCount:
+      form.isPartner && form.partnerCount
+        ? parseInt(form.partnerCount, 10)
+        : undefined,
+    parts: partsPayload,
   };
 }
 
@@ -223,6 +159,12 @@ export function AdminBenchmarks() {
       return false;
     return true;
   });
+
+  const closeForm = useCallback(() => {
+    setShowForm(false);
+    setEditingId(null);
+    setError("");
+  }, []);
 
   const saveMutation = useMutation({
     mutationFn: async (data: { id?: string; form: BenchmarkFormState }) => {
@@ -267,7 +209,7 @@ export function AdminBenchmarks() {
   });
 
   const openCreate = useCallback(() => {
-    setForm({ ...emptyForm, part: emptyPart() });
+    setForm({ ...emptyForm, parts: [emptyPart()] });
     setEditingId(null);
     setError("");
     setShowForm(true);
@@ -280,12 +222,6 @@ export function AdminBenchmarks() {
     setShowForm(true);
   }, []);
 
-  const closeForm = useCallback(() => {
-    setShowForm(false);
-    setEditingId(null);
-    setError("");
-  }, []);
-
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
@@ -294,16 +230,9 @@ export function AdminBenchmarks() {
     [editingId, form, saveMutation]
   );
 
-  const updatePart = useCallback((updates: Partial<WorkoutBuilderPart>) => {
-    setForm((prev) => ({ ...prev, part: { ...prev.part, ...updates } }));
+  const handlePartsChange = useCallback((parts: WorkoutBuilderPart[]) => {
+    setForm((prev) => ({ ...prev, parts }));
   }, []);
-
-  const updatePartMovements = useCallback(
-    (movements: WorkoutBuilderMovement[]) => {
-      setForm((prev) => ({ ...prev, part: { ...prev.part, movements } }));
-    },
-    []
-  );
 
   return (
     <div className="space-y-4">
@@ -371,6 +300,11 @@ export function AdminBenchmarks() {
                   >
                     {WORKOUT_TYPE_LABELS[b.workoutType]}
                   </Badge>
+                  {b.parts && b.parts.length > 1 && (
+                    <Badge variant="outline" className="text-[10px]">
+                      {b.parts.length} parts
+                    </Badge>
+                  )}
                   {b.category && (
                     <Badge
                       variant="outline"
@@ -485,10 +419,9 @@ export function AdminBenchmarks() {
 
             <Separator />
 
-            <WorkoutPartConfig
-              part={form.part}
-              onChange={updatePart}
-              onMovementsChange={updatePartMovements}
+            <MultiPartConfig
+              parts={form.parts}
+              onPartsChange={handlePartsChange}
               showRepScheme
             />
 
@@ -502,6 +435,51 @@ export function AdminBenchmarks() {
               compact
             />
 
+            {/* Partner / team flag */}
+            <div className="space-y-2 rounded-lg border border-border/50 bg-muted/20 p-3">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.isPartner}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setForm((prev) => ({
+                      ...prev,
+                      isPartner: checked,
+                      partnerCount: checked
+                        ? prev.partnerCount || "2"
+                        : "",
+                    }));
+                  }}
+                  className="size-4 cursor-pointer"
+                />
+                <span className="text-sm font-medium">
+                  Partner / team workout
+                </span>
+              </label>
+              {form.isPartner && (
+                <div className="space-y-1.5 pl-6">
+                  <Label className="text-xs text-muted-foreground">
+                    Team size
+                  </Label>
+                  <Input
+                    type="number"
+                    min={2}
+                    max={20}
+                    value={form.partnerCount}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        partnerCount: e.target.value,
+                      }))
+                    }
+                    placeholder="e.g. 2"
+                    className="h-8 max-w-[120px] text-sm"
+                  />
+                </div>
+              )}
+            </div>
+
             {error && (
               <p className="text-sm text-destructive">{error}</p>
             )}
@@ -510,7 +488,7 @@ export function AdminBenchmarks() {
               <Button
                 type="submit"
                 className="flex-1"
-                disabled={saveMutation.isPending}
+                disabled={saveMutation.isPending || form.parts.length === 0}
               >
                 {saveMutation.isPending
                   ? "Saving..."

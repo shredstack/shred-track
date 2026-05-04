@@ -19,13 +19,34 @@ type BenchmarkCategory =
   | "weightlifting"
   | "gym_benchmark";
 
-type BenchmarkSeed = {
-  name: string;
-  description?: string;
+type BenchmarkMovementSeed = {
+  canonicalName: string;
+  prescribedReps?: string;
+  prescribedWeightMale?: number;
+  prescribedWeightFemale?: number;
+  rxStandard?: string;
+  notes?: string;
+};
+
+type BenchmarkPartSeed = {
+  label?: string;
   workoutType: string;
   timeCapSeconds?: number;
   amrapDurationSeconds?: number;
+  emomIntervalSeconds?: number;
   repScheme?: string;
+  rounds?: number;
+  notes?: string;
+  movements: BenchmarkMovementSeed[];
+};
+
+// A benchmark seed is *either* the legacy single-part shape (movements +
+// flat type/timing fields) *or* the multi-part shape (parts: [...]).
+// Multi-part takes precedence — when both are provided the upsert ignores
+// the flat fields and uses parts only.
+type BenchmarkSeed = {
+  name: string;
+  description?: string;
   category: BenchmarkCategory;
   // Workout-level vest prescription. Set on Murph, Chad, etc. so the
   // builder, score-entry, and benchmark match all see it as first-class
@@ -33,15 +54,46 @@ type BenchmarkSeed = {
   requiresVest?: boolean;
   vestWeightMaleLb?: number;
   vestWeightFemaleLb?: number;
-  movements: {
-    canonicalName: string;
-    prescribedReps?: string;
-    prescribedWeightMale?: number;
-    prescribedWeightFemale?: number;
-    rxStandard?: string;
-    notes?: string;
-  }[];
-};
+  isPartner?: boolean;
+  partnerCount?: number;
+} & (
+  | {
+      // Legacy single-part shape.
+      workoutType: string;
+      timeCapSeconds?: number;
+      amrapDurationSeconds?: number;
+      repScheme?: string;
+      movements: BenchmarkMovementSeed[];
+      parts?: undefined;
+    }
+  | {
+      // Multi-part shape (Drew, etc.). The first part's
+      // workoutType/timeCap/repScheme is mirrored to the legacy top-level
+      // columns on benchmark_workouts so older read paths keep working.
+      parts: BenchmarkPartSeed[];
+      // These fields are not allowed on multi-part seeds — flat
+      // workoutType / movements would be ambiguous. Disallowed via the
+      // discriminated union above.
+      workoutType?: undefined;
+      timeCapSeconds?: undefined;
+      amrapDurationSeconds?: undefined;
+      repScheme?: undefined;
+      movements?: undefined;
+    }
+);
+
+function normalizeToParts(seed: BenchmarkSeed): BenchmarkPartSeed[] {
+  if (seed.parts) return seed.parts;
+  return [
+    {
+      workoutType: seed.workoutType,
+      timeCapSeconds: seed.timeCapSeconds,
+      amrapDurationSeconds: seed.amrapDurationSeconds,
+      repScheme: seed.repScheme,
+      movements: seed.movements,
+    },
+  ];
+}
 
 const benchmarkSeeds: BenchmarkSeed[] = [
   // ============================================
@@ -313,6 +365,57 @@ const benchmarkSeeds: BenchmarkSeed[] = [
       { canonicalName: "Box Step-Up", prescribedReps: "1000", notes: "20 inch box. 45/35 lb ruck is also acceptable." },
     ],
   },
+  {
+    // First multi-part hero WOD seeded after benchmarks gained a parts[]
+    // schema. Drew is structurally three sections — two identical 3-round
+    // chippers split by an 800m run — which is exactly what the legacy
+    // single-part shape couldn't express.
+    name: "Drew",
+    description:
+      "In honor of Petty Officer 3rd Class Drew. Three sections: a 3-round chipper, an 800m run, then the same 3-round chipper again.",
+    category: "heroes",
+    parts: [
+      {
+        label: "Block 1",
+        workoutType: "for_time",
+        rounds: 3,
+        movements: [
+          { canonicalName: "Run", prescribedReps: "400m" },
+          { canonicalName: "Box Jump", prescribedReps: "11", notes: "24/20 inch box" },
+          {
+            canonicalName: "Thruster",
+            prescribedReps: "7",
+            prescribedWeightMale: 95,
+            prescribedWeightFemale: 65,
+          },
+          { canonicalName: "Burpee Pull-Up", prescribedReps: "4" },
+        ],
+      },
+      {
+        label: "Run",
+        workoutType: "for_time",
+        movements: [
+          { canonicalName: "Run", prescribedReps: "800m" },
+        ],
+      },
+      {
+        label: "Block 2",
+        workoutType: "for_time",
+        rounds: 3,
+        movements: [
+          { canonicalName: "Run", prescribedReps: "400m" },
+          { canonicalName: "Box Jump", prescribedReps: "11", notes: "24/20 inch box" },
+          {
+            canonicalName: "Thruster",
+            prescribedReps: "7",
+            prescribedWeightMale: 95,
+            prescribedWeightFemale: 65,
+          },
+          { canonicalName: "Burpee Pull-Up", prescribedReps: "4" },
+        ],
+      },
+    ],
+  },
 
   // ============================================
   // Common Gym Benchmarks
@@ -486,13 +589,22 @@ async function upsertBenchmark(
   benchmark: BenchmarkSeed,
   movementMap: Map<string, string>
 ): Promise<"created" | "updated" | "skipped"> {
-  const missing = benchmark.movements.filter((m) => !movementMap.has(m.canonicalName));
+  const parts = normalizeToParts(benchmark);
+  const allMovementsFlat = parts.flatMap((p) => p.movements);
+  const missing = allMovementsFlat.filter(
+    (m) => !movementMap.has(m.canonicalName)
+  );
   if (missing.length > 0) {
     console.warn(
       `  WARN: ${benchmark.name} — missing movements: ${missing.map((m) => m.canonicalName).join(", ")}. Skipping.`
     );
     return "skipped";
   }
+
+  // Mirror the first part to the legacy top-level columns so older read
+  // paths still resolve a single workoutType / repScheme. Multi-part shape
+  // is the source of truth on read; this is just the fallback.
+  const firstPart = parts[0];
 
   return db.transaction(async (tx) => {
     const existing = await tx
@@ -517,11 +629,11 @@ async function upsertBenchmark(
         .update(schema.benchmarkWorkouts)
         .set({
           description: benchmark.description || null,
-          workoutType: benchmark.workoutType,
+          workoutType: firstPart.workoutType,
           category: benchmark.category,
-          timeCapSeconds: benchmark.timeCapSeconds || null,
-          amrapDurationSeconds: benchmark.amrapDurationSeconds || null,
-          repScheme: benchmark.repScheme || null,
+          timeCapSeconds: firstPart.timeCapSeconds || null,
+          amrapDurationSeconds: firstPart.amrapDurationSeconds || null,
+          repScheme: firstPart.repScheme || null,
           requiresVest: !!benchmark.requiresVest,
           vestWeightMaleLb:
             benchmark.vestWeightMaleLb != null
@@ -531,24 +643,36 @@ async function upsertBenchmark(
             benchmark.vestWeightFemaleLb != null
               ? String(benchmark.vestWeightFemaleLb)
               : null,
+          isPartner: !!benchmark.isPartner,
+          partnerCount: benchmark.partnerCount ?? null,
           updatedAt: new Date(),
         })
         .where(eq(schema.benchmarkWorkouts.id, benchmarkId));
 
+      // Cascade clears parts → movements thanks to the FK ON DELETE CASCADE
+      // on benchmark_workout_movements. Idempotent rebuild on every run.
+      await tx
+        .delete(schema.benchmarkWorkoutParts)
+        .where(eq(schema.benchmarkWorkoutParts.benchmarkWorkoutId, benchmarkId));
+      // Defensive: drop any movements still attached to the benchmark
+      // directly (e.g. legacy rows with NULL part FK from before the
+      // migration backfill).
       await tx
         .delete(schema.benchmarkWorkoutMovements)
-        .where(eq(schema.benchmarkWorkoutMovements.benchmarkWorkoutId, benchmarkId));
+        .where(
+          eq(schema.benchmarkWorkoutMovements.benchmarkWorkoutId, benchmarkId)
+        );
     } else {
       const [bw] = await tx
         .insert(schema.benchmarkWorkouts)
         .values({
           name: benchmark.name,
           description: benchmark.description || null,
-          workoutType: benchmark.workoutType,
+          workoutType: firstPart.workoutType,
           category: benchmark.category,
-          timeCapSeconds: benchmark.timeCapSeconds || null,
-          amrapDurationSeconds: benchmark.amrapDurationSeconds || null,
-          repScheme: benchmark.repScheme || null,
+          timeCapSeconds: firstPart.timeCapSeconds || null,
+          amrapDurationSeconds: firstPart.amrapDurationSeconds || null,
+          repScheme: firstPart.repScheme || null,
           requiresVest: !!benchmark.requiresVest,
           vestWeightMaleLb:
             benchmark.vestWeightMaleLb != null
@@ -558,6 +682,8 @@ async function upsertBenchmark(
             benchmark.vestWeightFemaleLb != null
               ? String(benchmark.vestWeightFemaleLb)
               : null,
+          isPartner: !!benchmark.isPartner,
+          partnerCount: benchmark.partnerCount ?? null,
           createdBy: null,
           communityId: null,
           isSystem: true,
@@ -567,18 +693,40 @@ async function upsertBenchmark(
       status = "created";
     }
 
-    await tx.insert(schema.benchmarkWorkoutMovements).values(
-      benchmark.movements.map((m, i) => ({
-        benchmarkWorkoutId: benchmarkId,
-        movementId: movementMap.get(m.canonicalName)!,
-        orderIndex: i,
-        prescribedReps: m.prescribedReps || null,
-        prescribedWeightMale: m.prescribedWeightMale?.toString() || null,
-        prescribedWeightFemale: m.prescribedWeightFemale?.toString() || null,
-        rxStandard: m.rxStandard || null,
-        notes: m.notes || null,
-      }))
-    );
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      const [insertedPart] = await tx
+        .insert(schema.benchmarkWorkoutParts)
+        .values({
+          benchmarkWorkoutId: benchmarkId,
+          orderIndex: i,
+          label: part.label || null,
+          workoutType: part.workoutType,
+          timeCapSeconds: part.timeCapSeconds || null,
+          amrapDurationSeconds: part.amrapDurationSeconds || null,
+          emomIntervalSeconds: part.emomIntervalSeconds || null,
+          repScheme: part.repScheme || null,
+          rounds: part.rounds || null,
+          notes: part.notes || null,
+        })
+        .returning();
+
+      if (part.movements.length > 0) {
+        await tx.insert(schema.benchmarkWorkoutMovements).values(
+          part.movements.map((m, j) => ({
+            benchmarkWorkoutId: benchmarkId,
+            benchmarkWorkoutPartId: insertedPart.id,
+            movementId: movementMap.get(m.canonicalName)!,
+            orderIndex: j,
+            prescribedReps: m.prescribedReps || null,
+            prescribedWeightMale: m.prescribedWeightMale?.toString() || null,
+            prescribedWeightFemale: m.prescribedWeightFemale?.toString() || null,
+            rxStandard: m.rxStandard || null,
+            notes: m.notes || null,
+          }))
+        );
+      }
+    }
 
     return status;
   });
