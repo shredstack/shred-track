@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import type { SegmentAggregate } from "@/lib/insights/queries";
+import type { SegmentAggregate, TrainingRace } from "@/lib/insights/queries";
 
 import type { DivisionKey } from "@/lib/hyrox-data";
 
@@ -59,6 +59,8 @@ export function useInsightsFeatureImportance(division: DivisionKey) {
     features: Array<{ feature: string; importance: number }>;
     trainingN: number;
     metrics: Record<string, number>;
+    trainedAt: string;
+    races: TrainingRace[];
   } | null>({
     queryKey: ["insights-feature-importance", division],
     queryFn: async () => {

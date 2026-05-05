@@ -1,7 +1,7 @@
 "use client";
 
 import { useInsightsEvents } from "@/hooks/useInsights";
-import { type DivisionKey } from "@/lib/hyrox-data";
+import { type DivisionKey, STANDARD_FORMAT_DIVISION_KEYS } from "@/lib/hyrox-data";
 import { AlertCircle } from "lucide-react";
 import { DivisionPicker } from "@/components/shared/division-picker";
 
@@ -11,13 +11,6 @@ interface InsightsFilterBarProps {
   eventId: string | undefined;
   onEventChange: (id: string | undefined) => void;
 }
-
-const INSIGHTS_DIVISION_KEYS: DivisionKey[] = [
-  "men_open",
-  "women_open",
-  "men_pro",
-  "women_pro",
-];
 
 export function InsightsFilterBar({
   division,
@@ -29,13 +22,12 @@ export function InsightsFilterBar({
 
   return (
     <div className="sticky top-0 z-10 flex flex-col gap-3 rounded-xl bg-background/80 backdrop-blur-md p-3 border border-white/[0.06]">
-      {/* Division picker — inline pills since ≤6 keys */}
       <div className="flex items-center gap-2">
         <div className="flex-1">
           <DivisionPicker
             value={division}
             onChange={onDivisionChange}
-            allowedKeys={INSIGHTS_DIVISION_KEYS}
+            allowedKeys={STANDARD_FORMAT_DIVISION_KEYS}
           />
         </div>
 

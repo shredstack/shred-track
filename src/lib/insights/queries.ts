@@ -7,10 +7,18 @@
 
 import { db } from "@/db";
 import { hyroxPublicEvents } from "@/db/schema";
-import { sql } from "drizzle-orm";
-import { desc } from "drizzle-orm";
+import { sql, inArray, desc } from "drizzle-orm";
+import type { DivisionKey } from "@/lib/hyrox-data";
 
-export type DivisionKey = "men_open" | "women_open" | "men_pro" | "women_pro";
+export type { DivisionKey };
+
+export interface TrainingRace {
+  id: string;
+  name: string;
+  city: string;
+  country: string;
+  eventDate: string;
+}
 
 export interface SegmentAggregate {
   divisionKey: string;
@@ -148,7 +156,8 @@ export async function getComparisons(
 }
 
 /**
- * Get feature importances from the active RF model for a division.
+ * Get feature importances from the active RF model for a division, plus the
+ * snapshot of races the model was trained on (when available).
  */
 export async function getFeatureImportance(
   division: DivisionKey,
@@ -156,12 +165,16 @@ export async function getFeatureImportance(
   features: Array<{ feature: string; importance: number }>;
   trainingN: number;
   metrics: Record<string, number>;
+  trainedAt: string;
+  races: TrainingRace[];
 } | null> {
   const rows = await db.execute(sql`
     SELECT
       feature_importances AS "featureImportances",
       training_n AS "trainingN",
-      metrics
+      metrics,
+      trained_at AS "trainedAt",
+      training_event_ids AS "trainingEventIds"
     FROM hyrox_predictor_models
     WHERE division_key = ${division}
     AND model_type = 'rf_percentile'
@@ -173,15 +186,45 @@ export async function getFeatureImportance(
     featureImportances: Array<{ feature: string; importance: number }>;
     trainingN: number;
     metrics: Record<string, number>;
+    trainedAt: Date | string;
+    trainingEventIds: string[] | null;
   }>)[0];
 
   if (!row) return null;
+
+  const races = row.trainingEventIds?.length
+    ? await getEventsByIds(row.trainingEventIds)
+    : [];
 
   return {
     features: row.featureImportances,
     trainingN: row.trainingN,
     metrics: row.metrics,
+    trainedAt:
+      typeof row.trainedAt === "string"
+        ? row.trainedAt
+        : row.trainedAt.toISOString(),
+    races,
   };
+}
+
+/**
+ * Resolve a list of event IDs into the race detail used by the insights UI.
+ */
+async function getEventsByIds(ids: string[]): Promise<TrainingRace[]> {
+  if (ids.length === 0) return [];
+  const rows = await db
+    .select({
+      id: hyroxPublicEvents.id,
+      name: hyroxPublicEvents.name,
+      city: hyroxPublicEvents.city,
+      country: hyroxPublicEvents.country,
+      eventDate: hyroxPublicEvents.eventDate,
+    })
+    .from(hyroxPublicEvents)
+    .where(inArray(hyroxPublicEvents.id, ids))
+    .orderBy(desc(hyroxPublicEvents.eventDate));
+  return rows;
 }
 
 /**
