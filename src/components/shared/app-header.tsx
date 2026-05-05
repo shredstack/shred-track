@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
 import Image from "next/image";
-import { ChevronDown } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, Plus, User as UserIcon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,14 +13,31 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  useGymContext,
+  useSetActiveCommunity,
+  type GymMembership,
+} from "@/hooks/useGymContext";
+import { JoinGymDialog } from "@/components/shared/join-gym-dialog";
 
-const mockCommunities = [
-  { id: "1", name: "ShredTrack HQ" },
-  { id: "2", name: "CFD" },
-];
+const PERSONAL_LABEL = "Personal";
+
+function activeLabel(
+  activeId: string | null,
+  memberships: GymMembership[] | undefined
+): string {
+  if (!activeId) return PERSONAL_LABEL;
+  const m = memberships?.find((x) => x.communityId === activeId);
+  return m?.communityName ?? PERSONAL_LABEL;
+}
 
 export function AppHeader() {
-  const [activeCommunity, setActiveCommunity] = useState(mockCommunities[0]);
+  const { data, isLoading } = useGymContext();
+  const setActive = useSetActiveCommunity();
+  const [joinOpen, setJoinOpen] = useState(false);
+
+  const memberships = data?.memberships.filter((m) => m.isActive) ?? [];
+  const label = isLoading ? PERSONAL_LABEL : activeLabel(data?.activeCommunityId ?? null, memberships);
 
   return (
     <header className="sticky top-0 z-40 glass border-b border-white/[0.06]">
@@ -27,7 +45,7 @@ export function AppHeader() {
       <div className="h-[env(safe-area-inset-top)]" />
       <div className="mx-auto flex h-14 max-w-lg items-center justify-between px-4">
         {/* Logo / brand */}
-        <div className="flex items-center gap-2.5">
+        <Link href="/crossfit" className="flex items-center gap-2.5">
           <Image
             src="/shredtrack_logo.png"
             alt="ShredTrack"
@@ -39,37 +57,74 @@ export function AppHeader() {
           <span className="font-heading text-lg font-bold uppercase tracking-wide text-gradient-primary">
             ShredTrack
           </span>
-        </div>
+        </Link>
 
-        {/* Community switcher */}
+        {/* Gym switcher — falls back to "Personal" when the user has no
+            gyms or hasn't picked one yet. Members can join a gym by code
+            via the dialog at the bottom of the menu. */}
         <DropdownMenu>
           <DropdownMenuTrigger className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.06] bg-white/[0.04] px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-white/[0.08] hover:text-foreground focus:outline-none">
-            {activeCommunity.name}
+            {label}
             <ChevronDown className="h-3.5 w-3.5 opacity-50" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuContent align="end" className="w-60">
             <DropdownMenuGroup>
               <DropdownMenuLabel className="text-xs text-muted-foreground">
-                Your Communities
+                Workout view
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {mockCommunities.map((community) => (
-                <DropdownMenuItem
-                  key={community.id}
-                  onClick={() => setActiveCommunity(community)}
-                  className={
-                    community.id === activeCommunity.id
-                      ? "font-semibold text-primary"
-                      : ""
-                  }
-                >
-                  {community.name}
-                </DropdownMenuItem>
-              ))}
+              <DropdownMenuItem
+                onClick={() => setActive.mutate(null)}
+                className={
+                  data?.activeCommunityId == null
+                    ? "font-semibold text-primary"
+                    : ""
+                }
+              >
+                <UserIcon className="mr-2 h-3.5 w-3.5" />
+                Personal
+              </DropdownMenuItem>
             </DropdownMenuGroup>
+
+            {memberships.length > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">
+                    Your gyms
+                  </DropdownMenuLabel>
+                  {memberships.map((m) => (
+                    <DropdownMenuItem
+                      key={m.communityId}
+                      onClick={() => setActive.mutate(m.communityId)}
+                      className={
+                        m.communityId === data?.activeCommunityId
+                          ? "font-semibold text-primary"
+                          : ""
+                      }
+                    >
+                      <span className="flex-1">{m.communityName}</span>
+                      {(m.isAdmin || m.isCoach) && (
+                        <span className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-primary">
+                          {m.isAdmin ? "Admin" : "Coach"}
+                        </span>
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+              </>
+            )}
+
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => setJoinOpen(true)}>
+              <Plus className="mr-2 h-3.5 w-3.5" />
+              Join a gym (code)
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <JoinGymDialog open={joinOpen} onOpenChange={setJoinOpen} />
     </header>
   );
 }

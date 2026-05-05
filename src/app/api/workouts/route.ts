@@ -12,9 +12,13 @@ import {
   movements,
   scores,
   scoreMovementDetails,
+  communityMemberships,
+  users,
 } from "@/db/schema";
-import { eq, desc, and, inArray, gte, lte, or, ilike } from "drizzle-orm";
+import { eq, desc, and, inArray, gte, lte, or, ilike, isNull } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
+import { canCreateWorkoutInGym, getWorkoutAccess } from "@/lib/authz/workout";
+import { canViewGym } from "@/lib/authz/community";
 import type { WorkoutType } from "@/types/crossfit";
 import {
   parseRepScheme,
@@ -91,20 +95,26 @@ interface PartInput {
 
 // GET /api/workouts — list workouts.
 // Supports filters:
-//   ?communityId=...        — scope to a community (default: caller's own)
+//   ?communityId=<uuid>     — gym programming view: visible to all active
+//                             members of that gym (not just the creator).
+//   ?personal=1             — explicit personal-only view (createdBy=me AND
+//                             communityId IS NULL).
 //   ?date=YYYY-MM-DD        — exact match on workoutDate
 //   ?startDate=YYYY-MM-DD   — workoutDate >=
 //   ?endDate=YYYY-MM-DD     — workoutDate <=
 //   ?movementId=<uuid>      — only workouts containing this movement
 //   ?q=<text>               — case-insensitive search over title/description/rawText
-// Returns each workout with its nested parts, movements, and (for the
-// caller's own workouts) per-part scores + movement details.
+// With no scope filter we return everything the caller can read: their
+// personal workouts plus gym workouts from any gym they're an active
+// member of. Returns each workout with its nested parts, movements, and
+// (for the caller's own workouts) per-part scores + movement details.
 export async function GET(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const params = req.nextUrl.searchParams;
   const communityId = params.get("communityId");
+  const personal = params.get("personal");
   const date = params.get("date");
   const startDate = params.get("startDate");
   const endDate = params.get("endDate");
@@ -112,8 +122,38 @@ export async function GET(req: NextRequest) {
   const q = params.get("q")?.trim();
 
   const conds = [];
-  if (communityId) conds.push(eq(workouts.communityId, communityId));
-  else conds.push(eq(workouts.createdBy, user.id));
+  if (communityId) {
+    // Gym programming view. Membership check before the query so a
+    // non-member can't read a gym's WODs by guessing the id.
+    const ok = await canViewGym(user.id, communityId);
+    if (!ok)
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    conds.push(eq(workouts.communityId, communityId));
+  } else if (personal === "1" || personal === "true") {
+    conds.push(eq(workouts.createdBy, user.id));
+    conds.push(isNull(workouts.communityId));
+  } else {
+    // Default scope = personal + any gym the user is an active member of.
+    const myGyms = await db
+      .select({ communityId: communityMemberships.communityId })
+      .from(communityMemberships)
+      .where(
+        and(
+          eq(communityMemberships.userId, user.id),
+          eq(communityMemberships.isActive, true)
+        )
+      );
+    const gymIds = myGyms.map((g) => g.communityId);
+    const personalCond = and(
+      eq(workouts.createdBy, user.id),
+      isNull(workouts.communityId)
+    );
+    const scopeCond =
+      gymIds.length > 0
+        ? or(personalCond, inArray(workouts.communityId, gymIds))
+        : personalCond;
+    if (scopeCond) conds.push(scopeCond);
+  }
   if (date) conds.push(eq(workouts.workoutDate, date));
   if (startDate) conds.push(gte(workouts.workoutDate, startDate));
   if (endDate) conds.push(lte(workouts.workoutDate, endDate));
@@ -231,6 +271,19 @@ export async function GET(req: NextRequest) {
     blocksByPart.set(b.workoutPartId, list);
   }
 
+  // Resolve creator names so the WorkoutCard can render "Programmed by
+  // Coach X" on gym workouts. One query, only when there are creators we
+  // don't already know.
+  const creatorIds = Array.from(new Set(workoutRows.map((w) => w.createdBy)));
+  const creatorRows =
+    creatorIds.length > 0
+      ? await db
+          .select({ id: users.id, name: users.name })
+          .from(users)
+          .where(inArray(users.id, creatorIds))
+      : [];
+  const creatorNameById = new Map(creatorRows.map((r) => [r.id, r.name]));
+
   const scoreIds = scoreRows.map((s) => s.id);
   const detailRows =
     scoreIds.length > 0
@@ -276,6 +329,7 @@ export async function GET(req: NextRequest) {
       w.vestWeightFemaleLb != null ? Number(w.vestWeightFemaleLb) : null,
     isPartner: w.isPartner,
     partnerCount: w.partnerCount,
+    creatorName: creatorNameById.get(w.createdBy) ?? null,
     parts: (partsByWorkout.get(w.id) ?? []).map((p) => {
       const score = scoreByPart.get(p.id);
       return {
@@ -420,6 +474,19 @@ export async function POST(req: NextRequest) {
     partnerCount,
   } = body;
 
+  // Gym-workout authorization: only coaches/admins of the target gym can
+  // create gym programming. Personal workouts (communityId omitted/null)
+  // are always allowed.
+  const targetCommunityId =
+    typeof communityId === "string" && communityId.length > 0
+      ? communityId
+      : null;
+  if (targetCommunityId) {
+    const ok = await canCreateWorkoutInGym(user.id, targetCommunityId);
+    if (!ok)
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   // Vest validation: if the workout claims it requires a vest, at least
   // one of the gendered weights must be set. We won't trust a "true"
   // toggle with no weight on either side.
@@ -526,7 +593,7 @@ export async function POST(req: NextRequest) {
         .insert(workouts)
         .values({
           createdBy: user.id,
-          communityId: communityId || null,
+          communityId: targetCommunityId,
           title: benchmark.name,
           description: benchmark.description,
           workoutType: benchmark.workoutType,

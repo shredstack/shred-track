@@ -415,6 +415,11 @@ export function WorkoutCard({
             <CardTitle className="text-base font-bold tracking-tight">
               {workout.title || "Workout"}
             </CardTitle>
+            {workout.communityId && workout.createdByName && (
+              <p className="text-[11px] text-muted-foreground">
+                Programmed by {workout.createdByName}
+              </p>
+            )}
           </div>
         </div>
       </CardHeader>

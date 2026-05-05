@@ -37,6 +37,11 @@ export const users = pgTable("users", {
   isVip: boolean("is_vip").default(false).notNull(),
   // Canonical store: lb. Drives BW-multiplier Rx resolution.
   bodyWeightLb: numeric("body_weight_lb"),
+  // Cross-device "active gym" pointer. Mirrored in localStorage so the
+  // header dropdown renders synchronously on first paint. Null = personal
+  // mode (no gym selected). FK declared in the SQL migration (not here)
+  // to avoid a circular type dependency between `users` and `communities`.
+  activeCommunityId: uuid("active_community_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -92,7 +97,14 @@ export const communityMemberships = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     communityId: uuid("community_id").notNull().references(() => communities.id, { onDelete: "cascade" }),
     userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-    role: text("role").notNull().default("member"), // 'admin' | 'member'
+    // Per-gym role flags. A user can be both an admin and a coach (typical
+    // affiliate owner / head coach). Members have neither flag.
+    isAdmin: boolean("is_admin").default(false).notNull(),
+    isCoach: boolean("is_coach").default(false).notNull(),
+    // Gym admins can deactivate a member without deleting their score
+    // history. Inactive members can't see the gym's programming.
+    isActive: boolean("is_active").default(true).notNull(),
+    deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
     joinedAt: timestamp("joined_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [uniqueIndex("community_memberships_unique").on(table.communityId, table.userId)]

@@ -21,7 +21,9 @@ import {
   useLogScore,
   useUpdateScore,
   type CreatePartInput,
+  type WorkoutScopeFilter,
 } from "@/hooks/useWorkouts";
+import { useActiveMembership, useGymContext } from "@/hooks/useGymContext";
 import { builderPartToPayload } from "@/lib/crossfit/builder-payload";
 import { useMovements, useCreateMovement } from "@/hooks/useMovements";
 import type {
@@ -195,16 +197,37 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
 // Page
 // ============================================
 
+type CrossfitView = "gym" | "personal";
+
 export default function CrossfitPage() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showAddWorkout, setShowAddWorkout] = useState(false);
   const [editingWorkoutId, setEditingWorkoutId] = useState<string | null>(null);
   const [scoringWorkoutId, setScoringWorkoutId] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // When the user has an active gym, default to the gym programming view.
+  // The toggle lets coaches/members flip to their personal-only list.
+  const [view, setView] = useState<CrossfitView>("gym");
 
   const dateStr = toDateString(selectedDate);
+  const { data: gymContext } = useGymContext();
+  const activeMembership = useActiveMembership();
+  const userId = gymContext?.user.id ?? null;
+  const isCoach = !!activeMembership && (activeMembership.isAdmin || activeMembership.isCoach);
+  const isSuperAdmin = !!gymContext?.user.isSuperAdmin;
+  const inGymMode = view === "gym" && !!activeMembership;
 
-  const { data: workouts = [], isLoading } = useWorkoutsByDate(dateStr);
+  const scope: WorkoutScopeFilter = useMemo(() => {
+    if (activeMembership && view === "gym") {
+      return { mode: "gym", communityId: activeMembership.communityId };
+    }
+    if (activeMembership && view === "personal") {
+      return { mode: "personal" };
+    }
+    return { mode: "personal" };
+  }, [activeMembership, view]);
+
+  const { data: workouts = [], isLoading } = useWorkoutsByDate(dateStr, scope);
   const { data: movementLibrary = [] } = useMovements();
   const createWorkout = useCreateWorkout();
   const updateWorkout = useUpdateWorkout();
@@ -248,6 +271,9 @@ export default function CrossfitPage() {
         description: form.description || undefined,
         workoutDate: form.workoutDate || dateStr,
         benchmarkWorkoutId: form.benchmarkWorkoutId ?? undefined,
+        // In gym mode (coach view), write the workout into the gym so all
+        // active members see it. Personal view stays personal.
+        communityId: inGymMode && isCoach ? activeMembership!.communityId : null,
         requiresVest: !!form.requiresVest,
         vestWeightMaleLb: form.vestWeightMaleLb
           ? parseFloat(form.vestWeightMaleLb)
@@ -316,6 +342,7 @@ export default function CrossfitPage() {
         title: parsed.title,
         description: parsed.description,
         workoutDate: workoutDate || dateStr,
+        communityId: inGymMode && isCoach ? activeMembership!.communityId : null,
         parts: [
           {
             workoutType: parsed.workoutType,
@@ -423,9 +450,47 @@ export default function CrossfitPage() {
   // Render
   // ============================================
 
+  // Members of a gym can't add/edit/delete the gym's coach-programmed
+  // workouts. We hide the buttons rather than letting the API 403.
+  const canAddInCurrentView = !inGymMode || isCoach || isSuperAdmin;
+  // Edit/delete are decided per-workout below using role + creator info.
+  const canEditWorkout = (w: { createdBy: string; communityId?: string | null }) => {
+    if (!userId) return false;
+    if (isSuperAdmin) return true;
+    if (w.communityId == null) return w.createdBy === userId;
+    return isCoach;
+  };
+
   return (
     <div className="flex flex-col gap-5">
       <DateNavigator selectedDate={selectedDate} onDateChange={setSelectedDate} />
+
+      {/* When the user belongs to a gym, surface the gym vs personal toggle.
+          Without an active gym there's no toggle — the only view is personal. */}
+      {activeMembership && (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setView("gym")}
+            className={`flex-1 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+              view === "gym"
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-white/[0.08] text-muted-foreground hover:bg-white/[0.04]"
+            }`}
+          >
+            Gym programming
+          </button>
+          <button
+            onClick={() => setView("personal")}
+            className={`flex-1 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+              view === "personal"
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-white/[0.08] text-muted-foreground hover:bg-white/[0.04]"
+            }`}
+          >
+            My personal
+          </button>
+        </div>
+      )}
 
       <div className="flex items-center justify-end gap-2">
         <Link href="/crossfit/search">
@@ -434,18 +499,34 @@ export default function CrossfitPage() {
             Search
           </Button>
         </Link>
-        <Button
-          size="sm"
-          onClick={() => {
-            setSaveError(null);
-            setShowAddWorkout(true);
-          }}
-          className="gap-1.5"
-        >
-          <Plus className="h-4 w-4" />
-          Add Workout
-        </Button>
+        {canAddInCurrentView && (
+          <Button
+            size="sm"
+            onClick={() => {
+              setSaveError(null);
+              setShowAddWorkout(true);
+            }}
+            className="gap-1.5"
+          >
+            <Plus className="h-4 w-4" />
+            Add Workout
+          </Button>
+        )}
       </div>
+
+      {inGymMode && !isCoach && !isSuperAdmin && (
+        <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px] text-muted-foreground">
+          Viewing programming from {activeMembership!.communityName}. Switch to{" "}
+          <button
+            type="button"
+            className="underline underline-offset-2 hover:text-foreground"
+            onClick={() => setView("personal")}
+          >
+            My personal
+          </button>{" "}
+          to add your own workouts.
+        </div>
+      )}
 
       {saveError && (
         <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
@@ -459,18 +540,28 @@ export default function CrossfitPage() {
         </div>
       ) : (
         <>
-          {workouts.map((workout) => (
-            <WorkoutCard
-              key={workout.id}
-              workout={workout}
-              onLogScore={() => setScoringWorkoutId(workout.id)}
-              onEdit={() => {
-                setSaveError(null);
-                setEditingWorkoutId(workout.id);
-              }}
-              onDelete={handleDeleteWorkout}
-            />
-          ))}
+          {workouts.map((workout) => {
+            const editable = canEditWorkout({
+              createdBy: workout.createdBy,
+              communityId: workout.communityId ?? null,
+            });
+            return (
+              <WorkoutCard
+                key={workout.id}
+                workout={workout}
+                onLogScore={() => setScoringWorkoutId(workout.id)}
+                onEdit={
+                  editable
+                    ? () => {
+                        setSaveError(null);
+                        setEditingWorkoutId(workout.id);
+                      }
+                    : undefined
+                }
+                onDelete={editable ? handleDeleteWorkout : undefined}
+              />
+            );
+          })}
 
           {workouts.length === 0 && (
             <Card className="border-dashed border-white/[0.06]">
@@ -481,17 +572,21 @@ export default function CrossfitPage() {
                 <div className="text-center">
                   <p className="font-semibold">No workouts for this date</p>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Add a workout or paste one from your gym
+                    {inGymMode && !canAddInCurrentView
+                      ? "Your coach hasn't programmed anything yet."
+                      : "Add a workout or paste one from your gym"}
                   </p>
                 </div>
-                <Button
-                  variant="outline"
-                  className="mt-1 border-white/[0.08]"
-                  onClick={() => setShowAddWorkout(true)}
-                >
-                  <Plus className="h-4 w-4" />
-                  Add Workout
-                </Button>
+                {canAddInCurrentView && (
+                  <Button
+                    variant="outline"
+                    className="mt-1 border-white/[0.08]"
+                    onClick={() => setShowAddWorkout(true)}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add Workout
+                  </Button>
+                )}
               </CardContent>
             </Card>
           )}
