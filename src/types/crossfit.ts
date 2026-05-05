@@ -288,6 +288,15 @@ export interface BenchmarkWorkoutPart {
   sideCadenceOpenEnded: boolean;
   notes: string | null;
   movements: BenchmarkMovement[];
+  // Optional named groupings under this part. Empty array = no grouping
+  // (movements render flat). Movements join blocks via BenchmarkMovement.blockId.
+  blocks: BenchmarkWorkoutBlock[];
+}
+
+export interface BenchmarkWorkoutBlock {
+  id: string;
+  orderIndex: number;
+  title: string;
 }
 
 export interface BenchmarkMovement {
@@ -295,6 +304,9 @@ export interface BenchmarkMovement {
   movementId: string;
   movementName: string;
   orderIndex: number;
+  // Optional FK to a benchmark_workout_block. Null = ungrouped within the
+  // part (renders flat).
+  blockId: string | null;
   // Joined from the movements library so the admin/edit form can render
   // the right inputs (cals vs. weight vs. distance) without re-deriving.
   category?: MovementCategory;
@@ -334,6 +346,8 @@ export interface WorkoutMovementDisplay {
   movementName: string;
   category: MovementCategory;
   orderIndex: number;
+  // Optional FK to a workout_block. Null = ungrouped within the part.
+  workoutBlockId: string | null;
   prescribedReps?: string;
   prescribedWeightMale?: string;
   prescribedWeightFemale?: string;
@@ -391,7 +405,16 @@ export interface WorkoutPartDisplay {
   sideCadenceOpenEnded?: boolean;
   notes?: string;
   movements: WorkoutMovementDisplay[];
+  // Optional named groupings under this part. Empty = no grouping.
+  // Movements join blocks via WorkoutMovementDisplay.workoutBlockId.
+  blocks: WorkoutBlockDisplay[];
   score?: ScoreDisplay | null;
+}
+
+export interface WorkoutBlockDisplay {
+  id: string;
+  orderIndex: number;
+  title: string;
 }
 
 export interface WorkoutDisplay {
@@ -519,6 +542,13 @@ export interface WorkoutBuilderMovement {
   isWeighted: boolean;
   is1rmApplicable?: boolean;
   metricType: MovementMetricType;
+  // Phase 2 movement settings. Carried on the builder movement so the
+  // data-driven render path can iterate the Rx fields without re-fetching.
+  // Undefined / empty falls back to the legacy hardcoded branches in
+  // MovementListBuilder (rollback insurance).
+  supportedMetricTypes?: MovementMetricType[];
+  rxFields?: RxField[];
+  rxDefaults?: RxDefaults;
   prescribedReps: string;
   // When true and `prescribedReps` is a closed arithmetic sequence (e.g.
   // "3-6-9-12-15"), the server promotes the parsed shape from `sequence`
@@ -556,6 +586,22 @@ export interface WorkoutBuilderMovement {
   equipmentCount?: number;
   rxStandard: string;
   notes: string;
+  // Optional block membership. `blockTempRef` references a
+  // WorkoutBuilderBlock.tempId on the same part — newly-created blocks are
+  // wired to movements via tempRef and resolved to a real block id on save.
+  // `blockId` is the round-tripped DB id when editing existing rows; the
+  // server resolves it to the same target as `blockTempRef`.
+  blockTempRef?: string | null;
+  blockId?: string | null;
+}
+
+export interface WorkoutBuilderBlock {
+  tempId: string;
+  // Real DB id when editing an existing benchmark/workout. Undefined for
+  // newly-added blocks; the server inserts and assigns the id.
+  id?: string;
+  title: string;
+  orderIndex: number;
 }
 
 export interface WorkoutBuilderPart {
@@ -591,6 +637,10 @@ export interface WorkoutBuilderPart {
   rounds: string;
   structure?: WorkoutPartStructure;
   movements: WorkoutBuilderMovement[];
+  // Named groupings under this part. Empty = ungrouped flat rendering.
+  // Each movement either references a block via `blockTempRef`/`blockId`
+  // or is rendered ungrouped.
+  blocks: WorkoutBuilderBlock[];
 }
 
 export interface WorkoutBuilderForm {
@@ -634,6 +684,39 @@ export interface LeaderboardEntry {
 // Movement Library
 // ============================================
 
+// Subset of rx_fields supported in the data-driven MovementListBuilder.
+// New entries here unlock new inputs without code changes elsewhere.
+export const RX_FIELDS = [
+  "weight",
+  "weight_bw",
+  "height",
+  "calories",
+  "distance",
+  "duration",
+  "tempo",
+] as const;
+
+export type RxField = (typeof RX_FIELDS)[number];
+
+// Per-field defaults stored on the movement itself. Gendered keys for
+// fields that have an Rx M/F split. Only the keys relevant to the
+// movement's rx_fields are populated.
+export interface RxDefaults {
+  weight_male?: number | string;
+  weight_female?: number | string;
+  weight_bw_male?: number | string;
+  weight_bw_female?: number | string;
+  height_inches_male?: number | string;
+  height_inches_female?: number | string;
+  calories_male?: number | string;
+  calories_female?: number | string;
+  distance_male?: number | string;
+  distance_female?: number | string;
+  duration_seconds_male?: number;
+  duration_seconds_female?: number;
+  tempo?: string;
+}
+
 export interface MovementOption {
   id: string;
   canonicalName: string;
@@ -641,6 +724,14 @@ export interface MovementOption {
   isWeighted: boolean;
   is1rmApplicable: boolean;
   metricType: MovementMetricType;
+  // All metrics this movement can be scored in (Phase 2 movement settings).
+  // The builder picks one per workout instance via metricType. Falls back
+  // to [metricType] when undefined (un-backfilled rows).
+  supportedMetricTypes?: MovementMetricType[];
+  // Rx inputs the builder surfaces. Empty/undefined = legacy hardcoded
+  // branches (rollback insurance).
+  rxFields?: RxField[];
+  rxDefaults?: RxDefaults;
   commonRxWeightMale?: string;
   commonRxWeightFemale?: string;
   videoUrl?: string | null;

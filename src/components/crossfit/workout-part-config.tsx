@@ -6,6 +6,7 @@ import { WorkoutTypeSelector } from "@/components/crossfit/workout-type-selector
 import { MovementListBuilder } from "@/components/crossfit/movement-list-builder";
 import { IntervalsConfig } from "@/components/crossfit/intervals-config";
 import type {
+  WorkoutBuilderBlock,
   WorkoutBuilderMovement,
   WorkoutBuilderPart,
 } from "@/types/crossfit";
@@ -32,6 +33,7 @@ export interface WorkoutPartConfigProps {
   part: WorkoutBuilderPart;
   onChange: (updates: Partial<WorkoutBuilderPart>) => void;
   onMovementsChange: (movements: WorkoutBuilderMovement[]) => void;
+  onBlocksChange: (blocks: WorkoutBuilderBlock[]) => void;
   /**
    * When true, surfaces a "Rep Scheme" text input. The Smart Builder
    * intentionally hides this on parts (rep scheme is per-movement there);
@@ -47,6 +49,7 @@ export function WorkoutPartConfig({
   part,
   onChange,
   onMovementsChange,
+  onBlocksChange,
   showRepScheme = false,
   compact = false,
 }: WorkoutPartConfigProps) {
@@ -243,6 +246,8 @@ export function WorkoutPartConfig({
         workoutType={part.workoutType}
         movements={part.movements}
         onChange={onMovementsChange}
+        blocks={part.blocks}
+        onBlocksChange={onBlocksChange}
         showSideCadence={
           (part.workoutType === "for_time" ||
             part.workoutType === "amrap" ||

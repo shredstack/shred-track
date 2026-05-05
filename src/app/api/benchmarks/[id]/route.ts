@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
   benchmarkWorkouts,
+  benchmarkWorkoutBlocks,
   benchmarkWorkoutMovements,
   benchmarkWorkoutParts,
 } from "@/db/schema";
 import { eq, and, notInArray } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import {
+  coerceBenchmarkBlockValues,
   coerceBenchmarkMovementValues,
   coerceBenchmarkPartValues,
   type BenchmarkPartInput,
@@ -201,6 +203,70 @@ export async function PUT(
         partId = inserted.id;
       }
 
+      // Diff blocks before movements so movement.blockTempRef can resolve.
+      const inputBlocks = Array.isArray(p.blocks) ? p.blocks : [];
+      const keepBlockIds = inputBlocks
+        .map((b) => b.id)
+        .filter((x): x is string => !!x);
+      if (keepBlockIds.length > 0) {
+        await tx
+          .delete(benchmarkWorkoutBlocks)
+          .where(
+            and(
+              eq(benchmarkWorkoutBlocks.benchmarkWorkoutPartId, partId),
+              notInArray(benchmarkWorkoutBlocks.id, keepBlockIds)
+            )
+          );
+      } else {
+        await tx
+          .delete(benchmarkWorkoutBlocks)
+          .where(eq(benchmarkWorkoutBlocks.benchmarkWorkoutPartId, partId));
+      }
+
+      const blockTempRefToId = new Map<string, string>();
+      for (let k = 0; k < inputBlocks.length; k++) {
+        const b = inputBlocks[k];
+        const blockValues = coerceBenchmarkBlockValues(b, k);
+        if (blockValues.title.length === 0) continue;
+
+        if (b.id) {
+          const [updatedBlock] = await tx
+            .update(benchmarkWorkoutBlocks)
+            .set(blockValues)
+            .where(
+              and(
+                eq(benchmarkWorkoutBlocks.id, b.id),
+                eq(benchmarkWorkoutBlocks.benchmarkWorkoutPartId, partId)
+              )
+            )
+            .returning({ id: benchmarkWorkoutBlocks.id });
+          if (!updatedBlock) {
+            const [inserted] = await tx
+              .insert(benchmarkWorkoutBlocks)
+              .values({
+                benchmarkWorkoutPartId: partId,
+                ...blockValues,
+              })
+              .returning({ id: benchmarkWorkoutBlocks.id });
+            if (b.tempRef) blockTempRefToId.set(b.tempRef, inserted.id);
+          }
+        } else {
+          const [inserted] = await tx
+            .insert(benchmarkWorkoutBlocks)
+            .values({ benchmarkWorkoutPartId: partId, ...blockValues })
+            .returning({ id: benchmarkWorkoutBlocks.id });
+          if (b.tempRef) blockTempRefToId.set(b.tempRef, inserted.id);
+        }
+      }
+
+      const resolveMovementBlockId = (
+        m: BenchmarkPartInput["movements"][number]
+      ): string | null => {
+        if (m.blockTempRef) return blockTempRefToId.get(m.blockTempRef) ?? null;
+        if (m.blockId) return m.blockId;
+        return null;
+      };
+
       // Diff movements within this part.
       const keepMovementIds = p.movements
         .map((m) => m.id)
@@ -223,11 +289,12 @@ export async function PUT(
       for (let j = 0; j < p.movements.length; j++) {
         const m = p.movements[j];
         const fields = coerceBenchmarkMovementValues(m, j);
+        const benchmarkWorkoutBlockId = resolveMovementBlockId(m);
 
         if (m.id) {
           const [updatedMov] = await tx
             .update(benchmarkWorkoutMovements)
-            .set(fields)
+            .set({ ...fields, benchmarkWorkoutBlockId })
             .where(
               and(
                 eq(benchmarkWorkoutMovements.id, m.id),
@@ -239,6 +306,7 @@ export async function PUT(
             await tx.insert(benchmarkWorkoutMovements).values({
               benchmarkWorkoutId: id,
               benchmarkWorkoutPartId: partId,
+              benchmarkWorkoutBlockId,
               ...fields,
             });
           }
@@ -246,6 +314,7 @@ export async function PUT(
           await tx.insert(benchmarkWorkoutMovements).values({
             benchmarkWorkoutId: id,
             benchmarkWorkoutPartId: partId,
+            benchmarkWorkoutBlockId,
             ...fields,
           });
         }

@@ -2,7 +2,28 @@ import type {
   WorkoutType,
   ParsedWorkout,
   ParsedMovement,
+  MovementMetricType,
 } from "@/types/crossfit";
+
+// ============================================
+// Movement library lookup (Phase 2 movement settings)
+// ============================================
+//
+// The parser stays pure — no DB access. Callers pass a sparse view of the
+// movement library so we can look up `supported_metric_types` and route
+// leading numbers to the right `prescribed_*` slot when the input doesn't
+// carry an explicit "cal" / "m" unit.
+//
+// Why this matters: "Row 21" — without text cues — is ambiguous. The
+// matched movement (Row) has supported metrics ['calories', 'distance'],
+// not ['reps'], so the 21 should land in `prescribedCaloriesMale`, not
+// `prescribedReps`. The heuristic-only path got this wrong.
+
+export interface MovementLibraryEntry {
+  canonicalName: string;
+  metricType?: MovementMetricType | null;
+  supportedMetricTypes?: MovementMetricType[] | null;
+}
 
 // ============================================
 // Abbreviation Map
@@ -330,7 +351,34 @@ function parseWeight(
 // Movement Line Parsing
 // ============================================
 
-function parseMovementLine(line: string): ParsedMovement | null {
+// Lookup helper: find the library entry for a matched canonical name.
+function lookupLibraryEntry(
+  matchedName: string | undefined,
+  library?: MovementLibraryEntry[]
+): MovementLibraryEntry | undefined {
+  if (!matchedName || !library) return undefined;
+  return library.find(
+    (m) => m.canonicalName.toLowerCase() === matchedName.toLowerCase()
+  );
+}
+
+// Returns true when the movement supports the given metric (via the
+// new supported_metric_types column or the legacy single metricType).
+function supportsMetric(
+  entry: MovementLibraryEntry | undefined,
+  metric: MovementMetricType
+): boolean {
+  if (!entry) return false;
+  if (entry.supportedMetricTypes && entry.supportedMetricTypes.length > 0) {
+    return entry.supportedMetricTypes.includes(metric);
+  }
+  return entry.metricType === metric;
+}
+
+function parseMovementLine(
+  line: string,
+  library?: MovementLibraryEntry[]
+): ParsedMovement | null {
   const trimmed = line.trim();
   if (!trimmed || trimmed.length < 2) return null;
 
@@ -445,6 +493,34 @@ function parseMovementLine(line: string): ParsedMovement | null {
     }
   }
 
+  // Library-driven re-routing: when the matched movement supports
+  // calories or distance (and not reps), and the heuristics dropped the
+  // leading number into `reps`, move it. This catches "Row 21" /
+  // "Row 21/15" inputs that don't carry an explicit "cal" unit cue.
+  // Falls back gracefully when no library is provided (the previous
+  // text-pattern behavior is preserved).
+  const libEntry = lookupLibraryEntry(matchedName, library);
+  if (libEntry && reps != null) {
+    const supportsReps = supportsMetric(libEntry, "reps");
+    const supportsCalories = supportsMetric(libEntry, "calories");
+    const supportsDistance = supportsMetric(libEntry, "distance");
+    // Single-number reps like "21" or "21/15" → split on /. If the
+    // movement scores in calories/distance only, route the number(s)
+    // there.
+    const repsParts = reps.match(/^(\d+)(?:\s*\/\s*(\d+))?$/);
+    if (repsParts && !supportsReps) {
+      if (supportsCalories) {
+        caloriesMale = parseInt(repsParts[1], 10);
+        if (repsParts[2]) caloriesFemale = parseInt(repsParts[2], 10);
+        reps = undefined;
+      } else if (supportsDistance) {
+        distanceMaleMeters = parseInt(repsParts[1], 10);
+        if (repsParts[2]) distanceFemaleMeters = parseInt(repsParts[2], 10);
+        reps = undefined;
+      }
+    }
+  }
+
   return {
     name: movementText,
     matchedCanonicalName: matchedName,
@@ -473,7 +549,10 @@ function toMeters(value: number, unit: string): number {
 // Main Parser
 // ============================================
 
-export function parseWorkoutText(rawText: string): ParsedWorkout {
+export function parseWorkoutText(
+  rawText: string,
+  library?: MovementLibraryEntry[]
+): ParsedWorkout {
   const lines = rawText
     .split(/\n/)
     .map((l) => l.trim())
@@ -513,7 +592,7 @@ export function parseWorkoutText(rawText: string): ParsedWorkout {
     // Skip the title line if we extracted one
     if (line === title) continue;
 
-    const parsed = parseMovementLine(line);
+    const parsed = parseMovementLine(line, library);
     if (parsed) {
       movements.push(parsed);
     }

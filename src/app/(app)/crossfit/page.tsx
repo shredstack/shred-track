@@ -72,6 +72,15 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
       const amrapDurationMinutes = p.amrapDurationSeconds
         ? String(Math.round(p.amrapDurationSeconds / 60))
         : "";
+      const blocks = (p.blocks ?? []).map((b) => ({
+        tempId: generateTempId(),
+        id: b.id,
+        title: b.title,
+        orderIndex: b.orderIndex,
+      }));
+      const blockTempRefByDbId = new Map(
+        blocks.map((b) => [b.id ?? "", b.tempId])
+      );
       return {
         tempId: generateTempId(),
         id: p.id,
@@ -170,8 +179,13 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
             equipmentCount: m.equipmentCount,
             rxStandard: m.rxStandard ?? "",
             notes: m.notes ?? "",
+            blockId: m.workoutBlockId ?? null,
+            blockTempRef: m.workoutBlockId
+              ? blockTempRefByDbId.get(m.workoutBlockId) ?? null
+              : null,
           })
         ),
+        blocks,
       };
     }),
   };

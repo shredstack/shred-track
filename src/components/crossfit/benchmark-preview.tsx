@@ -5,12 +5,87 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Plus } from "lucide-react";
 import { useState } from "react";
-import type { BenchmarkWorkout } from "@/types/crossfit";
+import type {
+  BenchmarkMovement,
+  BenchmarkWorkout,
+  BenchmarkWorkoutBlock,
+} from "@/types/crossfit";
 import { WORKOUT_TYPE_LABELS, WORKOUT_TYPE_COLORS } from "@/types/crossfit";
 import {
   WorkoutDateInput,
   localTodayString,
 } from "@/components/crossfit/workout-date-input";
+
+// Renders a part's movements grouped by their optional block titles. When a
+// part has no blocks (or every movement is ungrouped), this falls back to
+// the flat numbered list — matches the legacy single-part rendering.
+function PartMovementList({
+  blocks,
+  movements,
+}: {
+  blocks: BenchmarkWorkoutBlock[];
+  movements: BenchmarkMovement[];
+}) {
+  const ungrouped = movements.filter((m) => !m.blockId);
+  const movementsByBlock = new Map<string, BenchmarkMovement[]>();
+  for (const m of movements) {
+    if (!m.blockId) continue;
+    const list = movementsByBlock.get(m.blockId) ?? [];
+    list.push(m);
+    movementsByBlock.set(m.blockId, list);
+  }
+  const orderedBlocks = [...blocks].sort((a, b) => a.orderIndex - b.orderIndex);
+
+  return (
+    <div className="space-y-3">
+      {ungrouped.length > 0 && <MovementList movements={ungrouped} />}
+      {orderedBlocks.map((b) => {
+        const blockMovements = movementsByBlock.get(b.id) ?? [];
+        if (blockMovements.length === 0) return null;
+        return (
+          <div key={b.id} className="space-y-1.5">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {b.title}
+            </h4>
+            <MovementList movements={blockMovements} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MovementList({ movements }: { movements: BenchmarkMovement[] }) {
+  return (
+    <div className="space-y-1.5">
+      {movements.map((m, i) => (
+        <div key={m.id} className="flex items-baseline gap-2 text-sm">
+          <span className="text-xs text-muted-foreground w-4 text-right">
+            {i + 1}.
+          </span>
+          <span className="font-medium">{m.movementName}</span>
+          {m.prescribedReps && (
+            <span className="text-muted-foreground">{m.prescribedReps}</span>
+          )}
+          {(m.prescribedWeightMale || m.prescribedWeightFemale) && (
+            <span className="text-xs text-muted-foreground">
+              ({m.prescribedWeightMale}
+              {m.prescribedWeightFemale
+                ? `/${m.prescribedWeightFemale}`
+                : ""}{" "}
+              lb)
+            </span>
+          )}
+          {m.rxStandard && (
+            <span className="text-xs italic text-muted-foreground">
+              {m.rxStandard}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 interface BenchmarkPreviewProps {
   benchmark: BenchmarkWorkout;
@@ -112,39 +187,10 @@ export function BenchmarkPreview({
                 </p>
               )}
 
-              <div className="space-y-1.5">
-                {part.movements.map((m, i) => (
-                  <div
-                    key={m.id}
-                    className="flex items-baseline gap-2 text-sm"
-                  >
-                    <span className="text-xs text-muted-foreground w-4 text-right">
-                      {i + 1}.
-                    </span>
-                    <span className="font-medium">{m.movementName}</span>
-                    {m.prescribedReps && (
-                      <span className="text-muted-foreground">
-                        {m.prescribedReps}
-                      </span>
-                    )}
-                    {(m.prescribedWeightMale ||
-                      m.prescribedWeightFemale) && (
-                      <span className="text-xs text-muted-foreground">
-                        ({m.prescribedWeightMale}
-                        {m.prescribedWeightFemale
-                          ? `/${m.prescribedWeightFemale}`
-                          : ""}{" "}
-                        lb)
-                      </span>
-                    )}
-                    {m.rxStandard && (
-                      <span className="text-xs italic text-muted-foreground">
-                        {m.rxStandard}
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
+              <PartMovementList
+                blocks={part.blocks}
+                movements={part.movements}
+              />
             </div>
           );
         })}

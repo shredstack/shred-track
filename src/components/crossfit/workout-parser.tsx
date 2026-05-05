@@ -22,6 +22,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { parseWorkoutText, formatTime } from "@/lib/workout-parser";
+import { useMovements } from "@/hooks/useMovements";
 import type {
   ParsedWorkout,
   ParsedMovement,
@@ -90,12 +91,24 @@ export function WorkoutParser({
   const [workoutDate, setWorkoutDate] = useState(
     defaultWorkoutDate || localTodayString()
   );
+  // The parser stays pure but accepts a sparse view of the library so it
+  // can route "Row 21" to calories rather than reps. We pass whatever the
+  // hook has cached; on first render it's an empty list and the parser
+  // falls back to its text-pattern heuristics.
+  const { data: movementLibrary = [] } = useMovements();
 
   const handleParse = useCallback(() => {
     if (!rawText.trim()) return;
-    const result = parseWorkoutText(rawText);
+    const result = parseWorkoutText(
+      rawText,
+      movementLibrary.map((m) => ({
+        canonicalName: m.canonicalName,
+        metricType: m.metricType,
+        supportedMetricTypes: m.supportedMetricTypes,
+      }))
+    );
     setParsed(result);
-  }, [rawText]);
+  }, [rawText, movementLibrary]);
 
   const handleReset = useCallback(() => {
     setParsed(null);

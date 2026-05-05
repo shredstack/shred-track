@@ -142,7 +142,7 @@ def load_training_data(db_url: str, division: str) -> pd.DataFrame:
     # Add derived ratios
     df["ratio_sled_push_pull"] = df["station_sled_push"] / df["station_sled_pull"].clip(lower=1)
     df["ratio_run1_run8"] = df["run_1"] / df["run_8"].clip(lower=1)
-    df["ratio_burpees_wallballs"] = df["station_broad_jump_burpees"] / df["station_wall_balls"].clip(lower=1)
+    df["ratio_burpees_wallballs"] = df["station_burpee_broad_jumps"] / df["station_wall_balls"].clip(lower=1)
     df["ratio_ski_row"] = df["station_skierg"] / df["station_rowing"].clip(lower=1)
     df["ratio_farmers_lunges"] = df["station_farmers_carry"] / df["station_sandbag_lunges"].clip(lower=1)
 
@@ -207,7 +207,7 @@ def train_percentile_classifier(df: pd.DataFrame) -> tuple[RandomForestClassifie
     X = df[FEATURE_NAMES].values
 
     # Bucket percentile into 5 groups: 0-20, 20-40, 40-60, 60-80, 80-100
-    y = pd.cut(df["percentile"], bins=[0, 20, 40, 60, 80, 100], labels=False).values
+    y = pd.cut(df["percentile"], bins=[0, 20, 40, 60, 80, 100], labels=False, include_lowest=True).values
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42,

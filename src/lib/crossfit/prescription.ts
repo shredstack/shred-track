@@ -50,6 +50,29 @@ function num(v: string | number | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// Render a gendered cal/distance pair in a way that stays readable when
+// the values are dash-separated rep schemes (Sarah's flagged case:
+// "75-50-25 cal (M) / 60-40-20 cal (F)" — without explicit M/F labels
+// the bare slash is ambiguous because each side already contains dashes).
+function formatGenderedNumberOrScheme(
+  male: string | null,
+  female: string | null,
+  unit: string
+): string {
+  const m = male ?? null;
+  const f = female ?? null;
+  if (m && !f) return `${m} ${unit}`;
+  if (!m && f) return `${f} ${unit}`;
+  if (m && f && m === f) return `${m} ${unit}`;
+  if (m && f) {
+    if (m.includes("-") || f.includes("-")) {
+      return `${m} ${unit} (M) / ${f} ${unit} (F)`;
+    }
+    return `${m}/${f} ${unit}`;
+  }
+  return `? ${unit}`;
+}
+
 // ============================================
 // Resolve effective Rx weight in lb for a gender
 // ============================================
@@ -187,9 +210,7 @@ export function formatMovementPrescription(
       ? String(mov.prescribedCaloriesFemale)
       : null;
   if (calMale != null || calFemale != null) {
-    const m = calMale ?? "?";
-    const f = calFemale ?? null;
-    segments.push(`${m}${f ? `/${f}` : ""} cal`);
+    segments.push(formatGenderedNumberOrScheme(calMale, calFemale, "cal"));
   }
 
   // Distance (m) — values may be scalars ("400") or schemes ("800-400-200").
@@ -202,9 +223,7 @@ export function formatMovementPrescription(
       ? String(mov.prescribedDistanceFemale)
       : null;
   if (dMale != null || dFemale != null) {
-    const m = dMale ?? "?";
-    const f = dFemale ?? null;
-    segments.push(`${m}${f ? `/${f}` : ""} m`);
+    segments.push(formatGenderedNumberOrScheme(dMale, dFemale, "m"));
   }
 
   // Height (in)

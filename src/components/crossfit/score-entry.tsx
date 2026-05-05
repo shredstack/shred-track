@@ -32,6 +32,7 @@ import {
 } from "@/lib/crossfit/duration-parser";
 import { resolveRxWeightLb } from "@/lib/crossfit/prescription";
 import { useUserProfile } from "@/hooks/useProfile";
+import { useMovements } from "@/hooks/useMovements";
 import type {
   WorkoutPartDisplay,
   WorkoutMovementDisplay,
@@ -306,6 +307,57 @@ function distinctMovements(part: WorkoutPartDisplay) {
   return out;
 }
 
+// Read-only outline of the active part's movements grouped by block titles.
+// Surfaces "Buy-in / Main set / Buy-out" structure for chipper-style
+// benchmarks (Drew, etc.) while the athlete is logging — score inputs
+// remain part-level, so this is reference only.
+function PartBlockOutline({ part }: { part: WorkoutPartDisplay }) {
+  const orderedBlocks = [...part.blocks].sort(
+    (a, b) => a.orderIndex - b.orderIndex
+  );
+  const ungrouped = part.movements.filter((m) => !m.workoutBlockId);
+  const movementsByBlock = new Map<string, typeof part.movements>();
+  for (const m of part.movements) {
+    if (!m.workoutBlockId) continue;
+    const list = movementsByBlock.get(m.workoutBlockId) ?? [];
+    list.push(m);
+    movementsByBlock.set(m.workoutBlockId, list);
+  }
+  return (
+    <div className="space-y-2 rounded-lg border border-border/40 bg-muted/20 p-3 text-xs">
+      {ungrouped.length > 0 && (
+        <ul className="space-y-0.5">
+          {ungrouped.map((m) => (
+            <li key={m.id} className="text-muted-foreground">
+              · {m.movementName}
+              {m.prescribedReps ? ` ${m.prescribedReps}` : ""}
+            </li>
+          ))}
+        </ul>
+      )}
+      {orderedBlocks.map((b) => {
+        const ms = movementsByBlock.get(b.id) ?? [];
+        if (ms.length === 0) return null;
+        return (
+          <div key={b.id} className="space-y-0.5">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-foreground">
+              {b.title}
+            </div>
+            <ul className="space-y-0.5">
+              {ms.map((m) => (
+                <li key={m.id} className="text-muted-foreground">
+                  · {m.movementName}
+                  {m.prescribedReps ? ` ${m.prescribedReps}` : ""}
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ============================================
 // Helpers
 // ============================================
@@ -465,6 +517,11 @@ export function ScoreEntry({
   );
   const [divisionError, setDivisionError] = useState<string | null>(null);
   const { data: profile } = useUserProfile();
+  // Movement library — used by the per-movement details renderer to look
+  // up rx_fields off the canonical movement (Phase 2 movement settings).
+  // Falls back to legacy heuristics when the lookup is empty (cold cache,
+  // un-backfilled movement).
+  const { data: movementLibrary = [] } = useMovements();
   const userBodyWeightLb = profile?.bodyWeightLb ?? null;
   const gender =
     profile?.gender === "male" ||
@@ -1133,6 +1190,14 @@ export function ScoreEntry({
         )}
 
         <div className="space-y-6">
+          {/* Block outline — read-only reference of the active part's
+              movements grouped by block, so athletes see "Buy-in / Main set
+              / Buy-out" while logging. Score inputs remain at the part
+              level. Only renders when the part actually has blocks. */}
+          {activePart.blocks.length > 0 && (
+            <PartBlockOutline part={activePart} />
+          )}
+
           {/* Division */}
           <div className="space-y-2">
             <Label>
@@ -1318,10 +1383,18 @@ export function ScoreEntry({
               prescription includes one of these — they're not "scaling"
               fields, they're the canonical record of what was held / how
               high the deficit was. Drafts persist independent of the
-              division pick. */}
+              division pick.
+              Phase 2: data-driven via rx_fields on the canonical movement
+              when available. Falls back to the legacy metric_type +
+              prescribed_height inference when rx_fields is empty. */}
           {(() => {
             const fields = activePart.movements
               .map((mov) => {
+                const libEntry = movementLibrary.find(
+                  (m) => m.id === mov.movementId
+                );
+                const rxFields = libEntry?.rxFields ?? [];
+                const useRxFields = rxFields.length > 0;
                 const heightRx =
                   gender === "female"
                     ? mov.prescribedHeightInchesFemale ??
@@ -1332,8 +1405,12 @@ export function ScoreEntry({
                       mov.prescribedHeightInches;
                 return {
                   mov,
-                  wantsDuration: mov.metricType === "duration",
-                  wantsHeight: heightRx != null,
+                  wantsDuration: useRxFields
+                    ? rxFields.includes("duration")
+                    : mov.metricType === "duration",
+                  wantsHeight: useRxFields
+                    ? rxFields.includes("height")
+                    : heightRx != null,
                   heightRx,
                 };
               })

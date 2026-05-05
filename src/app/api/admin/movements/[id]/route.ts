@@ -23,6 +23,10 @@ export async function PUT(
     commonRxWeightFemale,
     videoUrl,
     isValidated,
+    metricType,
+    supportedMetricTypes,
+    rxFields,
+    rxDefaults,
   } = body;
 
   const [existing] = await db
@@ -51,6 +55,14 @@ export async function PUT(
           : existing.commonRxWeightFemale,
         videoUrl: videoUrl !== undefined ? (videoUrl || null) : existing.videoUrl,
         isValidated: isValidated ?? existing.isValidated,
+        ...(typeof metricType === "string" ? { metricType } : {}),
+        ...(Array.isArray(supportedMetricTypes) && supportedMetricTypes.length > 0
+          ? { supportedMetricTypes }
+          : {}),
+        ...(Array.isArray(rxFields) ? { rxFields } : {}),
+        ...(rxDefaults !== undefined && rxDefaults !== null && typeof rxDefaults === "object"
+          ? { rxDefaults }
+          : {}),
       })
       .where(eq(movements.id, id))
       .returning();

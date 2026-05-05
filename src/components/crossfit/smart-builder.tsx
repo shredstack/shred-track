@@ -58,6 +58,31 @@ function createEmptyForm(workoutDate?: string): WorkoutBuilderForm {
   };
 }
 
+// When the M and F values both contain dashes (rep schemes like 75-50-25 vs.
+// 60-40-20), the bare "X/Y" format is ambiguous — readers can't tell if
+// "75-50-25/60-40-20" means alternating rounds or a gendered split. Add an
+// explicit "(M)" / "(F)" annotation in that case.
+function formatGenderedScheme(
+  male: string | undefined,
+  female: string | undefined,
+  unit: string
+): string {
+  const m = male?.trim() || "";
+  const f = female?.trim() || "";
+  const hasM = !!m;
+  const hasF = !!f;
+  if (!hasM && !hasF) return "";
+  if (hasM && !hasF) return `${m} ${unit}`;
+  if (!hasM && hasF) return `${f} ${unit}`;
+  if (m === f) return `${m} ${unit}`;
+  // Both populated and divergent. If either side carries a dash-separated
+  // scheme, label the M/F to disambiguate.
+  if (m.includes("-") || f.includes("-")) {
+    return `${m} ${unit} (M) / ${f} ${unit} (F)`;
+  }
+  return `${m}/${f} ${unit}`;
+}
+
 // Single-line metric summary for the review screen. Returns the gendered
 // pair for whichever metric type the movement uses, or null when the
 // builder hasn't filled in any metric yet.
@@ -74,15 +99,19 @@ function formatBuilderMovementMetric(
   }
   if (m.metricType === "calories") {
     if (!m.prescribedCaloriesMale && !m.prescribedCaloriesFemale) return null;
-    return `${m.prescribedCaloriesMale || "?"}${
-      m.prescribedCaloriesFemale ? `/${m.prescribedCaloriesFemale}` : ""
-    } cal`;
+    return formatGenderedScheme(
+      m.prescribedCaloriesMale,
+      m.prescribedCaloriesFemale,
+      "cal"
+    );
   }
   if (m.metricType === "distance") {
     if (!m.prescribedDistanceMale && !m.prescribedDistanceFemale) return null;
-    return `${m.prescribedDistanceMale || "?"}${
-      m.prescribedDistanceFemale ? `/${m.prescribedDistanceFemale}` : ""
-    } m`;
+    return formatGenderedScheme(
+      m.prescribedDistanceMale,
+      m.prescribedDistanceFemale,
+      "m"
+    );
   }
   return null;
 }

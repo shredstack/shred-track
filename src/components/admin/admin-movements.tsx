@@ -24,8 +24,13 @@ import { Search, Plus, Pencil, Trash2, Video, Loader2, CheckCircle2, ShieldAlert
 import {
   MOVEMENT_CATEGORIES,
   MOVEMENT_CATEGORY_COLORS,
+  MOVEMENT_METRIC_TYPES,
+  RX_FIELDS,
   type MovementCategory,
   type CategoryFilter,
+  type MovementMetricType,
+  type RxField,
+  type RxDefaults,
 } from "@/types/crossfit";
 import { CategoryPills } from "@/components/shared/category-pills";
 
@@ -35,6 +40,10 @@ interface Movement {
   category: string;
   isWeighted: boolean;
   is1rmApplicable: boolean;
+  metricType?: string | null;
+  supportedMetricTypes?: string[] | null;
+  rxFields?: string[] | null;
+  rxDefaults?: Record<string, unknown> | null;
   commonRxWeightMale: string | null;
   commonRxWeightFemale: string | null;
   videoUrl: string | null;
@@ -73,6 +82,10 @@ interface MovementFormData {
   commonRxWeightMale: string;
   commonRxWeightFemale: string;
   videoUrl: string;
+  metricType: MovementMetricType;
+  supportedMetricTypes: MovementMetricType[];
+  rxFields: RxField[];
+  rxDefaults: RxDefaults;
 }
 
 const emptyForm: MovementFormData = {
@@ -83,7 +96,100 @@ const emptyForm: MovementFormData = {
   commonRxWeightMale: "",
   commonRxWeightFemale: "",
   videoUrl: "",
+  metricType: "reps",
+  supportedMetricTypes: ["reps"],
+  rxFields: [],
+  rxDefaults: {},
 };
+
+// Per-Rx-field input metadata. Mirrors the AdvancedMovementForm but lives
+// here so the admin form can render the same defaults editor inline.
+const RX_FIELD_META: Record<
+  RxField,
+  {
+    label: string;
+    keys: { key: keyof RxDefaults; label: string; placeholder?: string }[];
+  }
+> = {
+  weight: {
+    label: "Weight (lb)",
+    keys: [
+      { key: "weight_male", label: "M (lb)", placeholder: "e.g. 95" },
+      { key: "weight_female", label: "F (lb)", placeholder: "e.g. 65" },
+    ],
+  },
+  weight_bw: {
+    label: "% bodyweight",
+    keys: [
+      { key: "weight_bw_male", label: "M (×BW)", placeholder: "e.g. 1.5" },
+      { key: "weight_bw_female", label: "F (×BW)", placeholder: "e.g. 1.25" },
+    ],
+  },
+  height: {
+    label: "Height (in)",
+    keys: [
+      { key: "height_inches_male", label: "M (in)", placeholder: "e.g. 24" },
+      { key: "height_inches_female", label: "F (in)", placeholder: "e.g. 20" },
+    ],
+  },
+  calories: {
+    label: "Calories",
+    keys: [
+      { key: "calories_male", label: "M (cal)", placeholder: "e.g. 21" },
+      { key: "calories_female", label: "F (cal)", placeholder: "e.g. 15" },
+    ],
+  },
+  distance: {
+    label: "Distance (m)",
+    keys: [
+      { key: "distance_male", label: "M (m)", placeholder: "e.g. 400" },
+      { key: "distance_female", label: "F (m)", placeholder: "e.g. 320" },
+    ],
+  },
+  duration: {
+    label: "Duration (sec)",
+    keys: [
+      { key: "duration_seconds_male", label: "M (sec)", placeholder: "e.g. 60" },
+      {
+        key: "duration_seconds_female",
+        label: "F (sec)",
+        placeholder: "e.g. 60",
+      },
+    ],
+  },
+  tempo: {
+    label: "Tempo",
+    keys: [{ key: "tempo", label: "Tempo", placeholder: "e.g. 30X1" }],
+  },
+};
+
+function parseMetricType(v: unknown): MovementMetricType {
+  return typeof v === "string" &&
+    (MOVEMENT_METRIC_TYPES as readonly string[]).includes(v)
+    ? (v as MovementMetricType)
+    : "reps";
+}
+
+function parseSupportedMetricTypes(
+  v: unknown,
+  fallback: MovementMetricType
+): MovementMetricType[] {
+  if (Array.isArray(v)) {
+    const filtered = v.filter((m): m is MovementMetricType =>
+      typeof m === "string" &&
+      (MOVEMENT_METRIC_TYPES as readonly string[]).includes(m)
+    );
+    if (filtered.length > 0) return filtered;
+  }
+  return [fallback];
+}
+
+function parseRxFields(v: unknown): RxField[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((f): f is RxField =>
+    typeof f === "string" && (RX_FIELDS as readonly string[]).includes(f)
+  );
+}
 
 export function AdminMovements() {
   const queryClient = useQueryClient();
@@ -124,10 +230,29 @@ export function AdminMovements() {
       const url = data.id
         ? `/api/admin/movements/${data.id}`
         : "/api/admin/movements";
+      // Coerce string defaults (the inputs are text) into numbers where
+      // appropriate. Tempo stays a string. Empty values are dropped so we
+      // don't send "" into the JSONB column.
+      const cleanedDefaults: RxDefaults = {};
+      for (const [k, v] of Object.entries(data.form.rxDefaults)) {
+        if (v == null || v === "") continue;
+        if (k === "tempo") {
+          cleanedDefaults.tempo = String(v);
+        } else {
+          const n = typeof v === "number" ? v : parseFloat(String(v));
+          if (Number.isFinite(n)) {
+            (cleanedDefaults as Record<string, number>)[k] = n;
+          }
+        }
+      }
+      const payload = {
+        ...data.form,
+        rxDefaults: cleanedDefaults,
+      };
       const res = await fetch(url, {
         method: data.id ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data.form),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -165,6 +290,7 @@ export function AdminMovements() {
   }, []);
 
   const openEdit = useCallback((m: Movement) => {
+    const metricType = parseMetricType(m.metricType);
     setForm({
       canonicalName: m.canonicalName,
       category: m.category as MovementCategory,
@@ -173,6 +299,13 @@ export function AdminMovements() {
       commonRxWeightMale: m.commonRxWeightMale || "",
       commonRxWeightFemale: m.commonRxWeightFemale || "",
       videoUrl: m.videoUrl || "",
+      metricType,
+      supportedMetricTypes: parseSupportedMetricTypes(
+        m.supportedMetricTypes,
+        metricType
+      ),
+      rxFields: parseRxFields(m.rxFields),
+      rxDefaults: (m.rxDefaults as RxDefaults | null) ?? {},
     });
     setEditingId(m.id);
     setError("");
@@ -184,6 +317,45 @@ export function AdminMovements() {
     setEditingId(null);
     setError("");
   }, []);
+
+  const toggleSupportedMetric = useCallback((mt: MovementMetricType) => {
+    setForm((prev) => {
+      const has = prev.supportedMetricTypes.includes(mt);
+      const next = has
+        ? prev.supportedMetricTypes.filter((m) => m !== mt)
+        : [...prev.supportedMetricTypes, mt];
+      return {
+        ...prev,
+        supportedMetricTypes: next.length > 0 ? next : ["reps"],
+        metricType: next[0] ?? "reps",
+      };
+    });
+  }, []);
+
+  const toggleRxField = useCallback((f: RxField) => {
+    setForm((prev) => {
+      const has = prev.rxFields.includes(f);
+      const next = has
+        ? prev.rxFields.filter((x) => x !== f)
+        : [...prev.rxFields, f];
+      const defaults = { ...prev.rxDefaults };
+      if (has) {
+        for (const k of RX_FIELD_META[f].keys) {
+          delete defaults[k.key];
+        }
+      }
+      return { ...prev, rxFields: next, rxDefaults: defaults };
+    });
+  }, []);
+
+  const setRxDefault = useCallback(
+    (key: keyof RxDefaults, value: string) =>
+      setForm((prev) => ({
+        ...prev,
+        rxDefaults: { ...prev.rxDefaults, [key]: value },
+      })),
+    []
+  );
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -413,6 +585,94 @@ export function AdminMovements() {
                     }
                     placeholder="e.g. 95"
                   />
+                </div>
+              </div>
+            )}
+
+            {/* How is this movement scored? */}
+            <div className="space-y-2">
+              <Label>How is this movement scored?</Label>
+              <div className="flex flex-wrap gap-1">
+                {MOVEMENT_METRIC_TYPES.map((mt) => {
+                  const selected = form.supportedMetricTypes.includes(mt);
+                  return (
+                    <button
+                      key={mt}
+                      type="button"
+                      onClick={() => toggleSupportedMetric(mt)}
+                      className={`rounded-md px-2 py-1 text-xs font-medium capitalize ${
+                        selected
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted/50 text-muted-foreground hover:bg-muted"
+                      }`}
+                    >
+                      {mt}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Rx fields the builder should surface */}
+            <div className="space-y-2">
+              <Label>Rx fields the builder surfaces</Label>
+              <div className="flex flex-wrap gap-1">
+                {RX_FIELDS.map((f) => {
+                  const selected = form.rxFields.includes(f);
+                  return (
+                    <button
+                      key={f}
+                      type="button"
+                      onClick={() => toggleRxField(f)}
+                      className={`rounded-md px-2 py-1 text-xs font-medium ${
+                        selected
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted/50 text-muted-foreground hover:bg-muted"
+                      }`}
+                    >
+                      {f.replace("_", " ")}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Empty = legacy hardcoded behavior in the builder (rollback
+                insurance).
+              </p>
+            </div>
+
+            {/* Per-field default values */}
+            {form.rxFields.length > 0 && (
+              <div className="space-y-2">
+                <Label>Default values (optional)</Label>
+                <div className="space-y-3 rounded-lg border border-border/50 bg-muted/20 p-3">
+                  {form.rxFields.map((f) => {
+                    const meta = RX_FIELD_META[f];
+                    return (
+                      <div key={f} className="space-y-1.5">
+                        <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                          {meta.label}
+                        </div>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {meta.keys.map((k) => (
+                            <div key={k.key} className="space-y-0.5">
+                              <Label className="text-[11px] text-muted-foreground/80">
+                                {k.label}
+                              </Label>
+                              <Input
+                                value={String(form.rxDefaults[k.key] ?? "")}
+                                onChange={(e) =>
+                                  setRxDefault(k.key, e.target.value)
+                                }
+                                placeholder={k.placeholder}
+                                className="h-7 text-xs"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

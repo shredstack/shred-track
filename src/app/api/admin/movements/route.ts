@@ -28,6 +28,9 @@ export async function GET(req: NextRequest) {
       isWeighted: movements.isWeighted,
       is1rmApplicable: movements.is1rmApplicable,
       metricType: movements.metricType,
+      supportedMetricTypes: movements.supportedMetricTypes,
+      rxFields: movements.rxFields,
+      rxDefaults: movements.rxDefaults,
       commonRxWeightMale: movements.commonRxWeightMale,
       commonRxWeightFemale: movements.commonRxWeightFemale,
       videoUrl: movements.videoUrl,
@@ -59,6 +62,10 @@ export async function POST(req: NextRequest) {
     commonRxWeightMale,
     commonRxWeightFemale,
     videoUrl,
+    metricType,
+    supportedMetricTypes,
+    rxFields,
+    rxDefaults,
   } = body;
 
   const trimmedName = canonicalName?.trim();
@@ -81,6 +88,14 @@ export async function POST(req: NextRequest) {
         commonRxWeightFemale: commonRxWeightFemale?.toString() || null,
         videoUrl: videoUrl || null,
         isValidated: true,
+        ...(typeof metricType === "string" ? { metricType } : {}),
+        ...(Array.isArray(supportedMetricTypes) && supportedMetricTypes.length > 0
+          ? { supportedMetricTypes }
+          : {}),
+        ...(Array.isArray(rxFields) ? { rxFields } : {}),
+        ...(rxDefaults && typeof rxDefaults === "object"
+          ? { rxDefaults }
+          : {}),
       })
       .returning();
 
