@@ -48,6 +48,17 @@ import { formatSecondsAsClock } from "@/lib/crossfit/duration-parser";
 import { formatMovementPrescription } from "@/lib/crossfit/prescription";
 import { DeleteWorkoutDialog } from "@/components/crossfit/delete-workout-dialog";
 
+// Programmed Rest is identified by name + duration metric, mirroring the
+// builder's `isLegacyRestMovement` check. For a Rest the duration is the
+// whole prescription, so the card promotes it to the bold "lead" slot
+// rather than burying it in muted parens after the movement name.
+function isRestMovement(mov: WorkoutMovementDisplay): boolean {
+  return (
+    mov.metricType === "duration" &&
+    /^rest$/i.test((mov.movementName ?? "").trim())
+  );
+}
+
 interface WorkoutCardProps {
   workout: WorkoutDisplay;
   onLogScore?: (workoutId: string) => void;
@@ -204,6 +215,33 @@ function MovementRow({ mov }: { mov: WorkoutMovementDisplay }) {
     mov.equipmentCount && mov.equipmentCount > 1
       ? `${mov.equipmentCount} × `
       : "";
+
+  // Rest rows promote the duration to the bold lead slot so the prescribed
+  // length is the first thing the athlete reads — "0:30 Rest" instead of
+  // "Rest (0:30)" tucked into muted parens.
+  if (isRestMovement(mov)) {
+    const durSec =
+      mov.prescribedDurationSecondsMale ??
+      mov.prescribedDurationSecondsFemale ??
+      null;
+    const durLabel = durSec != null ? formatSecondsAsClock(durSec) : null;
+    return (
+      <div className="flex items-center gap-2.5 text-sm">
+        <div className="flex h-5 w-5 items-center justify-center rounded bg-primary/10">
+          <Dumbbell className="size-3 text-primary/70" />
+        </div>
+        <span className="flex-1">
+          {durLabel && (
+            <span className="font-mono font-bold text-foreground">
+              {durLabel}{" "}
+            </span>
+          )}
+          <span className="text-foreground/85">{mov.movementName}</span>
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center gap-2.5 text-sm">
       <div className="flex h-5 w-5 items-center justify-center rounded bg-primary/10">
@@ -251,59 +289,28 @@ function PartSection({
   const typeLabel = WORKOUT_TYPE_LABELS[part.workoutType];
   const defaultLabel = `Part ${String.fromCharCode(65 + index)}`;
 
-  const metaBits: React.ReactNode[] = [];
-  if (part.timeCapSeconds) {
-    metaBits.push(
-      <span key="tc" className="flex items-center gap-1 text-muted-foreground">
-        <Clock className="size-3" />
-        {formatTime(part.timeCapSeconds)} cap
-      </span>
-    );
-  }
-  if (part.amrapDurationSeconds) {
-    metaBits.push(
-      <span
-        key="amrap"
-        className="flex items-center gap-1 text-muted-foreground"
-      >
-        <Clock className="size-3" />
-        {formatTime(part.amrapDurationSeconds)}
-      </span>
-    );
-  }
-  if (part.workoutType === "for_time" && part.rounds) {
-    metaBits.push(
-      <span key="rounds" className="text-muted-foreground font-mono">
-        {part.rounds} rounds
-      </span>
-    );
-  }
-  if (part.workoutType === "for_reps" && part.structure === "tabata") {
-    metaBits.push(
-      <span
-        key="tabata"
-        className="text-muted-foreground font-mono"
-        title="8 rounds × :20 work / :10 rest per movement"
-      >
-        Tabata (8×:20/:10)
-      </span>
-    );
-  }
-  if (part.workoutType === "intervals") {
-    if (part.intervalRounds && part.intervalRounds.length > 0) {
-      // Per-round display: "4:00/4:00 → 3:00/3:00 → 2:00/2:00".
-      const segs = part.intervalRounds
-        .map(
-          (r) =>
-            `${formatSecondsAsClock(r.workSeconds)}/${formatSecondsAsClock(r.restSeconds)}`
-        )
-        .join(" → ");
-      metaBits.push(
-        <span key="intervals" className="text-muted-foreground font-mono">
-          {segs}
-        </span>
+  // The "signature" — the defining structural value of the workout, rendered
+  // big and clean below the type pill so athletes see it at a glance. Examples:
+  // "75-50-25" (rep scheme), "5 rounds", "20:00" (AMRAP duration), the
+  // interval sequence, etc. null = no signature line, just the pill.
+  const signature: React.ReactNode = (() => {
+    if (part.workoutType === "tabata" || part.structure === "tabata") {
+      return (
+        <>
+          8 × :20<span className="opacity-60"> / </span>:10
+        </>
       );
-    } else {
+    }
+
+    if (part.workoutType === "intervals") {
+      if (part.intervalRounds && part.intervalRounds.length > 0) {
+        return part.intervalRounds
+          .map(
+            (r) =>
+              `${formatSecondsAsClock(r.workSeconds)}/${formatSecondsAsClock(r.restSeconds)}`
+          )
+          .join(" → ");
+      }
       const work =
         part.intervalWorkSeconds != null
           ? formatSecondsAsClock(part.intervalWorkSeconds)
@@ -313,25 +320,38 @@ function PartSection({
           ? formatSecondsAsClock(part.intervalRestSeconds)
           : null;
       if (work || rest || part.rounds) {
-        metaBits.push(
-          <span key="intervals" className="text-muted-foreground font-mono">
-            {part.rounds ? `${part.rounds} × ` : ""}
-            {work || "?"}
-            {rest ? ` work / ${rest} rest` : " work"}
-          </span>
-        );
+        return `${part.rounds ? `${part.rounds} × ` : ""}${work || "?"}${rest ? ` / ${rest}` : ""}`;
       }
+      return null;
     }
-  }
-  if (part.repScheme) {
-    metaBits.push(
-      <span key="reps" className="text-muted-foreground font-mono">
-        {part.repScheme}
+
+    if (part.workoutType === "amrap" && part.amrapDurationSeconds) {
+      return formatTime(part.amrapDurationSeconds);
+    }
+
+    if (part.repScheme) return part.repScheme;
+
+    if (part.rounds) {
+      const roundWord = part.workoutType === "for_load" ? "sets" : "rounds";
+      return `${part.rounds} ${roundWord}`;
+    }
+
+    return null;
+  })();
+
+  // Secondary meta — kept small. Time cap is dropped for AMRAP since the
+  // duration is already the signature.
+  const secondaryBits: React.ReactNode[] = [];
+  if (part.timeCapSeconds && part.workoutType !== "amrap") {
+    secondaryBits.push(
+      <span key="tc" className="flex items-center gap-1">
+        <Clock className="size-3" />
+        {formatTime(part.timeCapSeconds)} cap
       </span>
     );
   }
   if (part.sideCadenceIntervalSeconds) {
-    metaBits.push(
+    secondaryBits.push(
       <span key="side-cadence" className="text-cyan-300/90 font-mono">
         EMOM {formatSecondsAsClock(part.sideCadenceIntervalSeconds)}
         {part.sideCadenceOpenEnded ? " (open-ended)" : ""}
@@ -340,22 +360,31 @@ function PartSection({
   }
 
   return (
-    <div className="space-y-2.5">
+    <div className="space-y-2">
       <div className="flex items-center gap-2 flex-wrap">
         {showLabel && (
           <Badge variant="outline" className="text-[10px] bg-muted/40">
             {part.label || defaultLabel}
           </Badge>
         )}
-        <Badge variant="outline" className={`text-[10px] font-bold ${typeColor}`}>
+        <Badge
+          variant="outline"
+          className={`text-xs font-bold ${typeColor}`}
+        >
           {typeLabel}
         </Badge>
-        {metaBits.length > 0 && (
-          <span className="flex items-center gap-2.5 text-[11px]">
-            {metaBits}
+        {secondaryBits.length > 0 && (
+          <span className="flex items-center gap-2.5 text-[11px] text-muted-foreground">
+            {secondaryBits}
           </span>
         )}
       </div>
+
+      {signature !== null && (
+        <div className="font-mono font-bold text-2xl sm:text-3xl tracking-tight leading-none text-foreground">
+          {signature}
+        </div>
+      )}
 
       <div className="space-y-1.5 rounded-lg bg-white/[0.02] border border-white/[0.04] p-3">
         {(() => {
