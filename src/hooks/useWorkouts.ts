@@ -429,6 +429,28 @@ export function useDeleteWorkout() {
   });
 }
 
+export interface WorkoutDeleteImpact {
+  totalScores: number;
+  uniqueAthletes: number;
+  otherAthletes: number;
+}
+
+export function useWorkoutDeleteImpact(workoutId: string | null) {
+  return useQuery<WorkoutDeleteImpact>({
+    queryKey: ["workouts", "delete-impact", workoutId],
+    queryFn: async () => {
+      const res = await fetch(`/api/workouts/${workoutId}/delete-impact`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || "Failed to load delete impact");
+      }
+      return res.json();
+    },
+    enabled: !!workoutId,
+    staleTime: 0,
+  });
+}
+
 export function useLogScore() {
   const queryClient = useQueryClient();
 

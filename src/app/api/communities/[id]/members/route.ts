@@ -1,13 +1,14 @@
 // GET /api/communities/[id]/members
-// Lists members of a gym. Visible to any active member; the join code
-// itself is not exposed here (separate /rotate-code endpoint).
+// Lists members of a gym with their personal details (name, email).
+// Restricted to coaches, admins, and super admins — regular members
+// shouldn't see other members' contact info.
 
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { communityMemberships, users } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
-import { canViewGym } from "@/lib/authz/community";
+import { canProgramForGym } from "@/lib/authz/community";
 
 export async function GET(
   _req: Request,
@@ -17,7 +18,7 @@ export async function GET(
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
-  const ok = await canViewGym(user.id, id);
+  const ok = await canProgramForGym(user.id, id);
   if (!ok) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const rows = await db

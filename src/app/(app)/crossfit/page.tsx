@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import Link from "next/link";
+import { toast } from "sonner";
 import { Plus, ClipboardPaste, Wrench, Zap, Trophy, Loader2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -421,8 +422,11 @@ export default function CrossfitPage() {
   const handleDeleteWorkout = async (workoutId: string) => {
     try {
       await deleteWorkout.mutateAsync(workoutId);
+      toast.success("Workout deleted");
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Failed to delete");
+      const message = err instanceof Error ? err.message : "Failed to delete workout";
+      toast.error(message);
+      throw err;
     }
   };
 
