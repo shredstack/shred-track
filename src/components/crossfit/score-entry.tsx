@@ -260,22 +260,6 @@ function emptyPartState(
     }
   }
 
-  // Seed height drafts from the prescribed values when the athlete hasn't
-  // entered anything yet — most often they used what was prescribed. The
-  // gendered columns (when populated) take precedence over the legacy
-  // single column.
-  if (part && !existing) {
-    for (const mov of part.movements) {
-      const seed =
-        mov.prescribedHeightInchesMale ??
-        mov.prescribedHeightInchesFemale ??
-        mov.prescribedHeightInches;
-      if (seed != null) {
-        heightDrafts[mov.id] = String(seed);
-      }
-    }
-  }
-
   return {
     division: existing?.division ?? null,
     timeSeconds: existing?.timeSeconds,
@@ -307,6 +291,33 @@ function distinctMovements(part: WorkoutPartDisplay) {
   return out;
 }
 
+// Compact one-liner of a movement's prescription: reps, duration, height.
+// Used by the read-only block outline so chipper-style WODs surface the
+// :30 next to "Rest" and the 24 in next to "Box step-up" without redirecting
+// the athlete to the score-entry form.
+function outlinePrescription(m: WorkoutMovementDisplay): string {
+  const segments: string[] = [];
+  if (m.prescribedReps) segments.push(m.prescribedReps);
+  const dur =
+    m.prescribedDurationSecondsMale ?? m.prescribedDurationSecondsFemale;
+  if (dur != null) {
+    segments.push(formatSecondsAsClock(dur));
+  }
+  const heightMale = m.prescribedHeightInchesMale;
+  const heightFemale = m.prescribedHeightInchesFemale;
+  const heightLegacy = m.prescribedHeightInches;
+  if (heightMale != null || heightFemale != null) {
+    if (heightMale != null && heightFemale != null && heightMale !== heightFemale) {
+      segments.push(`${heightMale}/${heightFemale} in`);
+    } else {
+      segments.push(`${heightMale ?? heightFemale} in`);
+    }
+  } else if (heightLegacy != null) {
+    segments.push(`${heightLegacy} in`);
+  }
+  return segments.join(" · ");
+}
+
 // Read-only outline of the active part's movements grouped by block titles.
 // Surfaces "Buy-in / Main set / Buy-out" structure for chipper-style
 // benchmarks (Drew, etc.) while the athlete is logging — score inputs
@@ -323,17 +334,19 @@ function PartBlockOutline({ part }: { part: WorkoutPartDisplay }) {
     list.push(m);
     movementsByBlock.set(m.workoutBlockId, list);
   }
+  const renderLine = (m: WorkoutMovementDisplay) => {
+    const details = outlinePrescription(m);
+    return (
+      <li key={m.id} className="text-muted-foreground">
+        · {m.movementName}
+        {details ? ` ${details}` : ""}
+      </li>
+    );
+  };
   return (
     <div className="space-y-2 rounded-lg border border-border/40 bg-muted/20 p-3 text-xs">
       {ungrouped.length > 0 && (
-        <ul className="space-y-0.5">
-          {ungrouped.map((m) => (
-            <li key={m.id} className="text-muted-foreground">
-              · {m.movementName}
-              {m.prescribedReps ? ` ${m.prescribedReps}` : ""}
-            </li>
-          ))}
-        </ul>
+        <ul className="space-y-0.5">{ungrouped.map(renderLine)}</ul>
       )}
       {orderedBlocks.map((b) => {
         const ms = movementsByBlock.get(b.id) ?? [];
@@ -343,14 +356,7 @@ function PartBlockOutline({ part }: { part: WorkoutPartDisplay }) {
             <div className="text-[11px] font-semibold uppercase tracking-wide text-foreground">
               {b.title}
             </div>
-            <ul className="space-y-0.5">
-              {ms.map((m) => (
-                <li key={m.id} className="text-muted-foreground">
-                  · {m.movementName}
-                  {m.prescribedReps ? ` ${m.prescribedReps}` : ""}
-                </li>
-              ))}
-            </ul>
+            <ul className="space-y-0.5">{ms.map(renderLine)}</ul>
           </div>
         );
       })}
@@ -669,6 +675,11 @@ export function ScoreEntry({
             return Number.isFinite(n) && n >= 0 ? n : 0;
           });
         }
+        // Duration / height are only meaningful when the athlete deviated
+        // from the prescription. The scaling card surfaces these inputs
+        // exclusively when the movement is flagged scaled, so we mirror
+        // that gate here — Rx and Rx+ rows never carry an "actual" value.
+        const movWasScaled = includeScalingDetails && scaling.wasRx === false;
         return {
           workoutMovementId: mov.id,
           wasRx: includeScalingDetails ? (scaling.wasRx ?? true) : true,
@@ -679,9 +690,13 @@ export function ScoreEntry({
             ? scaling.substitutionMovementId
             : undefined,
           setEntries: setEntries.length > 0 ? setEntries : undefined,
-          actualDurationSeconds: durSec ?? undefined,
+          actualDurationSeconds: movWasScaled
+            ? (durSec ?? undefined)
+            : undefined,
           actualHeightInches:
-            Number.isFinite(heightInches) && heightInches > 0
+            movWasScaled &&
+            Number.isFinite(heightInches) &&
+            heightInches > 0
               ? heightInches
               : undefined,
           actualRepsPerRound,
@@ -1379,128 +1394,6 @@ export function ScoreEntry({
             );
           })()}
 
-          {/* Per-movement duration / height fields. Surface whenever the
-              prescription includes one of these — they're not "scaling"
-              fields, they're the canonical record of what was held / how
-              high the deficit was. Drafts persist independent of the
-              division pick.
-              Phase 2: data-driven via rx_fields on the canonical movement
-              when available. Falls back to the legacy metric_type +
-              prescribed_height inference when rx_fields is empty. */}
-          {(() => {
-            const fields = activePart.movements
-              .map((mov) => {
-                const libEntry = movementLibrary.find(
-                  (m) => m.id === mov.movementId
-                );
-                const rxFields = libEntry?.rxFields ?? [];
-                const useRxFields = rxFields.length > 0;
-                const heightRx =
-                  gender === "female"
-                    ? mov.prescribedHeightInchesFemale ??
-                      mov.prescribedHeightInchesMale ??
-                      mov.prescribedHeightInches
-                    : mov.prescribedHeightInchesMale ??
-                      mov.prescribedHeightInchesFemale ??
-                      mov.prescribedHeightInches;
-                return {
-                  mov,
-                  wantsDuration: useRxFields
-                    ? rxFields.includes("duration")
-                    : mov.metricType === "duration",
-                  wantsHeight: useRxFields
-                    ? rxFields.includes("height")
-                    : heightRx != null,
-                  heightRx,
-                };
-              })
-              .filter((f) => f.wantsDuration || f.wantsHeight);
-            if (fields.length === 0) return null;
-            return (
-              <div className="space-y-2">
-                <Label className="text-sm">Per-movement details</Label>
-                <div className="space-y-2">
-                  {fields.map(({ mov, wantsDuration, wantsHeight, heightRx }) => {
-                    const durDraft = state.durationDrafts[mov.id] ?? "";
-                    const heightDraft = state.heightDrafts[mov.id] ?? "";
-                    const rxSec =
-                      mov.prescribedDurationSecondsMale ??
-                      mov.prescribedDurationSecondsFemale;
-                    return (
-                      <div
-                        key={mov.id}
-                        className="rounded-lg border border-border/40 bg-muted/20 p-2 space-y-1.5"
-                      >
-                        <div className="text-xs font-medium">
-                          {mov.movementName}
-                        </div>
-                        {wantsDuration && (
-                          <div className="space-y-0.5">
-                            <Label className="text-xs text-muted-foreground">
-                              Duration held (sec)
-                            </Label>
-                            <Input
-                              value={durDraft}
-                              onChange={(e) =>
-                                setPartStates((prev) => ({
-                                  ...prev,
-                                  [activePart.id]: {
-                                    ...prev[activePart.id],
-                                    durationDrafts: {
-                                      ...prev[activePart.id].durationDrafts,
-                                      [mov.id]: e.target.value,
-                                    },
-                                  },
-                                }))
-                              }
-                              placeholder={
-                                rxSec != null
-                                  ? `Rx: ${formatSecondsAsClock(rxSec)}`
-                                  : "Time held (e.g. :22)"
-                              }
-                              className="h-7 text-xs"
-                            />
-                          </div>
-                        )}
-                        {wantsHeight && (
-                          <div className="space-y-0.5">
-                            <Label className="text-xs text-muted-foreground">
-                              Actual height (in)
-                            </Label>
-                            <Input
-                              type="number"
-                              min={0}
-                              step="0.5"
-                              value={heightDraft}
-                              onChange={(e) =>
-                                setPartStates((prev) => ({
-                                  ...prev,
-                                  [activePart.id]: {
-                                    ...prev[activePart.id],
-                                    heightDrafts: {
-                                      ...prev[activePart.id].heightDrafts,
-                                      [mov.id]: e.target.value,
-                                    },
-                                  },
-                                }))
-                              }
-                              placeholder={
-                                heightRx != null
-                                  ? `Rx: ${heightRx} in`
-                                  : "Height used"
-                              }
-                              className="h-7 text-xs"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })()}
-
           <Separator />
 
           {/* Per-movement scaling — shown automatically when division is Scaled */}
@@ -1513,9 +1406,51 @@ export function ScoreEntry({
                     const selectedMod = scaling.modification
                       ? MODIFICATION_BY_VALUE.get(scaling.modification)
                       : undefined;
-                    const occurrenceCount = activePart.movements.filter(
+                    const occurrences = activePart.movements.filter(
                       (m) => m.movementId === mov.movementId
-                    ).length;
+                    );
+                    const occurrenceCount = occurrences.length;
+
+                    // Movement settings (rx_fields) drive whether to expose
+                    // a Duration / Height input on this scaling card. Falls
+                    // back to legacy heuristics (metric_type + presence of
+                    // a prescribed height) when rx_fields is empty.
+                    const libEntry = movementLibrary.find(
+                      (m) => m.id === mov.movementId
+                    );
+                    const rxFields = libEntry?.rxFields ?? [];
+                    const useRxFields = rxFields.length > 0;
+                    const heightRx =
+                      gender === "female"
+                        ? mov.prescribedHeightInchesFemale ??
+                          mov.prescribedHeightInchesMale ??
+                          mov.prescribedHeightInches
+                        : mov.prescribedHeightInchesMale ??
+                          mov.prescribedHeightInchesFemale ??
+                          mov.prescribedHeightInches;
+                    const wantsDuration = useRxFields
+                      ? rxFields.includes("duration")
+                      : mov.metricType === "duration";
+                    const wantsHeight = useRxFields
+                      ? rxFields.includes("height")
+                      : heightRx != null;
+                    const rxSec =
+                      mov.prescribedDurationSecondsMale ??
+                      mov.prescribedDurationSecondsFemale;
+                    // Drafts are stored per-occurrence (workout_movement_id);
+                    // the panel itself is one card per movement_id. Read the
+                    // first occurrence's draft for the input value, and on
+                    // change broadcast to every occurrence so save emits a
+                    // value for each row that the API expects.
+                    const firstOccId = occurrences[0]?.id;
+                    const durDraft =
+                      firstOccId != null
+                        ? state.durationDrafts[firstOccId] ?? ""
+                        : "";
+                    const heightDraft =
+                      firstOccId != null
+                        ? state.heightDrafts[firstOccId] ?? ""
+                        : "";
 
                     return (
                       <div
@@ -1659,6 +1594,82 @@ export function ScoreEntry({
                                     (mov.prescribedReps
                                       ? `Rx: ${mov.prescribedReps}`
                                       : "Reps completed")
+                                  }
+                                  className="h-7 text-xs"
+                                />
+                              </div>
+                            )}
+
+                            {/* Duration / height inputs — only the movements
+                                whose prescription includes one of these (per
+                                rx_fields) surface here, and only when the
+                                athlete is logging this movement as scaled. */}
+                            {wantsDuration && (
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">
+                                  Actual duration
+                                </Label>
+                                <Input
+                                  value={durDraft}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    setPartStates((prev) => {
+                                      const drafts = {
+                                        ...prev[activePart.id].durationDrafts,
+                                      };
+                                      for (const occ of occurrences) {
+                                        drafts[occ.id] = value;
+                                      }
+                                      return {
+                                        ...prev,
+                                        [activePart.id]: {
+                                          ...prev[activePart.id],
+                                          durationDrafts: drafts,
+                                        },
+                                      };
+                                    });
+                                  }}
+                                  placeholder={
+                                    rxSec != null
+                                      ? `Rx: ${formatSecondsAsClock(rxSec)}`
+                                      : "Time held (e.g. :22)"
+                                  }
+                                  className="h-7 text-xs"
+                                />
+                              </div>
+                            )}
+                            {wantsHeight && (
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">
+                                  Actual height (in)
+                                </Label>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  step="0.5"
+                                  value={heightDraft}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    setPartStates((prev) => {
+                                      const drafts = {
+                                        ...prev[activePart.id].heightDrafts,
+                                      };
+                                      for (const occ of occurrences) {
+                                        drafts[occ.id] = value;
+                                      }
+                                      return {
+                                        ...prev,
+                                        [activePart.id]: {
+                                          ...prev[activePart.id],
+                                          heightDrafts: drafts,
+                                        },
+                                      };
+                                    });
+                                  }}
+                                  placeholder={
+                                    heightRx != null
+                                      ? `Rx: ${heightRx} in`
+                                      : "Height used"
                                   }
                                   className="h-7 text-xs"
                                 />
