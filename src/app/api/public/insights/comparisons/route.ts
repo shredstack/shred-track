@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   const divisionResult = divisionSchema.safeParse(params.get("division"));
   if (!divisionResult.success) {
     return NextResponse.json(
-      { error: "Invalid division. Must be one of: men_open, women_open, men_pro, women_pro" },
+      { error: `Invalid division. Must be one of: ${divisionSchema.options.join(", ")}` },
       { status: 400 },
     );
   }

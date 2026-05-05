@@ -70,6 +70,45 @@ STATION_ORDER = [
 
 RUN_LABELS = [f"Run {i}" for i in range(1, 9)]
 
+# Divisions that use the standard 8-station + 8-run format. Must stay in sync
+# with STANDARD_FORMAT_DIVISION_KEYS in src/lib/hyrox-data.ts. Excludes
+# Youngstars 8-9 / 10-11 / 12-13 (shorter races) which need a separate model
+# schema. Divisions without ≥100 results in the DB are auto-skipped at
+# training time, so listing all 8-run divisions here is safe.
+STANDARD_FORMAT_DIVISIONS = [
+    # Singles
+    "women_open", "women_pro", "men_open", "men_pro",
+    # Elite 15
+    "elite_15_women", "elite_15_men",
+    # Doubles
+    "doubles_women_open", "doubles_men_open", "doubles_mixed_open",
+    "doubles_women_pro", "doubles_men_pro", "doubles_mixed_pro",
+    # Elite 15 Doubles
+    "elite_15_doubles_women", "elite_15_doubles_men", "elite_15_doubles_mixed",
+    # Relay
+    "relay_women", "relay_men", "relay_mixed",
+    # Corporate Relay
+    "corporate_relay_women", "corporate_relay_men", "corporate_relay_mixed",
+    # Company Challenge
+    "company_challenge_women", "company_challenge_men", "company_challenge_mixed",
+    # Adaptive
+    "adaptive_ll_minor_women", "adaptive_ll_minor_men",
+    "adaptive_ll_major_women", "adaptive_ll_major_men",
+    "adaptive_ul_minor_women", "adaptive_ul_minor_men",
+    "adaptive_ul_major_women", "adaptive_ul_major_men",
+    "adaptive_short_stature_women", "adaptive_short_stature_men",
+    "adaptive_visual_women", "adaptive_visual_men",
+    "adaptive_deaf_women", "adaptive_deaf_men",
+    "adaptive_neuro_minor_women", "adaptive_neuro_minor_men",
+    "adaptive_neuro_moderate_women", "adaptive_neuro_moderate_men",
+    "adaptive_neuro_major_women", "adaptive_neuro_major_men",
+    "adaptive_swhf_women", "adaptive_swhf_men",
+    "adaptive_swohf_women", "adaptive_swohf_men",
+    "adaptive_swoc_women", "adaptive_swoc_men",
+    # Youngstars 14-15 (shorter Youngstars formats are excluded)
+    "youngstars_14_15_women", "youngstars_14_15_men",
+]
+
 # Feature columns: 8 station times + 8 run times + 5 ratios
 FEATURE_NAMES = (
     [f"station_{s.lower().replace(' ', '_')}" for s in STATION_ORDER]
@@ -90,6 +129,7 @@ def load_training_data(db_url: str, division: str) -> pd.DataFrame:
                 """
                 SELECT
                     r.id AS result_id,
+                    r.event_id,
                     r.finish_time_seconds,
                     r.percentile,
                     s.segment_label,
@@ -116,6 +156,7 @@ def load_training_data(db_url: str, division: str) -> pd.DataFrame:
         rid = row["result_id"]
         if rid not in records:
             records[rid] = {
+                "event_id": str(row["event_id"]),
                 "finish_time_seconds": row["finish_time_seconds"],
                 "percentile": float(row["percentile"]),
             }
@@ -260,6 +301,7 @@ def save_model_to_db(
     metrics: dict,
     feature_importances: list | None = None,
     training_n: int = 0,
+    training_event_ids: list[str] | None = None,
 ) -> str:
     """Save model artifact as JSON and record in hyrox_predictor_models."""
     model_id = str(uuid.uuid4())
@@ -302,14 +344,15 @@ def save_model_to_db(
                 """
                 INSERT INTO hyrox_predictor_models
                     (id, division_key, model_type, training_n, metrics,
-                     feature_importances, artifact_url, is_active)
+                     feature_importances, training_event_ids, artifact_url, is_active)
                 VALUES
-                    (%s, %s, %s, %s, %s, %s, %s, true)
+                    (%s, %s, %s, %s, %s, %s, %s, %s, true)
                 """,
                 (
                     model_id, division, model_type, training_n,
                     json.dumps(metrics),
                     json.dumps(feature_importances or []),
+                    json.dumps(training_event_ids) if training_event_ids else None,
                     artifact_url,
                 ),
             )
@@ -320,9 +363,10 @@ def save_model_to_db(
 
 
 @click.command()
-@click.option("--division", type=click.Choice(["men_open", "women_open", "men_pro", "women_pro"]),
+@click.option("--division", type=click.Choice(STANDARD_FORMAT_DIVISIONS),
               help="Single division to train")
-@click.option("--all-divisions", is_flag=True, help="Train all four divisions")
+@click.option("--all-divisions", is_flag=True,
+              help="Train every division in STANDARD_FORMAT_DIVISIONS (insufficient-data divisions skip with a warning)")
 @click.option("--dry-run", is_flag=True, help="Train but don't save to DB")
 @click.option("--env", "env_file", default="local",
               type=click.Choice(["local", "prod"]),
@@ -368,7 +412,7 @@ def main(division: str | None, all_divisions: bool, dry_run: bool, env_file: str
         sys.exit(1)
 
     divisions = (
-        ["men_open", "women_open", "men_pro", "women_pro"]
+        list(STANDARD_FORMAT_DIVISIONS)
         if all_divisions
         else [division]
     )
@@ -384,6 +428,10 @@ def main(division: str | None, all_divisions: bool, dry_run: bool, env_file: str
             continue
 
         training_n = len(df)
+        # Snapshot the distinct races in the (post-filter) training set so the
+        # insights UI can show users exactly which races went into the model.
+        training_event_ids = sorted(df["event_id"].dropna().unique().tolist())
+        logger.info(f"  Training set spans {len(training_event_ids)} races")
 
         # 1. GBM finish time (median)
         logger.info("Training GBM finish time model (median)...")
@@ -410,13 +458,17 @@ def main(division: str | None, all_divisions: bool, dry_run: bool, env_file: str
             logger.info(f"  Top features: {[f['feature'] for f in importances[:5]]}")
         else:
             save_model_to_db(db_url, div, "gbm_finish_time", gbm_model, gbm_metrics,
-                           training_n=training_n)
+                           training_n=training_n,
+                           training_event_ids=training_event_ids)
             save_model_to_db(db_url, div, "gbm_finish_time_q10", q10_model, q10_metrics,
-                           training_n=training_n)
+                           training_n=training_n,
+                           training_event_ids=training_event_ids)
             save_model_to_db(db_url, div, "gbm_finish_time_q90", q90_model, q90_metrics,
-                           training_n=training_n)
+                           training_n=training_n,
+                           training_event_ids=training_event_ids)
             save_model_to_db(db_url, div, "rf_percentile", None, rf_metrics,
-                           feature_importances=importances, training_n=training_n)
+                           feature_importances=importances, training_n=training_n,
+                           training_event_ids=training_event_ids)
 
     logger.info("\nDone!")
 

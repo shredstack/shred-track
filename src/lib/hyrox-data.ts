@@ -981,6 +981,18 @@ export const SINGLES_DIVISION_KEYS: SinglesDivisionKey[] = [
 /** All division keys */
 export const ALL_DIVISION_KEYS = Object.keys(DIVISIONS) as DivisionKey[];
 
+/**
+ * Divisions that use the standard 8-station + 8-run race format. Used by
+ * Field Insights and the predictor — anything that assumes a 16-segment race
+ * structure should derive its allowlist from this constant.
+ *
+ * Excludes Youngstars 8-9 (3 runs), 10-11 (3 runs), and 12-13 (2 runs), which
+ * need a separate model schema to support.
+ */
+export const STANDARD_FORMAT_DIVISION_KEYS = ALL_DIVISION_KEYS.filter(
+  (k) => DIVISIONS[k].runSegments === 8,
+);
+
 /** Backwards compat: same as SINGLES_DIVISION_KEYS */
 export const DIVISION_KEYS = SINGLES_DIVISION_KEYS;
 

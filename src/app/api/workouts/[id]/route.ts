@@ -842,7 +842,35 @@ export async function DELETE(
     );
   }
 
-  await db.delete(workouts).where(eq(workouts.id, id));
+  try {
+    // score_movement_details.workout_movement_id has no ON DELETE clause
+    // (defaults to NO ACTION). Cascade order from a single DELETE on workouts
+    // can leave that constraint violated, so we explicitly drop the dependent
+    // rows first inside a transaction.
+    await db.transaction(async (tx) => {
+      const wmIds = await tx
+        .select({ id: workoutMovements.id })
+        .from(workoutMovements)
+        .where(eq(workoutMovements.workoutId, id));
 
-  return NextResponse.json({ deleted: true });
+      if (wmIds.length > 0) {
+        await tx
+          .delete(scoreMovementDetails)
+          .where(
+            inArray(
+              scoreMovementDetails.workoutMovementId,
+              wmIds.map((r) => r.id)
+            )
+          );
+      }
+
+      await tx.delete(workouts).where(eq(workouts.id, id));
+    });
+
+    return NextResponse.json({ deleted: true });
+  } catch (err) {
+    console.error("DELETE /api/workouts/[id] failed", { workoutId: id, err });
+    const message = err instanceof Error ? err.message : "Failed to delete workout";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

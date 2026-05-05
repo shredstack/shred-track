@@ -340,7 +340,7 @@ export const scoreMovementDetails = pgTable("score_movement_details", {
     name: "smd_workout_movement_id_fk",
     columns: [table.workoutMovementId],
     foreignColumns: [workoutMovements.id],
-  }),
+  }).onDelete("cascade"),
 ]);
 
 // ============================================
@@ -880,6 +880,7 @@ export const hyroxPredictorModels = pgTable(
     trainingN: integer("training_n").notNull(),
     metrics: jsonb("metrics").notNull().default({}),
     featureImportances: jsonb("feature_importances").notNull().default([]),
+    trainingEventIds: jsonb("training_event_ids").$type<string[] | null>(),
     artifactUrl: text("artifact_url").notNull(),
     isActive: boolean("is_active").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
