@@ -88,6 +88,94 @@ function formatMovementMetric(m: WorkoutBuilderMovement): string | null {
   return null;
 }
 
+// Movement key for a builder movement's block membership. Newly-added blocks
+// reference by `blockTempRef`; round-tripped blocks (when editing) reference
+// by `blockId`. The block itself is identified by its tempId — we look up
+// blocks by tempId and (for round-tripped blocks) also by id.
+function builderMovementBlockKey(
+  m: WorkoutBuilderMovement
+): string | null {
+  return m.blockTempRef ?? m.blockId ?? null;
+}
+
+function BuilderMovementBlocks({ part }: { part: WorkoutBuilderPart }) {
+  const blocks = part.blocks ?? [];
+  const orderedBlocks = [...blocks].sort(
+    (a, b) => a.orderIndex - b.orderIndex
+  );
+
+  // A movement matches a block when its blockTempRef === block.tempId
+  // (newly-added) or its blockId === block.id (round-tripped).
+  const movementsByBlockTempId = new Map<string, WorkoutBuilderMovement[]>();
+  const ungrouped: WorkoutBuilderMovement[] = [];
+  for (const m of part.movements) {
+    const key = builderMovementBlockKey(m);
+    if (!key) {
+      ungrouped.push(m);
+      continue;
+    }
+    const block = blocks.find((b) => b.tempId === key || b.id === key);
+    if (!block) {
+      ungrouped.push(m);
+      continue;
+    }
+    const list = movementsByBlockTempId.get(block.tempId) ?? [];
+    list.push(m);
+    movementsByBlockTempId.set(block.tempId, list);
+  }
+
+  return (
+    <div className="space-y-2">
+      {ungrouped.length > 0 && (
+        <BuilderMovementList movements={ungrouped} />
+      )}
+      {orderedBlocks.map((b) => {
+        const blockMovements = movementsByBlockTempId.get(b.tempId) ?? [];
+        if (blockMovements.length === 0) return null;
+        return (
+          <div key={b.tempId} className="space-y-1">
+            <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {b.title}
+            </h4>
+            <BuilderMovementList movements={blockMovements} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function BuilderMovementList({
+  movements,
+}: {
+  movements: WorkoutBuilderMovement[];
+}) {
+  return (
+    <div className="space-y-1">
+      {movements.map((m, i) => {
+        const metric = formatMovementMetric(m);
+        return (
+          <div
+            key={m.tempId}
+            className="flex items-center gap-2 text-sm"
+          >
+            <span className="text-muted-foreground">{i + 1}.</span>
+            <span className="font-medium">{m.movementName}</span>
+            {m.prescribedReps && (
+              <span className="text-muted-foreground">
+                — {m.prescribedReps}
+              </span>
+            )}
+            {metric && (
+              <span className="text-xs text-muted-foreground">({metric})</span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function BenchmarkForm({
   onSave,
   onCancel,
@@ -303,28 +391,7 @@ export function BenchmarkForm({
 
                 <Separator />
 
-                {part.movements.map((m, i) => {
-                  const metric = formatMovementMetric(m);
-                  return (
-                    <div
-                      key={m.tempId}
-                      className="flex items-center gap-2 text-sm"
-                    >
-                      <span className="text-muted-foreground">{i + 1}.</span>
-                      <span className="font-medium">{m.movementName}</span>
-                      {m.prescribedReps && (
-                        <span className="text-muted-foreground">
-                          — {m.prescribedReps}
-                        </span>
-                      )}
-                      {metric && (
-                        <span className="text-xs text-muted-foreground">
-                          ({metric})
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
+                <BuilderMovementBlocks part={part} />
               </div>
             ))}
           </div>

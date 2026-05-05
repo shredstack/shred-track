@@ -40,6 +40,8 @@ import type {
   BenchmarkCategoryName,
   BenchmarkAttempt,
   WorkoutType,
+  BenchmarkMovement,
+  BenchmarkWorkoutBlock,
 } from "@/types/crossfit";
 
 // Pills mix two filter axes:
@@ -267,6 +269,81 @@ function BenchmarkRow({
 // Detail dialog (browse + history + log new attempt)
 // ============================================
 
+// Renders a part's movements grouped by their optional block titles. When a
+// part has no blocks (or every movement is ungrouped), this falls back to
+// the flat numbered list that the dialog used pre-blocks.
+function BenchmarkPartMovementList({
+  blocks,
+  movements,
+}: {
+  blocks: BenchmarkWorkoutBlock[];
+  movements: BenchmarkMovement[];
+}) {
+  const ungrouped = movements.filter((m) => !m.blockId);
+  const movementsByBlock = new Map<string, BenchmarkMovement[]>();
+  for (const m of movements) {
+    if (!m.blockId) continue;
+    const list = movementsByBlock.get(m.blockId) ?? [];
+    list.push(m);
+    movementsByBlock.set(m.blockId, list);
+  }
+  const orderedBlocks = [...blocks].sort((a, b) => a.orderIndex - b.orderIndex);
+
+  return (
+    <div className="space-y-2">
+      {ungrouped.length > 0 && (
+        <BenchmarkMovementList movements={ungrouped} />
+      )}
+      {orderedBlocks.map((b) => {
+        const blockMovements = movementsByBlock.get(b.id) ?? [];
+        if (blockMovements.length === 0) return null;
+        return (
+          <div key={b.id} className="space-y-1">
+            <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {b.title}
+            </h4>
+            <BenchmarkMovementList movements={blockMovements} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function BenchmarkMovementList({
+  movements,
+}: {
+  movements: BenchmarkMovement[];
+}) {
+  return (
+    <div className="space-y-1">
+      {movements.map((m, i) => (
+        <div key={m.id} className="flex items-baseline gap-2 text-sm">
+          <span className="w-4 text-right text-xs text-muted-foreground">
+            {i + 1}.
+          </span>
+          <span className="font-medium">{m.movementName}</span>
+          {m.prescribedReps && (
+            <span className="text-muted-foreground">{m.prescribedReps}</span>
+          )}
+          {(m.prescribedWeightMale || m.prescribedWeightFemale) && (
+            <span className="text-xs text-muted-foreground">
+              ({m.prescribedWeightMale}
+              {m.prescribedWeightFemale ? `/${m.prescribedWeightFemale}` : ""}{" "}
+              lb)
+            </span>
+          )}
+          {m.rxStandard && (
+            <span className="text-xs italic text-muted-foreground">
+              {m.rxStandard}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function BenchmarkDetailDialog({
   benchmark,
   onClose,
@@ -316,12 +393,14 @@ function BenchmarkDetailDialog({
                   {BENCHMARK_CATEGORY_SHORT_LABELS[benchmark.category]}
                 </Badge>
               )}
-              <Badge
-                variant="outline"
-                className={WORKOUT_TYPE_COLORS[benchmark.workoutType]}
-              >
-                {WORKOUT_TYPE_LABELS[benchmark.workoutType]}
-              </Badge>
+              {benchmark.parts.length === 1 && (
+                <Badge
+                  variant="outline"
+                  className={WORKOUT_TYPE_COLORS[benchmark.workoutType]}
+                >
+                  {WORKOUT_TYPE_LABELS[benchmark.workoutType]}
+                </Badge>
+              )}
             </div>
           </div>
         </DialogHeader>
@@ -333,51 +412,64 @@ function BenchmarkDetailDialog({
             </p>
           )}
 
-          {/* Prescription */}
-          <div className="space-y-2">
-            {benchmark.repScheme && (
-              <p className="text-sm font-medium">{benchmark.repScheme}</p>
-            )}
-            {benchmark.timeCapSeconds != null && (
-              <p className="text-xs text-muted-foreground">
-                Time cap: {Math.floor(benchmark.timeCapSeconds / 60)} min
-              </p>
-            )}
-            {benchmark.amrapDurationSeconds != null && (
-              <p className="text-xs text-muted-foreground">
-                Duration: {Math.floor(benchmark.amrapDurationSeconds / 60)} min
-              </p>
-            )}
+          {/* Prescription — iterate parts so multi-part benchmarks (and
+              chipper-style benchmarks with blocks like Drew) render with
+              their proper structure. Single-part benchmarks collapse to
+              one section. */}
+          <div className="space-y-3">
+            {benchmark.parts.map((part, idx) => {
+              const showPartHeader = benchmark.parts.length > 1;
+              const partLabel =
+                part.label || `Part ${String.fromCharCode(65 + idx)}`;
+              return (
+                <div
+                  key={part.id}
+                  className={
+                    showPartHeader
+                      ? "rounded-md border border-border/40 bg-muted/20 p-3 space-y-2"
+                      : "space-y-2"
+                  }
+                >
+                  {showPartHeader && (
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        variant="outline"
+                        className={WORKOUT_TYPE_COLORS[part.workoutType]}
+                      >
+                        {partLabel}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {WORKOUT_TYPE_LABELS[part.workoutType]}
+                      </span>
+                    </div>
+                  )}
 
-            <div className="space-y-1">
-              {benchmark.movements.map((m, i) => (
-                <div key={m.id} className="flex items-baseline gap-2 text-sm">
-                  <span className="w-4 text-right text-xs text-muted-foreground">
-                    {i + 1}.
-                  </span>
-                  <span className="font-medium">{m.movementName}</span>
-                  {m.prescribedReps && (
-                    <span className="text-muted-foreground">
-                      {m.prescribedReps}
-                    </span>
+                  {part.repScheme && (
+                    <p className="text-sm font-medium">{part.repScheme}</p>
                   )}
-                  {(m.prescribedWeightMale || m.prescribedWeightFemale) && (
-                    <span className="text-xs text-muted-foreground">
-                      ({m.prescribedWeightMale}
-                      {m.prescribedWeightFemale
-                        ? `/${m.prescribedWeightFemale}`
-                        : ""}{" "}
-                      lb)
-                    </span>
+                  {part.rounds && (
+                    <p className="text-xs text-muted-foreground">
+                      {part.rounds} rounds
+                    </p>
                   )}
-                  {m.rxStandard && (
-                    <span className="text-xs italic text-muted-foreground">
-                      {m.rxStandard}
-                    </span>
+                  {part.timeCapSeconds != null && (
+                    <p className="text-xs text-muted-foreground">
+                      Time cap: {Math.floor(part.timeCapSeconds / 60)} min
+                    </p>
                   )}
+                  {part.amrapDurationSeconds != null && (
+                    <p className="text-xs text-muted-foreground">
+                      Duration: {Math.floor(part.amrapDurationSeconds / 60)} min
+                    </p>
+                  )}
+
+                  <BenchmarkPartMovementList
+                    blocks={part.blocks}
+                    movements={part.movements}
+                  />
                 </div>
-              ))}
-            </div>
+              );
+            })}
           </div>
 
           <Separator />

@@ -181,6 +181,46 @@ function parseRepsPerSet(repScheme: string): number | undefined {
   return parseInt(parts[parts.length - 1], 10);
 }
 
+function MovementRow({ mov }: { mov: WorkoutMovementDisplay }) {
+  const metricText = formatMovementMetric(mov);
+  const prefix =
+    mov.equipmentCount && mov.equipmentCount > 1
+      ? `${mov.equipmentCount} × `
+      : "";
+  return (
+    <div className="flex items-center gap-2.5 text-sm">
+      <div className="flex h-5 w-5 items-center justify-center rounded bg-primary/10">
+        <Dumbbell className="size-3 text-primary/70" />
+      </div>
+      <span className="flex-1">
+        {mov.isMaxReps ? (
+          <span className="mr-1 inline-flex items-center rounded bg-amber-500/15 px-1 py-px text-[10px] font-bold text-amber-300">
+            MAX
+          </span>
+        ) : (
+          mov.prescribedReps && (
+            <span className="font-mono font-bold text-foreground">
+              {mov.prescribedReps}{" "}
+            </span>
+          )
+        )}
+        <span className="text-foreground/85">{mov.movementName}</span>
+        {metricText && (
+          <span className="ml-1.5 text-xs text-muted-foreground font-mono">
+            ({prefix}
+            {metricText})
+          </span>
+        )}
+        {!metricText && prefix && (
+          <span className="ml-1.5 text-xs text-muted-foreground font-mono">
+            ({mov.equipmentCount} DBs)
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
+
 function PartSection({
   part,
   index,
@@ -301,45 +341,54 @@ function PartSection({
       </div>
 
       <div className="space-y-1.5 rounded-lg bg-white/[0.02] border border-white/[0.04] p-3">
-        {part.movements.map((mov) => {
-          const metricText = formatMovementMetric(mov);
-          const prefix =
-            mov.equipmentCount && mov.equipmentCount > 1
-              ? `${mov.equipmentCount} × `
-              : "";
-          return (
-            <div key={mov.id} className="flex items-center gap-2.5 text-sm">
-              <div className="flex h-5 w-5 items-center justify-center rounded bg-primary/10">
-                <Dumbbell className="size-3 text-primary/70" />
-              </div>
-              <span className="flex-1">
-                {mov.isMaxReps ? (
-                  <span className="mr-1 inline-flex items-center rounded bg-amber-500/15 px-1 py-px text-[10px] font-bold text-amber-300">
-                    MAX
-                  </span>
-                ) : (
-                  mov.prescribedReps && (
-                    <span className="font-mono font-bold text-foreground">
-                      {mov.prescribedReps}{" "}
-                    </span>
-                  )
-                )}
-                <span className="text-foreground/85">{mov.movementName}</span>
-                {metricText && (
-                  <span className="ml-1.5 text-xs text-muted-foreground font-mono">
-                    ({prefix}
-                    {metricText})
-                  </span>
-                )}
-                {!metricText && prefix && (
-                  <span className="ml-1.5 text-xs text-muted-foreground font-mono">
-                    ({mov.equipmentCount} DBs)
-                  </span>
-                )}
-              </span>
-            </div>
+        {(() => {
+          const ungrouped = part.movements.filter((m) => !m.workoutBlockId);
+          const movementsByBlock = new Map<string, WorkoutMovementDisplay[]>();
+          for (const m of part.movements) {
+            if (!m.workoutBlockId) continue;
+            const list = movementsByBlock.get(m.workoutBlockId) ?? [];
+            list.push(m);
+            movementsByBlock.set(m.workoutBlockId, list);
+          }
+          const orderedBlocks = [...part.blocks].sort(
+            (a, b) => a.orderIndex - b.orderIndex
           );
-        })}
+
+          return (
+            <>
+              {ungrouped.length > 0 && (
+                <div className="space-y-1.5">
+                  {ungrouped.map((mov) => (
+                    <MovementRow key={mov.id} mov={mov} />
+                  ))}
+                </div>
+              )}
+              {orderedBlocks.map((b, blockIdx) => {
+                const blockMovements = movementsByBlock.get(b.id) ?? [];
+                if (blockMovements.length === 0) return null;
+                return (
+                  <div
+                    key={b.id}
+                    className={
+                      blockIdx === 0 && ungrouped.length === 0
+                        ? "space-y-1"
+                        : "space-y-1 pt-1"
+                    }
+                  >
+                    <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      {b.title}
+                    </h4>
+                    <div className="space-y-1.5">
+                      {blockMovements.map((mov) => (
+                        <MovementRow key={mov.id} mov={mov} />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          );
+        })()}
       </div>
 
       {part.score && <ScoreRow part={part} />}
