@@ -19,6 +19,9 @@ import {
   ChevronRight,
   Sparkles,
   Trash2,
+  Building,
+  ShieldCheck,
+  Star,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -45,6 +48,8 @@ import {
   type FullHyroxProfile,
   type StationAssessment,
 } from "@/hooks/useProfile";
+import { useGymContext } from "@/hooks/useGymContext";
+import { JoinGymDialog } from "@/components/shared/join-gym-dialog";
 import {
   DIVISIONS,
   STATION_ORDER,
@@ -906,6 +911,99 @@ function HyroxSection() {
 }
 
 // ---------------------------------------------------------------------------
+// Gyms Section — optional. Users can use ShredTrack without belonging to
+// any gym. Entering a gym join code here connects them to a coach who
+// programs workouts inside the app.
+// ---------------------------------------------------------------------------
+
+function GymsSection() {
+  const { data: ctx, isLoading } = useGymContext();
+  const [joinOpen, setJoinOpen] = useState(false);
+  const memberships = ctx?.memberships ?? [];
+  const activeOnly = memberships.filter((m) => m.isActive);
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+          Gyms
+        </CardTitle>
+        <Button variant="ghost" size="sm" onClick={() => setJoinOpen(true)}>
+          <Building className="mr-1 h-3.5 w-3.5" />
+          Join with code
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-[11px] text-muted-foreground leading-relaxed">
+          Joining a gym is optional. If your coach programs workouts in
+          ShredTrack, enter the join code they gave you — otherwise just
+          keep logging your own workouts and ignore this section.
+        </p>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center py-4">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          </div>
+        ) : activeOnly.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-white/[0.08] bg-white/[0.02] py-4 text-center text-xs text-muted-foreground">
+            You&apos;re not in any gyms.
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {activeOnly.map((m) => (
+              <div
+                key={m.communityId}
+                className="flex items-center justify-between rounded-lg bg-muted/30 px-3 py-2"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">
+                    {m.communityName}
+                  </p>
+                  {m.joinCode && (
+                    <p className="truncate font-mono text-[10px] text-muted-foreground">
+                      Code: {m.joinCode}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  {m.isAdmin && (
+                    <Badge variant="secondary" className="gap-1 text-[10px]">
+                      <ShieldCheck className="h-3 w-3" />
+                      Admin
+                    </Badge>
+                  )}
+                  {m.isCoach && (
+                    <Badge variant="secondary" className="gap-1 text-[10px]">
+                      <Star className="h-3 w-3" />
+                      Coach
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {activeOnly.some((m) => m.isAdmin || m.isCoach) && (
+          <Link
+            href="/gym"
+            className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/[0.05] px-3 py-2.5 text-sm font-medium text-primary hover:bg-primary/[0.1]"
+          >
+            <span className="flex items-center gap-2">
+              <Building className="h-4 w-4" />
+              Manage your gym
+            </span>
+            <ChevronRight className="h-4 w-4" />
+          </Link>
+        )}
+      </CardContent>
+
+      <JoinGymDialog open={joinOpen} onOpenChange={setJoinOpen} />
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Profile Page
 // ---------------------------------------------------------------------------
 
@@ -966,6 +1064,10 @@ export default function ProfilePage() {
           <HyroxSection />
         </TabsContent>
       </Tabs>
+
+      {/* Gyms — optional. Lets the user enter a coach's join code without
+          ever forcing them to belong to a gym. */}
+      <GymsSection />
 
       {/* Notes processing privacy disclaimer (VIP only) */}
       {user?.isVip && (

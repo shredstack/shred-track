@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   Card,
   CardHeader,
@@ -35,11 +36,12 @@ import { SetWeightBreakdown } from "@/components/crossfit/set-weight-breakdown";
 import { AmrapScoreBreakdown } from "@/components/crossfit/amrap-score-breakdown";
 import { formatSecondsAsClock } from "@/lib/crossfit/duration-parser";
 import { formatMovementPrescription } from "@/lib/crossfit/prescription";
+import { DeleteWorkoutDialog } from "@/components/crossfit/delete-workout-dialog";
 
 interface WorkoutCardProps {
   workout: WorkoutDisplay;
   onLogScore?: (workoutId: string) => void;
-  onDelete?: (workoutId: string) => void;
+  onDelete?: (workoutId: string) => Promise<void> | void;
   onEdit?: (workoutId: string) => void;
   onViewLeaderboard?: (workoutId: string) => void;
 }
@@ -407,6 +409,20 @@ export function WorkoutCard({
   const hasAnyScore = parts.some((p) => p.score);
   const multiPart = parts.length > 1;
 
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleConfirmDelete = async () => {
+    if (!onDelete) return;
+    setIsDeleting(true);
+    try {
+      await onDelete(workout.id);
+      setConfirmOpen(false);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <Card className="gradient-border overflow-visible">
       <CardHeader>
@@ -415,6 +431,11 @@ export function WorkoutCard({
             <CardTitle className="text-base font-bold tracking-tight">
               {workout.title || "Workout"}
             </CardTitle>
+            {workout.communityId && workout.createdByName && (
+              <p className="text-[11px] text-muted-foreground">
+                Programmed by {workout.createdByName}
+              </p>
+            )}
           </div>
         </div>
       </CardHeader>
@@ -504,17 +525,26 @@ export function WorkoutCard({
             variant="outline"
             size="sm"
             className="border-white/[0.08] text-muted-foreground hover:text-destructive hover:border-destructive/30"
-            onClick={() => {
-              if (window.confirm("Delete this workout?")) {
-                onDelete(workout.id);
-              }
-            }}
+            onClick={() => setConfirmOpen(true)}
             aria-label="Delete workout"
           >
             <Trash2 className="size-3.5" />
           </Button>
         )}
       </CardFooter>
+
+      {onDelete && (
+        <DeleteWorkoutDialog
+          workoutId={workout.id}
+          workoutTitle={workout.title}
+          open={confirmOpen}
+          onOpenChange={(open) => {
+            if (!isDeleting) setConfirmOpen(open);
+          }}
+          onConfirm={handleConfirmDelete}
+          isDeleting={isDeleting}
+        />
+      )}
     </Card>
   );
 }

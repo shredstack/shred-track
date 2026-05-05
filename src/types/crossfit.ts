@@ -425,6 +425,8 @@ export interface WorkoutDisplay {
   parts: WorkoutPartDisplay[];
   createdBy: string;
   createdByName?: string;
+  /** Null = personal workout. Non-null = gym workout, scoped to that gym. */
+  communityId?: string | null;
   benchmarkWorkoutId?: string | null;
   requiresVest?: boolean;
   vestWeightMaleLb?: number;

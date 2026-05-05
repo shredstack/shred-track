@@ -8,9 +8,11 @@ import {
   movements,
   scores,
   scoreMovementDetails,
+  users,
 } from "@/db/schema";
 import { eq, and, inArray, notInArray } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
+import { getWorkoutAccess } from "@/lib/authz/workout";
 import {
   parseRepScheme,
   type RepSchemeParsed,
@@ -36,6 +38,16 @@ export async function GET(
 
   if (!workout) {
     return NextResponse.json({ error: "Workout not found" }, { status: 404 });
+  }
+
+  // Permission gate. Anonymous callers fall through (legacy behavior — we
+  // never threw on no-auth GETs); authenticated callers must have read
+  // access to this workout.
+  if (user) {
+    const access = await getWorkoutAccess(user.id, id);
+    if (!access.canRead) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
   }
 
   const parts = await db
@@ -294,6 +306,12 @@ export async function GET(
     };
   });
 
+  const [creatorRow] = await db
+    .select({ name: users.name })
+    .from(users)
+    .where(eq(users.id, workout.createdBy))
+    .limit(1);
+
   return NextResponse.json({
     ...workout,
     requiresVest: workout.requiresVest,
@@ -307,6 +325,7 @@ export async function GET(
         : null,
     isPartner: workout.isPartner,
     partnerCount: workout.partnerCount,
+    creatorName: creatorRow?.name ?? null,
     parts: partsPayload,
   });
 }
@@ -382,14 +401,25 @@ export async function PUT(
   const { id } = await params;
   const body = await req.json();
 
+  const access = await getWorkoutAccess(user.id, id);
+  if (!access.exists) {
+    return NextResponse.json({ error: "Workout not found" }, { status: 404 });
+  }
+  if (!access.canEdit) {
+    return NextResponse.json(
+      { error: "You don't have permission to edit this workout" },
+      { status: 403 }
+    );
+  }
+
   const [existing] = await db
     .select()
     .from(workouts)
-    .where(and(eq(workouts.id, id), eq(workouts.createdBy, user.id)))
+    .where(eq(workouts.id, id))
     .limit(1);
 
   if (!existing) {
-    return NextResponse.json({ error: "Workout not found or not owned by you" }, { status: 404 });
+    return NextResponse.json({ error: "Workout not found" }, { status: 404 });
   }
 
   // Vest validation: same rule as POST — if the resulting state has
@@ -801,14 +831,15 @@ export async function DELETE(
 
   const { id } = await params;
 
-  const [existing] = await db
-    .select()
-    .from(workouts)
-    .where(and(eq(workouts.id, id), eq(workouts.createdBy, user.id)))
-    .limit(1);
-
-  if (!existing) {
-    return NextResponse.json({ error: "Workout not found or not owned by you" }, { status: 404 });
+  const access = await getWorkoutAccess(user.id, id);
+  if (!access.exists) {
+    return NextResponse.json({ error: "Workout not found" }, { status: 404 });
+  }
+  if (!access.canEdit) {
+    return NextResponse.json(
+      { error: "You don't have permission to delete this workout" },
+      { status: 403 }
+    );
   }
 
   await db.delete(workouts).where(eq(workouts.id, id));

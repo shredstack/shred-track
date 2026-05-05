@@ -15,6 +15,7 @@
 // ---------------------------------------------------------------------------
 
 import {
+  Building,
   Crown,
   Dumbbell,
   Sparkles,
@@ -72,6 +73,13 @@ export const ADMIN_TOOLS: AdminTool[] = [
     description: "Manage canonical benchmark workouts (Girls, Heroes, etc.)",
     icon: Trophy,
     group: "crossfit",
+  },
+  {
+    slug: "gyms",
+    label: "Gyms",
+    description: "Create gyms and assign gym admins",
+    icon: Building,
+    group: "users",
   },
   {
     slug: "vips",

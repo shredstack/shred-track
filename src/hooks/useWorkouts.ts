@@ -95,6 +95,8 @@ interface WirePart {
 interface WireWorkout {
   id: string;
   createdBy: string;
+  creatorName: string | null;
+  communityId: string | null;
   title: string | null;
   description: string | null;
   workoutDate: string;
@@ -178,6 +180,8 @@ function wireWorkoutToDisplay(w: WireWorkout): WorkoutDisplay {
     description: w.description ?? undefined,
     workoutDate: w.workoutDate,
     createdBy: w.createdBy,
+    createdByName: w.creatorName ?? undefined,
+    communityId: w.communityId,
     benchmarkWorkoutId: w.benchmarkWorkoutId,
     parts: w.parts.map(wirePartToDisplay),
   };
@@ -187,11 +191,36 @@ function wireWorkoutToDisplay(w: WireWorkout): WorkoutDisplay {
 // Queries
 // ============================================
 
-export function useWorkoutsByDate(date: string) {
+export type WorkoutScopeFilter =
+  | { mode: "all" }
+  | { mode: "personal" }
+  | { mode: "gym"; communityId: string };
+
+/**
+ * Fetch workouts for a single date, optionally scoped to a gym or personal-only.
+ *
+ * - `{ mode: "all" }` (default) — caller's personal workouts plus any gym
+ *   they're an active member of. Used on Insights and the default CrossFit
+ *   day view when there's no active gym.
+ * - `{ mode: "personal" }` — caller's personal (community_id IS NULL)
+ *   workouts only. Used by the "My personal workouts" toggle.
+ * - `{ mode: "gym", communityId }` — gym programming view. Visible to all
+ *   active members of the gym, not just the creator.
+ */
+export function useWorkoutsByDate(
+  date: string,
+  scope: WorkoutScopeFilter = { mode: "all" }
+) {
+  const scopeKey =
+    scope.mode === "gym" ? `gym:${scope.communityId}` : scope.mode;
   return useQuery({
-    queryKey: ["workouts", "by-date", date],
+    queryKey: ["workouts", "by-date", date, scopeKey],
     queryFn: async () => {
-      const res = await fetch(`/api/workouts?date=${encodeURIComponent(date)}`);
+      const params = new URLSearchParams();
+      params.set("date", date);
+      if (scope.mode === "gym") params.set("communityId", scope.communityId);
+      else if (scope.mode === "personal") params.set("personal", "1");
+      const res = await fetch(`/api/workouts?${params.toString()}`);
       if (!res.ok) throw new Error("Failed to fetch workouts");
       const rows = (await res.json()) as WireWorkout[];
       return rows.map(wireWorkoutToDisplay);
@@ -307,6 +336,9 @@ export interface CreateWorkoutInput {
   description?: string;
   workoutDate: string;
   benchmarkWorkoutId?: string;
+  /** Set to a gym's id to make this gym programming. Caller must be a
+   *  coach/admin of that gym. Omit/null for a personal workout. */
+  communityId?: string | null;
   requiresVest?: boolean;
   vestWeightMaleLb?: number;
   vestWeightFemaleLb?: number;
@@ -394,6 +426,28 @@ export function useDeleteWorkout() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["workouts"] });
     },
+  });
+}
+
+export interface WorkoutDeleteImpact {
+  totalScores: number;
+  uniqueAthletes: number;
+  otherAthletes: number;
+}
+
+export function useWorkoutDeleteImpact(workoutId: string | null) {
+  return useQuery<WorkoutDeleteImpact>({
+    queryKey: ["workouts", "delete-impact", workoutId],
+    queryFn: async () => {
+      const res = await fetch(`/api/workouts/${workoutId}/delete-impact`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || "Failed to load delete impact");
+      }
+      return res.json();
+    },
+    enabled: !!workoutId,
+    staleTime: 0,
   });
 }
 
