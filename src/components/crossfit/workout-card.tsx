@@ -21,7 +21,17 @@ import {
   Pencil,
   Shield,
   Users,
+  Building2,
+  Loader2,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import type {
   WorkoutDisplay,
   WorkoutMovementDisplay,
@@ -44,6 +54,11 @@ interface WorkoutCardProps {
   onDelete?: (workoutId: string) => Promise<void> | void;
   onEdit?: (workoutId: string) => void;
   onViewLeaderboard?: (workoutId: string) => void;
+  // When set, renders a "Move to gym" button. Parent decides eligibility
+  // (creator + admin of target gym + email allowlist). The handler receives
+  // the workout id; the gym name is shown in the confirm dialog only.
+  onMoveToGym?: (workoutId: string) => Promise<void> | void;
+  moveToGymName?: string;
 }
 
 const DIVISION_COLORS = {
@@ -404,6 +419,8 @@ export function WorkoutCard({
   onDelete,
   onEdit,
   onViewLeaderboard,
+  onMoveToGym,
+  moveToGymName,
 }: WorkoutCardProps) {
   const parts = workout.parts ?? [];
   const hasAnyScore = parts.some((p) => p.score);
@@ -411,6 +428,9 @@ export function WorkoutCard({
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [isMoving, setIsMoving] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
 
   const handleConfirmDelete = async () => {
     if (!onDelete) return;
@@ -420,6 +440,22 @@ export function WorkoutCard({
       setConfirmOpen(false);
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleConfirmMove = async () => {
+    if (!onMoveToGym) return;
+    setIsMoving(true);
+    setMoveError(null);
+    try {
+      await onMoveToGym(workout.id);
+      setMoveOpen(false);
+    } catch (err) {
+      setMoveError(
+        err instanceof Error ? err.message : "Failed to move workout"
+      );
+    } finally {
+      setIsMoving(false);
     }
   };
 
@@ -520,6 +556,25 @@ export function WorkoutCard({
             <Pencil className="size-3.5" />
           </Button>
         )}
+        {onMoveToGym && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-white/[0.08] text-muted-foreground hover:text-foreground"
+            onClick={() => {
+              setMoveError(null);
+              setMoveOpen(true);
+            }}
+            aria-label="Move workout to gym"
+            title={
+              moveToGymName
+                ? `Move to ${moveToGymName}`
+                : "Move to gym"
+            }
+          >
+            <Building2 className="size-3.5" />
+          </Button>
+        )}
         {onDelete && (
           <Button
             variant="outline"
@@ -544,6 +599,58 @@ export function WorkoutCard({
           onConfirm={handleConfirmDelete}
           isDeleting={isDeleting}
         />
+      )}
+
+      {onMoveToGym && (
+        <Dialog
+          open={moveOpen}
+          onOpenChange={(open) => {
+            if (!isMoving) setMoveOpen(open);
+          }}
+        >
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Move workout to gym?</DialogTitle>
+              <DialogDescription>
+                {workout.title ? `"${workout.title}"` : "This workout"} will
+                move from your personal workouts to{" "}
+                {moveToGymName ? (
+                  <strong className="text-foreground">{moveToGymName}</strong>
+                ) : (
+                  "your gym"
+                )}
+                . All gym members will be able to see it, and your existing
+                scores stay attached.
+              </DialogDescription>
+            </DialogHeader>
+
+            {moveError && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                {moveError}
+              </div>
+            )}
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setMoveOpen(false)}
+                disabled={isMoving}
+              >
+                Cancel
+              </Button>
+              <Button onClick={handleConfirmMove} disabled={isMoving}>
+                {isMoving ? (
+                  <>
+                    <Loader2 className="size-3.5 animate-spin" />
+                    Moving…
+                  </>
+                ) : (
+                  "Move to gym"
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </Card>
   );

@@ -21,6 +21,7 @@ import {
   useDeleteWorkout,
   useLogScore,
   useUpdateScore,
+  useMoveWorkoutToGym,
   type CreatePartInput,
   type WorkoutScopeFilter,
 } from "@/hooks/useWorkouts";
@@ -236,6 +237,33 @@ export default function CrossfitPage() {
   const logScore = useLogScore();
   const updateScore = useUpdateScore();
   const createMovement = useCreateMovement();
+  const moveWorkoutToGym = useMoveWorkoutToGym();
+
+  // Temporary helper: lets the gym admin move a personal workout into the
+  // gym they admin, so workouts created before multi-gym support don't have
+  // to be re-entered. Locked to a single email (mirrored on the server) so
+  // it doesn't drift into a general feature.
+  const userEmail = gymContext?.user.email ?? null;
+  const canMovePersonalToGym =
+    !!activeMembership &&
+    activeMembership.isAdmin &&
+    userEmail?.toLowerCase() === "sarah.dorich@gmail.com";
+
+  const handleMoveToGym = async (workoutId: string) => {
+    if (!canMovePersonalToGym || !activeMembership) return;
+    try {
+      await moveWorkoutToGym.mutateAsync({
+        workoutId,
+        communityId: activeMembership.communityId,
+      });
+      toast.success(`Moved to ${activeMembership.communityName}`);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to move workout"
+      );
+      throw err;
+    }
+  };
 
   const scoringWorkout = useMemo(
     () => workouts.find((w) => w.id === scoringWorkoutId) ?? null,
@@ -549,6 +577,9 @@ export default function CrossfitPage() {
               createdBy: workout.createdBy,
               communityId: workout.communityId ?? null,
             });
+            const isPersonalAndOwn =
+              workout.communityId == null && workout.createdBy === userId;
+            const showMoveToGym = canMovePersonalToGym && isPersonalAndOwn;
             return (
               <WorkoutCard
                 key={workout.id}
@@ -563,6 +594,10 @@ export default function CrossfitPage() {
                     : undefined
                 }
                 onDelete={editable ? handleDeleteWorkout : undefined}
+                onMoveToGym={showMoveToGym ? handleMoveToGym : undefined}
+                moveToGymName={
+                  showMoveToGym ? activeMembership?.communityName : undefined
+                }
               />
             );
           })}

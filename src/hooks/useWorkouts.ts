@@ -429,6 +429,34 @@ export function useDeleteWorkout() {
   });
 }
 
+export function useMoveWorkoutToGym() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      workoutId,
+      communityId,
+    }: {
+      workoutId: string;
+      communityId: string;
+    }) => {
+      const res = await fetch(`/api/workouts/${workoutId}/move-to-gym`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ communityId }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || "Failed to move workout to gym");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["workouts"] });
+    },
+  });
+}
+
 export interface WorkoutDeleteImpact {
   totalScores: number;
   uniqueAthletes: number;
