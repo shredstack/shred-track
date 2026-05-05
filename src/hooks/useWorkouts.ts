@@ -4,6 +4,7 @@ import type {
   WorkoutPartDisplay,
   WorkoutPartStructure,
   WorkoutMovementDisplay,
+  WorkoutBlockDisplay,
   WorkoutType,
   ScoreInput,
   MovementCategory,
@@ -38,6 +39,13 @@ interface WireMovement {
   equipmentCount: number | null;
   rxStandard: string | null;
   notes: string | null;
+  workoutBlockId: string | null;
+}
+
+interface WireBlock {
+  id: string;
+  orderIndex: number;
+  title: string;
 }
 
 interface WireMovementDetail {
@@ -76,9 +84,11 @@ interface WirePart {
   amrapDurationSeconds: number | null;
   emomIntervalSeconds: number | null;
   repScheme: string | null;
+  rounds: number | null;
   structure: string | null;
   notes: string | null;
   movements: WireMovement[];
+  blocks: WireBlock[];
   score: WireScore | null;
 }
 
@@ -116,7 +126,12 @@ function wireMovementToDisplay(m: WireMovement): WorkoutMovementDisplay {
     equipmentCount: m.equipmentCount ?? undefined,
     rxStandard: m.rxStandard ?? undefined,
     notes: m.notes ?? undefined,
+    workoutBlockId: m.workoutBlockId ?? null,
   };
+}
+
+function wireBlockToDisplay(b: WireBlock): WorkoutBlockDisplay {
+  return { id: b.id, orderIndex: b.orderIndex, title: b.title };
 }
 
 function wireScoreToDisplay(s: WireScore): ScoreDisplay {
@@ -147,9 +162,11 @@ function wirePartToDisplay(p: WirePart): WorkoutPartDisplay {
     amrapDurationSeconds: p.amrapDurationSeconds ?? undefined,
     emomIntervalSeconds: p.emomIntervalSeconds ?? undefined,
     repScheme: p.repScheme ?? undefined,
+    rounds: p.rounds ?? undefined,
     structure: (p.structure as WorkoutPartStructure | null) ?? undefined,
     notes: p.notes ?? undefined,
     movements: p.movements.map(wireMovementToDisplay),
+    blocks: (p.blocks ?? []).map(wireBlockToDisplay),
     score: p.score ? wireScoreToDisplay(p.score) : null,
   };
 }
@@ -250,6 +267,18 @@ export interface CreatePartMovementInput {
   equipmentCount?: number;
   rxStandard?: string;
   notes?: string;
+  // Block membership. `blockId` is a round-tripped DB id (edit flow);
+  // `blockTempRef` references a CreatePartBlockInput.tempRef on the same
+  // part for newly-created blocks. Either may be null = ungrouped.
+  blockId?: string | null;
+  blockTempRef?: string | null;
+}
+
+export interface CreatePartBlockInput {
+  id?: string;
+  tempRef?: string;
+  title: string;
+  orderIndex?: number;
 }
 
 export interface CreatePartInput {
@@ -270,6 +299,7 @@ export interface CreatePartInput {
   structure?: WorkoutPartStructure;
   notes?: string;
   movements: CreatePartMovementInput[];
+  blocks?: CreatePartBlockInput[];
 }
 
 export interface CreateWorkoutInput {

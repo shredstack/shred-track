@@ -110,7 +110,19 @@ export const movements = pgTable(
     category: text("category").notNull(), // barbell | dumbbell | kettlebell | gymnastics | bodyweight | monostructural | accessory | other
     isWeighted: boolean("is_weighted").default(false).notNull(),
     is1rmApplicable: boolean("is_1rm_applicable").default(false).notNull(),
-    metricType: text("metric_type").default("reps").notNull(), // 'reps' | 'weight' | 'calories' | 'distance'
+    metricType: text("metric_type").default("reps").notNull(), // 'reps' | 'weight' | 'calories' | 'distance' | 'duration' (legacy single value; superseded by supportedMetricTypes for new code paths)
+    // All metric types this movement can be scored in. The user picks one
+    // per workout instance via workout_movements.metric_type. Drives the
+    // builder's "scoring metric" toggle.
+    supportedMetricTypes: text("supported_metric_types").array().default(sql`ARRAY['reps']::text[]`).notNull(),
+    // Rx inputs the builder surfaces when adding the movement. Subset of:
+    // 'weight' | 'weight_bw' | 'height' | 'calories' | 'distance' |
+    // 'duration' | 'tempo'. Empty array = legacy hardcoded-branch fallback
+    // (the rollback insurance described in the Phase 2 spec).
+    rxFields: text("rx_fields").array().default(sql`ARRAY[]::text[]`).notNull(),
+    // Per-field defaults, gendered where it matters. Examples:
+    // {"height_inches_male": 24, "height_inches_female": 20} for Box Jump.
+    rxDefaults: jsonb("rx_defaults").default(sql`'{}'::jsonb`).notNull(),
     commonRxWeightMale: numeric("common_rx_weight_male"),
     commonRxWeightFemale: numeric("common_rx_weight_female"),
     videoUrl: text("video_url"),
@@ -193,10 +205,28 @@ export const workoutParts = pgTable(
   ]
 );
 
+export const workoutBlocks = pgTable(
+  "workout_blocks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workoutPartId: uuid("workout_part_id").notNull().references(() => workoutParts.id, { onDelete: "cascade" }),
+    orderIndex: integer("order_index").notNull(),
+    title: text("title").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("workout_blocks_part_order_unique").on(table.workoutPartId, table.orderIndex),
+    index("workout_blocks_part_id_idx").on(table.workoutPartId),
+  ]
+);
+
 export const workoutMovements = pgTable("workout_movements", {
   id: uuid("id").defaultRandom().primaryKey(),
   workoutId: uuid("workout_id").notNull().references(() => workouts.id, { onDelete: "cascade" }),
   workoutPartId: uuid("workout_part_id").references(() => workoutParts.id, { onDelete: "cascade" }),
+  // Optional grouping under a part. Null = ungrouped (legacy / flat
+  // rendering). Block headers appear in score-entry and previews when set.
+  workoutBlockId: uuid("workout_block_id").references(() => workoutBlocks.id, { onDelete: "set null" }),
   movementId: uuid("movement_id").notNull().references(() => movements.id),
   orderIndex: integer("order_index").notNull(),
   prescribedReps: text("prescribed_reps"),
@@ -389,6 +419,26 @@ export const benchmarkWorkoutParts = pgTable(
   ]
 );
 
+export const benchmarkWorkoutBlocks = pgTable(
+  "benchmark_workout_blocks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    benchmarkWorkoutPartId: uuid("benchmark_workout_part_id")
+      .notNull()
+      .references(() => benchmarkWorkoutParts.id, { onDelete: "cascade" }),
+    orderIndex: integer("order_index").notNull(),
+    title: text("title").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("benchmark_workout_blocks_part_order_unique").on(
+      table.benchmarkWorkoutPartId,
+      table.orderIndex
+    ),
+    index("benchmark_workout_blocks_part_id_idx").on(table.benchmarkWorkoutPartId),
+  ]
+);
+
 export const benchmarkWorkoutMovements = pgTable("benchmark_workout_movements", {
   id: uuid("id").defaultRandom().primaryKey(),
   benchmarkWorkoutId: uuid("benchmark_workout_id").notNull().references(() => benchmarkWorkouts.id, { onDelete: "cascade" }),
@@ -398,6 +448,11 @@ export const benchmarkWorkoutMovements = pgTable("benchmark_workout_movements", 
   benchmarkWorkoutPartId: uuid("benchmark_workout_part_id").references(
     () => benchmarkWorkoutParts.id,
     { onDelete: "cascade" }
+  ),
+  // Optional grouping under a part. Null = ungrouped within the part.
+  benchmarkWorkoutBlockId: uuid("benchmark_workout_block_id").references(
+    () => benchmarkWorkoutBlocks.id,
+    { onDelete: "set null" }
   ),
   movementId: uuid("movement_id").notNull().references(() => movements.id),
   orderIndex: integer("order_index").notNull(),

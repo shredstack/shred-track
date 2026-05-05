@@ -3,6 +3,7 @@ import { db } from "@/db";
 import {
   workouts,
   workoutParts,
+  workoutBlocks,
   workoutMovements,
   movements,
   scores,
@@ -47,6 +48,7 @@ export async function GET(
     .select({
       id: workoutMovements.id,
       workoutPartId: workoutMovements.workoutPartId,
+      workoutBlockId: workoutMovements.workoutBlockId,
       movementId: workoutMovements.movementId,
       orderIndex: workoutMovements.orderIndex,
       prescribedReps: workoutMovements.prescribedReps,
@@ -163,6 +165,22 @@ export async function GET(
     movementsByPart.set(m.workoutPartId, list);
   }
 
+  const partIds = parts.map((p) => p.id);
+  const blockRows =
+    partIds.length > 0
+      ? await db
+          .select()
+          .from(workoutBlocks)
+          .where(inArray(workoutBlocks.workoutPartId, partIds))
+          .orderBy(workoutBlocks.orderIndex)
+      : [];
+  const blocksByPart = new Map<string, typeof blockRows>();
+  for (const b of blockRows) {
+    const list = blocksByPart.get(b.workoutPartId) ?? [];
+    list.push(b);
+    blocksByPart.set(b.workoutPartId, list);
+  }
+
   const partsPayload = parts.map((p) => {
     const score = userScoresByPart.get(p.id);
     return {
@@ -182,6 +200,11 @@ export async function GET(
       rounds: p.rounds,
       structure: p.structure,
       notes: p.notes,
+      blocks: (blocksByPart.get(p.id) ?? []).map((b) => ({
+        id: b.id,
+        orderIndex: b.orderIndex,
+        title: b.title,
+      })),
       movements: (movementsByPart.get(p.id) ?? []).map((m) => ({
         id: m.id,
         movementId: m.movementId,
@@ -190,6 +213,7 @@ export async function GET(
         isWeighted: m.isWeighted,
         metricType: m.metricType,
         orderIndex: m.orderIndex,
+        workoutBlockId: m.workoutBlockId ?? null,
         prescribedReps: m.prescribedReps,
         prescribedWeightMale: m.prescribedWeightMale,
         prescribedWeightFemale: m.prescribedWeightFemale,
@@ -312,6 +336,15 @@ interface UpdatePartMovementInput {
   equipmentCount?: number;
   rxStandard?: string;
   notes?: string;
+  blockId?: string | null;
+  blockTempRef?: string | null;
+}
+
+interface UpdatePartBlockInput {
+  id?: string;
+  tempRef?: string;
+  title: string;
+  orderIndex?: number;
 }
 
 interface UpdatePartInput {
@@ -331,6 +364,7 @@ interface UpdatePartInput {
   structure?: string;
   notes?: string;
   movements: UpdatePartMovementInput[];
+  blocks?: UpdatePartBlockInput[];
 }
 
 // PUT /api/workouts/[id] — update workout, including its parts and
@@ -523,7 +557,62 @@ export async function PUT(
         partId = inserted.id;
       }
 
-      // 3a) Diff movements within this part.
+      // 3a) Diff blocks for this part. Blocks are inserted before
+      // movements so movement.blockTempRef can be resolved when upserting.
+      const inputBlocks = Array.isArray(p.blocks) ? p.blocks : [];
+      const keepBlockIds = inputBlocks
+        .map((b) => b.id)
+        .filter((x): x is string => !!x);
+      if (keepBlockIds.length > 0) {
+        await tx
+          .delete(workoutBlocks)
+          .where(
+            and(
+              eq(workoutBlocks.workoutPartId, partId),
+              notInArray(workoutBlocks.id, keepBlockIds)
+            )
+          );
+      } else {
+        await tx
+          .delete(workoutBlocks)
+          .where(eq(workoutBlocks.workoutPartId, partId));
+      }
+
+      const blockTempRefToId = new Map<string, string>();
+      for (let k = 0; k < inputBlocks.length; k++) {
+        const b = inputBlocks[k];
+        const title = b.title?.toString().trim() ?? "";
+        if (title.length === 0) continue;
+        const blockValues = { title, orderIndex: b.orderIndex ?? k };
+
+        if (b.id) {
+          const [updatedBlock] = await tx
+            .update(workoutBlocks)
+            .set(blockValues)
+            .where(
+              and(
+                eq(workoutBlocks.id, b.id),
+                eq(workoutBlocks.workoutPartId, partId)
+              )
+            )
+            .returning({ id: workoutBlocks.id });
+          if (!updatedBlock) {
+            const [inserted] = await tx
+              .insert(workoutBlocks)
+              .values({ workoutPartId: partId, ...blockValues })
+              .returning({ id: workoutBlocks.id });
+            if (b.tempRef) blockTempRefToId.set(b.tempRef, inserted.id);
+          }
+        } else {
+          const [inserted] = await tx
+            .insert(workoutBlocks)
+            .values({ workoutPartId: partId, ...blockValues })
+            .returning({ id: workoutBlocks.id });
+          if (b.tempRef) blockTempRefToId.set(b.tempRef, inserted.id);
+        }
+      }
+
+      // 3b) Diff movements within this part.
       const keepMovementIds = p.movements
         .map((m) => m.id)
         .filter((x): x is string => !!x);
@@ -548,9 +637,13 @@ export async function PUT(
           m.prescribedReps,
           m.promoteSequenceToLadder ?? false
         );
+        const workoutBlockId = m.blockTempRef
+          ? blockTempRefToId.get(m.blockTempRef) ?? null
+          : m.blockId ?? null;
         const fields = {
           movementId: m.movementId,
           orderIndex: m.orderIndex ?? j,
+          workoutBlockId,
           prescribedReps: m.prescribedReps || null,
           prescribedWeightMale: m.prescribedWeightMale?.toString() || null,
           prescribedWeightFemale: m.prescribedWeightFemale?.toString() || null,

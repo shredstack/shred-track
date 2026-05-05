@@ -39,6 +39,27 @@ interface BenchmarkFormProps {
 
 type Step = "build" | "review";
 
+// See smart-builder.tsx for the same disambiguator used there. Kept in
+// sync manually since both review screens render the same shape.
+function formatGenderedScheme(
+  male: string | undefined,
+  female: string | undefined,
+  unit: string
+): string {
+  const m = male?.trim() || "";
+  const f = female?.trim() || "";
+  const hasM = !!m;
+  const hasF = !!f;
+  if (!hasM && !hasF) return "";
+  if (hasM && !hasF) return `${m} ${unit}`;
+  if (!hasM && hasF) return `${f} ${unit}`;
+  if (m === f) return `${m} ${unit}`;
+  if (m.includes("-") || f.includes("-")) {
+    return `${m} ${unit} (M) / ${f} ${unit} (F)`;
+  }
+  return `${m}/${f} ${unit}`;
+}
+
 function formatMovementMetric(m: WorkoutBuilderMovement): string | null {
   const prefix =
     m.equipmentCount && m.equipmentCount > 1 ? `${m.equipmentCount} × ` : "";
@@ -50,15 +71,19 @@ function formatMovementMetric(m: WorkoutBuilderMovement): string | null {
   }
   if (m.metricType === "calories") {
     if (!m.prescribedCaloriesMale && !m.prescribedCaloriesFemale) return null;
-    return `${m.prescribedCaloriesMale || "?"}${
-      m.prescribedCaloriesFemale ? `/${m.prescribedCaloriesFemale}` : ""
-    } cal`;
+    return formatGenderedScheme(
+      m.prescribedCaloriesMale,
+      m.prescribedCaloriesFemale,
+      "cal"
+    );
   }
   if (m.metricType === "distance") {
     if (!m.prescribedDistanceMale && !m.prescribedDistanceFemale) return null;
-    return `${m.prescribedDistanceMale || "?"}${
-      m.prescribedDistanceFemale ? `/${m.prescribedDistanceFemale}` : ""
-    } m`;
+    return formatGenderedScheme(
+      m.prescribedDistanceMale,
+      m.prescribedDistanceFemale,
+      "m"
+    );
   }
   return null;
 }

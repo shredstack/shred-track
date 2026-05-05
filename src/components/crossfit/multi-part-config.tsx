@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { WorkoutPartConfig } from "@/components/crossfit/workout-part-config";
 import type {
+  WorkoutBuilderBlock,
   WorkoutBuilderPart,
   WorkoutBuilderMovement,
 } from "@/types/crossfit";
@@ -55,6 +56,7 @@ export function emptyPart(): WorkoutBuilderPart {
     repScheme: "",
     rounds: "",
     movements: [],
+    blocks: [],
   };
 }
 
@@ -102,6 +104,7 @@ interface PartCardProps {
   onToggleCollapse: () => void;
   onChange: (updates: Partial<WorkoutBuilderPart>) => void;
   onMovementsChange: (movements: WorkoutBuilderMovement[]) => void;
+  onBlocksChange: (blocks: WorkoutBuilderBlock[]) => void;
   onMove: (direction: "up" | "down") => void;
   onDelete: () => void;
 }
@@ -115,10 +118,28 @@ function PartCard({
   onToggleCollapse,
   onChange,
   onMovementsChange,
+  onBlocksChange,
   onMove,
   onDelete,
 }: PartCardProps) {
   const defaultLabel = `Part ${String.fromCharCode(65 + index)}`;
+  // For single-part workouts, the "Part A" wrapper is noise — blocks are
+  // the primary grouping. Render the part body directly without the
+  // collapsible card chrome.
+  const isSingleton = totalParts === 1;
+
+  if (isSingleton) {
+    return (
+      <WorkoutPartConfig
+        part={part}
+        onChange={onChange}
+        onMovementsChange={onMovementsChange}
+        onBlocksChange={onBlocksChange}
+        showRepScheme={showRepScheme}
+        compact
+      />
+    );
+  }
 
   return (
     <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-3">
@@ -147,59 +168,56 @@ function PartCard({
             </span>
           )}
         </button>
-        {totalParts > 1 && (
-          <div className="flex items-center gap-0.5">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => onMove("up")}
-              disabled={index === 0}
-            >
-              <ChevronUp className="size-3.5" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => onMove("down")}
-              disabled={index === totalParts - 1}
-            >
-              <ChevronDown className="size-3.5" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={onDelete}
-              className="text-destructive hover:text-destructive"
-            >
-              <Trash2 className="size-3.5" />
-            </Button>
-          </div>
-        )}
+        <div className="flex items-center gap-0.5">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => onMove("up")}
+            disabled={index === 0}
+          >
+            <ChevronUp className="size-3.5" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => onMove("down")}
+            disabled={index === totalParts - 1}
+          >
+            <ChevronDown className="size-3.5" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            onClick={onDelete}
+            className="text-destructive hover:text-destructive"
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+        </div>
       </div>
 
       {!isCollapsed && (
         <div className="space-y-3 pt-1">
-          {totalParts > 1 && (
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">
-                Label (optional)
-              </Label>
-              <Input
-                value={part.label}
-                onChange={(e) => onChange({ label: e.target.value })}
-                placeholder={`e.g. Strength, ${defaultLabel}`}
-                className="h-8 text-xs"
-              />
-            </div>
-          )}
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">
+              Label (optional)
+            </Label>
+            <Input
+              value={part.label}
+              onChange={(e) => onChange({ label: e.target.value })}
+              placeholder={`e.g. Strength, ${defaultLabel}`}
+              className="h-8 text-xs"
+            />
+          </div>
 
           <WorkoutPartConfig
             part={part}
             onChange={onChange}
             onMovementsChange={onMovementsChange}
+            onBlocksChange={onBlocksChange}
             showRepScheme={showRepScheme}
             compact
           />
@@ -242,6 +260,15 @@ export function MultiPartConfig({
     (tempId: string, movements: WorkoutBuilderMovement[]) => {
       onPartsChange(
         parts.map((p) => (p.tempId === tempId ? { ...p, movements } : p))
+      );
+    },
+    [parts, onPartsChange]
+  );
+
+  const updatePartBlocks = useCallback(
+    (tempId: string, blocks: WorkoutBuilderBlock[]) => {
+      onPartsChange(
+        parts.map((p) => (p.tempId === tempId ? { ...p, blocks } : p))
       );
     },
     [parts, onPartsChange]
@@ -299,6 +326,7 @@ export function MultiPartConfig({
           onMovementsChange={(movements) =>
             updatePartMovements(part.tempId, movements)
           }
+          onBlocksChange={(blocks) => updatePartBlocks(part.tempId, blocks)}
           onMove={(direction) => movePart(part.tempId, direction)}
           onDelete={() => deletePart(part.tempId)}
         />

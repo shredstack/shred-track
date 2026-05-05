@@ -2,15 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
   benchmarkWorkouts,
+  benchmarkWorkoutBlocks,
   benchmarkWorkoutMovements,
   benchmarkWorkoutParts,
   workouts,
+  workoutBlocks,
   workoutParts,
   workoutMovements,
 } from "@/db/schema";
 import { eq, and, inArray, notInArray } from "drizzle-orm";
 import { getAdminUser } from "@/lib/admin";
 import {
+  coerceBenchmarkBlockValues,
   coerceBenchmarkMovementValues,
   coerceBenchmarkPartValues,
   type BenchmarkPartInput,
@@ -163,6 +166,11 @@ export async function PUT(
         .where(eq(benchmarkWorkoutParts.benchmarkWorkoutId, id));
     }
 
+    // Per-part block tempRef → real benchmark block id, captured in the
+    // benchmark write loop so the linked-workouts propagation loop below
+    // can resolve movement.blockTempRef → block id without re-querying.
+    const blockTempRefByPartIndex = new Map<number, Map<string, string>>();
+
     for (let i = 0; i < parts.length; i++) {
       const p = parts[i];
       const partValues = coerceBenchmarkPartValues(p);
@@ -204,6 +212,72 @@ export async function PUT(
         partId = inserted.id;
       }
 
+      // Diff blocks for this part. Done before movements so we can resolve
+      // blockTempRef → real block id when upserting movements.
+      const inputBlocks = Array.isArray(p.blocks) ? p.blocks : [];
+      const keepBlockIds = inputBlocks
+        .map((b) => b.id)
+        .filter((x): x is string => !!x);
+      if (keepBlockIds.length > 0) {
+        await tx
+          .delete(benchmarkWorkoutBlocks)
+          .where(
+            and(
+              eq(benchmarkWorkoutBlocks.benchmarkWorkoutPartId, partId),
+              notInArray(benchmarkWorkoutBlocks.id, keepBlockIds)
+            )
+          );
+      } else {
+        await tx
+          .delete(benchmarkWorkoutBlocks)
+          .where(eq(benchmarkWorkoutBlocks.benchmarkWorkoutPartId, partId));
+      }
+
+      const blockTempRefToId = new Map<string, string>();
+      blockTempRefByPartIndex.set(i, blockTempRefToId);
+      for (let k = 0; k < inputBlocks.length; k++) {
+        const b = inputBlocks[k];
+        const blockValues = coerceBenchmarkBlockValues(b, k);
+        if (blockValues.title.length === 0) continue;
+
+        if (b.id) {
+          const [updatedBlock] = await tx
+            .update(benchmarkWorkoutBlocks)
+            .set(blockValues)
+            .where(
+              and(
+                eq(benchmarkWorkoutBlocks.id, b.id),
+                eq(benchmarkWorkoutBlocks.benchmarkWorkoutPartId, partId)
+              )
+            )
+            .returning({ id: benchmarkWorkoutBlocks.id });
+          if (!updatedBlock) {
+            const [inserted] = await tx
+              .insert(benchmarkWorkoutBlocks)
+              .values({
+                benchmarkWorkoutPartId: partId,
+                ...blockValues,
+              })
+              .returning({ id: benchmarkWorkoutBlocks.id });
+            if (b.tempRef) blockTempRefToId.set(b.tempRef, inserted.id);
+          }
+        } else {
+          const [inserted] = await tx
+            .insert(benchmarkWorkoutBlocks)
+            .values({ benchmarkWorkoutPartId: partId, ...blockValues })
+            .returning({ id: benchmarkWorkoutBlocks.id });
+          if (b.tempRef) blockTempRefToId.set(b.tempRef, inserted.id);
+        }
+      }
+
+      const resolveMovementBlockId = (
+        m: BenchmarkPartInput["movements"][number]
+      ): string | null => {
+        if (m.blockTempRef) return blockTempRefToId.get(m.blockTempRef) ?? null;
+        if (m.blockId) return m.blockId;
+        return null;
+      };
+
       const keepMovementIds = p.movements
         .map((m) => m.id)
         .filter((x): x is string => !!x);
@@ -225,11 +299,12 @@ export async function PUT(
       for (let j = 0; j < p.movements.length; j++) {
         const m = p.movements[j];
         const fields = coerceBenchmarkMovementValues(m, j);
+        const benchmarkWorkoutBlockId = resolveMovementBlockId(m);
 
         if (m.id) {
           const [updatedMov] = await tx
             .update(benchmarkWorkoutMovements)
-            .set(fields)
+            .set({ ...fields, benchmarkWorkoutBlockId })
             .where(
               and(
                 eq(benchmarkWorkoutMovements.id, m.id),
@@ -241,6 +316,7 @@ export async function PUT(
             await tx.insert(benchmarkWorkoutMovements).values({
               benchmarkWorkoutId: id,
               benchmarkWorkoutPartId: partId,
+              benchmarkWorkoutBlockId,
               ...fields,
             });
           }
@@ -248,6 +324,7 @@ export async function PUT(
           await tx.insert(benchmarkWorkoutMovements).values({
             benchmarkWorkoutId: id,
             benchmarkWorkoutPartId: partId,
+            benchmarkWorkoutBlockId,
             ...fields,
           });
         }
@@ -331,6 +408,32 @@ export async function PUT(
             )
           );
 
+        // Read the just-upserted benchmark blocks for this part so we can
+        // mirror them onto each linked workout's matching part. The map is
+        // keyed by benchmarkBlockId so each linked-workout block can be
+        // looked up when stamping movement.workoutBlockId below.
+        const benchmarkBlocksForPart = await tx
+          .select({
+            id: benchmarkWorkoutBlocks.id,
+            orderIndex: benchmarkWorkoutBlocks.orderIndex,
+            title: benchmarkWorkoutBlocks.title,
+          })
+          .from(benchmarkWorkoutBlocks)
+          .innerJoin(
+            benchmarkWorkoutParts,
+            eq(
+              benchmarkWorkoutBlocks.benchmarkWorkoutPartId,
+              benchmarkWorkoutParts.id
+            )
+          )
+          .where(
+            and(
+              eq(benchmarkWorkoutParts.benchmarkWorkoutId, id),
+              eq(benchmarkWorkoutParts.orderIndex, i)
+            )
+          )
+          .orderBy(benchmarkWorkoutBlocks.orderIndex);
+
         // Diff per-part movements on each linked workout. Match by
         // orderIndex within the part — preserves score_movement_details
         // FKs when shape lines up.
@@ -346,6 +449,34 @@ export async function PUT(
             )
             .limit(1);
           if (!linkedPart) continue;
+
+          // Replace this linked-part's blocks with a fresh copy so block
+          // edits propagate. Existing workout_movements.workoutBlockId
+          // references get nulled by ON DELETE SET NULL — we re-stamp
+          // them below from the benchmark movement's blockId.
+          await tx
+            .delete(workoutBlocks)
+            .where(eq(workoutBlocks.workoutPartId, linkedPart.id));
+
+          const benchmarkBlockIdToWorkoutBlockId = new Map<string, string>();
+          if (benchmarkBlocksForPart.length > 0) {
+            const inserted = await tx
+              .insert(workoutBlocks)
+              .values(
+                benchmarkBlocksForPart.map((b) => ({
+                  workoutPartId: linkedPart.id,
+                  orderIndex: b.orderIndex,
+                  title: b.title,
+                }))
+              )
+              .returning({ id: workoutBlocks.id });
+            for (let k = 0; k < inserted.length; k++) {
+              benchmarkBlockIdToWorkoutBlockId.set(
+                benchmarkBlocksForPart[k].id,
+                inserted[k].id
+              );
+            }
+          }
 
           const existingMovs = await tx
             .select({
@@ -365,18 +496,30 @@ export async function PUT(
             const m = inputs[j];
             const orderIndex = m.orderIndex ?? j;
             const fields = coerceBenchmarkMovementValues(m, orderIndex);
+            // Resolve the movement's benchmark block (by tempRef if newly
+            // created; by id otherwise) and map it to the corresponding
+            // linked-workout block id we just inserted.
+            const partBlockTempRefMap =
+              blockTempRefByPartIndex.get(i) ?? new Map<string, string>();
+            const benchmarkBlockId = m.blockTempRef
+              ? partBlockTempRefMap.get(m.blockTempRef) ?? null
+              : m.blockId ?? null;
+            const workoutBlockId = benchmarkBlockId
+              ? benchmarkBlockIdToWorkoutBlockId.get(benchmarkBlockId) ?? null
+              : null;
             // workoutMovements has the same column set as benchmarkWorkoutMovements;
             // the coerce helper produces the right shape.
             const existingMov = existingByOrder.get(orderIndex);
             if (existingMov) {
               await tx
                 .update(workoutMovements)
-                .set(fields)
+                .set({ ...fields, workoutBlockId })
                 .where(eq(workoutMovements.id, existingMov.id));
             } else {
               await tx.insert(workoutMovements).values({
                 workoutId: wid,
                 workoutPartId: linkedPart.id,
+                workoutBlockId,
                 ...fields,
               });
             }

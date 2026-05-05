@@ -3,9 +3,11 @@ import { db } from "@/db";
 import {
   workouts,
   workoutParts,
+  workoutBlocks,
   workoutMovements,
   benchmarkWorkouts,
   benchmarkWorkoutParts,
+  benchmarkWorkoutBlocks,
   benchmarkWorkoutMovements,
   movements,
   scores,
@@ -54,6 +56,18 @@ interface PartMovementInput {
   tempo?: string;
   isMaxReps?: boolean;
   isSideCadence?: boolean;
+  // Block membership. `blockId` is the round-tripped DB id (edit flow);
+  // `blockTempRef` references a PartBlockInput.tempRef for newly-created
+  // blocks. The route resolves to a real workout_block id post-insert.
+  blockId?: string | null;
+  blockTempRef?: string | null;
+}
+
+interface PartBlockInput {
+  id?: string;
+  tempRef?: string;
+  title: string;
+  orderIndex?: number;
 }
 
 interface PartInput {
@@ -72,6 +86,7 @@ interface PartInput {
   structure?: string;
   notes?: string;
   movements: PartMovementInput[];
+  blocks?: PartBlockInput[];
 }
 
 // GET /api/workouts — list workouts.
@@ -150,6 +165,7 @@ export async function GET(req: NextRequest) {
         id: workoutMovements.id,
         workoutId: workoutMovements.workoutId,
         workoutPartId: workoutMovements.workoutPartId,
+        workoutBlockId: workoutMovements.workoutBlockId,
         movementId: workoutMovements.movementId,
         orderIndex: workoutMovements.orderIndex,
         prescribedReps: workoutMovements.prescribedReps,
@@ -195,6 +211,25 @@ export async function GET(req: NextRequest) {
         and(inArray(scores.workoutId, workoutIds), eq(scores.userId, user.id))
       ),
   ]);
+
+  // Workout blocks for the part list — fetched after parts so we have the
+  // partIds. Empty when no blocks exist (legacy workouts render flat).
+  const partIds = partRows.map((p) => p.id);
+  const blockRows =
+    partIds.length > 0
+      ? await db
+          .select()
+          .from(workoutBlocks)
+          .where(inArray(workoutBlocks.workoutPartId, partIds))
+          .orderBy(workoutBlocks.orderIndex)
+      : [];
+
+  const blocksByPart = new Map<string, typeof blockRows>();
+  for (const b of blockRows) {
+    const list = blocksByPart.get(b.workoutPartId) ?? [];
+    list.push(b);
+    blocksByPart.set(b.workoutPartId, list);
+  }
 
   const scoreIds = scoreRows.map((s) => s.id);
   const detailRows =
@@ -260,6 +295,11 @@ export async function GET(req: NextRequest) {
         rounds: p.rounds,
         structure: p.structure,
         notes: p.notes,
+        blocks: (blocksByPart.get(p.id) ?? []).map((b) => ({
+          id: b.id,
+          orderIndex: b.orderIndex,
+          title: b.title,
+        })),
         movements: (movementsByPart.get(p.id) ?? []).map((m) => ({
           id: m.id,
           movementId: m.movementId,
@@ -268,6 +308,7 @@ export async function GET(req: NextRequest) {
           isWeighted: m.isWeighted,
           metricType: m.metricType,
           orderIndex: m.orderIndex,
+          workoutBlockId: m.workoutBlockId ?? null,
           prescribedReps: m.prescribedReps,
           prescribedWeightMale: m.prescribedWeightMale,
           prescribedWeightFemale: m.prescribedWeightFemale,
@@ -419,11 +460,27 @@ export async function POST(req: NextRequest) {
       .where(eq(benchmarkWorkoutParts.benchmarkWorkoutId, benchmarkWorkoutId))
       .orderBy(benchmarkWorkoutParts.orderIndex);
 
+    const bmBlocks =
+      bmParts.length > 0
+        ? await db
+            .select()
+            .from(benchmarkWorkoutBlocks)
+            .where(
+              inArray(
+                benchmarkWorkoutBlocks.benchmarkWorkoutPartId,
+                bmParts.map((p) => p.id)
+              )
+            )
+            .orderBy(benchmarkWorkoutBlocks.orderIndex)
+        : [];
+
     const bmMovements = await db
       .select({
         movementId: benchmarkWorkoutMovements.movementId,
         orderIndex: benchmarkWorkoutMovements.orderIndex,
         benchmarkWorkoutPartId: benchmarkWorkoutMovements.benchmarkWorkoutPartId,
+        benchmarkWorkoutBlockId:
+          benchmarkWorkoutMovements.benchmarkWorkoutBlockId,
         prescribedReps: benchmarkWorkoutMovements.prescribedReps,
         prescribedWeightMale: benchmarkWorkoutMovements.prescribedWeightMale,
         prescribedWeightFemale: benchmarkWorkoutMovements.prescribedWeightFemale,
@@ -554,6 +611,41 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // Copy benchmark blocks to workout_blocks. Build a map from
+      // benchmarkBlockId to the new workoutBlockId so movements can be
+      // stamped with the right pointer below.
+      const benchmarkBlockIdToWorkoutBlockId = new Map<string, string>();
+      if (bmBlocks.length > 0) {
+        const blocksToInsert = bmBlocks
+          .map((b) => {
+            const workoutPartId = benchmarkPartIdToWorkoutPartId.get(
+              b.benchmarkWorkoutPartId
+            );
+            if (!workoutPartId) return null;
+            return {
+              source: b,
+              values: {
+                workoutPartId,
+                orderIndex: b.orderIndex,
+                title: b.title,
+              },
+            };
+          })
+          .filter(<T,>(x: T | null): x is T => x !== null);
+        if (blocksToInsert.length > 0) {
+          const inserted = await tx
+            .insert(workoutBlocks)
+            .values(blocksToInsert.map((b) => b.values))
+            .returning({ id: workoutBlocks.id });
+          for (let k = 0; k < inserted.length; k++) {
+            benchmarkBlockIdToWorkoutBlockId.set(
+              blocksToInsert[k].source.id,
+              inserted[k].id
+            );
+          }
+        }
+      }
+
       if (bmMovements.length > 0) {
         await tx.insert(workoutMovements).values(
           bmMovements.map((m) => {
@@ -561,9 +653,15 @@ export async function POST(req: NextRequest) {
               ? benchmarkPartIdToWorkoutPartId.get(m.benchmarkWorkoutPartId) ??
                 firstWorkoutPartId!
               : firstWorkoutPartId!;
+            const workoutBlockId = m.benchmarkWorkoutBlockId
+              ? benchmarkBlockIdToWorkoutBlockId.get(
+                  m.benchmarkWorkoutBlockId
+                ) ?? null
+              : null;
             return {
               workoutId: workout.id,
               workoutPartId: partId,
+              workoutBlockId,
               movementId: m.movementId,
               orderIndex: m.orderIndex,
               prescribedReps: m.prescribedReps,
@@ -689,11 +787,38 @@ export async function POST(req: NextRequest) {
         })
         .returning();
 
+      const blockTempRefToId = new Map<string, string>();
+      if (Array.isArray(p.blocks) && p.blocks.length > 0) {
+        const blocksToInsert = p.blocks
+          .map((b, k) => ({
+            input: b,
+            values: {
+              workoutPartId: part.id,
+              orderIndex: b.orderIndex ?? k,
+              title: b.title?.toString().trim() ?? "",
+            },
+          }))
+          .filter((entry) => entry.values.title.length > 0);
+        if (blocksToInsert.length > 0) {
+          const inserted = await tx
+            .insert(workoutBlocks)
+            .values(blocksToInsert.map((entry) => entry.values))
+            .returning({ id: workoutBlocks.id });
+          for (let k = 0; k < inserted.length; k++) {
+            const tempRef = blocksToInsert[k].input.tempRef;
+            if (tempRef) blockTempRefToId.set(tempRef, inserted[k].id);
+          }
+        }
+      }
+
       if (p.movements.length > 0) {
         await tx.insert(workoutMovements).values(
           p.movements.map((m, j) => ({
             workoutId: workout.id,
             workoutPartId: part.id,
+            workoutBlockId: m.blockTempRef
+              ? blockTempRefToId.get(m.blockTempRef) ?? null
+              : m.blockId ?? null,
             movementId: m.movementId,
             orderIndex: m.orderIndex ?? j,
             prescribedReps: m.prescribedReps || null,

@@ -72,10 +72,35 @@ export async function POST(req: NextRequest) {
 
   // metric_type defaults to "reps" in the column. Callers can pass an
   // explicit value when seeding a known cal/distance/weight movement.
-  const metricType =
-    typeof body.metricType === "string" &&
-    ["reps", "weight", "calories", "distance"].includes(body.metricType)
-      ? (body.metricType as "reps" | "weight" | "calories" | "distance")
+  const VALID_METRIC_TYPES = ["reps", "weight", "calories", "distance", "duration"] as const;
+  type MT = (typeof VALID_METRIC_TYPES)[number];
+  const isMetricType = (v: unknown): v is MT =>
+    typeof v === "string" && (VALID_METRIC_TYPES as readonly string[]).includes(v);
+
+  const metricType = isMetricType(body.metricType) ? body.metricType : undefined;
+
+  // Phase 2 movement settings — let the user declare which fields the
+  // builder should surface for this movement.
+  const VALID_RX_FIELDS = [
+    "weight",
+    "weight_bw",
+    "height",
+    "calories",
+    "distance",
+    "duration",
+    "tempo",
+  ] as const;
+  const supportedMetricTypes = Array.isArray(body.supportedMetricTypes)
+    ? body.supportedMetricTypes.filter(isMetricType)
+    : undefined;
+  const rxFields = Array.isArray(body.rxFields)
+    ? body.rxFields.filter((f: unknown): f is string =>
+        typeof f === "string" && (VALID_RX_FIELDS as readonly string[]).includes(f)
+      )
+    : undefined;
+  const rxDefaults =
+    body.rxDefaults && typeof body.rxDefaults === "object" && !Array.isArray(body.rxDefaults)
+      ? body.rxDefaults
       : undefined;
 
   try {
@@ -87,6 +112,11 @@ export async function POST(req: NextRequest) {
         isWeighted: body.isWeighted ?? false,
         is1rmApplicable: body.is1rmApplicable ?? false,
         ...(metricType ? { metricType } : {}),
+        ...(supportedMetricTypes && supportedMetricTypes.length > 0
+          ? { supportedMetricTypes }
+          : {}),
+        ...(rxFields ? { rxFields } : {}),
+        ...(rxDefaults ? { rxDefaults } : {}),
         commonRxWeightMale: body.commonRxWeightMale || null,
         commonRxWeightFemale: body.commonRxWeightFemale || null,
         createdBy: user.id,

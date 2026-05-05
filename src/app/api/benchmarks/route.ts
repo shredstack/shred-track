@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
   benchmarkWorkouts,
+  benchmarkWorkoutBlocks,
   benchmarkWorkoutMovements,
   benchmarkWorkoutParts,
   communityMemberships,
@@ -14,6 +15,7 @@ import { pickBestScore, type ScoreRow } from "@/lib/crossfit/benchmark-stats";
 import type { WorkoutType } from "@/types/crossfit";
 import {
   assembleBenchmarkParts,
+  coerceBenchmarkBlockValues,
   coerceBenchmarkMovementValues,
   coerceBenchmarkPartValues,
   fetchBenchmarkPartsAndMovements,
@@ -81,7 +83,7 @@ export async function GET(req: NextRequest) {
     .orderBy(benchmarkWorkouts.name);
 
   const benchmarkIds = rows.map((r) => r.id);
-  const { partsByBenchmark, movementsByBenchmark } =
+  const { partsByBenchmark, movementsByBenchmark, blocksByPart } =
     await fetchBenchmarkPartsAndMovements(benchmarkIds);
 
   // Optional: aggregate user score stats per benchmark.
@@ -161,7 +163,8 @@ export async function GET(req: NextRequest) {
     const { parts, flatMovements } = assembleBenchmarkParts(
       bw,
       partsByBenchmark.get(bw.id) ?? [],
-      movementsByBenchmark.get(bw.id) ?? []
+      movementsByBenchmark.get(bw.id) ?? [],
+      blocksByPart
     );
     return {
       id: bw.id,
@@ -388,13 +391,41 @@ export async function POST(req: NextRequest) {
         })
         .returning();
 
+      const blockTempRefToId = new Map<string, string>();
+      if (Array.isArray(p.blocks) && p.blocks.length > 0) {
+        const blocksToInsert = p.blocks
+          .map((b, k) => ({ input: b, values: coerceBenchmarkBlockValues(b, k) }))
+          .filter((entry) => entry.values.title.length > 0);
+        if (blocksToInsert.length > 0) {
+          const inserted = await tx
+            .insert(benchmarkWorkoutBlocks)
+            .values(
+              blocksToInsert.map((entry) => ({
+                benchmarkWorkoutPartId: insertedPart.id,
+                ...entry.values,
+              }))
+            )
+            .returning({ id: benchmarkWorkoutBlocks.id });
+          for (let k = 0; k < inserted.length; k++) {
+            const tempRef = blocksToInsert[k].input.tempRef;
+            if (tempRef) blockTempRefToId.set(tempRef, inserted[k].id);
+          }
+        }
+      }
+
       if (p.movements.length > 0) {
         await tx.insert(benchmarkWorkoutMovements).values(
-          p.movements.map((m, j) => ({
-            benchmarkWorkoutId: bw.id,
-            benchmarkWorkoutPartId: insertedPart.id,
-            ...coerceBenchmarkMovementValues(m, j),
-          }))
+          p.movements.map((m, j) => {
+            const resolvedBlockId = m.blockTempRef
+              ? blockTempRefToId.get(m.blockTempRef) ?? null
+              : m.blockId ?? null;
+            return {
+              benchmarkWorkoutId: bw.id,
+              benchmarkWorkoutPartId: insertedPart.id,
+              benchmarkWorkoutBlockId: resolvedBlockId,
+              ...coerceBenchmarkMovementValues(m, j),
+            };
+          })
         );
       }
     }

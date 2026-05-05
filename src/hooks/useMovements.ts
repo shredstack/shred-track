@@ -3,7 +3,10 @@ import type {
   MovementOption,
   MovementCategory,
   MovementMetricType,
+  RxField,
+  RxDefaults,
 } from "@/types/crossfit";
+import { MOVEMENT_METRIC_TYPES, RX_FIELDS } from "@/types/crossfit";
 
 // ============================================
 // API response shape (from /api/movements)
@@ -16,22 +19,33 @@ interface MovementRow {
   isWeighted: boolean;
   is1rmApplicable: boolean;
   metricType: string | null;
+  supportedMetricTypes?: string[] | null;
+  rxFields?: string[] | null;
+  rxDefaults?: Record<string, unknown> | null;
   commonRxWeightMale: string | null;
   commonRxWeightFemale: string | null;
   videoUrl: string | null;
   createdBy: string | null;
 }
 
+function toMetricType(value: string | null | undefined): MovementMetricType | null {
+  if (!value) return null;
+  return (MOVEMENT_METRIC_TYPES as readonly string[]).includes(value)
+    ? (value as MovementMetricType)
+    : null;
+}
+
 function toMovementOption(row: MovementRow): MovementOption {
-  // Older API responses may pre-date the metric_type column, so default to
-  // "reps" for safety. The DB column is NOT NULL, so this only matters for
-  // tests / mocks.
-  const metricType: MovementMetricType =
-    row.metricType === "weight" ||
-    row.metricType === "calories" ||
-    row.metricType === "distance"
-      ? row.metricType
-      : "reps";
+  const metricType: MovementMetricType = toMetricType(row.metricType) ?? "reps";
+
+  const supportedMetricTypes = (row.supportedMetricTypes ?? [])
+    .map(toMetricType)
+    .filter((m): m is MovementMetricType => m !== null);
+
+  const rxFields = (row.rxFields ?? []).filter((f): f is RxField =>
+    (RX_FIELDS as readonly string[]).includes(f)
+  );
+
   return {
     id: row.id,
     canonicalName: row.canonicalName,
@@ -39,6 +53,10 @@ function toMovementOption(row: MovementRow): MovementOption {
     isWeighted: row.isWeighted,
     is1rmApplicable: row.is1rmApplicable,
     metricType,
+    supportedMetricTypes:
+      supportedMetricTypes.length > 0 ? supportedMetricTypes : undefined,
+    rxFields: rxFields.length > 0 ? rxFields : undefined,
+    rxDefaults: (row.rxDefaults as RxDefaults | null) ?? undefined,
     commonRxWeightMale: row.commonRxWeightMale ?? undefined,
     commonRxWeightFemale: row.commonRxWeightFemale ?? undefined,
     videoUrl: row.videoUrl,
@@ -87,6 +105,10 @@ export interface CreateMovementInput {
   canonicalName: string;
   category?: MovementCategory;
   isWeighted?: boolean;
+  metricType?: MovementMetricType;
+  supportedMetricTypes?: MovementMetricType[];
+  rxFields?: RxField[];
+  rxDefaults?: RxDefaults;
 }
 
 export function useCreateMovement() {

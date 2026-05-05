@@ -22,6 +22,13 @@ function generateTempId(prefix: string) {
 export function benchmarkPartToBuilderPart(
   part: BenchmarkWorkoutPart
 ): WorkoutBuilderPart {
+  const blocks = (part.blocks ?? []).map((b) => ({
+    tempId: generateTempId("block"),
+    id: b.id,
+    title: b.title,
+    orderIndex: b.orderIndex,
+  }));
+  const blockTempByDbId = new Map(blocks.map((b) => [b.id ?? "", b.tempId]));
   return {
     tempId: generateTempId("part"),
     // Synthetic ids (legacy single-part backfill) shouldn't round-trip as a
@@ -128,8 +135,11 @@ export function benchmarkPartToBuilderPart(
         equipmentCount: m.equipmentCount ?? undefined,
         rxStandard: m.rxStandard ?? "",
         notes: m.notes ?? "",
+        blockId: m.blockId ?? null,
+        blockTempRef: m.blockId ? blockTempByDbId.get(m.blockId) ?? null : null,
       };
     }),
+    blocks,
   };
 }
 
@@ -216,6 +226,17 @@ export function builderPartToPayload(
       promoteSequenceToLadder: m.promoteSequenceToLadder || undefined,
       equipmentCount: m.equipmentCount,
       rxStandard: m.rxStandard || undefined,
+      blockId: m.blockId ?? null,
+      blockTempRef: m.blockTempRef ?? null,
     })),
+    blocks:
+      part.blocks.length > 0
+        ? part.blocks.map((b, i) => ({
+            id: b.id,
+            tempRef: b.tempId,
+            title: b.title,
+            orderIndex: b.orderIndex ?? i,
+          }))
+        : undefined,
   };
 }

@@ -8,6 +8,7 @@
 // renderers (preview cards, leaderboard headers) keep working.
 
 import {
+  benchmarkWorkoutBlocks,
   benchmarkWorkoutMovements,
   benchmarkWorkoutParts,
   movements,
@@ -21,6 +22,7 @@ import {
 import { parseDurationToSeconds } from "@/lib/crossfit/duration-parser";
 import type {
   BenchmarkMovement,
+  BenchmarkWorkoutBlock,
   BenchmarkWorkoutPart,
   IntervalRoundSpec,
   MovementCategory,
@@ -57,6 +59,21 @@ export interface BenchmarkPartMovementInput {
   equipmentCount?: number | null;
   rxStandard?: string | null;
   notes?: string | null;
+  // Block membership. `blockId` is the existing DB id (round-trip on
+  // edit). `blockTempRef` references a `BenchmarkBlockInput.tempRef` on
+  // the same part for newly-created blocks; the route resolves it to a
+  // real id post-insert. Either may be null = ungrouped within the part.
+  blockId?: string | null;
+  blockTempRef?: string | null;
+}
+
+export interface BenchmarkBlockInput {
+  id?: string;
+  // Client-side correlation key for newly-created blocks. Must be unique
+  // within the part. Movements reference this via `blockTempRef`.
+  tempRef?: string | null;
+  title: string;
+  orderIndex?: number;
 }
 
 export interface BenchmarkPartInput {
@@ -78,6 +95,7 @@ export interface BenchmarkPartInput {
   sideCadenceOpenEnded?: boolean;
   notes?: string | null;
   movements: BenchmarkPartMovementInput[];
+  blocks?: BenchmarkBlockInput[];
 }
 
 // ============================================
@@ -130,6 +148,16 @@ function normalizeIntervalRounds(
     out.push({ workSeconds: w, restSeconds: rest });
   }
   return out;
+}
+
+export function coerceBenchmarkBlockValues(
+  block: BenchmarkBlockInput,
+  fallbackOrderIndex: number
+) {
+  return {
+    title: block.title?.toString().trim() ?? "",
+    orderIndex: block.orderIndex ?? fallbackOrderIndex,
+  };
 }
 
 export function coerceBenchmarkPartValues(part: BenchmarkPartInput) {
@@ -210,10 +238,12 @@ type RawBenchmarkWorkout = {
 };
 
 type FetchedPart = typeof benchmarkWorkoutParts.$inferSelect;
+type FetchedBlock = typeof benchmarkWorkoutBlocks.$inferSelect;
 type FetchedMovementRow = {
   id: string;
   benchmarkWorkoutId: string;
   benchmarkWorkoutPartId: string | null;
+  benchmarkWorkoutBlockId: string | null;
   movementId: string;
   movementName: string;
   movementCategory: string;
@@ -247,6 +277,7 @@ export async function fetchBenchmarkPartsAndMovements(benchmarkIds: string[]) {
     return {
       partsByBenchmark: new Map<string, FetchedPart[]>(),
       movementsByBenchmark: new Map<string, FetchedMovementRow[]>(),
+      blocksByPart: new Map<string, FetchedBlock[]>(),
     };
   }
 
@@ -256,11 +287,25 @@ export async function fetchBenchmarkPartsAndMovements(benchmarkIds: string[]) {
     .where(inArray(benchmarkWorkoutParts.benchmarkWorkoutId, benchmarkIds))
     .orderBy(benchmarkWorkoutParts.orderIndex);
 
+  const partIds = allParts.map((p) => p.id);
+  const allBlocks: FetchedBlock[] =
+    partIds.length === 0
+      ? []
+      : await db
+          .select()
+          .from(benchmarkWorkoutBlocks)
+          .where(
+            inArray(benchmarkWorkoutBlocks.benchmarkWorkoutPartId, partIds)
+          )
+          .orderBy(benchmarkWorkoutBlocks.orderIndex);
+
   const allMovements: FetchedMovementRow[] = await db
     .select({
       id: benchmarkWorkoutMovements.id,
       benchmarkWorkoutId: benchmarkWorkoutMovements.benchmarkWorkoutId,
       benchmarkWorkoutPartId: benchmarkWorkoutMovements.benchmarkWorkoutPartId,
+      benchmarkWorkoutBlockId:
+        benchmarkWorkoutMovements.benchmarkWorkoutBlockId,
       movementId: benchmarkWorkoutMovements.movementId,
       movementName: movements.canonicalName,
       movementCategory: movements.category,
@@ -321,7 +366,14 @@ export async function fetchBenchmarkPartsAndMovements(benchmarkIds: string[]) {
     movementsByBenchmark.set(m.benchmarkWorkoutId, list);
   }
 
-  return { partsByBenchmark, movementsByBenchmark };
+  const blocksByPart = new Map<string, FetchedBlock[]>();
+  for (const b of allBlocks) {
+    const list = blocksByPart.get(b.benchmarkWorkoutPartId) ?? [];
+    list.push(b);
+    blocksByPart.set(b.benchmarkWorkoutPartId, list);
+  }
+
+  return { partsByBenchmark, movementsByBenchmark, blocksByPart };
 }
 
 function shapeMovement(m: FetchedMovementRow): BenchmarkMovement {
@@ -333,6 +385,7 @@ function shapeMovement(m: FetchedMovementRow): BenchmarkMovement {
     isWeighted: m.movementIsWeighted,
     metricType: m.movementMetricType as MovementMetricType,
     orderIndex: m.orderIndex,
+    blockId: m.benchmarkWorkoutBlockId,
     prescribedReps: m.prescribedReps,
     prescribedWeightMale:
       m.prescribedWeightMale != null ? Number(m.prescribedWeightMale) : null,
@@ -375,13 +428,18 @@ function shapeMovement(m: FetchedMovementRow): BenchmarkMovement {
   };
 }
 
+function shapeBlock(b: FetchedBlock): BenchmarkWorkoutBlock {
+  return { id: b.id, orderIndex: b.orderIndex, title: b.title };
+}
+
 // Assemble the public `parts[]` payload for one benchmark, falling back to a
 // synthetic single-part wrapper when no parts rows exist (legacy /
 // un-backfilled data).
 export function assembleBenchmarkParts(
   benchmark: RawBenchmarkWorkout,
   partsForBenchmark: FetchedPart[],
-  movementsForBenchmark: FetchedMovementRow[]
+  movementsForBenchmark: FetchedMovementRow[],
+  blocksByPart: Map<string, FetchedBlock[]> = new Map()
 ): { parts: BenchmarkWorkoutPart[]; flatMovements: BenchmarkMovement[] } {
   const movementsByPart = new Map<string | null, FetchedMovementRow[]>();
   for (const m of movementsForBenchmark) {
@@ -396,6 +454,7 @@ export function assembleBenchmarkParts(
   if (partsForBenchmark.length > 0) {
     for (const p of partsForBenchmark) {
       const movs = movementsByPart.get(p.id) ?? [];
+      const blocks = (blocksByPart.get(p.id) ?? []).map(shapeBlock);
       parts.push({
         id: p.id,
         orderIndex: p.orderIndex,
@@ -414,6 +473,7 @@ export function assembleBenchmarkParts(
         sideCadenceOpenEnded: p.sideCadenceOpenEnded,
         notes: p.notes,
         movements: movs.map(shapeMovement),
+        blocks,
       });
     }
   } else {
@@ -439,6 +499,7 @@ export function assembleBenchmarkParts(
       sideCadenceOpenEnded: false,
       notes: null,
       movements: movs.map(shapeMovement),
+      blocks: [],
     });
   }
 
