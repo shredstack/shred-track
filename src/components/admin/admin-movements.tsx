@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { Search, Plus, Pencil, Trash2, Video, Loader2, CheckCircle2, ShieldAlert } from "lucide-react";
 import {
+  CATEGORY_FILTER_OPTIONS,
   MOVEMENT_CATEGORIES,
   MOVEMENT_CATEGORY_COLORS,
   MOVEMENT_METRIC_TYPES,
@@ -334,7 +335,7 @@ export function AdminMovements() {
             Add
           </Button>
         </div>
-        <CategoryPills value={category} onChange={setCategory} />
+        <CategoryPills value={category} onChange={setCategory} options={CATEGORY_FILTER_OPTIONS} />
       </div>
 
       {/* Movement list */}

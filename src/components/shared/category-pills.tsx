@@ -1,40 +1,36 @@
 "use client";
 
-import {
-  CATEGORY_FILTER_OPTIONS,
-  type CategoryFilter,
-} from "@/types/crossfit";
+export interface PillOption<K extends string> {
+  key: K;
+  label: string;
+}
 
-interface CategoryPillsProps {
-  value: CategoryFilter;
-  onChange: (next: CategoryFilter) => void;
+interface CategoryPillsProps<K extends string> {
+  value: K;
+  onChange: (next: K) => void;
+  options: readonly PillOption<K>[];
   className?: string;
-  /** Hide labels not in this set — useful when an "Accessory" or "Other"
-   * pill would surface a category the page doesn't support. */
-  allowedKeys?: CategoryFilter[];
+  ariaLabel?: string;
 }
 
 /**
- * Horizontal-scrolling row of movement-category filter pills. Controlled —
- * the parent owns the active value. Used in the public movement library,
- * the workout-builder picker, and the admin movements page so any change
- * to the filter set propagates everywhere.
+ * Horizontal-scrolling row of filter pills. Controlled — the parent owns the
+ * active value and supplies the option set. Used in the public movement
+ * library, the workout-builder picker, the admin movements page, and the
+ * recovery library so any change to the look/feel propagates everywhere.
  */
-export function CategoryPills({
+export function CategoryPills<K extends string>({
   value,
   onChange,
+  options,
   className,
-  allowedKeys,
-}: CategoryPillsProps) {
-  const options = allowedKeys
-    ? CATEGORY_FILTER_OPTIONS.filter((o) => allowedKeys.includes(o.key))
-    : CATEGORY_FILTER_OPTIONS;
-
+  ariaLabel = "Filter",
+}: CategoryPillsProps<K>) {
   return (
     <div
       className={`overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${className ?? ""}`}
       role="tablist"
-      aria-label="Filter by category"
+      aria-label={ariaLabel}
     >
       <div className="flex gap-1.5">
         {options.map((opt) => {

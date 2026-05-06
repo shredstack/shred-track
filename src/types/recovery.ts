@@ -28,6 +28,31 @@ export const RECOVERY_BODY_REGIONS = [
 ] as const;
 export type RecoveryBodyRegion = (typeof RECOVERY_BODY_REGIONS)[number];
 
+export type RecoveryBodyRegionFilter = "all" | RecoveryBodyRegion;
+export type RecoveryCategoryFilter = "all" | RecoveryCategory;
+
+const formatRegionLabel = (r: RecoveryBodyRegion) =>
+  r.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+const formatCategoryLabel = (c: RecoveryCategory) =>
+  c.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+export const RECOVERY_BODY_REGION_FILTER_OPTIONS: {
+  key: RecoveryBodyRegionFilter;
+  label: string;
+}[] = [
+  { key: "all", label: "All" },
+  ...RECOVERY_BODY_REGIONS.map((r) => ({ key: r, label: formatRegionLabel(r) })),
+];
+
+export const RECOVERY_CATEGORY_FILTER_OPTIONS: {
+  key: RecoveryCategoryFilter;
+  label: string;
+}[] = [
+  { key: "all", label: "All" },
+  ...RECOVERY_CATEGORIES.map((c) => ({ key: c, label: formatCategoryLabel(c) })),
+];
+
 export type RecoveryVisibility = "public" | "gym";
 export type RecoveryVideoSource = "upload" | "external";
 

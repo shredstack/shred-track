@@ -13,7 +13,7 @@ import type {
   MovementCategory,
   CategoryFilter,
 } from "@/types/crossfit";
-import { MOVEMENT_CATEGORY_COLORS } from "@/types/crossfit";
+import { CATEGORY_FILTER_OPTIONS, MOVEMENT_CATEGORY_COLORS } from "@/types/crossfit";
 
 // ============================================
 // Fallback library — used only when the live fetch hasn't returned yet
@@ -271,6 +271,7 @@ export function MovementSearch({
             setCategory(next);
             setHighlightIndex(0);
           }}
+          options={CATEGORY_FILTER_OPTIONS}
           className="px-3 pb-2"
         />
 

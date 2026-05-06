@@ -17,14 +17,17 @@ import {
 import {
   RECOVERY_CATEGORIES,
   RECOVERY_BODY_REGIONS,
+  RECOVERY_BODY_REGION_FILTER_OPTIONS,
   type RecoveryCategory,
   type RecoveryBodyRegion,
+  type RecoveryBodyRegionFilter,
 } from "@/types/recovery";
+import { CategoryPills } from "@/components/shared/category-pills";
 
 export default function RecoveryMovementsPage() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<RecoveryCategory | "all">("all");
-  const [bodyRegion, setBodyRegion] = useState<RecoveryBodyRegion | "all">("all");
+  const [bodyRegion, setBodyRegion] = useState<RecoveryBodyRegionFilter>("all");
   const [pendingOnly, setPendingOnly] = useState(false);
   const [mineOnly, setMineOnly] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -50,6 +53,13 @@ export default function RecoveryMovementsPage() {
           />
         </div>
 
+        <CategoryPills
+          value={bodyRegion}
+          onChange={setBodyRegion}
+          options={RECOVERY_BODY_REGION_FILTER_OPTIONS}
+          ariaLabel="Filter by body region"
+          className="-mx-1 px-1"
+        />
         <div className="flex flex-wrap gap-2 text-xs">
           <select
             className="rounded-md border border-input bg-background px-2 py-1"
@@ -60,18 +70,6 @@ export default function RecoveryMovementsPage() {
             {RECOVERY_CATEGORIES.map((c) => (
               <option key={c} value={c}>
                 {c}
-              </option>
-            ))}
-          </select>
-          <select
-            className="rounded-md border border-input bg-background px-2 py-1"
-            value={bodyRegion}
-            onChange={(e) => setBodyRegion(e.target.value as RecoveryBodyRegion | "all")}
-          >
-            <option value="all">All regions</option>
-            {RECOVERY_BODY_REGIONS.map((r) => (
-              <option key={r} value={r}>
-                {r.replace(/_/g, " ")}
               </option>
             ))}
           </select>
