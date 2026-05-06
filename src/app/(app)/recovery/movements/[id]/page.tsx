@@ -32,6 +32,7 @@ import {
   externalEmbedUrl,
   externalThumbnailUrl,
 } from "@/lib/recovery/storage";
+import { GymOverrideEditor } from "@/components/recovery/gym-override-editor";
 
 export default function RecoveryMovementDetailPage({
   params,
@@ -50,6 +51,10 @@ export default function RecoveryMovementDetailPage({
     (m) => m.isActive && (m.isAdmin || m.isCoach)
   );
   const isSuper = !!ctx?.user.isSuperAdmin;
+  const canEditActiveGymOverride =
+    !!activeMembership &&
+    activeMembership.isActive &&
+    (activeMembership.isAdmin || activeMembership.isCoach);
 
   if (isLoading) {
     return (
@@ -139,6 +144,16 @@ export default function RecoveryMovementDetailPage({
             )}
           </CardContent>
         </Card>
+      )}
+
+      {canEditActiveGymOverride && activeMembership && (
+        <GymOverrideEditor
+          movementId={data.id}
+          communityId={activeMembership.communityId}
+          communityName={activeMembership.communityName}
+          notesOverride={data.notesOverride ?? null}
+          canonicalDescription={data.description ?? null}
+        />
       )}
 
       {/* Default prescription chips */}

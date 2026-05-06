@@ -175,3 +175,62 @@ export async function fetchVideoPlaybackUrl(movementId: string, videoId: string)
   if (!res.ok) throw new Error("Failed to fetch video URL");
   return res.json() as Promise<{ url: string; external: boolean; provider?: string; videoId?: string }>;
 }
+
+// ============================================
+// Gym notes overrides
+// ============================================
+
+export function useUpsertGymOverride() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      movementId: string;
+      communityId: string;
+      notesOverride: string;
+    }) => {
+      const res = await fetch(
+        `/api/recovery/movements/${input.movementId}/gym-overrides`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            communityId: input.communityId,
+            notesOverride: input.notesOverride,
+          }),
+        }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "Failed to save note");
+      }
+      return res.json();
+    },
+    onSuccess: (_data, input) => {
+      qc.invalidateQueries({ queryKey: ["recovery-movement", input.movementId] });
+    },
+  });
+}
+
+export function useClearGymOverride() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { movementId: string; communityId: string }) => {
+      const res = await fetch(
+        `/api/recovery/movements/${input.movementId}/gym-overrides`,
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ communityId: input.communityId }),
+        }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "Failed to clear note");
+      }
+      return res.json();
+    },
+    onSuccess: (_data, input) => {
+      qc.invalidateQueries({ queryKey: ["recovery-movement", input.movementId] });
+    },
+  });
+}
