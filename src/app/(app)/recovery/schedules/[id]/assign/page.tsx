@@ -1,8 +1,8 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2, Users, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Loader2, Search, Trash2, Users } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,7 @@ import {
   useCreateAssignment,
   useDeleteAssignment,
 } from "@/hooks/useRecoverySchedules";
+import { useGymMembers, type GymMemberRow } from "@/hooks/useGymMembers";
 import { toast } from "sonner";
 
 export default function AssignSchedulePage({
@@ -28,23 +29,35 @@ export default function AssignSchedulePage({
   const remove = useDeleteAssignment();
 
   const [forAllMembers, setForAllMembers] = useState(true);
-  const [userId, setUserId] = useState("");
+  const [userId, setUserId] = useState<string | null>(null);
   const [startsOn, setStartsOn] = useState(() => new Date().toISOString().slice(0, 10));
   const [endsOn, setEndsOn] = useState("");
   const [durationLabel, setDurationLabel] = useState("");
 
+  const { data: members } = useGymMembers(schedule?.communityId ?? null);
+  const memberById = useMemo(() => {
+    const map = new Map<string, GymMemberRow>();
+    for (const m of members ?? []) map.set(m.userId, m);
+    return map;
+  }, [members]);
+  const selectedMember = userId ? memberById.get(userId) ?? null : null;
+
   const submit = async () => {
+    if (!forAllMembers && !userId) {
+      toast.error("Pick an athlete");
+      return;
+    }
     try {
       await create.mutateAsync({
         scheduleId: id,
-        userId: forAllMembers ? null : userId.trim() || null,
+        userId: forAllMembers ? null : userId,
         communityId: forAllMembers ? schedule?.communityId ?? null : null,
         startsOn,
         endsOn: endsOn || null,
         durationLabel: durationLabel || null,
       });
       toast.success("Assigned");
-      setUserId("");
+      setUserId(null);
       setEndsOn("");
       setDurationLabel("");
     } catch (e) {
@@ -96,15 +109,12 @@ export default function AssignSchedulePage({
               </div>
               {!forAllMembers && (
                 <div>
-                  <Label className="text-xs">Athlete user ID</Label>
-                  <Input
-                    value={userId}
-                    onChange={(e) => setUserId(e.target.value)}
-                    placeholder="UUID"
+                  <Label className="text-xs">Athlete</Label>
+                  <AthletePicker
+                    members={members ?? []}
+                    selected={selectedMember}
+                    onSelect={(m) => setUserId(m.userId)}
                   />
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    Athlete picker is coming soon — paste the user UUID for now.
-                  </p>
                 </div>
               )}
               <div className="grid grid-cols-2 gap-2">
@@ -140,13 +150,18 @@ export default function AssignSchedulePage({
               No assignments yet.
             </p>
           ) : (
-            assignments.map((a) => (
+            assignments.map((a) => {
+              const m = a.userId ? memberById.get(a.userId) : null;
+              const targetLabel = a.userId
+                ? m
+                  ? `${m.name || m.email}`
+                  : `User ${a.userId.slice(0, 8)}…`
+                : "All members";
+              return (
               <Card key={a.id}>
                 <CardContent className="py-3 flex items-center gap-2">
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm">
-                      {a.userId ? `User ${a.userId.slice(0, 8)}…` : "All members"}
-                    </p>
+                    <p className="text-sm">{targetLabel}</p>
                     <p className="text-[11px] text-muted-foreground">
                       {a.startsOn}
                       {a.endsOn ? ` → ${a.endsOn}` : " → ongoing"}
@@ -167,9 +182,108 @@ export default function AssignSchedulePage({
                   </button>
                 </CardContent>
               </Card>
-            ))
+              );
+            })
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+function AthletePicker({
+  members,
+  selected,
+  onSelect,
+}: {
+  members: GymMemberRow[];
+  selected: GymMemberRow | null;
+  onSelect: (m: GymMemberRow) => void;
+}) {
+  const [search, setSearch] = useState("");
+
+  // Active members only — assigning a recovery schedule to a deactivated
+  // member would surface in their today view if they ever rejoined, but
+  // the common case is an in-good-standing athlete.
+  const active = useMemo(
+    () => members.filter((m) => m.isActive),
+    [members]
+  );
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return active;
+    return active.filter(
+      (m) =>
+        m.name.toLowerCase().includes(q) ||
+        m.email.toLowerCase().includes(q)
+    );
+  }, [active, search]);
+
+  return (
+    <div className="space-y-1.5">
+      {selected && (
+        <div className="flex items-center justify-between rounded-md border border-primary bg-primary/5 px-3 py-2">
+          <div className="min-w-0">
+            <p className="text-sm font-medium truncate">
+              {selected.name || selected.email}
+            </p>
+            {selected.name && (
+              <p className="text-[11px] text-muted-foreground truncate">
+                {selected.email}
+              </p>
+            )}
+          </div>
+          <Check className="h-4 w-4 text-primary shrink-0" />
+        </div>
+      )}
+      <div className="relative">
+        <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by name or email…"
+          className="pl-9"
+        />
+      </div>
+      {active.length === 0 ? (
+        <p className="text-[11px] text-muted-foreground py-2">
+          No active members in this gym.
+        </p>
+      ) : filtered.length === 0 ? (
+        <p className="text-[11px] text-muted-foreground py-2">
+          No athletes match your search.
+        </p>
+      ) : (
+        <div className="max-h-56 overflow-y-auto rounded-md border border-input">
+          {filtered.map((m) => {
+            const isSelected = selected?.userId === m.userId;
+            return (
+              <button
+                key={m.userId}
+                type="button"
+                onClick={() => onSelect(m)}
+                className={`w-full flex items-center justify-between px-3 py-2 text-left text-sm border-b border-input last:border-0 ${
+                  isSelected ? "bg-primary/10" : "hover:bg-accent/50"
+                }`}
+              >
+                <div className="min-w-0">
+                  <p className="truncate">{m.name || m.email}</p>
+                  {m.name && (
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      {m.email}
+                    </p>
+                  )}
+                </div>
+                {(m.isAdmin || m.isCoach) && (
+                  <Badge variant="outline" className="text-[10px] shrink-0">
+                    {m.isAdmin ? "admin" : "coach"}
+                  </Badge>
+                )}
+              </button>
+            );
+          })}
+        </div>
       )}
     </div>
   );
