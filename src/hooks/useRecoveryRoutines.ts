@@ -53,6 +53,28 @@ export function useCreateRecoveryRoutine() {
   });
 }
 
+export function useUpdateRecoveryRoutine() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      id: string;
+      data: Partial<CreateRoutineInput>;
+    }) => {
+      const res = await fetch(`/api/recovery/routines/${input.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input.data),
+      });
+      if (!res.ok) throw new Error("Failed to update routine");
+      return res.json();
+    },
+    onSuccess: (_d, input) => {
+      qc.invalidateQueries({ queryKey: ["recovery-routines"] });
+      qc.invalidateQueries({ queryKey: ["recovery-routine", input.id] });
+    },
+  });
+}
+
 export function useDeleteRecoveryRoutine() {
   const qc = useQueryClient();
   return useMutation({

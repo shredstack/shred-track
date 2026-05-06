@@ -2,11 +2,12 @@
 
 import { use } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2, Users } from "lucide-react";
+import { ArrowLeft, Loader2, Pencil, Users } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useRecoverySchedule, useDeleteRecoverySchedule } from "@/hooks/useRecoverySchedules";
+import { useGymContext } from "@/hooks/useGymContext";
 import { formatPrescription } from "@/types/recovery";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -19,6 +20,7 @@ export default function ScheduleDetailPage({
   const { id } = use(params);
   const { data, isLoading } = useRecoverySchedule(id);
   const remove = useDeleteRecoverySchedule();
+  const { data: ctx } = useGymContext();
   const router = useRouter();
 
   if (isLoading) {
@@ -29,6 +31,18 @@ export default function ScheduleDetailPage({
     );
   }
   if (!data) return null;
+
+  const isOwner = ctx?.user.id === data.createdBy;
+  const isGymCoach = !!(
+    data.communityId &&
+    ctx?.memberships.some(
+      (m) =>
+        m.communityId === data.communityId &&
+        m.isActive &&
+        (m.isAdmin || m.isCoach)
+    )
+  );
+  const canEdit = !!ctx?.user.isSuperAdmin || isOwner || isGymCoach;
 
   const slotsByDay = new Map<string, typeof data.slots>();
   (data.slots ?? []).forEach((s) => {
@@ -58,18 +72,28 @@ export default function ScheduleDetailPage({
         <ArrowLeft className="h-3.5 w-3.5 mr-1" />
         Back
       </Link>
-      <div>
-        <h1 className="text-xl font-bold">{data.name}</h1>
-        <div className="flex items-center gap-2 mt-1 flex-wrap">
-          <Badge variant="outline" className="text-[10px]">
-            {data.kind === "day_keyed"
-              ? `Day-keyed (${data.rotationDays}d)`
-              : `${data.weeklyTarget}× per week`}
-          </Badge>
-          {data.communityId && <Badge variant="secondary" className="text-[10px]">Gym</Badge>}
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h1 className="text-xl font-bold">{data.name}</h1>
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
+            <Badge variant="outline" className="text-[10px]">
+              {data.kind === "day_keyed"
+                ? `Day-keyed (${data.rotationDays}d)`
+                : `${data.weeklyTarget}× per week`}
+            </Badge>
+            {data.communityId && <Badge variant="secondary" className="text-[10px]">Gym</Badge>}
+          </div>
+          {data.description && (
+            <p className="text-sm text-muted-foreground mt-2">{data.description}</p>
+          )}
         </div>
-        {data.description && (
-          <p className="text-sm text-muted-foreground mt-2">{data.description}</p>
+        {canEdit && (
+          <Link href={`/recovery/schedules/${id}/edit`}>
+            <Button size="sm" variant="outline">
+              <Pencil className="h-3.5 w-3.5 mr-1" />
+              Edit
+            </Button>
+          </Link>
         )}
       </div>
 

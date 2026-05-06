@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Loader2, ChevronRight } from "lucide-react";
+import { ChevronRight, Loader2, Plus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { useRecoveryRoutines } from "@/hooks/useRecoveryRoutines";
 
 export default function RecoveryRoutinesPage() {
@@ -11,7 +12,15 @@ export default function RecoveryRoutinesPage() {
 
   return (
     <div className="flex flex-col gap-3">
-      <h1 className="text-lg font-semibold">Routines</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-semibold">Routines</h1>
+        <Link href="/recovery/routines/new">
+          <Button size="sm" variant="outline">
+            <Plus className="h-3.5 w-3.5 mr-1" />
+            Add routine
+          </Button>
+        </Link>
+      </div>
       <p className="text-xs text-muted-foreground">
         Composite movements bundled together. Drop one into a schedule and it
         expands into all of its child movements when you log the day.
@@ -23,8 +32,17 @@ export default function RecoveryRoutinesPage() {
         </div>
       ) : !data || data.length === 0 ? (
         <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            No routines yet. (Coming soon: a routine builder.)
+          <CardContent className="py-10 text-center space-y-3">
+            <p className="text-sm text-muted-foreground">
+              No routines yet. Bundle a few movements together to reuse them
+              across schedules.
+            </p>
+            <Link href="/recovery/routines/new">
+              <Button size="sm">
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Build your first routine
+              </Button>
+            </Link>
           </CardContent>
         </Card>
       ) : (

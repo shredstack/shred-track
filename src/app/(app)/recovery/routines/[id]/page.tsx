@@ -2,9 +2,11 @@
 
 import { use } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, Pencil } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { useRecoveryRoutine } from "@/hooks/useRecoveryRoutines";
+import { useGymContext } from "@/hooks/useGymContext";
 import { formatPrescription } from "@/types/recovery";
 
 export default function RoutineDetailPage({
@@ -14,6 +16,7 @@ export default function RoutineDetailPage({
 }) {
   const { id } = use(params);
   const { data, isLoading } = useRecoveryRoutine(id);
+  const { data: ctx } = useGymContext();
 
   if (isLoading) {
     return (
@@ -24,6 +27,18 @@ export default function RoutineDetailPage({
   }
   if (!data) return null;
 
+  const isOwner = ctx?.user.id === data.createdBy;
+  const isGymCoach = !!(
+    data.communityId &&
+    ctx?.memberships.some(
+      (m) =>
+        m.communityId === data.communityId &&
+        m.isActive &&
+        (m.isAdmin || m.isCoach)
+    )
+  );
+  const canEdit = !!ctx?.user.isSuperAdmin || isOwner || isGymCoach;
+
   return (
     <div className="flex flex-col gap-4">
       <Link
@@ -33,10 +48,20 @@ export default function RoutineDetailPage({
         <ArrowLeft className="h-3.5 w-3.5 mr-1" />
         Back
       </Link>
-      <div>
-        <h1 className="text-xl font-bold">{data.name}</h1>
-        {data.description && (
-          <p className="text-sm text-muted-foreground mt-1">{data.description}</p>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h1 className="text-xl font-bold">{data.name}</h1>
+          {data.description && (
+            <p className="text-sm text-muted-foreground mt-1">{data.description}</p>
+          )}
+        </div>
+        {canEdit && (
+          <Link href={`/recovery/routines/${id}/edit`}>
+            <Button size="sm" variant="outline">
+              <Pencil className="h-3.5 w-3.5 mr-1" />
+              Edit
+            </Button>
+          </Link>
         )}
       </div>
 
