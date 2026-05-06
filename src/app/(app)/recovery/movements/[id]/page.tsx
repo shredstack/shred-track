@@ -22,10 +22,18 @@ import { Label } from "@/components/ui/label";
 import {
   useRecoveryMovement,
   useAddExternalVideo,
+  useUploadRecoveryVideo,
   useDeleteRecoveryVideo,
   useValidateRecoveryMovement,
   fetchVideoPlaybackUrl,
 } from "@/hooks/useRecoveryMovements";
+import {
+  VIDEO_UPLOAD_ACCEPT,
+  VIDEO_UPLOAD_ALLOWED_MIME,
+  VIDEO_UPLOAD_MAX_BYTES,
+  VIDEO_UPLOAD_MAX_DURATION_SECONDS,
+  formatBytes,
+} from "@/lib/recovery/video-config";
 import { useGymContext, useActiveMembership } from "@/hooks/useGymContext";
 import { formatPrescription, type RecoveryVideo, type RecoveryVisibility } from "@/types/recovery";
 import {
@@ -360,15 +368,22 @@ function PlaybackDialog({
   );
 }
 
+type AddVideoMode = "external" | "upload";
+
 function AddVideoDialog(props: {
   open: boolean;
   onClose: () => void;
   movementId: string;
 }) {
+  const [mode, setMode] = useState<AddVideoMode>("external");
   const [url, setUrl] = useState("");
   const [label, setLabel] = useState("");
   const [visibility, setVisibility] = useState<RecoveryVisibility>("gym");
   const [confirmRights, setConfirmRights] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [fileDuration, setFileDuration] = useState<number | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [confirmingPublic, setConfirmingPublic] = useState(false);
   const activeMembership = useActiveMembership();
   const { data: ctx } = useGymContext();
   const isSuper = !!ctx?.user.isSuperAdmin;
@@ -377,34 +392,104 @@ function AddVideoDialog(props: {
   );
   const canPublic = isSuper || isCoachOrAdmin;
   const add = useAddExternalVideo();
+  const upload = useUploadRecoveryVideo();
+  const submitting = add.isPending || upload.isPending;
 
-  const submit = async () => {
-    if (!url.trim()) {
-      toast.error("URL required");
+  const reset = () => {
+    setMode("external");
+    setUrl("");
+    setLabel("");
+    setFile(null);
+    setFileDuration(null);
+    setFileError(null);
+    setConfirmRights(false);
+    setConfirmingPublic(false);
+  };
+
+  const onFilePicked = async (next: File | null) => {
+    setFileError(null);
+    setFileDuration(null);
+    setFile(next);
+    if (!next) return;
+    if (!VIDEO_UPLOAD_ALLOWED_MIME.has(next.type)) {
+      setFileError("Only .mp4 or .mov video files are supported");
+      setFile(null);
       return;
     }
+    if (next.size > VIDEO_UPLOAD_MAX_BYTES) {
+      setFileError(`File is ${formatBytes(next.size)} — max ${formatBytes(VIDEO_UPLOAD_MAX_BYTES)}`);
+      setFile(null);
+      return;
+    }
+    // Probe duration via a hidden video element. Some Safari + h.265 combos
+    // can fail to report duration; in that case we skip the duration cap.
+    const duration = await probeVideoDuration(next).catch(() => null);
+    if (duration !== null && duration > VIDEO_UPLOAD_MAX_DURATION_SECONDS) {
+      setFileError(
+        `Video is ${Math.round(duration)}s long — max ${VIDEO_UPLOAD_MAX_DURATION_SECONDS}s (5 min)`
+      );
+      setFile(null);
+      return;
+    }
+    setFileDuration(duration);
+  };
+
+  const validateBase = () => {
     if (!confirmRights) {
       toast.error("Please confirm you have rights to share this content");
-      return;
+      return false;
     }
     if (visibility === "gym" && !activeMembership) {
       toast.error("Switch to a gym to add gym-visibility videos");
+      return false;
+    }
+    return true;
+  };
+
+  const beginSubmit = () => {
+    if (!validateBase()) return;
+    if (mode === "external" && !url.trim()) {
+      toast.error("URL required");
       return;
     }
+    if (mode === "upload" && !file) {
+      toast.error("Pick a video file");
+      return;
+    }
+    if (visibility === "public") {
+      setConfirmingPublic(true);
+      return;
+    }
+    void doSubmit();
+  };
 
+  const doSubmit = async () => {
+    setConfirmingPublic(false);
     try {
-      await add.mutateAsync({
-        movementId: props.movementId,
-        externalUrl: url.trim(),
-        visibility,
-        communityId: visibility === "gym" ? activeMembership!.communityId : null,
-        label: label || undefined,
-        rightsConfirmed: true,
-      });
+      const communityId =
+        visibility === "gym" ? activeMembership!.communityId : null;
+      if (mode === "external") {
+        await add.mutateAsync({
+          movementId: props.movementId,
+          externalUrl: url.trim(),
+          visibility,
+          communityId,
+          label: label || undefined,
+          rightsConfirmed: true,
+        });
+      } else {
+        await upload.mutateAsync({
+          movementId: props.movementId,
+          file: file!,
+          visibility,
+          communityId,
+          label: label || undefined,
+          durationSeconds: fileDuration ?? undefined,
+          rightsConfirmed: true,
+        });
+      }
       toast.success("Video added");
-      setUrl("");
-      setLabel("");
-      setConfirmRights(false);
+      reset();
       props.onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed");
@@ -412,57 +497,175 @@ function AddVideoDialog(props: {
   };
 
   return (
-    <Dialog open={props.open} onOpenChange={(v) => !v && props.onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Add a video</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div>
-            <Label className="text-xs">YouTube or Vimeo URL</Label>
-            <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://youtube.com/..." />
-            <p className="text-[10px] text-muted-foreground mt-1">
-              File uploads are coming soon — for now paste an external link.
-            </p>
-          </div>
-          <div>
-            <Label className="text-xs">Label (optional)</Label>
-            <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder='e.g. "Front view"' />
-          </div>
-          <div>
-            <Label className="text-xs">Visibility</Label>
-            <select
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              value={visibility}
-              onChange={(e) => setVisibility(e.target.value as RecoveryVisibility)}
-            >
-              <option value="gym">My gym only{activeMembership ? ` (${activeMembership.communityName})` : ""}</option>
-              {canPublic && <option value="public">Public — visible to everyone</option>}
-            </select>
-            {visibility === "public" && (
-              <p className="text-[11px] text-amber-500 mt-1">
-                This video will be visible to everyone using ShredTrack, not just your gym.
-              </p>
+    <>
+      <Dialog open={props.open} onOpenChange={(v) => !v && (reset(), props.onClose())}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add a video</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="flex gap-1 rounded-lg bg-muted/30 p-1">
+              <button
+                type="button"
+                onClick={() => setMode("external")}
+                className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium ${
+                  mode === "external"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground"
+                }`}
+              >
+                External link
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("upload")}
+                className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium ${
+                  mode === "upload"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground"
+                }`}
+              >
+                Upload file
+              </button>
+            </div>
+
+            {mode === "external" ? (
+              <div>
+                <Label className="text-xs">YouTube or Vimeo URL</Label>
+                <Input
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="https://youtube.com/..."
+                />
+              </div>
+            ) : (
+              <div>
+                <Label className="text-xs">Video file</Label>
+                <input
+                  type="file"
+                  accept={VIDEO_UPLOAD_ACCEPT}
+                  onChange={(e) => onFilePicked(e.target.files?.[0] ?? null)}
+                  className="block w-full text-xs file:mr-2 file:rounded-md file:border file:border-input file:bg-background file:px-3 file:py-1.5 file:text-xs file:hover:bg-accent"
+                />
+                {file && !fileError && (
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    {file.name} · {formatBytes(file.size)}
+                    {fileDuration !== null && ` · ${Math.round(fileDuration)}s`}
+                  </p>
+                )}
+                {fileError && (
+                  <p className="text-[10px] text-destructive mt-1">{fileError}</p>
+                )}
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  .mp4 or .mov, up to {formatBytes(VIDEO_UPLOAD_MAX_BYTES)}, max{" "}
+                  {VIDEO_UPLOAD_MAX_DURATION_SECONDS / 60} min.
+                </p>
+              </div>
             )}
+
+            <div>
+              <Label className="text-xs">Label (optional)</Label>
+              <Input
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                placeholder='e.g. "Front view"'
+              />
+            </div>
+            <div>
+              <Label className="text-xs">Visibility</Label>
+              <select
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={visibility}
+                onChange={(e) => setVisibility(e.target.value as RecoveryVisibility)}
+              >
+                <option value="gym">
+                  My gym only
+                  {activeMembership ? ` (${activeMembership.communityName})` : ""}
+                </option>
+                {canPublic && (
+                  <option value="public">Public — visible to everyone</option>
+                )}
+              </select>
+              {visibility === "public" && (
+                <p className="text-[11px] text-amber-500 mt-1">
+                  This video will be visible to everyone using ShredTrack, not
+                  just your gym.
+                </p>
+              )}
+            </div>
+            <label className="flex items-start gap-2 text-xs cursor-pointer">
+              <input
+                type="checkbox"
+                checked={confirmRights}
+                onChange={(e) => setConfirmRights(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span className="text-muted-foreground">
+                I have rights to share this content. Avoid copyrighted music and
+                don&apos;t show minors who haven&apos;t consented.
+              </span>
+            </label>
+            <Button
+              onClick={beginSubmit}
+              disabled={submitting}
+              className="w-full"
+            >
+              {submitting && (
+                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+              )}
+              {mode === "upload" && submitting ? "Uploading…" : "Add"}
+            </Button>
           </div>
-          <label className="flex items-start gap-2 text-xs cursor-pointer">
-            <input
-              type="checkbox"
-              checked={confirmRights}
-              onChange={(e) => setConfirmRights(e.target.checked)}
-              className="mt-0.5"
-            />
-            <span className="text-muted-foreground">
-              I have rights to share this content. Avoid copyrighted music and don&apos;t
-              show minors who haven&apos;t consented.
-            </span>
-          </label>
-          <Button onClick={submit} disabled={add.isPending} className="w-full">
-            {add.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
-            Add
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={confirmingPublic}
+        onOpenChange={(v) => !v && setConfirmingPublic(false)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Share publicly?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This video will be visible to everyone using ShredTrack, not just{" "}
+            {activeMembership?.communityName ?? "your gym"}.
+          </p>
+          <div className="flex gap-2 mt-2">
+            <Button
+              variant="outline"
+              onClick={() => setConfirmingPublic(false)}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button onClick={doSubmit} className="flex-1" disabled={submitting}>
+              {submitting && (
+                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+              )}
+              Publish publicly
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
+}
+
+async function probeVideoDuration(file: File): Promise<number | null> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      URL.revokeObjectURL(url);
+      const d = video.duration;
+      resolve(Number.isFinite(d) ? d : null);
+    };
+    video.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not read video metadata"));
+    };
+    video.src = url;
+  });
 }
