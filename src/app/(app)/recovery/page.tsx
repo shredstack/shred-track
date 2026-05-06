@@ -3,10 +3,17 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { CheckCircle2, Circle, ChevronDown, ChevronUp, Loader2, Heart, Plus, Settings } from "lucide-react";
+import { CheckCircle2, Circle, ChevronDown, ChevronUp, EyeOff, Loader2, Heart, Plus, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { DateNavigator } from "@/components/crossfit/date-navigator";
 import { useGymContext, useActiveMembership } from "@/hooks/useGymContext";
 import {
@@ -14,6 +21,11 @@ import {
   useStartRecoverySession,
   useUpdateRecoverySession,
 } from "@/hooks/useRecoverySessions";
+import {
+  useDismissedAssignments,
+  useUpdateMyOverride,
+  type DismissedAssignment,
+} from "@/hooks/useRecoverySchedules";
 import { formatPrescription } from "@/types/recovery";
 
 function toDateString(d: Date) {
@@ -114,6 +126,9 @@ export default function RecoveryTodayPage() {
           </Button>
         </div>
       )}
+
+      <HiddenAssignmentsButton />
+
 
       {isLoading ? (
         <div className="flex justify-center py-10">
@@ -421,6 +436,83 @@ function RoutineCard(props: {
             })}
           </div>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function HiddenAssignmentsButton() {
+  const [open, setOpen] = useState(false);
+  const { data: dismissed = [], isLoading } = useDismissedAssignments();
+  if (isLoading || dismissed.length === 0) return null;
+
+  return (
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger
+        render={
+          <button className="flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-xs text-muted-foreground hover:bg-accent/50">
+            <span className="flex items-center gap-1.5">
+              <EyeOff className="h-3.5 w-3.5" />
+              Hidden assignments
+            </span>
+            <Badge variant="secondary" className="text-[10px]">
+              {dismissed.length}
+            </Badge>
+          </button>
+        }
+      />
+      <SheetContent side="bottom" className="max-h-[80dvh] overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle>Hidden assignments</SheetTitle>
+        </SheetHeader>
+        <div className="mt-4 space-y-2 px-4 pb-6">
+          {dismissed.map((d) => (
+            <DismissedRow key={d.assignmentId} dismissed={d} />
+          ))}
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function DismissedRow({ dismissed }: { dismissed: DismissedAssignment }) {
+  const update = useUpdateMyOverride();
+  const unhide = () => {
+    update.mutate(
+      { assignmentId: dismissed.assignmentId, isDismissed: false },
+      {
+        onSuccess: () => toast.success("Assignment restored"),
+        onError: (e) => toast.error(e.message),
+      }
+    );
+  };
+  return (
+    <Card>
+      <CardContent className="py-3 flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium truncate">
+            {dismissed.scheduleName ?? "Recovery schedule"}
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            {dismissed.isGymWide
+              ? `${dismissed.communityName ?? "Gym"} · all members`
+              : "Direct assignment"}
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            {dismissed.startsOn}
+            {dismissed.endsOn ? ` → ${dismissed.endsOn}` : " → ongoing"}
+            {dismissed.durationLabel ? ` · ${dismissed.durationLabel}` : ""}
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={unhide}
+          disabled={update.isPending}
+        >
+          {update.isPending && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+          Un-hide
+        </Button>
       </CardContent>
     </Card>
   );

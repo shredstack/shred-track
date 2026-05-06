@@ -179,6 +179,32 @@ export function useUpdateMyOverride() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["recovery-today"] });
+      qc.invalidateQueries({ queryKey: ["recovery-dismissed-assignments"] });
     },
+  });
+}
+
+export interface DismissedAssignment {
+  assignmentId: string;
+  scheduleId: string;
+  scheduleName: string | null;
+  communityId: string | null;
+  communityName: string | null;
+  startsOn: string;
+  endsOn: string | null;
+  durationLabel: string | null;
+  isGymWide: boolean;
+  dismissedAt: string;
+}
+
+export function useDismissedAssignments() {
+  return useQuery<DismissedAssignment[]>({
+    queryKey: ["recovery-dismissed-assignments"],
+    queryFn: async () => {
+      const res = await fetch("/api/recovery/assignments/dismissed");
+      if (!res.ok) throw new Error("Failed to load dismissed assignments");
+      return res.json();
+    },
+    staleTime: 30_000,
   });
 }
