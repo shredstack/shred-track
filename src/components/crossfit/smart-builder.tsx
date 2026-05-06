@@ -19,6 +19,7 @@ import {
   emptyPart,
 } from "@/components/crossfit/multi-part-config";
 import { VestRequirements } from "@/components/crossfit/vest-requirements";
+import { parseDurationToSeconds } from "@/lib/crossfit/duration-parser";
 import {
   WorkoutDateInput,
   localTodayString,
@@ -291,12 +292,8 @@ export function SmartBuilder({
         parts: form.parts.map((p) => ({
           workoutType: p.workoutType,
           repScheme: p.repScheme || null,
-          timeCapSeconds: p.timeCapMinutes
-            ? parseInt(p.timeCapMinutes) * 60
-            : null,
-          amrapDurationSeconds: p.amrapDurationMinutes
-            ? parseInt(p.amrapDurationMinutes) * 60
-            : null,
+          timeCapSeconds: parseDurationToSeconds(p.timeCapInput),
+          amrapDurationSeconds: parseDurationToSeconds(p.amrapDurationInput),
           movementIds: p.movements
             .map((m) => m.movementId)
             .filter((id): id is string => !!id),
@@ -462,14 +459,14 @@ export function SmartBuilder({
                       ? " · Tabata"
                       : ""}
                     {part.repScheme ? ` · ${part.repScheme}` : ""}
-                    {part.workoutType === "amrap" && part.amrapDurationMinutes
-                      ? ` · ${part.amrapDurationMinutes} min`
+                    {part.workoutType === "amrap" && part.amrapDurationInput
+                      ? ` · ${part.amrapDurationInput}`
                       : ""}
                     {(part.workoutType === "for_time" ||
                       part.workoutType === "emom" ||
                       part.workoutType === "for_reps") &&
-                    part.timeCapMinutes
-                      ? ` · ${part.timeCapMinutes} min`
+                    part.timeCapInput
+                      ? ` · ${part.timeCapInput} cap`
                       : ""}
                   </span>
                 </div>

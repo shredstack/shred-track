@@ -1,36 +1,13 @@
 "use client";
 
 import { Loader2, ShieldCheck, Star, UserMinus, UserPlus } from "lucide-react";
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { useQueryClient, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useGymContext } from "@/hooks/useGymContext";
-
-interface MemberRow {
-  membershipId: string;
-  userId: string;
-  isAdmin: boolean;
-  isCoach: boolean;
-  isActive: boolean;
-  joinedAt: string;
-  deactivatedAt: string | null;
-  name: string;
-  email: string;
-}
-
-function useGymMembers(communityId: string | null) {
-  return useQuery<MemberRow[]>({
-    queryKey: ["gym-members", communityId],
-    enabled: !!communityId,
-    queryFn: async () => {
-      const res = await fetch(`/api/communities/${communityId}/members`);
-      if (!res.ok) throw new Error("Failed to fetch members");
-      return res.json();
-    },
-  });
-}
+import { useGymMembers } from "@/hooks/useGymMembers";
 
 export default function GymMembersPage() {
   const { data: ctx } = useGymContext();

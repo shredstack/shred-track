@@ -1053,3 +1053,166 @@ export const hyroxRaceReports = pgTable(
   },
   (table) => [index("race_reports_user").on(table.userId)],
 );
+
+// ============================================
+// Recovery: Movements + Videos + Routines
+// ============================================
+
+export const recoveryMovements = pgTable(
+  "recovery_movements",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    canonicalName: text("canonical_name").notNull(),
+    slug: text("slug").notNull(),
+    category: text("category").notNull(),
+    bodyRegion: text("body_region").array().default(sql`ARRAY[]::text[]`).notNull(),
+    description: text("description"),
+    defaultPrescription: jsonb("default_prescription").default(sql`'{}'::jsonb`).notNull(),
+    isPerSide: boolean("is_per_side").default(false).notNull(),
+    isValidated: boolean("is_validated").default(false).notNull(),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_recovery_movements_category").on(table.category),
+    index("idx_recovery_movements_creator").on(table.createdBy),
+  ]
+);
+
+export const recoveryMovementVideos = pgTable(
+  "recovery_movement_videos",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    movementId: uuid("movement_id").notNull().references(() => recoveryMovements.id, { onDelete: "cascade" }),
+    sourceType: text("source_type").notNull(), // 'upload' | 'external'
+    storagePath: text("storage_path"),
+    externalUrl: text("external_url"),
+    externalProvider: text("external_provider"),
+    externalVideoId: text("external_video_id"),
+    visibility: text("visibility").notNull(), // 'public' | 'gym'
+    communityId: uuid("community_id").references(() => communities.id, { onDelete: "cascade" }),
+    label: text("label"),
+    durationSeconds: integer("duration_seconds"),
+    posterStoragePath: text("poster_storage_path"),
+    rightsConfirmed: boolean("rights_confirmed").default(false).notNull(),
+    orderIndex: integer("order_index").default(0).notNull(),
+    uploadedBy: uuid("uploaded_by").notNull().references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_recovery_videos_movement_v2").on(table.movementId, table.orderIndex),
+  ]
+);
+
+export const recoveryMovementGymOverrides = pgTable("recovery_movement_gym_overrides", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  movementId: uuid("movement_id").notNull().references(() => recoveryMovements.id, { onDelete: "cascade" }),
+  communityId: uuid("community_id").notNull().references(() => communities.id, { onDelete: "cascade" }),
+  notesOverride: text("notes_override"),
+  createdBy: uuid("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const recoveryRoutines = pgTable("recovery_routines", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  isValidated: boolean("is_validated").default(false).notNull(),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  communityId: uuid("community_id").references(() => communities.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const recoveryRoutineMovements = pgTable("recovery_routine_movements", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  routineId: uuid("routine_id").notNull().references(() => recoveryRoutines.id, { onDelete: "cascade" }),
+  movementId: uuid("movement_id").notNull().references(() => recoveryMovements.id, { onDelete: "restrict" }),
+  orderIndex: integer("order_index").notNull(),
+  prescription: jsonb("prescription").default(sql`'{}'::jsonb`).notNull(),
+  notes: text("notes"),
+});
+
+// ============================================
+// Recovery: Schedules + Assignments
+// ============================================
+
+export const recoverySchedules = pgTable("recovery_schedules", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: text("name").notNull(),
+  kind: text("kind").notNull(), // 'day_keyed' | 'frequency_keyed'
+  rotationDays: integer("rotation_days"),
+  weeklyTarget: integer("weekly_target"),
+  description: text("description"),
+  rotationStrategy: text("rotation_strategy").default("progress").notNull(),
+  communityId: uuid("community_id").references(() => communities.id, { onDelete: "set null" }),
+  createdBy: uuid("created_by").notNull().references(() => users.id),
+  isArchived: boolean("is_archived").default(false).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const recoveryScheduleSlots = pgTable("recovery_schedule_slots", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  scheduleId: uuid("schedule_id").notNull().references(() => recoverySchedules.id, { onDelete: "cascade" }),
+  dayIndex: integer("day_index"),
+  orderIndex: integer("order_index").notNull(),
+  movementId: uuid("movement_id").references(() => recoveryMovements.id, { onDelete: "restrict" }),
+  routineId: uuid("routine_id").references(() => recoveryRoutines.id, { onDelete: "restrict" }),
+  prescription: jsonb("prescription").default(sql`'{}'::jsonb`).notNull(),
+  notes: text("notes"),
+});
+
+export const recoveryScheduleAssignments = pgTable("recovery_schedule_assignments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  scheduleId: uuid("schedule_id").notNull().references(() => recoverySchedules.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+  communityId: uuid("community_id").references(() => communities.id, { onDelete: "cascade" }),
+  startsOn: date("starts_on").notNull(),
+  endsOn: date("ends_on"),
+  durationLabel: text("duration_label"),
+  assignedBy: uuid("assigned_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const recoveryAssignmentOverrides = pgTable("recovery_assignment_overrides", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  assignmentId: uuid("assignment_id").notNull().references(() => recoveryScheduleAssignments.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  startsOn: date("starts_on"),
+  endsOn: date("ends_on"),
+  isDismissed: boolean("is_dismissed").default(false).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ============================================
+// Recovery: Sessions
+// ============================================
+
+export const recoverySessions = pgTable("recovery_sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  scheduleId: uuid("schedule_id").references(() => recoverySchedules.id, { onDelete: "set null" }),
+  assignmentId: uuid("assignment_id").references(() => recoveryScheduleAssignments.id, { onDelete: "set null" }),
+  sessionDate: date("session_date").notNull(),
+  dayIndex: integer("day_index"),
+  status: text("status").default("in_progress").notNull(),
+  notes: text("notes"),
+  startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+});
+
+export const recoverySessionItems = pgTable("recovery_session_items", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  sessionId: uuid("session_id").notNull().references(() => recoverySessions.id, { onDelete: "cascade" }),
+  movementId: uuid("movement_id").notNull().references(() => recoveryMovements.id, { onDelete: "restrict" }),
+  routineId: uuid("routine_id").references(() => recoveryRoutines.id, { onDelete: "set null" }),
+  scheduleSlotId: uuid("schedule_slot_id").references(() => recoveryScheduleSlots.id, { onDelete: "set null" }),
+  orderIndex: integer("order_index").notNull(),
+  prescribed: jsonb("prescribed").default(sql`'{}'::jsonb`).notNull(),
+  actual: jsonb("actual").default(sql`'{}'::jsonb`).notNull(),
+  status: text("status").default("pending").notNull(),
+  notes: text("notes"),
+});

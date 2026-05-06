@@ -614,22 +614,27 @@ export interface WorkoutBuilderPart {
   id?: string;
   label: string;
   workoutType: WorkoutType;
-  timeCapMinutes: string;
-  amrapDurationMinutes: string;
-  emomIntervalSeconds: string;
-  // "Intervals" workout type: per-round work + rest cadence (free-text
-  // mm:ss-style strings; parsed on save). When `intervalRounds` is
-  // populated the per-round array takes precedence over these uniform
-  // values.
-  intervalWorkSeconds: string;
-  intervalRestSeconds: string;
+  // All duration fields are free-text mm:ss-style strings (":30", "1:30",
+  // "90s", or a bare number = seconds). Parsed to seconds at the API
+  // boundary via parseDurationToSeconds(). Names use the DB unit (seconds)
+  // even though the input format is mm:ss — the field carries the user's
+  // raw string until submit.
+  timeCapInput: string;
+  amrapDurationInput: string;
+  emomIntervalInput: string;
+  // "Intervals" workout type: per-round work + rest cadence. Free-text
+  // mm:ss strings like the other duration fields above. When
+  // `intervalRounds` is populated the per-round array takes precedence
+  // over these uniform values.
+  intervalWorkInput: string;
+  intervalRestInput: string;
   // Per-round (work, rest) override. Each entry's strings are mm:ss-style
   // and get parsed on save. Length should equal `rounds`. Use this when
   // the rounds aren't uniform (e.g. 4:00/4:00 → 3:00/3:00 → 2:00/2:00).
-  intervalRounds?: { workSeconds: string; restSeconds: string }[];
+  intervalRounds?: { workInput: string; restInput: string }[];
   // Side-cadence: pairs the part with a recurring side movement (e.g.
   // EMOM 5 burpees). Free-text mm:ss like the duration fields.
-  sideCadenceIntervalSeconds?: string;
+  sideCadenceIntervalInput?: string;
   sideCadenceOpenEnded?: boolean;
   // Workout-level rep scheme. Retained on the type for legacy / parsed
   // workouts; the Smart Builder no longer surfaces it directly — for_load

@@ -10,6 +10,10 @@ import type {
   WorkoutBuilderMovement,
   WorkoutBuilderPart,
 } from "@/types/crossfit";
+import {
+  formatSecondsAsClock,
+  parseDurationToSeconds,
+} from "@/lib/crossfit/duration-parser";
 
 function generateTempId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -37,28 +41,34 @@ export function benchmarkPartToBuilderPart(
       part.id && !part.id.startsWith("synthetic:") ? part.id : undefined,
     label: part.label ?? "",
     workoutType: part.workoutType,
-    timeCapMinutes: part.timeCapSeconds
-      ? String(Math.round(part.timeCapSeconds / 60))
+    timeCapInput: part.timeCapSeconds
+      ? formatSecondsAsClock(part.timeCapSeconds)
       : "",
-    amrapDurationMinutes: part.amrapDurationSeconds
-      ? String(Math.round(part.amrapDurationSeconds / 60))
+    amrapDurationInput: part.amrapDurationSeconds
+      ? formatSecondsAsClock(part.amrapDurationSeconds)
       : "",
-    emomIntervalSeconds:
-      part.emomIntervalSeconds != null ? String(part.emomIntervalSeconds) : "",
-    intervalWorkSeconds:
-      part.intervalWorkSeconds != null ? String(part.intervalWorkSeconds) : "",
-    intervalRestSeconds:
-      part.intervalRestSeconds != null ? String(part.intervalRestSeconds) : "",
+    emomIntervalInput:
+      part.emomIntervalSeconds != null
+        ? formatSecondsAsClock(part.emomIntervalSeconds)
+        : "",
+    intervalWorkInput:
+      part.intervalWorkSeconds != null
+        ? formatSecondsAsClock(part.intervalWorkSeconds)
+        : "",
+    intervalRestInput:
+      part.intervalRestSeconds != null
+        ? formatSecondsAsClock(part.intervalRestSeconds)
+        : "",
     intervalRounds:
       Array.isArray(part.intervalRounds) && part.intervalRounds.length > 0
         ? part.intervalRounds.map((r) => ({
-            workSeconds: String(r.workSeconds),
-            restSeconds: String(r.restSeconds),
+            workInput: formatSecondsAsClock(r.workSeconds),
+            restInput: formatSecondsAsClock(r.restSeconds),
           }))
         : undefined,
-    sideCadenceIntervalSeconds:
+    sideCadenceIntervalInput:
       part.sideCadenceIntervalSeconds != null
-        ? String(part.sideCadenceIntervalSeconds)
+        ? formatSecondsAsClock(part.sideCadenceIntervalSeconds)
         : "",
     sideCadenceOpenEnded: part.sideCadenceOpenEnded,
     repScheme: part.repScheme ?? "",
@@ -152,30 +162,26 @@ export function builderPartToPayload(
     id: part.id,
     label: part.label || undefined,
     workoutType: part.workoutType,
-    timeCapSeconds: part.timeCapMinutes
-      ? parseInt(part.timeCapMinutes) * 60
-      : undefined,
-    amrapDurationSeconds: part.amrapDurationMinutes
-      ? parseInt(part.amrapDurationMinutes) * 60
-      : undefined,
-    emomIntervalSeconds: part.emomIntervalSeconds
-      ? parseInt(part.emomIntervalSeconds)
-      : undefined,
-    intervalWorkSeconds: part.intervalWorkSeconds || undefined,
-    intervalRestSeconds: part.intervalRestSeconds || undefined,
+    timeCapSeconds: parseDurationToSeconds(part.timeCapInput) ?? undefined,
+    amrapDurationSeconds:
+      parseDurationToSeconds(part.amrapDurationInput) ?? undefined,
+    emomIntervalSeconds:
+      parseDurationToSeconds(part.emomIntervalInput) ?? undefined,
+    intervalWorkSeconds: part.intervalWorkInput || undefined,
+    intervalRestSeconds: part.intervalRestInput || undefined,
     intervalRounds:
       part.workoutType === "intervals" &&
       part.intervalRounds &&
       part.intervalRounds.length > 0 &&
       part.intervalRounds.some(
-        (r) => r.workSeconds.trim() || r.restSeconds.trim()
+        (r) => r.workInput.trim() || r.restInput.trim()
       )
         ? part.intervalRounds.map((r) => ({
-            workSeconds: r.workSeconds,
-            restSeconds: r.restSeconds,
+            workSeconds: r.workInput,
+            restSeconds: r.restInput,
           }))
         : undefined,
-    sideCadenceIntervalSeconds: part.sideCadenceIntervalSeconds || undefined,
+    sideCadenceIntervalSeconds: part.sideCadenceIntervalInput || undefined,
     sideCadenceOpenEnded: !!part.sideCadenceOpenEnded,
     repScheme: part.repScheme || undefined,
     rounds:

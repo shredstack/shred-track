@@ -2,7 +2,7 @@
 // links to member management, join-code rotation, and gym settings.
 
 import Link from "next/link";
-import { ChevronRight, KeyRound, Settings, Users } from "lucide-react";
+import { ChevronRight, Heart, KeyRound, Settings, Users } from "lucide-react";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users, communities } from "@/db/schema";
@@ -25,6 +25,13 @@ const TOOLS: Tool[] = [
     description: "Promote coaches, deactivate members",
     icon: Users,
     adminOnly: true,
+  },
+  {
+    href: "/gym/recovery",
+    label: "Recovery adherence",
+    description: "Per-athlete recovery completion stats",
+    icon: Heart,
+    adminOnly: false,
   },
   {
     href: "/gym/join-code",

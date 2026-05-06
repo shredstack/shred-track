@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  CATEGORY_FILTER_OPTIONS,
   MOVEMENT_CATEGORY_COLORS,
   type MovementCategory,
   type CategoryFilter,
@@ -106,6 +107,7 @@ export default function MovementsPage() {
         <CategoryPills
           value={category}
           onChange={setCategory}
+          options={CATEGORY_FILTER_OPTIONS}
           className="-mx-1 px-1"
         />
         <div className="flex gap-2">

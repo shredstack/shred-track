@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Dumbbell, Trophy, Clock, User } from "lucide-react";
+import { Dumbbell, Trophy, Clock, User, Heart } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsRacing } from "@/hooks/useRaceMode";
 
 const tabs = [
   { href: "/crossfit", label: "CrossFit", icon: Dumbbell },
   { href: "/hyrox", label: "HYROX", icon: Trophy },
+  { href: "/recovery", label: "Recovery", icon: Heart },
   { href: "/history", label: "History", icon: Clock },
   { href: "/profile", label: "Profile", icon: User },
 ] as const;

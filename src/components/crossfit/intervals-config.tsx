@@ -6,19 +6,19 @@ import { Label } from "@/components/ui/label";
 import { DurationInput } from "@/components/crossfit/duration-input";
 
 interface IntervalRoundDraft {
-  workSeconds: string;
-  restSeconds: string;
+  workInput: string;
+  restInput: string;
 }
 
 interface IntervalsConfigProps {
   rounds: string;
-  intervalWorkSeconds: string;
-  intervalRestSeconds: string;
+  intervalWorkInput: string;
+  intervalRestInput: string;
   intervalRounds?: IntervalRoundDraft[];
   onChange: (updates: {
     rounds?: string;
-    intervalWorkSeconds?: string;
-    intervalRestSeconds?: string;
+    intervalWorkInput?: string;
+    intervalRestInput?: string;
     intervalRounds?: IntervalRoundDraft[] | undefined;
   }) => void;
   compact?: boolean;
@@ -34,8 +34,8 @@ interface IntervalsConfigProps {
 //   descending interval ladders (4:00/4:00 → 3:00/3:00 → 2:00/2:00).
 export function IntervalsConfig({
   rounds,
-  intervalWorkSeconds,
-  intervalRestSeconds,
+  intervalWorkInput,
+  intervalRestInput,
   intervalRounds,
   onChange,
   compact = false,
@@ -56,8 +56,8 @@ export function IntervalsConfig({
     if (cur.length === roundCount) return;
     if (cur.length < roundCount) {
       const seed: IntervalRoundDraft = {
-        workSeconds: cur[cur.length - 1]?.workSeconds ?? "",
-        restSeconds: cur[cur.length - 1]?.restSeconds ?? "",
+        workInput: cur[cur.length - 1]?.workInput ?? "",
+        restInput: cur[cur.length - 1]?.restInput ?? "",
       };
       const grown = [...cur];
       while (grown.length < roundCount) grown.push({ ...seed });
@@ -69,12 +69,12 @@ export function IntervalsConfig({
 
   const togglePerRound = (next: boolean) => {
     if (next) {
-      const seedWork = intervalWorkSeconds || "";
-      const seedRest = intervalRestSeconds || "";
+      const seedWork = intervalWorkInput || "";
+      const seedRest = intervalRestInput || "";
       const n = roundCount > 0 ? roundCount : 1;
       const seeded: IntervalRoundDraft[] = Array.from({ length: n }, () => ({
-        workSeconds: seedWork,
-        restSeconds: seedRest,
+        workInput: seedWork,
+        restInput: seedRest,
       }));
       onChange({ intervalRounds: seeded });
     } else {
@@ -85,8 +85,8 @@ export function IntervalsConfig({
         intervalRounds: undefined,
         ...(first
           ? {
-              intervalWorkSeconds: first.workSeconds,
-              intervalRestSeconds: first.restSeconds,
+              intervalWorkInput: first.workInput,
+              intervalRestInput: first.restInput,
             }
           : {}),
       });
@@ -116,20 +116,20 @@ export function IntervalsConfig({
         {!perRound && (
           <>
             <div className="space-y-1">
-              <Label className={labelClass}>Work (per round)</Label>
+              <Label className={labelClass}>Work per round (mm:ss)</Label>
               <DurationInput
-                value={intervalWorkSeconds}
-                onChange={(v) => onChange({ intervalWorkSeconds: v })}
+                value={intervalWorkInput}
+                onChange={(v) => onChange({ intervalWorkInput: v })}
                 placeholder="e.g. 1:00"
                 className={inputHeight}
                 ariaLabel="Work duration per round"
               />
             </div>
             <div className="space-y-1">
-              <Label className={labelClass}>Rest (per round)</Label>
+              <Label className={labelClass}>Rest per round (mm:ss)</Label>
               <DurationInput
-                value={intervalRestSeconds}
-                onChange={(v) => onChange({ intervalRestSeconds: v })}
+                value={intervalRestInput}
+                onChange={(v) => onChange({ intervalRestInput: v })}
                 placeholder="e.g. 3:00"
                 className={inputHeight}
                 ariaLabel="Rest duration per round"
@@ -158,11 +158,11 @@ export function IntervalsConfig({
               </div>
               <div className="space-y-1">
                 <Label className="text-[11px] text-muted-foreground">
-                  Work
+                  Work (mm:ss)
                 </Label>
                 <DurationInput
-                  value={r.workSeconds}
-                  onChange={(v) => updateRound(i, { workSeconds: v })}
+                  value={r.workInput}
+                  onChange={(v) => updateRound(i, { workInput: v })}
                   placeholder="e.g. 4:00"
                   className="h-8"
                   ariaLabel={`Round ${i + 1} work`}
@@ -170,11 +170,11 @@ export function IntervalsConfig({
               </div>
               <div className="space-y-1">
                 <Label className="text-[11px] text-muted-foreground">
-                  Rest
+                  Rest (mm:ss)
                 </Label>
                 <DurationInput
-                  value={r.restSeconds}
-                  onChange={(v) => updateRound(i, { restSeconds: v })}
+                  value={r.restInput}
+                  onChange={(v) => updateRound(i, { restInput: v })}
                   placeholder="e.g. 4:00"
                   className="h-8"
                   ariaLabel={`Round ${i + 1} rest`}
