@@ -1,0 +1,358 @@
+// Resolves "what's the user's recovery plan today?" — used by the today view
+// and the session-start endpoint to snapshot a prescription.
+
+import { db } from "@/db";
+import {
+  recoverySchedules,
+  recoveryScheduleSlots,
+  recoveryScheduleAssignments,
+  recoveryAssignmentOverrides,
+  recoverySessions,
+  recoveryRoutines,
+  recoveryRoutineMovements,
+  recoveryMovements,
+  users,
+} from "@/db/schema";
+import { and, eq, desc, lte, gte, isNull, inArray } from "drizzle-orm";
+
+export type RecoveryTodayMode = "personal" | "gym";
+
+export interface RecoveryTodaySlot {
+  slotId: string;
+  dayIndex: number | null;
+  orderIndex: number;
+  movementId: string | null;
+  movementName: string | null;
+  isPerSide: boolean;
+  routineId: string | null;
+  routineName: string | null;
+  prescription: Record<string, unknown>;
+  notes: string | null;
+  routineMovements: Array<{
+    id: string;
+    movementId: string;
+    movementName: string;
+    isPerSide: boolean;
+    orderIndex: number;
+    prescription: Record<string, unknown>;
+  }>;
+}
+
+export interface RecoveryToday {
+  schedule: {
+    id: string;
+    name: string;
+    kind: "day_keyed" | "frequency_keyed";
+    rotationDays: number | null;
+    weeklyTarget: number | null;
+    rotationStrategy: "progress" | "calendar";
+    communityId: string | null;
+  } | null;
+  assignmentId: string | null;
+  effectiveStartsOn: string | null;
+  effectiveEndsOn: string | null;
+  durationLabel: string | null;
+  dayIndex: number | null; // For day-keyed schedules
+  weeklyCompleted: number; // For frequency-keyed schedules
+  slots: RecoveryTodaySlot[];
+  source: "assignment_user" | "assignment_gym" | "personal" | "none";
+}
+
+function dateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function startOfWeek(d: Date): Date {
+  const x = new Date(d);
+  const day = x.getDay();
+  const diff = (day + 6) % 7; // Monday-start week
+  x.setDate(x.getDate() - diff);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+export async function resolveToday(
+  userId: string,
+  date: string,
+  prefer: RecoveryTodayMode = "personal"
+): Promise<RecoveryToday> {
+  // 1. Active per-user assignment.
+  const userAssignments = await db
+    .select({
+      a: recoveryScheduleAssignments,
+      o: recoveryAssignmentOverrides,
+    })
+    .from(recoveryScheduleAssignments)
+    .leftJoin(
+      recoveryAssignmentOverrides,
+      and(
+        eq(recoveryAssignmentOverrides.assignmentId, recoveryScheduleAssignments.id),
+        eq(recoveryAssignmentOverrides.userId, userId)
+      )
+    )
+    .where(eq(recoveryScheduleAssignments.userId, userId))
+    .orderBy(desc(recoveryScheduleAssignments.createdAt));
+
+  const activeUserAssignment = userAssignments.find(({ a, o }) => {
+    if (o?.isDismissed) return false;
+    const start = o?.startsOn ?? a.startsOn;
+    const end = o?.endsOn ?? a.endsOn;
+    if (start > date) return false;
+    if (end && end < date) return false;
+    return true;
+  });
+
+  // 2. Caller's active gym (used for gym-wide assignment lookup AND for the
+  // personal-vs-gym preference in step 3).
+  const [userRow] = await db
+    .select({ activeCommunityId: users.activeCommunityId })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  const activeGym = userRow?.activeCommunityId ?? null;
+
+  let chosen: { assignmentId: string | null; scheduleId: string; effectiveStart: string; effectiveEnd: string | null; durationLabel: string | null; source: "assignment_user" | "assignment_gym" | "personal" } | null = null;
+
+  if (activeUserAssignment && (prefer === "gym" || activeUserAssignment.a.communityId === null || activeUserAssignment.a.communityId === activeGym)) {
+    chosen = {
+      assignmentId: activeUserAssignment.a.id,
+      scheduleId: activeUserAssignment.a.scheduleId,
+      effectiveStart: activeUserAssignment.o?.startsOn ?? activeUserAssignment.a.startsOn,
+      effectiveEnd: activeUserAssignment.o?.endsOn ?? activeUserAssignment.a.endsOn,
+      durationLabel: activeUserAssignment.a.durationLabel,
+      source: "assignment_user",
+    };
+  }
+
+  // 3. Gym-wide assignment for caller's active gym.
+  if (!chosen && activeGym && prefer === "gym") {
+    const gymAssignments = await db
+      .select({
+        a: recoveryScheduleAssignments,
+        o: recoveryAssignmentOverrides,
+      })
+      .from(recoveryScheduleAssignments)
+      .leftJoin(
+        recoveryAssignmentOverrides,
+        and(
+          eq(recoveryAssignmentOverrides.assignmentId, recoveryScheduleAssignments.id),
+          eq(recoveryAssignmentOverrides.userId, userId)
+        )
+      )
+      .where(eq(recoveryScheduleAssignments.communityId, activeGym))
+      .orderBy(desc(recoveryScheduleAssignments.createdAt));
+
+    const active = gymAssignments.find(({ a, o }) => {
+      if (o?.isDismissed) return false;
+      const start = o?.startsOn ?? a.startsOn;
+      const end = o?.endsOn ?? a.endsOn;
+      if (start > date) return false;
+      if (end && end < date) return false;
+      return true;
+    });
+
+    if (active) {
+      chosen = {
+        assignmentId: active.a.id,
+        scheduleId: active.a.scheduleId,
+        effectiveStart: active.o?.startsOn ?? active.a.startsOn,
+        effectiveEnd: active.o?.endsOn ?? active.a.endsOn,
+        durationLabel: active.a.durationLabel,
+        source: "assignment_gym",
+      };
+    }
+  }
+
+  // 4. Personal fallback: most recently updated personal schedule.
+  if (!chosen && prefer === "personal") {
+    const personals = await db
+      .select()
+      .from(recoverySchedules)
+      .where(
+        and(
+          eq(recoverySchedules.createdBy, userId),
+          isNull(recoverySchedules.communityId),
+          eq(recoverySchedules.isArchived, false)
+        )
+      )
+      .orderBy(desc(recoverySchedules.updatedAt))
+      .limit(1);
+    if (personals[0]) {
+      chosen = {
+        assignmentId: null,
+        scheduleId: personals[0].id,
+        effectiveStart: personals[0].createdAt.toISOString().slice(0, 10),
+        effectiveEnd: null,
+        durationLabel: null,
+        source: "personal",
+      };
+    }
+  }
+
+  if (!chosen) {
+    return {
+      schedule: null,
+      assignmentId: null,
+      effectiveStartsOn: null,
+      effectiveEndsOn: null,
+      durationLabel: null,
+      dayIndex: null,
+      weeklyCompleted: 0,
+      slots: [],
+      source: "none",
+    };
+  }
+
+  const [schedule] = await db
+    .select()
+    .from(recoverySchedules)
+    .where(eq(recoverySchedules.id, chosen.scheduleId))
+    .limit(1);
+  if (!schedule) {
+    return {
+      schedule: null,
+      assignmentId: null,
+      effectiveStartsOn: null,
+      effectiveEndsOn: null,
+      durationLabel: null,
+      dayIndex: null,
+      weeklyCompleted: 0,
+      slots: [],
+      source: "none",
+    };
+  }
+
+  // Determine day index for day-keyed schedules.
+  let dayIndex: number | null = null;
+  if (schedule.kind === "day_keyed" && schedule.rotationDays && schedule.rotationDays > 0) {
+    if (schedule.rotationStrategy === "calendar") {
+      const start = new Date(`${chosen.effectiveStart}T00:00:00`);
+      const target = new Date(`${date}T00:00:00`);
+      const days = Math.floor((target.getTime() - start.getTime()) / 86400000);
+      dayIndex = (days % schedule.rotationDays + schedule.rotationDays) % schedule.rotationDays + 1;
+    } else {
+      // Progress strategy: most recent completed session's day_index + 1, mod rotationDays.
+      const [last] = await db
+        .select()
+        .from(recoverySessions)
+        .where(
+          and(
+            eq(recoverySessions.userId, userId),
+            eq(recoverySessions.scheduleId, schedule.id),
+            eq(recoverySessions.status, "complete")
+          )
+        )
+        .orderBy(desc(recoverySessions.sessionDate))
+        .limit(1);
+      const lastIdx = last?.dayIndex ?? 0;
+      dayIndex = (lastIdx % schedule.rotationDays) + 1;
+    }
+  }
+
+  // Slots filtered to current day (or all, for frequency-keyed).
+  const slotRows = await db
+    .select({
+      slot: recoveryScheduleSlots,
+      movementName: recoveryMovements.canonicalName,
+      isPerSide: recoveryMovements.isPerSide,
+      routineName: recoveryRoutines.name,
+    })
+    .from(recoveryScheduleSlots)
+    .leftJoin(recoveryMovements, eq(recoveryScheduleSlots.movementId, recoveryMovements.id))
+    .leftJoin(recoveryRoutines, eq(recoveryScheduleSlots.routineId, recoveryRoutines.id))
+    .where(eq(recoveryScheduleSlots.scheduleId, schedule.id))
+    .orderBy(recoveryScheduleSlots.orderIndex);
+
+  const filteredSlots = schedule.kind === "day_keyed"
+    ? slotRows.filter((s) => s.slot.dayIndex === dayIndex)
+    : slotRows;
+
+  // Pre-fetch routine children for any routine slots.
+  const routineIds = filteredSlots.map((s) => s.slot.routineId).filter((x): x is string => !!x);
+  const routineKids = routineIds.length
+    ? await db
+        .select({
+          rm: recoveryRoutineMovements,
+          movementName: recoveryMovements.canonicalName,
+          isPerSide: recoveryMovements.isPerSide,
+        })
+        .from(recoveryRoutineMovements)
+        .innerJoin(recoveryMovements, eq(recoveryRoutineMovements.movementId, recoveryMovements.id))
+        .where(inArray(recoveryRoutineMovements.routineId, routineIds))
+        .orderBy(recoveryRoutineMovements.orderIndex)
+    : [];
+
+  const kidsByRoutine = new Map<string, typeof routineKids>();
+  for (const k of routineKids) {
+    const arr = kidsByRoutine.get(k.rm.routineId) ?? [];
+    arr.push(k);
+    kidsByRoutine.set(k.rm.routineId, arr);
+  }
+
+  const slots: RecoveryTodaySlot[] = filteredSlots.map((s) => ({
+    slotId: s.slot.id,
+    dayIndex: s.slot.dayIndex,
+    orderIndex: s.slot.orderIndex,
+    movementId: s.slot.movementId,
+    movementName: s.movementName ?? null,
+    isPerSide: s.isPerSide ?? false,
+    routineId: s.slot.routineId,
+    routineName: s.routineName ?? null,
+    prescription: (s.slot.prescription as Record<string, unknown>) ?? {},
+    notes: s.slot.notes,
+    routineMovements: s.slot.routineId
+      ? (kidsByRoutine.get(s.slot.routineId) ?? []).map((k) => ({
+          id: k.rm.id,
+          movementId: k.rm.movementId,
+          movementName: k.movementName,
+          isPerSide: k.isPerSide,
+          orderIndex: k.rm.orderIndex,
+          prescription: (k.rm.prescription as Record<string, unknown>) ?? {},
+        }))
+      : [],
+  }));
+
+  // Weekly completion count for frequency-keyed.
+  let weeklyCompleted = 0;
+  if (schedule.kind === "frequency_keyed") {
+    const wkStart = startOfWeek(new Date(`${date}T00:00:00`));
+    const wkEnd = new Date(wkStart);
+    wkEnd.setDate(wkEnd.getDate() + 7);
+    const completedThisWeek = await db
+      .select()
+      .from(recoverySessions)
+      .where(
+        and(
+          eq(recoverySessions.userId, userId),
+          eq(recoverySessions.scheduleId, schedule.id),
+          eq(recoverySessions.status, "complete"),
+          gte(recoverySessions.sessionDate, dateKey(wkStart)),
+          lte(recoverySessions.sessionDate, dateKey(wkEnd))
+        )
+      );
+    weeklyCompleted = completedThisWeek.length;
+  }
+
+  return {
+    schedule: {
+      id: schedule.id,
+      name: schedule.name,
+      kind: schedule.kind as "day_keyed" | "frequency_keyed",
+      rotationDays: schedule.rotationDays,
+      weeklyTarget: schedule.weeklyTarget,
+      rotationStrategy: schedule.rotationStrategy as "progress" | "calendar",
+      communityId: schedule.communityId,
+    },
+    assignmentId: chosen.assignmentId,
+    effectiveStartsOn: chosen.effectiveStart,
+    effectiveEndsOn: chosen.effectiveEnd,
+    durationLabel: chosen.durationLabel,
+    dayIndex,
+    weeklyCompleted,
+    slots,
+    source: chosen.source,
+  };
+}

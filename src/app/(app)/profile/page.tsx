@@ -22,6 +22,7 @@ import {
   Building,
   ShieldCheck,
   Star,
+  Heart,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -258,6 +259,25 @@ function CrossFitSection() {
       <CardContent>
         <p className="text-sm text-muted-foreground text-center py-8">
           CrossFit profile coming soon.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RecoverySection() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm font-bold text-muted-foreground uppercase tracking-wider">
+          Recovery
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-muted-foreground text-center py-6">
+          Default schedule preferences and reminders are coming soon. For now,
+          head to the <Link href="/recovery" className="underline">Recovery tab</Link>{" "}
+          to manage your daily logging.
         </p>
       </CardContent>
     </Card>
@@ -1050,6 +1070,10 @@ export default function ProfilePage() {
             <Timer className="h-3.5 w-3.5" />
             HYROX
           </TabsTrigger>
+          <TabsTrigger value="recovery" className="flex-1 gap-1.5">
+            <Heart className="h-3.5 w-3.5" />
+            Recovery
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="general" className="mt-4">
@@ -1062,6 +1086,10 @@ export default function ProfilePage() {
 
         <TabsContent value="hyrox" className="mt-4">
           <HyroxSection />
+        </TabsContent>
+
+        <TabsContent value="recovery" className="mt-4">
+          <RecoverySection />
         </TabsContent>
       </Tabs>
 
