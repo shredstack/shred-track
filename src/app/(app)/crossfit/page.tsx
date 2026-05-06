@@ -27,6 +27,7 @@ import {
 } from "@/hooks/useWorkouts";
 import { useActiveMembership, useGymContext } from "@/hooks/useGymContext";
 import { builderPartToPayload } from "@/lib/crossfit/builder-payload";
+import { formatSecondsAsClock } from "@/lib/crossfit/duration-parser";
 import { useMovements, useCreateMovement } from "@/hooks/useMovements";
 import type {
   WorkoutBuilderForm,
@@ -70,12 +71,6 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
     isPartner: !!w.isPartner,
     partnerCount: w.partnerCount != null ? String(w.partnerCount) : "",
     parts: w.parts.map((p): WorkoutBuilderPart => {
-      const timeCapMinutes = p.timeCapSeconds
-        ? String(Math.round(p.timeCapSeconds / 60))
-        : "";
-      const amrapDurationMinutes = p.amrapDurationSeconds
-        ? String(Math.round(p.amrapDurationSeconds / 60))
-        : "";
       const blocks = (p.blocks ?? []).map((b) => ({
         tempId: generateTempId(),
         id: b.id,
@@ -90,29 +85,34 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
         id: p.id,
         label: p.label ?? "",
         workoutType: p.workoutType,
-        timeCapMinutes,
-        amrapDurationMinutes,
-        emomIntervalSeconds: p.emomIntervalSeconds
-          ? String(p.emomIntervalSeconds)
+        timeCapInput: p.timeCapSeconds
+          ? formatSecondsAsClock(p.timeCapSeconds)
           : "",
-        intervalWorkSeconds:
-          p.intervalWorkSeconds != null
-            ? String(p.intervalWorkSeconds)
+        amrapDurationInput: p.amrapDurationSeconds
+          ? formatSecondsAsClock(p.amrapDurationSeconds)
+          : "",
+        emomIntervalInput:
+          p.emomIntervalSeconds != null
+            ? formatSecondsAsClock(p.emomIntervalSeconds)
             : "",
-        intervalRestSeconds:
+        intervalWorkInput:
+          p.intervalWorkSeconds != null
+            ? formatSecondsAsClock(p.intervalWorkSeconds)
+            : "",
+        intervalRestInput:
           p.intervalRestSeconds != null
-            ? String(p.intervalRestSeconds)
+            ? formatSecondsAsClock(p.intervalRestSeconds)
             : "",
         intervalRounds:
           Array.isArray(p.intervalRounds) && p.intervalRounds.length > 0
             ? p.intervalRounds.map((r) => ({
-                workSeconds: String(r.workSeconds),
-                restSeconds: String(r.restSeconds),
+                workInput: formatSecondsAsClock(r.workSeconds),
+                restInput: formatSecondsAsClock(r.restSeconds),
               }))
             : undefined,
-        sideCadenceIntervalSeconds:
+        sideCadenceIntervalInput:
           p.sideCadenceIntervalSeconds != null
-            ? String(p.sideCadenceIntervalSeconds)
+            ? formatSecondsAsClock(p.sideCadenceIntervalSeconds)
             : "",
         sideCadenceOpenEnded: !!p.sideCadenceOpenEnded,
         repScheme: p.repScheme ?? "",

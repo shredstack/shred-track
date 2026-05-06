@@ -48,11 +48,11 @@ export function emptyPart(): WorkoutBuilderPart {
     tempId: generatePartId(),
     label: "",
     workoutType: "for_time",
-    timeCapMinutes: "",
-    amrapDurationMinutes: "",
-    emomIntervalSeconds: "",
-    intervalWorkSeconds: "",
-    intervalRestSeconds: "",
+    timeCapInput: "",
+    amrapDurationInput: "",
+    emomIntervalInput: "",
+    intervalWorkInput: "",
+    intervalRestInput: "",
     repScheme: "",
     rounds: "",
     movements: [],
@@ -70,22 +70,22 @@ function partSummary(part: WorkoutBuilderPart, idx: number): string {
     segments.push("Tabata");
   if (part.workoutType === "intervals") {
     if (part.rounds) segments.push(`${part.rounds} rds`);
-    if (part.intervalWorkSeconds && part.intervalRestSeconds) {
+    if (part.intervalWorkInput && part.intervalRestInput) {
       segments.push(
-        `${part.intervalWorkSeconds} work / ${part.intervalRestSeconds} rest`
+        `${part.intervalWorkInput} work / ${part.intervalRestInput} rest`
       );
     }
   }
   if (part.repScheme) segments.push(part.repScheme);
-  if (part.workoutType === "amrap" && part.amrapDurationMinutes)
-    segments.push(`${part.amrapDurationMinutes} min`);
+  if (part.workoutType === "amrap" && part.amrapDurationInput)
+    segments.push(part.amrapDurationInput);
   if (
     (part.workoutType === "for_time" ||
       part.workoutType === "emom" ||
       part.workoutType === "for_reps") &&
-    part.timeCapMinutes
+    part.timeCapInput
   )
-    segments.push(`${part.timeCapMinutes} min`);
+    segments.push(part.timeCapInput);
   const movs = part.movements
     .slice(0, 2)
     .map((m) => m.movementName)

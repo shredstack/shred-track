@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { WorkoutTypeSelector } from "@/components/crossfit/workout-type-selector";
 import { MovementListBuilder } from "@/components/crossfit/movement-list-builder";
 import { IntervalsConfig } from "@/components/crossfit/intervals-config";
+import { DurationInput } from "@/components/crossfit/duration-input";
 import type {
   WorkoutBuilderBlock,
   WorkoutBuilderMovement,
@@ -74,18 +75,19 @@ export function WorkoutPartConfig({
         <div className="space-y-1.5">
           <Label className={labelClass}>
             {part.workoutType === "emom"
-              ? "EMOM Duration (min)"
-              : "Time Cap (min)"}
+              ? "EMOM Duration (mm:ss)"
+              : "Time Cap (mm:ss)"}
           </Label>
-          <Input
-            type="number"
-            min={0}
-            value={part.timeCapMinutes}
-            onChange={(e) => onChange({ timeCapMinutes: e.target.value })}
+          <DurationInput
+            value={part.timeCapInput}
+            onChange={(v) => onChange({ timeCapInput: v })}
             placeholder={
-              part.workoutType === "emom" ? "e.g. 20" : "Optional"
+              part.workoutType === "emom" ? "e.g. 20:00" : "Optional"
             }
             className={inputHeight}
+            ariaLabel={
+              part.workoutType === "emom" ? "EMOM duration" : "Time cap"
+            }
           />
         </div>
       )}
@@ -128,33 +130,26 @@ export function WorkoutPartConfig({
 
       {part.workoutType === "amrap" && (
         <div className="space-y-1.5">
-          <Label className={labelClass}>AMRAP Duration (min)</Label>
-          <Input
-            type="number"
-            min={1}
-            value={part.amrapDurationMinutes}
-            onChange={(e) =>
-              onChange({ amrapDurationMinutes: e.target.value })
-            }
-            placeholder="e.g. 12"
+          <Label className={labelClass}>AMRAP Duration (mm:ss)</Label>
+          <DurationInput
+            value={part.amrapDurationInput}
+            onChange={(v) => onChange({ amrapDurationInput: v })}
+            placeholder="e.g. 12:00"
             className={inputHeight}
+            ariaLabel="AMRAP duration"
           />
         </div>
       )}
 
       {part.workoutType === "emom" && (
         <div className="space-y-1.5">
-          <Label className={labelClass}>Interval (seconds)</Label>
-          <Input
-            type="number"
-            min={30}
-            step={30}
-            value={part.emomIntervalSeconds}
-            onChange={(e) =>
-              onChange({ emomIntervalSeconds: e.target.value })
-            }
-            placeholder="60"
+          <Label className={labelClass}>Interval (mm:ss)</Label>
+          <DurationInput
+            value={part.emomIntervalInput}
+            onChange={(v) => onChange({ emomIntervalInput: v })}
+            placeholder="e.g. 1:00"
             className={inputHeight}
+            ariaLabel="EMOM interval"
           />
         </div>
       )}
@@ -178,8 +173,8 @@ export function WorkoutPartConfig({
           <Label className={labelClass}>Interval cadence</Label>
           <IntervalsConfig
             rounds={part.rounds}
-            intervalWorkSeconds={part.intervalWorkSeconds}
-            intervalRestSeconds={part.intervalRestSeconds}
+            intervalWorkInput={part.intervalWorkInput}
+            intervalRestInput={part.intervalRestInput}
             intervalRounds={part.intervalRounds}
             onChange={onChange}
             compact={compact}
@@ -235,7 +230,7 @@ export function WorkoutPartConfig({
         part.workoutType === "amrap" ||
         part.workoutType === "intervals") && (
         <SideCadenceConfig
-          intervalSeconds={part.sideCadenceIntervalSeconds ?? ""}
+          intervalInput={part.sideCadenceIntervalInput ?? ""}
           openEnded={!!part.sideCadenceOpenEnded}
           onChange={(updates) => onChange(updates)}
           compact={compact}
@@ -252,8 +247,8 @@ export function WorkoutPartConfig({
           (part.workoutType === "for_time" ||
             part.workoutType === "amrap" ||
             part.workoutType === "intervals") &&
-          (!!part.sideCadenceIntervalSeconds &&
-            part.sideCadenceIntervalSeconds.trim() !== "")
+          (!!part.sideCadenceIntervalInput &&
+            part.sideCadenceIntervalInput.trim() !== "")
         }
       />
     </div>
@@ -264,21 +259,21 @@ export function WorkoutPartConfig({
 // "Side cadence (optional)" disclosure so it doesn't clutter the
 // non-cadence path.
 function SideCadenceConfig({
-  intervalSeconds,
+  intervalInput,
   openEnded,
   onChange,
   compact,
 }: {
-  intervalSeconds: string;
+  intervalInput: string;
   openEnded: boolean;
   onChange: (updates: {
-    sideCadenceIntervalSeconds?: string;
+    sideCadenceIntervalInput?: string;
     sideCadenceOpenEnded?: boolean;
   }) => void;
   compact: boolean;
 }) {
   const labelClass = compact ? "text-xs text-muted-foreground" : "text-sm";
-  const enabled = !!intervalSeconds && intervalSeconds.trim() !== "";
+  const enabled = !!intervalInput && intervalInput.trim() !== "";
   return (
     <details
       className="rounded-md border border-border/40 bg-muted/15 p-2"
@@ -289,14 +284,13 @@ function SideCadenceConfig({
       </summary>
       <div className="space-y-2 pt-2">
         <div className="space-y-1">
-          <Label className={labelClass}>Cadence interval</Label>
-          <Input
-            value={intervalSeconds}
-            onChange={(e) =>
-              onChange({ sideCadenceIntervalSeconds: e.target.value })
-            }
-            placeholder="60 (every minute on the minute)"
+          <Label className={labelClass}>Cadence interval (mm:ss)</Label>
+          <DurationInput
+            value={intervalInput}
+            onChange={(v) => onChange({ sideCadenceIntervalInput: v })}
+            placeholder="e.g. 1:00"
             className={compact ? "h-8" : ""}
+            ariaLabel="Side cadence interval"
           />
           <p className="text-[11px] text-muted-foreground">
             Movements you mark as &quot;side cadence&quot; below run on this

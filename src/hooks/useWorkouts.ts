@@ -11,6 +11,7 @@ import type {
   MovementMetricType,
   ScoreDisplay,
   SetEntry,
+  IntervalRoundSpec,
 } from "@/types/crossfit";
 import type { RepSchemeParsed } from "@/lib/crossfit/rep-scheme-parser";
 
@@ -83,6 +84,11 @@ interface WirePart {
   timeCapSeconds: number | null;
   amrapDurationSeconds: number | null;
   emomIntervalSeconds: number | null;
+  intervalWorkSeconds: number | null;
+  intervalRestSeconds: number | null;
+  intervalRounds: IntervalRoundSpec[] | null;
+  sideCadenceIntervalSeconds: number | null;
+  sideCadenceOpenEnded: boolean | null;
   repScheme: string | null;
   rounds: number | null;
   structure: string | null;
@@ -163,6 +169,11 @@ function wirePartToDisplay(p: WirePart): WorkoutPartDisplay {
     timeCapSeconds: p.timeCapSeconds ?? undefined,
     amrapDurationSeconds: p.amrapDurationSeconds ?? undefined,
     emomIntervalSeconds: p.emomIntervalSeconds ?? undefined,
+    intervalWorkSeconds: p.intervalWorkSeconds ?? undefined,
+    intervalRestSeconds: p.intervalRestSeconds ?? undefined,
+    intervalRounds: p.intervalRounds ?? undefined,
+    sideCadenceIntervalSeconds: p.sideCadenceIntervalSeconds ?? undefined,
+    sideCadenceOpenEnded: p.sideCadenceOpenEnded ?? undefined,
     repScheme: p.repScheme ?? undefined,
     rounds: p.rounds ?? undefined,
     structure: (p.structure as WorkoutPartStructure | null) ?? undefined,

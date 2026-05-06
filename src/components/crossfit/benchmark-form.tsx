@@ -378,14 +378,14 @@ export function BenchmarkForm({
                     ? `${part.rounds} rounds`
                     : ""}
                   {part.repScheme ? ` · ${part.repScheme}` : ""}
-                  {part.workoutType === "amrap" && part.amrapDurationMinutes
-                    ? ` · ${part.amrapDurationMinutes} min`
+                  {part.workoutType === "amrap" && part.amrapDurationInput
+                    ? ` · ${part.amrapDurationInput}`
                     : ""}
                   {(part.workoutType === "for_time" ||
                     part.workoutType === "emom" ||
                     part.workoutType === "for_reps") &&
-                  part.timeCapMinutes
-                    ? ` · ${part.timeCapMinutes} min cap`
+                  part.timeCapInput
+                    ? ` · ${part.timeCapInput} cap`
                     : ""}
                 </div>
 
