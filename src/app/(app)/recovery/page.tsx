@@ -39,9 +39,10 @@ export default function RecoveryTodayPage() {
   const [date, setDate] = useState<Date>(new Date());
   const dateStr = toDateString(date);
   const activeMembership = useActiveMembership();
-  const [prefer, setPrefer] = useState<"personal" | "gym">(
-    activeMembership ? "gym" : "personal"
-  );
+  // Until the user explicitly picks, derive prefer from the gym context so a
+  // late-resolving membership flips the default from "personal" to "gym".
+  const [preferOverride, setPreferOverride] = useState<"personal" | "gym" | null>(null);
+  const prefer = preferOverride ?? (activeMembership ? "gym" : "personal");
 
   const { data: today, isLoading } = useRecoveryToday(dateStr, prefer);
   const startSession = useStartRecoverySession();
@@ -112,7 +113,7 @@ export default function RecoveryTodayPage() {
             size="sm"
             variant={prefer === "gym" ? "default" : "ghost"}
             className="flex-1"
-            onClick={() => setPrefer("gym")}
+            onClick={() => setPreferOverride("gym")}
           >
             Gym
           </Button>
@@ -120,7 +121,7 @@ export default function RecoveryTodayPage() {
             size="sm"
             variant={prefer === "personal" ? "default" : "ghost"}
             className="flex-1"
-            onClick={() => setPrefer("personal")}
+            onClick={() => setPreferOverride("personal")}
           >
             Personal
           </Button>
@@ -128,7 +129,6 @@ export default function RecoveryTodayPage() {
       )}
 
       <HiddenAssignmentsButton />
-
 
       {isLoading ? (
         <div className="flex justify-center py-10">
