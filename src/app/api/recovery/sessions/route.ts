@@ -4,6 +4,8 @@ import {
   recoverySessions,
   recoverySessionItems,
   recoveryMovements,
+  recoveryMovementVideos,
+  communityMemberships,
 } from "@/db/schema";
 import { and, eq, desc, gte, lte, inArray } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
@@ -44,11 +46,18 @@ export async function GET(req: NextRequest) {
             i: recoverySessionItems,
             movementName: recoveryMovements.canonicalName,
             isPerSide: recoveryMovements.isPerSide,
+            description: recoveryMovements.description,
           })
           .from(recoverySessionItems)
           .innerJoin(recoveryMovements, eq(recoverySessionItems.movementId, recoveryMovements.id))
           .where(eq(recoverySessionItems.sessionId, s.id))
           .orderBy(recoverySessionItems.orderIndex);
+
+        // Pull the visible videos for every movement in this session in a
+        // single query, then group them by movement on the way out.
+        const movementIds = Array.from(new Set(items.map((row) => row.i.movementId)));
+        const videosByMovement = await fetchVisibleVideosByMovement(user.id, movementIds);
+
         existingSession = {
           id: s.id,
           status: s.status,
@@ -56,6 +65,8 @@ export async function GET(req: NextRequest) {
             ...row.i,
             movementName: row.movementName,
             isPerSide: row.isPerSide,
+            description: row.description,
+            videos: videosByMovement.get(row.i.movementId) ?? [],
           })),
         };
       }
@@ -205,4 +216,43 @@ export async function POST(req: NextRequest) {
   });
 
   return NextResponse.json(result, { status: 201 });
+}
+
+type RecoveryVideoRow = typeof recoveryMovementVideos.$inferSelect;
+
+// Fetch every video for the given movements, then keep only the ones the
+// caller is allowed to see (mirrors the per-movement videos GET endpoint's
+// visibility rules so the session view doesn't leak gym/private uploads).
+async function fetchVisibleVideosByMovement(
+  userId: string,
+  movementIds: string[]
+): Promise<Map<string, RecoveryVideoRow[]>> {
+  const grouped = new Map<string, RecoveryVideoRow[]>();
+  if (movementIds.length === 0) return grouped;
+
+  const memberships = await db
+    .select({ communityId: communityMemberships.communityId })
+    .from(communityMemberships)
+    .where(
+      and(eq(communityMemberships.userId, userId), eq(communityMemberships.isActive, true))
+    );
+  const myGyms = memberships.map((m) => m.communityId);
+
+  const videoRows = await db
+    .select()
+    .from(recoveryMovementVideos)
+    .where(inArray(recoveryMovementVideos.movementId, movementIds))
+    .orderBy(recoveryMovementVideos.orderIndex, recoveryMovementVideos.createdAt);
+
+  for (const v of videoRows) {
+    const visible =
+      v.visibility === "public" ||
+      (v.visibility === "gym" && v.communityId && myGyms.includes(v.communityId)) ||
+      (v.visibility === "private" && v.uploadedBy === userId);
+    if (!visible) continue;
+    const arr = grouped.get(v.movementId) ?? [];
+    arr.push(v);
+    grouped.set(v.movementId, arr);
+  }
+  return grouped;
 }
