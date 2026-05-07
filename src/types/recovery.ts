@@ -219,6 +219,8 @@ export interface RecoverySessionItem {
   notes: string | null;
   movementName?: string;
   isPerSide?: boolean;
+  description?: string | null;
+  videos?: RecoveryVideo[];
 }
 
 // Format a prescription as a human-readable string.

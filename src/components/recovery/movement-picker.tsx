@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { Plus, Clock } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { useRecoveryMovements } from "@/hooks/useRecoveryMovements";
 import { useRecoveryRoutines } from "@/hooks/useRecoveryRoutines";
 import type { RecoveryPrescription } from "@/types/recovery";
@@ -44,8 +45,12 @@ export function MovementPicker({
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const m = (movements ?? []).filter(
-      (mv) => mv.isValidated && mv.canonicalName.toLowerCase().includes(q)
+    // The list API already returns only movements visible to the caller
+    // (validated movements + the caller's own pending submissions). We don't
+    // re-filter on isValidated here so users can pick a movement they just
+    // added — a "Pending" badge tells them validation is still required.
+    const m = (movements ?? []).filter((mv) =>
+      mv.canonicalName.toLowerCase().includes(q)
     );
     const r = includeRoutines
       ? (routines ?? []).filter((r) => r.name.toLowerCase().includes(q))
@@ -116,9 +121,15 @@ export function MovementPicker({
                 setOpen(false);
                 setSearch("");
               }}
-              className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-muted/40"
+              className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-muted/40 flex items-center gap-2"
             >
-              {m.canonicalName}
+              <span className="flex-1 truncate">{m.canonicalName}</span>
+              {!m.isValidated && (
+                <Badge variant="secondary" className="text-[10px]">
+                  <Clock className="h-3 w-3 mr-0.5" />
+                  Pending
+                </Badge>
+              )}
             </button>
           ))}
           {filtered.movements.length === 0 &&

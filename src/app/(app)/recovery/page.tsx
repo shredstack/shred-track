@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { CheckCircle2, Circle, ChevronDown, ChevronUp, EyeOff, Loader2, Heart, Plus, Settings } from "lucide-react";
+import { CheckCircle2, Circle, ChevronDown, ChevronUp, EyeOff, Loader2, Heart, Plus, Settings, Video as VideoIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +26,8 @@ import {
   useUpdateMyOverride,
   type DismissedAssignment,
 } from "@/hooks/useRecoverySchedules";
-import { formatPrescription } from "@/types/recovery";
+import { formatPrescription, type RecoveryVideo } from "@/types/recovery";
+import { SessionMovementDetail } from "@/components/recovery/session-movement-detail";
 
 function toDateString(d: Date) {
   const y = d.getFullYear();
@@ -284,6 +285,8 @@ interface SessionItemLite {
   status: string;
   movementId: string;
   scheduleSlotId: string | null;
+  description?: string | null;
+  videos?: RecoveryVideo[];
 }
 
 function MovementRow(props: {
@@ -299,44 +302,79 @@ function MovementRow(props: {
   const status = item?.status ?? "pending";
   const checked = status === "done";
   const skipped = status === "skipped";
+  const [expanded, setExpanded] = useState(false);
+  const videos = item?.videos ?? [];
+  const description = item?.description ?? null;
+  const hasDetail = !!description || videos.length > 0;
 
   return (
     <Card className={skipped ? "opacity-50" : ""}>
-      <CardContent className="py-3 flex items-start gap-3">
-        <button
-          onClick={() => item && onToggle(item.id, status)}
-          className="mt-0.5"
-          disabled={!item}
-        >
-          {checked ? (
-            <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-          ) : (
-            <Circle className="h-5 w-5 text-muted-foreground" />
+      <CardContent className="py-3">
+        <div className="flex items-start gap-3">
+          <button
+            onClick={() => item && onToggle(item.id, status)}
+            className="mt-0.5"
+            disabled={!item}
+          >
+            {checked ? (
+              <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+            ) : (
+              <Circle className="h-5 w-5 text-muted-foreground" />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => hasDetail && setExpanded((v) => !v)}
+            className="flex-1 min-w-0 text-left"
+            disabled={!hasDetail}
+          >
+            <div className="flex items-center gap-2">
+              <p className={`text-sm font-medium truncate ${checked ? "line-through text-muted-foreground" : ""}`}>
+                {name}
+              </p>
+              {videos.length > 0 && (
+                <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                  <VideoIcon className="h-3 w-3" />
+                  {videos.length}
+                </span>
+              )}
+              {hasDetail && (
+                expanded ? (
+                  <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                ) : (
+                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                )
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {formatPrescription(prescription, isPerSide) || "—"}
+            </p>
+            {notes && (
+              <p className="text-[11px] text-muted-foreground italic mt-1">{notes}</p>
+            )}
+          </button>
+          {item && !skipped && !checked && (
+            <button
+              onClick={() => onSkip(item.id)}
+              className="text-[10px] uppercase tracking-wide text-muted-foreground hover:text-foreground shrink-0"
+            >
+              Skip
+            </button>
           )}
-        </button>
-        <div className="flex-1 min-w-0">
-          <p className={`text-sm font-medium ${checked ? "line-through text-muted-foreground" : ""}`}>
-            {name}
-          </p>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {formatPrescription(prescription, isPerSide) || "—"}
-          </p>
-          {notes && (
-            <p className="text-[11px] text-muted-foreground italic mt-1">{notes}</p>
+          {skipped && (
+            <Badge variant="outline" className="text-[10px]">
+              Skipped
+            </Badge>
           )}
         </div>
-        {item && !skipped && !checked && (
-          <button
-            onClick={() => onSkip(item.id)}
-            className="text-[10px] uppercase tracking-wide text-muted-foreground hover:text-foreground"
-          >
-            Skip
-          </button>
-        )}
-        {skipped && (
-          <Badge variant="outline" className="text-[10px]">
-            Skipped
-          </Badge>
+        {expanded && item && (
+          <div className="mt-3 border-t border-white/[0.06] pt-3">
+            <SessionMovementDetail
+              movementId={item.movementId}
+              description={description}
+              videos={videos}
+            />
+          </div>
         )}
       </CardContent>
     </Card>
@@ -392,49 +430,104 @@ function RoutineCard(props: {
         </button>
         {expanded && (
           <div className="mt-3 space-y-2 border-t border-white/[0.06] pt-3">
-            {items.map(({ rm, item }) => {
-              const status = item?.status ?? "pending";
-              const checked = status === "done";
-              const skipped = status === "skipped";
-              return (
-                <div
-                  key={rm.id}
-                  className={`flex items-start gap-3 ${skipped ? "opacity-50" : ""}`}
-                >
-                  <button
-                    onClick={() => item && props.onToggle(item.id, status)}
-                    className="mt-0.5"
-                    disabled={!item}
-                  >
-                    {checked ? (
-                      <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                    ) : (
-                      <Circle className="h-4 w-4 text-muted-foreground" />
-                    )}
-                  </button>
-                  <div className="flex-1">
-                    <p className={`text-sm ${checked ? "line-through text-muted-foreground" : ""}`}>
-                      {rm.movementName}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground">
-                      {formatPrescription(rm.prescription, rm.isPerSide) || "—"}
-                    </p>
-                  </div>
-                  {item && !skipped && !checked && (
-                    <button
-                      onClick={() => props.onSkip(item.id)}
-                      className="text-[10px] uppercase text-muted-foreground hover:text-foreground"
-                    >
-                      Skip
-                    </button>
-                  )}
-                </div>
-              );
-            })}
+            {items.map(({ rm, item }) => (
+              <RoutineChildRow
+                key={rm.id}
+                movementName={rm.movementName}
+                prescription={rm.prescription}
+                isPerSide={rm.isPerSide}
+                item={item}
+                onToggle={props.onToggle}
+                onSkip={props.onSkip}
+              />
+            ))}
           </div>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function RoutineChildRow(props: {
+  movementName: string;
+  prescription: Record<string, unknown>;
+  isPerSide: boolean;
+  item?: SessionItemLite;
+  onToggle: (itemId: string, status: string) => void;
+  onSkip: (itemId: string) => void;
+}) {
+  const { movementName, prescription, isPerSide, item, onToggle, onSkip } = props;
+  const status = item?.status ?? "pending";
+  const checked = status === "done";
+  const skipped = status === "skipped";
+  const [expanded, setExpanded] = useState(false);
+  const videos = item?.videos ?? [];
+  const description = item?.description ?? null;
+  const hasDetail = !!description || videos.length > 0;
+
+  return (
+    <div className={skipped ? "opacity-50" : ""}>
+      <div className="flex items-start gap-3">
+        <button
+          onClick={() => item && onToggle(item.id, status)}
+          className="mt-0.5"
+          disabled={!item}
+        >
+          {checked ? (
+            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+          ) : (
+            <Circle className="h-4 w-4 text-muted-foreground" />
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => hasDetail && setExpanded((v) => !v)}
+          className="flex-1 min-w-0 text-left"
+          disabled={!hasDetail}
+        >
+          <div className="flex items-center gap-2">
+            <p className={`text-sm truncate ${checked ? "line-through text-muted-foreground" : ""}`}>
+              {movementName}
+            </p>
+            {videos.length > 0 && (
+              <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                <VideoIcon className="h-3 w-3" />
+                {videos.length}
+              </span>
+            )}
+            {hasDetail && (
+              expanded ? (
+                <ChevronUp className="h-3 w-3 text-muted-foreground shrink-0" />
+              ) : (
+                <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+              )
+            )}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            {formatPrescription(prescription, isPerSide) || "—"}
+          </p>
+        </button>
+        {item && !skipped && !checked && (
+          <button
+            onClick={() => onSkip(item.id)}
+            className="text-[10px] uppercase text-muted-foreground hover:text-foreground shrink-0"
+          >
+            Skip
+          </button>
+        )}
+      </div>
+      {/* Expanded detail spans the full row width (not indented under the
+          checkbox) so the inline video can break out to the card edges. */}
+      {expanded && item && (
+        <div className="mt-2">
+          <SessionMovementDetail
+            movementId={item.movementId}
+            description={description}
+            videos={videos}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
