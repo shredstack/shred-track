@@ -185,7 +185,10 @@ export async function POST(
         visibility,
         communityId,
         label: body.label ?? null,
-        durationSeconds: body.durationSeconds ?? null,
+        durationSeconds:
+          typeof body.durationSeconds === "number" && Number.isFinite(body.durationSeconds)
+            ? Math.round(body.durationSeconds)
+            : null,
         rightsConfirmed: true,
         orderIndex: typeof body.orderIndex === "number" ? body.orderIndex : 0,
         uploadedBy: user.id,
