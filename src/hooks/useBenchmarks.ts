@@ -113,6 +113,8 @@ export function useCreateWorkoutFromBenchmark() {
       benchmarkWorkoutId: string;
       workoutDate: string;
       communityId?: string;
+      isPartner?: boolean;
+      partnerCount?: number;
     }) => {
       const response = await fetch("/api/workouts", {
         method: "POST",
