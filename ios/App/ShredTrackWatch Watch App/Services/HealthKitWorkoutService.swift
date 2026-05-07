@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import HealthKit
 
 // HealthKitWorkoutService — owns the `HKWorkoutSession` for the duration

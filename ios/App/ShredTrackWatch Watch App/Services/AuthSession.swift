@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 // AuthSession — the Watch-side cached session.
