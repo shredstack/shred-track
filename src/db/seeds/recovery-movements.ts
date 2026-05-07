@@ -14,7 +14,7 @@ import * as schema from "../schema";
 
 interface Seed {
   canonicalName: string;
-  category: "stretch" | "mobility" | "strength" | "breathwork" | "soft_tissue" | "other";
+  category: "stretch" | "mobility" | "strength" | "exercises" | "breathwork" | "soft_tissue" | "other";
   bodyRegion: string[];
   description?: string;
   isPerSide?: boolean;

@@ -226,6 +226,7 @@ export default function RecoveryMovementDetailPage({
 }
 
 function videoTier(v: RecoveryVideo, myGymId: string | null): number {
+  if (v.visibility === "private") return 0;
   if (v.visibility === "gym" && myGymId && v.communityId === myGymId) return 0;
   if (v.visibility === "public") return 1;
   if (v.visibility === "gym") return 2;
@@ -378,7 +379,7 @@ function AddVideoDialog(props: {
   const [mode, setMode] = useState<AddVideoMode>("external");
   const [url, setUrl] = useState("");
   const [label, setLabel] = useState("");
-  const [visibility, setVisibility] = useState<RecoveryVisibility>("gym");
+  const [visibility, setVisibility] = useState<RecoveryVisibility>("private");
   const [confirmRights, setConfirmRights] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [fileDuration, setFileDuration] = useState<number | null>(null);
@@ -404,6 +405,7 @@ function AddVideoDialog(props: {
     setFileError(null);
     setConfirmRights(false);
     setConfirmingPublic(false);
+    setVisibility("private");
   };
 
   const onFilePicked = async (next: File | null) => {
@@ -578,10 +580,12 @@ function AddVideoDialog(props: {
                 value={visibility}
                 onChange={(e) => setVisibility(e.target.value as RecoveryVisibility)}
               >
-                <option value="gym">
-                  My gym only
-                  {activeMembership ? ` (${activeMembership.communityName})` : ""}
-                </option>
+                <option value="private">Just me — only visible to me</option>
+                {activeMembership && (
+                  <option value="gym">
+                    My gym only ({activeMembership.communityName})
+                  </option>
+                )}
                 {canPublic && (
                   <option value="public">Public — visible to everyone</option>
                 )}

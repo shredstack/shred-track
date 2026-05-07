@@ -49,6 +49,7 @@ export async function GET(
   const visibleVideos = allVideos.filter((v) => {
     if (v.visibility === "public") return true;
     if (v.visibility === "gym" && v.communityId && myGyms.includes(v.communityId)) return true;
+    if (v.visibility === "private" && v.uploadedBy === user.id) return true;
     return false;
   });
 

@@ -42,6 +42,7 @@ export async function GET(
   const visible = videos.filter((v) => {
     if (v.visibility === "public") return true;
     if (v.visibility === "gym" && v.communityId && myGyms.includes(v.communityId)) return true;
+    if (v.visibility === "private" && v.uploadedBy === user.id) return true;
     return false;
   });
 
@@ -55,6 +56,9 @@ export async function GET(
 //      → finalizes the row after the client uploads
 //   { kind: 'external', externalUrl, visibility, communityId?, label?, rightsConfirmed }
 //      → inserts an external-URL row immediately
+//
+// visibility = 'private' is per-uploader (only the user who uploaded can see
+// or play). communityId must be null for private rows.
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -113,6 +117,10 @@ export async function POST(
       if (!m) return "You are not an active member of that gym";
       return null;
     }
+    if (visibility === "private") {
+      if (communityId !== null) return "Private videos cannot have a community_id";
+      return null;
+    }
     return "Invalid visibility";
   }
 
@@ -127,6 +135,7 @@ export async function POST(
     const storagePath = buildStoragePath({
       visibility,
       communityId,
+      uploadedBy: user.id,
       movementId: id,
       videoId,
       ext,

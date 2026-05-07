@@ -1091,7 +1091,7 @@ export const recoveryMovementVideos = pgTable(
     externalUrl: text("external_url"),
     externalProvider: text("external_provider"),
     externalVideoId: text("external_video_id"),
-    visibility: text("visibility").notNull(), // 'public' | 'gym'
+    visibility: text("visibility").notNull(), // 'public' | 'gym' | 'private'
     communityId: uuid("community_id").references(() => communities.id, { onDelete: "cascade" }),
     label: text("label"),
     durationSeconds: integer("duration_seconds"),

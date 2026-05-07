@@ -42,6 +42,9 @@ export async function GET(
         .limit(1)
         .then((rows) => rows.length > 0));
     if (!ok) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  } else if (video.visibility === "private") {
+    const ok = video.uploadedBy === user.id || (await isSuperAdmin(user.id));
+    if (!ok) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   if (video.sourceType === "external") {
