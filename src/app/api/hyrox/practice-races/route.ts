@@ -37,11 +37,17 @@ export async function GET() {
 interface SplitPayload {
   segmentOrder: number;
   segmentType: "run" | "station";
+  /** Optional discriminator for run segments. "roxzone" marks
+   *  transition-simulation runs; "prescribed_run" marks 1km runs. NULL
+   *  on legacy rows and on stations. See spec §4.1. */
+  segmentSubtype?: "prescribed_run" | "roxzone";
   segmentLabel: string;
   timeSeconds: number;
   distanceMeters?: number;
   reps?: number;
 }
+
+const VALID_SEGMENT_SUBTYPES = new Set(["prescribed_run", "roxzone"]);
 
 interface RacePayload {
   title?: string;
@@ -100,6 +106,14 @@ export async function POST(request: Request) {
         raceId: race.id,
         segmentOrder: s.segmentOrder,
         segmentType: s.segmentType,
+        // Drop unknown subtype values silently — the CHECK constraint
+        // would reject them otherwise. Stations always store NULL.
+        segmentSubtype:
+          s.segmentType === "run" &&
+          s.segmentSubtype &&
+          VALID_SEGMENT_SUBTYPES.has(s.segmentSubtype)
+            ? s.segmentSubtype
+            : null,
         segmentLabel: s.segmentLabel,
         timeSeconds: s.timeSeconds.toFixed(1),
         distanceMeters: s.distanceMeters,

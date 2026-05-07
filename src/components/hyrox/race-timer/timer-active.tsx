@@ -94,6 +94,10 @@ export function TimerActive({
   const progressPercent = (completedCount / totalSegments) * 100;
 
   const isRun = currentSegment?.segmentType === "run";
+  const isRoxzone = currentSegment?.segmentSubtype === "roxzone";
+  const isNextRoxzone = nextSegment?.segmentSubtype === "roxzone";
+  // Roxzone shares the run accent — per spec §3.4 it's "just another run
+  // segment" for active-screen purposes. Subtitle disambiguates.
   const accentColor = isRun ? "text-blue-400" : "text-orange-400";
   const accentBg = isRun ? "bg-blue-500" : "bg-orange-500";
 
@@ -144,7 +148,7 @@ export function TimerActive({
           Segment {completedCount + 1} of {totalSegments}
         </span>
         <span className={`text-xs font-bold uppercase tracking-wider ${accentColor}`}>
-          {isRun ? "RUN" : "STATION"}
+          {isRoxzone ? "TRANSITION" : isRun ? "RUN" : "STATION"}
         </span>
       </div>
 
@@ -153,6 +157,11 @@ export function TimerActive({
         <h2 className={`text-xl font-bold ${accentColor}`}>
           {currentSegment?.label}
         </h2>
+        {isRoxzone && (
+          <p className="text-[11px] text-teal-400 font-medium mt-0.5">
+            Transition simulation
+          </p>
+        )}
         {currentSegment && (
           <p className="text-xs text-muted-foreground mt-0.5">
             {currentSegment.distance}
@@ -235,9 +244,15 @@ export function TimerActive({
           <p className="text-sm font-medium mt-1">
             {nextSegment.label}
             <span className="text-xs text-muted-foreground ml-2">
-              {nextSegment.distance}
-              {nextSegment.reps ? `${nextSegment.reps} reps` : ""}
-              {nextSegment.weightLabel ? ` @ ${nextSegment.weightLabel}` : ""}
+              {isNextRoxzone
+                ? `${nextSegment.distance} transition`
+                : (
+                  <>
+                    {nextSegment.distance}
+                    {nextSegment.reps ? `${nextSegment.reps} reps` : ""}
+                    {nextSegment.weightLabel ? ` @ ${nextSegment.weightLabel}` : ""}
+                  </>
+                )}
             </span>
           </p>
         </div>

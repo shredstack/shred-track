@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { Activity, Dumbbell } from "lucide-react";
+import { Activity, Dumbbell, ArrowRightLeft } from "lucide-react";
 import {
   formatTime,
   formatLongTime,
@@ -52,10 +52,14 @@ export function RaceSplitsTable({
     <div className="flex flex-col gap-1.5">
       {orderedWithCumulative.map(({ split, seconds, cumulative }) => {
         const isRun = split.segmentType === "run";
+        const isRoxzone = split.segmentSubtype === "roxzone";
 
-        // Lookup reference distribution for percentile chip.
+        // Lookup reference distribution for percentile chip — but skip for
+        // Roxzone segments (no reference distribution exists for 100m
+        // transition runs and the prescribed-run distribution would be
+        // a misleading comparison).
         let percentile: number | null = null;
-        if (showPercentiles && refData) {
+        if (showPercentiles && refData && !isRoxzone) {
           if (isRun) {
             const dist = refData.runs[split.segmentLabel];
             if (dist) percentile = estimatePercentile(seconds, dist);
@@ -68,8 +72,9 @@ export function RaceSplitsTable({
         // Pace string
         let paceDisplay: string | null = null;
         if (isRun) {
-          // Run pace per km — fall back to per-segment-time if no division
-          const distM = split.distanceMeters ?? division?.runDistanceM ?? 1000;
+          // Roxzone is a fixed 100m segment; everyone else falls back to
+          // the division's prescribed run distance.
+          const distM = split.distanceMeters ?? (isRoxzone ? 100 : (division?.runDistanceM ?? 1000));
           const perKm = (seconds / distM) * 1000;
           const m = Math.floor(perKm / 60);
           const s = Math.round(perKm % 60);
@@ -89,10 +94,28 @@ export function RaceSplitsTable({
           );
         }
 
-        const bgColor = isRun ? "bg-blue-500/[0.06]" : "bg-orange-500/[0.06]";
-        const borderColor = isRun ? "border-blue-500/15" : "border-orange-500/15";
-        const accentColor = isRun ? "text-blue-400" : "text-orange-400";
-        const iconBg = isRun ? "bg-blue-500/15" : "bg-orange-500/15";
+        // Roxzone uses a third (muted teal) variant to disambiguate from
+        // the headline 1km splits in the history view. Per spec §3.5.
+        const bgColor = isRoxzone
+          ? "bg-teal-500/[0.05]"
+          : isRun
+            ? "bg-blue-500/[0.06]"
+            : "bg-orange-500/[0.06]";
+        const borderColor = isRoxzone
+          ? "border-teal-500/15"
+          : isRun
+            ? "border-blue-500/15"
+            : "border-orange-500/15";
+        const accentColor = isRoxzone
+          ? "text-teal-400"
+          : isRun
+            ? "text-blue-400"
+            : "text-orange-400";
+        const iconBg = isRoxzone
+          ? "bg-teal-500/15"
+          : isRun
+            ? "bg-blue-500/15"
+            : "bg-orange-500/15";
 
         return (
           <div
@@ -100,7 +123,9 @@ export function RaceSplitsTable({
             className={`flex items-center gap-3 rounded-xl ${bgColor} border ${borderColor} px-3 py-2.5`}
           >
             <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${iconBg}`}>
-              {isRun ? (
+              {isRoxzone ? (
+                <ArrowRightLeft className={`h-3.5 w-3.5 ${accentColor}`} />
+              ) : isRun ? (
                 <Activity className={`h-3.5 w-3.5 ${accentColor}`} />
               ) : (
                 <Dumbbell className={`h-3.5 w-3.5 ${accentColor}`} />
@@ -112,6 +137,11 @@ export function RaceSplitsTable({
                 <span className="text-xs font-semibold truncate">
                   {split.segmentLabel}
                 </span>
+                {isRoxzone && (
+                  <span className="text-[9px] uppercase tracking-wider text-teal-400 font-medium">
+                    Transition
+                  </span>
+                )}
                 {showPercentiles && percentile != null && (
                   <PercentileChip percentile={percentile} />
                 )}

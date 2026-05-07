@@ -189,6 +189,10 @@ export function usePaceFromHealthKit(
     let totalMeters = 0;
     for (const seg of completedSegments) {
       if (seg.segmentType !== "run") continue;
+      // Roxzone (transition-simulation) runs are excluded — a 100m segment
+      // at fatigue-recovery jog pace would drag the prescribed-run average
+      // down misleadingly. Per spec §3.6.
+      if (seg.segmentSubtype === "roxzone") continue;
       if (typeof seg.distanceMeters !== "number") continue;
       if (seg.distanceMeters <= 0) continue;
       totalSeconds += seg.timeMs / 1000;

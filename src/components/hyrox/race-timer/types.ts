@@ -1,8 +1,16 @@
 /** Shared types for the practice race timer feature */
 
+/**
+ * Discriminator for run segments. NULL/undefined is treated as
+ * "prescribed_run" semantically (matches all pre-Roxzone-feature races).
+ * Stations always leave this unset.
+ */
+export type SegmentSubtype = "prescribed_run" | "roxzone";
+
 export interface RaceSegment {
   id: string;
   segmentType: "run" | "station";
+  segmentSubtype?: SegmentSubtype | null;
   label: string;
   /** e.g. "1000m", "50m" */
   distance?: string;
@@ -15,6 +23,7 @@ export interface RaceSegment {
 export interface CompletedSegment {
   segmentOrder: number;
   segmentType: "run" | "station";
+  segmentSubtype?: SegmentSubtype | null;
   label: string;
   timeMs: number;
   /** Measured distance for run segments on iOS (HealthKit). Null on web / stations. */

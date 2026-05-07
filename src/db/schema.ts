@@ -1012,6 +1012,7 @@ export const hyroxPracticeRaceSplits = pgTable(
     raceId: uuid("race_id").notNull().references(() => hyroxPracticeRaces.id, { onDelete: "cascade" }),
     segmentOrder: integer("segment_order").notNull(),
     segmentType: text("segment_type").notNull(),
+    segmentSubtype: text("segment_subtype"),
     segmentLabel: text("segment_label").notNull(),
     distanceMeters: integer("distance_meters"),
     reps: integer("reps"),

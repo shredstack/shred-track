@@ -124,7 +124,9 @@ If the PR adds or modifies server-rendered components, check for:
 - [ ] **No locale-dependent formatting without explicit locale**: `toLocaleString()` / `toLocaleDateString()` must pass a locale
 - [ ] **No `Date.now()` or `new Date()` in render**: Current time should be read in `useEffect`
 - [ ] **No `Math.random()` in render**: Use stable seeds or `useEffect`
-- [ ] **No `typeof window` branches in render**: Use `useEffect` for client-only logic
+- [ ] **No `typeof window` branches in render**: Use `useEffect` for client-only logic. Note: lazy `useState` initialisers count as render and run on the server. Reading localStorage from a lazy initialiser is the bug, not the fix.
+
+**The recommended pattern for hydrating from localStorage** is `useState(<fallback>)` + a `useEffect` that reads localStorage and calls the setter. Do not flag this pattern. Do not suggest replacing it with `useState(() => readLocalStorage())` — that creates the hydration mismatch the `useEffect` form is designed to avoid.
 
 ### Specific Feedback
 
@@ -195,10 +197,19 @@ Before flagging an issue, verify it's a real problem:
 12. **`NOT NULL` without a default is often intentional.** Columns capturing user-provided action timestamps (`disclaimer_acked_at`, `signed_at`, `accepted_at`, etc.) deliberately have no default — the value must come from an explicit user action. Do not flag these as "inserts will fail at runtime" unless you've actually traced the insert paths and found one that omits the field.
 13. **Same name ≠ duplicate implementation.** Before flagging a "duplicate function" as a blocker, open both files and compare signatures and return types. Two functions named `parseRepScheme` that return different shapes (`RepSchemeParsed | null` vs `number | null`) are different functions with a naming collision — suggest a rename as **Nit**, never as **Request Changes**. Only flag as a real issue if both implementations have the same signature and overlapping behavior.
 14. **Next.js App Router handles unhandled rejections.** A thrown error in an App Router route handler returns a clean 500 — no `try/catch` is required for that. Only flag missing `try/catch` when there's specific recovery logic the route should perform (e.g. translating a unique-constraint violation into a 409, retrying a transient failure, surfacing a user-facing error message). "Add try/catch so errors return a clean 500" is a false alarm — that already happens.
+15. **`useState(initial) + useEffect` to hydrate from localStorage IS the correct pattern, not a hydration footgun.** `"use client"` components still SSR. A lazy `useState(() => readLocalStorage())` runs on the server (returning the fallback) AND on the client (returning the real persisted value) — that's the mismatch. The `typeof window === "undefined"` guard inside the loader does NOT prevent this; it causes it. CLAUDE.md's "Hydration Safety" section explicitly recommends moving client-only reads into `useEffect`. Do not flag this pattern, and never suggest moving a `typeof window` guard into a lazy initialiser as a "fix" — that introduces the bug it claims to prevent.
 
 ### Verdict discipline
 
 The **Request Changes** verdict is reserved for issues that genuinely block merge: data loss risk, security issues, broken functionality, missing user scoping, breaking API changes. Before issuing **Request Changes**, re-read each "Critical / Important" item and ask: *did I actually open the file and confirm this is missing?* If even one of your blocking items turns out to already be in the code, downgrade the verdict — a single false alarm in the blocking list erodes trust in the whole review.
+
+### Verify your proposed fix
+
+Before flagging an issue with a suggested fix, mentally apply the fix and check it against the project's own coding guidelines (CLAUDE.md, AGENTS.md):
+
+1. **Does the existing code already match a recommended pattern in CLAUDE.md?** If yes, it's not a bug — even if it superficially looks like an anti-pattern. The hydration section is a common trap: `useState + useEffect` for client-only reads is the *recommended* fix, not the bug.
+2. **Would your suggested fix violate a different rule?** A "fix" that introduces a hydration mismatch, removes user scoping, drops error handling, or breaks SSR is worse than the original. If you can't articulate why your fix is safer than the current code, don't suggest it.
+3. **Is the bug you're describing reachable in practice, or only theoretical?** Sub-tick race conditions during hydration, errors that can only happen if React's invariants break, and stale closures that self-correct on the next render are not blockers.
 
 ### What to Actually Flag
 

@@ -201,6 +201,7 @@ export function useRaceTimer(initialSegments: RaceSegment[]): UseRaceTimerReturn
         const completed: CompletedSegment = {
           segmentOrder: prev.currentSegmentIndex + 1,
           segmentType: seg.segmentType,
+          segmentSubtype: seg.segmentSubtype ?? null,
           label: seg.label,
           timeMs: segTime,
           distanceMeters:
@@ -278,6 +279,7 @@ export function useRaceTimer(initialSegments: RaceSegment[]): UseRaceTimerReturn
           completed.push({
             segmentOrder: prev.currentSegmentIndex + 1,
             segmentType: seg.segmentType,
+            segmentSubtype: seg.segmentSubtype ?? null,
             label: seg.label,
             timeMs: now - prev.segmentStartedAt,
             distanceMeters:

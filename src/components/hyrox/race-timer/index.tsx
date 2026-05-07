@@ -90,7 +90,7 @@ export function RaceTimerFlow() {
     completedSegments: timer.state.completedSegments,
   });
   const completedRunCount = timer.state.completedSegments.filter(
-    (s) => s.segmentType === "run",
+    (s) => s.segmentType === "run" && s.segmentSubtype !== "roxzone",
   ).length;
 
   // Handle recovery prompt
@@ -173,6 +173,7 @@ export function RaceTimerFlow() {
             segmentType: s.segmentType,
             segmentLabel: s.label,
             timeSeconds: s.timeMs / 1000,
+            ...(s.segmentSubtype ? { segmentSubtype: s.segmentSubtype } : {}),
             ...(typeof s.distanceMeters === "number"
               ? { distanceMeters: s.distanceMeters }
               : {}),
