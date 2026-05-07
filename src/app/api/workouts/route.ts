@@ -608,9 +608,15 @@ export async function POST(req: NextRequest) {
           requiresVest: !!benchmark.requiresVest,
           vestWeightMaleLb: benchmark.vestWeightMaleLb ?? null,
           vestWeightFemaleLb: benchmark.vestWeightFemaleLb ?? null,
-          // Inherit partner flag from the benchmark.
-          isPartner: !!benchmark.isPartner,
-          partnerCount: benchmark.partnerCount ?? null,
+          // Body overrides win when explicitly provided so callers can mark
+          // a non-partner benchmark (or unmark one) at workout-creation time.
+          // Falls back to the benchmark's own flag when the body is silent.
+          isPartner:
+            isPartner !== undefined ? !!isPartner : !!benchmark.isPartner,
+          partnerCount:
+            isPartner !== undefined
+              ? toIntOrNull(partnerCount)
+              : benchmark.partnerCount ?? null,
         })
         .returning();
 

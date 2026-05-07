@@ -37,13 +37,18 @@ import {
   WorkoutDateInput,
   localTodayString,
 } from "@/components/crossfit/workout-date-input";
+import { PartnerWorkoutToggle } from "@/components/crossfit/partner-workout-toggle";
 
 // ============================================
 // Props
 // ============================================
 
 interface WorkoutParserProps {
-  onSave?: (parsed: ParsedWorkout, workoutDate: string) => void;
+  onSave?: (
+    parsed: ParsedWorkout,
+    workoutDate: string,
+    options: { isPartner: boolean; partnerCount: number | null }
+  ) => void;
   onCancel?: () => void;
   defaultWorkoutDate?: string;
 }
@@ -91,6 +96,8 @@ export function WorkoutParser({
   const [workoutDate, setWorkoutDate] = useState(
     defaultWorkoutDate || localTodayString()
   );
+  const [isPartner, setIsPartner] = useState(false);
+  const [partnerCount, setPartnerCount] = useState("");
   // The parser stays pure but accepts a sparse view of the library so it
   // can route "Row 21" to calories rather than reps. We pass whatever the
   // hook has cached; on first render it's an empty list and the parser
@@ -146,7 +153,11 @@ export function WorkoutParser({
 
   const handleSave = () => {
     if (parsed) {
-      onSave?.(parsed, workoutDate);
+      onSave?.(parsed, workoutDate, {
+        isPartner,
+        partnerCount:
+          isPartner && partnerCount ? parseInt(partnerCount, 10) : null,
+      });
     }
   };
 
@@ -474,6 +485,16 @@ Time Cap: 10 min`}
       </div>
 
       <Separator />
+
+      <PartnerWorkoutToggle
+        isPartner={isPartner}
+        partnerCount={partnerCount}
+        onChange={(updates) => {
+          if (updates.isPartner !== undefined) setIsPartner(updates.isPartner);
+          if (updates.partnerCount !== undefined)
+            setPartnerCount(updates.partnerCount);
+        }}
+      />
 
       {/* Raw Text Reference */}
       <details className="text-xs">

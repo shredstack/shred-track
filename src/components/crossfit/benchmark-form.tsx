@@ -12,6 +12,7 @@ import {
   MultiPartConfig,
   emptyPart,
 } from "@/components/crossfit/multi-part-config";
+import { PartnerWorkoutToggle } from "@/components/crossfit/partner-workout-toggle";
 import { builderPartToPayload } from "@/lib/crossfit/builder-payload";
 import type {
   WorkoutBuilderPart,
@@ -276,38 +277,15 @@ export function BenchmarkForm({
             showRepScheme
           />
 
-          {/* Partner / team flag */}
-          <div className="space-y-2 rounded-lg border border-border/50 bg-muted/20 p-3">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={isPartner}
-                onChange={(e) => {
-                  setIsPartner(e.target.checked);
-                  if (!e.target.checked) setPartnerCount("");
-                  else if (!partnerCount) setPartnerCount("2");
-                }}
-                className="size-4 cursor-pointer"
-              />
-              <span className="text-sm font-medium">Partner / team workout</span>
-            </label>
-            {isPartner && (
-              <div className="space-y-1.5 pl-6">
-                <Label className="text-xs text-muted-foreground">
-                  Team size
-                </Label>
-                <Input
-                  type="number"
-                  min={2}
-                  max={20}
-                  value={partnerCount}
-                  onChange={(e) => setPartnerCount(e.target.value)}
-                  placeholder="e.g. 2"
-                  className="h-8 max-w-[120px] text-sm"
-                />
-              </div>
-            )}
-          </div>
+          <PartnerWorkoutToggle
+            isPartner={isPartner}
+            partnerCount={partnerCount}
+            onChange={(updates) => {
+              if (updates.isPartner !== undefined) setIsPartner(updates.isPartner);
+              if (updates.partnerCount !== undefined)
+                setPartnerCount(updates.partnerCount);
+            }}
+          />
 
           <div className="flex gap-2 pt-1">
             <Button

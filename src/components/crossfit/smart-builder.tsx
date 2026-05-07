@@ -19,6 +19,7 @@ import {
   emptyPart,
 } from "@/components/crossfit/multi-part-config";
 import { VestRequirements } from "@/components/crossfit/vest-requirements";
+import { PartnerWorkoutToggle } from "@/components/crossfit/partner-workout-toggle";
 import { parseDurationToSeconds } from "@/lib/crossfit/duration-parser";
 import {
   WorkoutDateInput,
@@ -549,54 +550,13 @@ export function SmartBuilder({
 
           {/* Partner / team workout. Description carries the split
               strategy — we don't try to model "tag your partner" yet. */}
-          <div className="space-y-2 rounded-lg border border-border/50 bg-muted/20 p-3">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={!!form.isPartner}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    isPartner: e.target.checked,
-                    // Default to 2 (partner) when toggling on; clear count
-                    // when toggling off so we don't carry stale state.
-                    partnerCount: e.target.checked
-                      ? prev.partnerCount || "2"
-                      : "",
-                  }))
-                }
-                className="size-4 cursor-pointer"
-              />
-              <span className="text-sm font-medium">
-                Partner / team workout
-              </span>
-            </label>
-            {form.isPartner && (
-              <div className="space-y-1.5 pl-6">
-                <Label className="text-xs text-muted-foreground">
-                  Team size
-                </Label>
-                <Input
-                  type="number"
-                  min={2}
-                  max={20}
-                  value={form.partnerCount ?? ""}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      partnerCount: e.target.value,
-                    }))
-                  }
-                  placeholder="e.g. 2"
-                  className="h-8 max-w-[120px] text-sm"
-                />
-                <p className="text-[11px] text-muted-foreground">
-                  Use the notes below to explain how partners split the
-                  work (e.g. &quot;one works while the other rests&quot;).
-                </p>
-              </div>
-            )}
-          </div>
+          <PartnerWorkoutToggle
+            isPartner={!!form.isPartner}
+            partnerCount={form.partnerCount ?? ""}
+            onChange={(updates) =>
+              setForm((prev) => ({ ...prev, ...updates }))
+            }
+          />
 
           {/* Notes */}
           <div className="space-y-2">

@@ -19,6 +19,11 @@ import {
 interface BenchmarkPickerProps {
   onWorkoutCreated: () => void;
   workoutDate?: string;
+  // When set, the created workout is written into this gym so all members
+  // see it (gym programming). Null/undefined keeps it personal. The parent
+  // is responsible for only passing this when the user is a coach/admin
+  // viewing the gym tab — the API will reject it otherwise.
+  communityId?: string | null;
 }
 
 type View = "list" | "preview" | "create";
@@ -43,6 +48,7 @@ const CATEGORY_PILLS: { value: PillValue; label: string }[] = [
 export function BenchmarkPicker({
   onWorkoutCreated,
   workoutDate,
+  communityId,
 }: BenchmarkPickerProps) {
   const [view, setView] = useState<View>("list");
   const [search, setSearch] = useState("");
@@ -68,13 +74,23 @@ export function BenchmarkPicker({
   }, []);
 
   const handleAddWorkout = useCallback(
-    (benchmarkId: string, date: string) => {
+    (
+      benchmarkId: string,
+      date: string,
+      options: { isPartner: boolean; partnerCount: number | null }
+    ) => {
       createWorkout.mutate(
-        { benchmarkWorkoutId: benchmarkId, workoutDate: date },
+        {
+          benchmarkWorkoutId: benchmarkId,
+          workoutDate: date,
+          communityId: communityId ?? undefined,
+          isPartner: options.isPartner,
+          partnerCount: options.partnerCount ?? undefined,
+        },
         { onSuccess: () => onWorkoutCreated() }
       );
     },
-    [createWorkout, onWorkoutCreated]
+    [createWorkout, onWorkoutCreated, communityId]
   );
 
   const handleCreateBenchmark = useCallback(

@@ -349,7 +349,8 @@ export default function CrossfitPage() {
 
   const handleSaveFromParser = async (
     parsed: ParsedWorkout,
-    workoutDate: string
+    workoutDate: string,
+    options: { isPartner: boolean; partnerCount: number | null }
   ) => {
     setSaveError(null);
 
@@ -372,6 +373,8 @@ export default function CrossfitPage() {
         description: parsed.description,
         workoutDate: workoutDate || dateStr,
         communityId: inGymMode && isCoach ? activeMembership!.communityId : null,
+        isPartner: options.isPartner,
+        partnerCount: options.partnerCount ?? undefined,
         parts: [
           {
             workoutType: parsed.workoutType,
@@ -670,6 +673,9 @@ export default function CrossfitPage() {
               <BenchmarkPicker
                 onWorkoutCreated={() => setShowAddWorkout(false)}
                 workoutDate={dateStr}
+                communityId={
+                  inGymMode && isCoach ? activeMembership!.communityId : null
+                }
               />
             </TabsContent>
           </Tabs>

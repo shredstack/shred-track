@@ -15,6 +15,7 @@ import {
   WorkoutDateInput,
   localTodayString,
 } from "@/components/crossfit/workout-date-input";
+import { PartnerWorkoutToggle } from "@/components/crossfit/partner-workout-toggle";
 
 // Renders a part's movements grouped by their optional block titles. When a
 // part has no blocks (or every movement is ungrouped), this falls back to
@@ -89,7 +90,11 @@ function MovementList({ movements }: { movements: BenchmarkMovement[] }) {
 
 interface BenchmarkPreviewProps {
   benchmark: BenchmarkWorkout;
-  onAdd: (benchmarkId: string, workoutDate: string) => void;
+  onAdd: (
+    benchmarkId: string,
+    workoutDate: string,
+    options: { isPartner: boolean; partnerCount: number | null }
+  ) => void;
   onBack: () => void;
   isLoading?: boolean;
   defaultWorkoutDate?: string;
@@ -104,6 +109,13 @@ export function BenchmarkPreview({
 }: BenchmarkPreviewProps) {
   const [workoutDate, setWorkoutDate] = useState(
     defaultWorkoutDate || localTodayString()
+  );
+  // Default to the benchmark's own partner flag — most users picking a
+  // benchmark want it as-is. They can flip a non-partner benchmark on
+  // (e.g. doing Murph as a pair) or vice versa before adding.
+  const [isPartner, setIsPartner] = useState(!!benchmark.isPartner);
+  const [partnerCount, setPartnerCount] = useState(
+    benchmark.partnerCount != null ? String(benchmark.partnerCount) : ""
   );
 
   return (
@@ -198,7 +210,7 @@ export function BenchmarkPreview({
 
       <Separator />
 
-      {/* Date picker + Add button */}
+      {/* Date picker + partner override + Add button */}
       <div className="space-y-3">
         <WorkoutDateInput
           id="bp-date"
@@ -206,9 +218,25 @@ export function BenchmarkPreview({
           onChange={setWorkoutDate}
         />
 
+        <PartnerWorkoutToggle
+          isPartner={isPartner}
+          partnerCount={partnerCount}
+          onChange={(updates) => {
+            if (updates.isPartner !== undefined) setIsPartner(updates.isPartner);
+            if (updates.partnerCount !== undefined)
+              setPartnerCount(updates.partnerCount);
+          }}
+        />
+
         <Button
           className="w-full"
-          onClick={() => onAdd(benchmark.id, workoutDate)}
+          onClick={() =>
+            onAdd(benchmark.id, workoutDate, {
+              isPartner,
+              partnerCount:
+                isPartner && partnerCount ? parseInt(partnerCount, 10) : null,
+            })
+          }
           disabled={isLoading}
         >
           <Plus className="size-4" />
