@@ -80,6 +80,7 @@ export async function GET(req: NextRequest) {
       movementId: recoveryMovementVideos.movementId,
       visibility: recoveryMovementVideos.visibility,
       communityId: recoveryMovementVideos.communityId,
+      uploadedBy: recoveryMovementVideos.uploadedBy,
     })
     .from(recoveryMovementVideos)
     .where(inArray(recoveryMovementVideos.movementId, ids));
@@ -87,7 +88,8 @@ export async function GET(req: NextRequest) {
   for (const v of videoRows) {
     const visibleToCaller =
       v.visibility === "public" ||
-      (v.visibility === "gym" && v.communityId && myGyms.includes(v.communityId));
+      (v.visibility === "gym" && v.communityId && myGyms.includes(v.communityId)) ||
+      (v.visibility === "private" && v.uploadedBy === user.id);
     if (visibleToCaller) {
       videoCount.set(v.movementId, (videoCount.get(v.movementId) ?? 0) + 1);
     }

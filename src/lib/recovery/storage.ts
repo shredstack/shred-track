@@ -23,8 +23,9 @@ export function getServiceRoleClient() {
 }
 
 export function buildStoragePath(opts: {
-  visibility: "public" | "gym";
+  visibility: "public" | "gym" | "private";
   communityId: string | null;
+  uploadedBy: string;
   movementId: string;
   videoId: string;
   ext: string;
@@ -34,6 +35,9 @@ export function buildStoragePath(opts: {
     return opts.communityId
       ? `public/community/${opts.communityId}/${opts.movementId}/${opts.videoId}.${safeExt}`
       : `public/canonical/${opts.movementId}/${opts.videoId}.${safeExt}`;
+  }
+  if (opts.visibility === "private") {
+    return `private/${opts.uploadedBy}/${opts.movementId}/${opts.videoId}.${safeExt}`;
   }
   return `gym/${opts.communityId}/${opts.movementId}/${opts.videoId}.${safeExt}`;
 }

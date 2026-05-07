@@ -4,6 +4,7 @@ export const RECOVERY_CATEGORIES = [
   "stretch",
   "mobility",
   "strength",
+  "exercises",
   "breathwork",
   "soft_tissue",
   "other",
@@ -53,7 +54,7 @@ export const RECOVERY_CATEGORY_FILTER_OPTIONS: {
   ...RECOVERY_CATEGORIES.map((c) => ({ key: c, label: formatCategoryLabel(c) })),
 ];
 
-export type RecoveryVisibility = "public" | "gym";
+export type RecoveryVisibility = "public" | "gym" | "private";
 export type RecoveryVideoSource = "upload" | "external";
 
 export interface RecoveryPrescription {
