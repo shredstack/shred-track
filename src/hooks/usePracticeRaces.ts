@@ -23,6 +23,9 @@ export interface PracticeRaceSplit {
   raceId: string;
   segmentOrder: number;
   segmentType: "run" | "station";
+  /** "roxzone" for transition-simulation runs, "prescribed_run" for 1km runs,
+   *  null on legacy rows and on stations. */
+  segmentSubtype: "prescribed_run" | "roxzone" | null;
   segmentLabel: string;
   distanceMeters: number | null;
   reps: number | null;

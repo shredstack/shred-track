@@ -148,11 +148,14 @@ export function formatStationPace(
  * Compute the average run pace (seconds per kilometer) across the run
  * splits of a saved race. Per pace spec §3, weights by measured
  * `distanceMeters` when available, falling back to the division's
- * nominal `runDistanceM`. Returns null if there are no run splits.
+ * nominal `runDistanceM`. Roxzone (transition-simulation) runs are
+ * excluded — see roxzone spec §3.6. Returns null if there are no
+ * prescribed run splits.
  */
 export function computeAvgRunPaceSecPerKm(
   splits: ReadonlyArray<{
     segmentType: "run" | "station";
+    segmentSubtype?: "prescribed_run" | "roxzone" | null;
     timeSeconds: string | number;
     distanceMeters: number | null;
   }>,
@@ -162,6 +165,7 @@ export function computeAvgRunPaceSecPerKm(
   let totalMeters = 0;
   for (const s of splits) {
     if (s.segmentType !== "run") continue;
+    if (s.segmentSubtype === "roxzone") continue;
     const time = typeof s.timeSeconds === "string"
       ? parseFloat(s.timeSeconds)
       : s.timeSeconds;

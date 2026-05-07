@@ -1,15 +1,17 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   Plus,
   Footprints,
   Dumbbell,
   RotateCcw,
   Timer,
+  Info,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { DivisionPicker } from "@/components/shared/division-picker";
 import {
   DIVISIONS,
@@ -26,6 +28,32 @@ import {
 import type { RaceSegment, RaceTemplate } from "./types";
 
 // ---------------------------------------------------------------------------
+// Roxzone toggle persistence
+// ---------------------------------------------------------------------------
+
+// Per spec §3.1 / open question #1: localStorage for v1, revisit when we
+// add cross-device (Watch) support.
+const ROXZONE_PREF_KEY = "shredtrack.timer.simulateRoxzone";
+
+function loadRoxzonePref(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(ROXZONE_PREF_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function saveRoxzonePref(value: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(ROXZONE_PREF_KEY, value ? "true" : "false");
+  } catch {
+    // noop
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -40,23 +68,38 @@ interface TimerSetupProps {
 export function TimerSetup({ onStart }: TimerSetupProps) {
   const [divisionKey, setDivisionKey] = useState<DivisionKey>("women_open");
   const [template, setTemplate] = useState<RaceTemplate>("full");
+  // Default false; hydrate from localStorage in an effect to avoid SSR mismatch.
+  const [simulateRoxzone, setSimulateRoxzone] = useState<boolean>(false);
+  const [showRoxzoneInfo, setShowRoxzoneInfo] = useState<boolean>(false);
   const [segments, setSegments] = useState<RaceSegment[]>(() =>
     buildFullRaceSegments("women_open"),
   );
   const [showAddMenu, setShowAddMenu] = useState(false);
 
+  // Hydrate persisted Roxzone preference on mount and rebuild segments
+  // for the current preset. The deps are intentionally empty — we only
+  // want to run this once at mount.
+  useEffect(() => {
+    const saved = loadRoxzonePref();
+    if (saved) {
+      setSimulateRoxzone(true);
+      setSegments(buildFullRaceSegments("women_open", { simulateRoxzone: true }));
+    }
+  }, []);
+
   // Rebuild segments when template or division changes
   const applyTemplate = useCallback(
-    (t: RaceTemplate, dk: DivisionKey) => {
+    (t: RaceTemplate, dk: DivisionKey, opts?: { simulateRoxzone?: boolean }) => {
       setTemplate(t);
+      const roxzone = opts?.simulateRoxzone ?? simulateRoxzone;
       if (t === "full") {
-        setSegments(buildFullRaceSegments(dk));
+        setSegments(buildFullRaceSegments(dk, { simulateRoxzone: roxzone }));
       } else if (t === "half") {
-        setSegments(buildHalfRaceSegments(dk));
+        setSegments(buildHalfRaceSegments(dk, { simulateRoxzone: roxzone }));
       }
       // "custom" keeps current segments
     },
-    [],
+    [simulateRoxzone],
   );
 
   const handleDivisionChange = useCallback(
@@ -85,6 +128,18 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
       }
     },
     [template],
+  );
+
+  const handleRoxzoneToggle = useCallback(
+    (next: boolean) => {
+      setSimulateRoxzone(next);
+      saveRoxzonePref(next);
+      // Only rebuild for presets — custom keeps the user's manual list.
+      if (template === "full" || template === "half") {
+        applyTemplate(template, divisionKey, { simulateRoxzone: next });
+      }
+    },
+    [template, divisionKey, applyTemplate],
   );
 
   const addRun = useCallback(() => {
@@ -119,6 +174,8 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
   const totalSegments = segments.length;
   const runCount = segments.filter((s) => s.segmentType === "run").length;
   const stationCount = segments.filter((s) => s.segmentType === "station").length;
+
+  const roxzoneDisabled = template === "custom";
 
   return (
     <div className="flex flex-col gap-4 pb-8">
@@ -168,6 +225,48 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
           </button>
         ))}
       </div>
+
+      {/* Roxzone toggle */}
+      <Card>
+        <CardContent className="py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium">Simulate Roxzone</span>
+                <button
+                  type="button"
+                  onClick={() => setShowRoxzoneInfo((v) => !v)}
+                  aria-label="What is the Roxzone?"
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <Info className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                {roxzoneDisabled
+                  ? "Available for Full or Half templates only"
+                  : "Adds a 100m run between each station and the next run (~800m total)"}
+              </p>
+            </div>
+            <Switch
+              checked={simulateRoxzone}
+              onCheckedChange={handleRoxzoneToggle}
+              disabled={roxzoneDisabled}
+              aria-label="Simulate Roxzone"
+            />
+          </div>
+
+          {showRoxzoneInfo && (
+            <div className="mt-3 rounded-lg bg-white/[0.04] border border-white/[0.06] px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+              On race day you cover ~700–800m of extra running through the
+              transition zone between stations. Turning this on inserts a
+              100m run after each station so your practice finish times
+              are honest, and you can train the mental gear-shift at every
+              transition.
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Segment summary */}
       <div className="flex items-center justify-between text-xs text-muted-foreground px-1">

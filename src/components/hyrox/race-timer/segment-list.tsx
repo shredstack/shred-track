@@ -17,7 +17,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, X, Footprints, Dumbbell } from "lucide-react";
+import { GripVertical, X, Footprints, Dumbbell, ArrowRightLeft } from "lucide-react";
 import type { RaceSegment } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -51,11 +51,22 @@ const SortableSegmentItem = React.memo(function SortableSegmentItem({
   };
 
   const isRun = segment.segmentType === "run";
-  const bgColor = isRun ? "bg-blue-500/[0.08]" : "bg-orange-500/[0.08]";
-  const borderColor = isRun
-    ? "border-blue-500/20"
-    : "border-orange-500/20";
-  const iconColor = isRun ? "text-blue-400" : "text-orange-400";
+  const isRoxzone = segment.segmentSubtype === "roxzone";
+  const bgColor = isRoxzone
+    ? "bg-teal-500/[0.06]"
+    : isRun
+      ? "bg-blue-500/[0.08]"
+      : "bg-orange-500/[0.08]";
+  const borderColor = isRoxzone
+    ? "border-teal-500/20"
+    : isRun
+      ? "border-blue-500/20"
+      : "border-orange-500/20";
+  const iconColor = isRoxzone
+    ? "text-teal-400"
+    : isRun
+      ? "text-blue-400"
+      : "text-orange-400";
 
   const spec = segment.distance
     ? segment.distance
@@ -84,7 +95,9 @@ const SortableSegmentItem = React.memo(function SortableSegmentItem({
       </span>
 
       {/* Icon */}
-      {isRun ? (
+      {isRoxzone ? (
+        <ArrowRightLeft className={`h-3.5 w-3.5 shrink-0 ${iconColor}`} />
+      ) : isRun ? (
         <Footprints className={`h-3.5 w-3.5 shrink-0 ${iconColor}`} />
       ) : (
         <Dumbbell className={`h-3.5 w-3.5 shrink-0 ${iconColor}`} />
