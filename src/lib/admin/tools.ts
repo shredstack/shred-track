@@ -18,6 +18,7 @@ import {
   Building,
   Crown,
   Dumbbell,
+  HeartPulse,
   Sparkles,
   Trophy,
   Users,
@@ -25,7 +26,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-export type AdminGroup = "crossfit" | "hyrox" | "users";
+export type AdminGroup = "crossfit" | "hyrox" | "recovery" | "users";
 
 export interface AdminGroupMeta {
   label: string;
@@ -43,6 +44,11 @@ export const ADMIN_GROUPS: Record<AdminGroup, AdminGroupMeta> = {
     label: "HYROX",
     description: "Plan allowances and HYROX-specific tooling",
     icon: Zap,
+  },
+  recovery: {
+    label: "Recovery",
+    description: "Mobility, stretching, and recovery movements",
+    icon: HeartPulse,
   },
   users: {
     label: "Users",
@@ -95,6 +101,13 @@ export const ADMIN_TOOLS: AdminTool[] = [
     icon: Sparkles,
     group: "hyrox",
   },
+  {
+    slug: "recovery-movements",
+    label: "Recovery Movements",
+    description: "Validate user submissions, edit, delete, and manage videos",
+    icon: HeartPulse,
+    group: "recovery",
+  },
 ];
 
 export function getAdminTool(slug: string): AdminTool | undefined {
@@ -102,7 +115,7 @@ export function getAdminTool(slug: string): AdminTool | undefined {
 }
 
 export function groupAdminTools(): Record<AdminGroup, AdminTool[]> {
-  const grouped = { crossfit: [], hyrox: [], users: [] } as Record<
+  const grouped = { crossfit: [], hyrox: [], recovery: [], users: [] } as Record<
     AdminGroup,
     AdminTool[]
   >;
