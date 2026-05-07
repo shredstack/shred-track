@@ -76,6 +76,38 @@ export function useCreateRecoveryMovement() {
   });
 }
 
+export interface UpdateRecoveryMovementInput {
+  id: string;
+  canonicalName?: string;
+  category?: RecoveryCategory;
+  bodyRegion?: RecoveryBodyRegion[];
+  description?: string | null;
+  isPerSide?: boolean;
+  defaultPrescription?: Record<string, unknown>;
+}
+
+export function useUpdateRecoveryMovement() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...patch }: UpdateRecoveryMovementInput) => {
+      const res = await fetch(`/api/recovery/movements/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "Failed to update movement");
+      }
+      return res.json() as Promise<RecoveryMovement>;
+    },
+    onSuccess: (_data, input) => {
+      qc.invalidateQueries({ queryKey: ["recovery-movements"] });
+      qc.invalidateQueries({ queryKey: ["recovery-movement", input.id] });
+    },
+  });
+}
+
 export function useValidateRecoveryMovement() {
   const qc = useQueryClient();
   return useMutation({
@@ -244,6 +276,37 @@ export function useUploadRecoveryVideo() {
       qc.invalidateQueries({ queryKey: ["recovery-videos", input.movementId] });
       qc.invalidateQueries({ queryKey: ["recovery-movement", input.movementId] });
       qc.invalidateQueries({ queryKey: ["recovery-movements"] });
+    },
+  });
+}
+
+export function useUpdateRecoveryVideo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      movementId: string;
+      videoId: string;
+      label?: string | null;
+      orderIndex?: number;
+    }) => {
+      const { movementId, videoId, ...patch } = input;
+      const res = await fetch(
+        `/api/recovery/movements/${movementId}/videos/${videoId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "Failed to update video");
+      }
+      return res.json() as Promise<RecoveryVideo>;
+    },
+    onSuccess: (_data, input) => {
+      qc.invalidateQueries({ queryKey: ["recovery-videos", input.movementId] });
+      qc.invalidateQueries({ queryKey: ["recovery-movement", input.movementId] });
     },
   });
 }

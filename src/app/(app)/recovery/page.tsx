@@ -264,19 +264,16 @@ function EmptyState() {
 
 function ManageLink() {
   const { data: ctx } = useGymContext();
-  const isCoachOrAdmin = !!ctx?.memberships.some(
-    (m) => m.isActive && (m.isAdmin || m.isCoach)
-  );
   const isSuper = !!ctx?.user.isSuperAdmin;
-  if (!isCoachOrAdmin && !isSuper) return null;
+  if (!isSuper) return null;
   return (
     <Link
-      href="/recovery/admin/pending"
+      href="/admin/recovery-movements"
       className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/[0.05] px-3 py-2.5 text-xs font-medium text-primary hover:bg-primary/[0.1]"
     >
       <span className="flex items-center gap-2">
         <Settings className="h-3.5 w-3.5" />
-        Manage videos &amp; pending submissions
+        Manage recovery movements
       </span>
     </Link>
   );
