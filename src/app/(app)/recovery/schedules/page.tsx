@@ -7,6 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useRecoverySchedules } from "@/hooks/useRecoverySchedules";
 
+const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function formatDays(days: number[]): string {
+  return [...days]
+    .sort((a, b) => a - b)
+    .map((d) => DAY_SHORT[d])
+    .join(" · ");
+}
+
 export default function RecoverySchedulesPage() {
   const { data, isLoading } = useRecoverySchedules();
 
@@ -35,7 +43,7 @@ export default function RecoverySchedulesPage() {
       ) : (
         data.map((s) => (
           <Link key={s.id} href={`/recovery/schedules/${s.id}`}>
-            <Card className="hover:bg-muted/30 transition-colors">
+            <Card className={`hover:bg-muted/30 transition-colors ${s.isActive === false ? "opacity-60" : ""}`}>
               <CardContent className="flex items-center gap-3 py-3">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{s.name}</p>
@@ -47,6 +55,16 @@ export default function RecoverySchedulesPage() {
                     </Badge>
                     {s.communityId && (
                       <Badge variant="secondary" className="text-[10px]">Gym</Badge>
+                    )}
+                    {s.isActive === false && (
+                      <Badge variant="outline" className="text-[10px]">
+                        Inactive
+                      </Badge>
+                    )}
+                    {s.activeDaysOfWeek && s.activeDaysOfWeek.length > 0 && s.activeDaysOfWeek.length < 7 && (
+                      <Badge variant="outline" className="text-[10px]">
+                        {formatDays(s.activeDaysOfWeek)}
+                      </Badge>
                     )}
                     {s.isArchived && (
                       <Badge variant="outline" className="text-[10px]">

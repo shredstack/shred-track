@@ -1,5 +1,14 @@
 // Resolves "what's the user's recovery plan today?" — used by the today view
 // and the session-start endpoint to snapshot a prescription.
+//
+// Two entry points:
+//   resolveToday      — returns at most one schedule (used by start-session
+//                       POST when a specific scheduleId is requested).
+//   resolveTodayList  — returns every schedule that should display on the
+//                       given date. Personal schedules are filtered by their
+//                       per-schedule isActive + activeDaysOfWeek settings,
+//                       so a user can keep multiple schedules and pick which
+//                       ones surface on which days.
 
 import { db } from "@/db";
 import {
@@ -58,6 +67,15 @@ export interface RecoveryToday {
   source: "assignment_user" | "assignment_gym" | "personal" | "none";
 }
 
+interface Chosen {
+  assignmentId: string | null;
+  scheduleId: string;
+  effectiveStart: string;
+  effectiveEnd: string | null;
+  durationLabel: string | null;
+  source: "assignment_user" | "assignment_gym" | "personal";
+}
+
 function dateKey(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -74,156 +92,29 @@ function startOfWeek(d: Date): Date {
   return x;
 }
 
-export async function resolveToday(
-  userId: string,
-  date: string,
-  prefer: RecoveryTodayMode = "personal"
-): Promise<RecoveryToday> {
-  // 1. Active per-user assignment.
-  const userAssignments = await db
-    .select({
-      a: recoveryScheduleAssignments,
-      o: recoveryAssignmentOverrides,
-    })
-    .from(recoveryScheduleAssignments)
-    .leftJoin(
-      recoveryAssignmentOverrides,
-      and(
-        eq(recoveryAssignmentOverrides.assignmentId, recoveryScheduleAssignments.id),
-        eq(recoveryAssignmentOverrides.userId, userId)
-      )
-    )
-    .where(eq(recoveryScheduleAssignments.userId, userId))
-    .orderBy(desc(recoveryScheduleAssignments.createdAt));
+function emptyToday(): RecoveryToday {
+  return {
+    schedule: null,
+    assignmentId: null,
+    effectiveStartsOn: null,
+    effectiveEndsOn: null,
+    durationLabel: null,
+    dayIndex: null,
+    weeklyCompleted: 0,
+    slots: [],
+    source: "none",
+  };
+}
 
-  const activeUserAssignment = userAssignments.find(({ a, o }) => {
-    if (o?.isDismissed) return false;
-    const start = o?.startsOn ?? a.startsOn;
-    const end = o?.endsOn ?? a.endsOn;
-    if (start > date) return false;
-    if (end && end < date) return false;
-    return true;
-  });
-
-  // 2. Caller's active gym (used for gym-wide assignment lookup AND for the
-  // personal-vs-gym preference in step 3).
-  const [userRow] = await db
-    .select({ activeCommunityId: users.activeCommunityId })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  const activeGym = userRow?.activeCommunityId ?? null;
-
-  let chosen: { assignmentId: string | null; scheduleId: string; effectiveStart: string; effectiveEnd: string | null; durationLabel: string | null; source: "assignment_user" | "assignment_gym" | "personal" } | null = null;
-
-  if (activeUserAssignment && (prefer === "gym" || activeUserAssignment.a.communityId === null || activeUserAssignment.a.communityId === activeGym)) {
-    chosen = {
-      assignmentId: activeUserAssignment.a.id,
-      scheduleId: activeUserAssignment.a.scheduleId,
-      effectiveStart: activeUserAssignment.o?.startsOn ?? activeUserAssignment.a.startsOn,
-      effectiveEnd: activeUserAssignment.o?.endsOn ?? activeUserAssignment.a.endsOn,
-      durationLabel: activeUserAssignment.a.durationLabel,
-      source: "assignment_user",
-    };
-  }
-
-  // 3. Gym-wide assignment for caller's active gym.
-  if (!chosen && activeGym && prefer === "gym") {
-    const gymAssignments = await db
-      .select({
-        a: recoveryScheduleAssignments,
-        o: recoveryAssignmentOverrides,
-      })
-      .from(recoveryScheduleAssignments)
-      .leftJoin(
-        recoveryAssignmentOverrides,
-        and(
-          eq(recoveryAssignmentOverrides.assignmentId, recoveryScheduleAssignments.id),
-          eq(recoveryAssignmentOverrides.userId, userId)
-        )
-      )
-      .where(eq(recoveryScheduleAssignments.communityId, activeGym))
-      .orderBy(desc(recoveryScheduleAssignments.createdAt));
-
-    const active = gymAssignments.find(({ a, o }) => {
-      if (o?.isDismissed) return false;
-      const start = o?.startsOn ?? a.startsOn;
-      const end = o?.endsOn ?? a.endsOn;
-      if (start > date) return false;
-      if (end && end < date) return false;
-      return true;
-    });
-
-    if (active) {
-      chosen = {
-        assignmentId: active.a.id,
-        scheduleId: active.a.scheduleId,
-        effectiveStart: active.o?.startsOn ?? active.a.startsOn,
-        effectiveEnd: active.o?.endsOn ?? active.a.endsOn,
-        durationLabel: active.a.durationLabel,
-        source: "assignment_gym",
-      };
-    }
-  }
-
-  // 4. Personal fallback: most recently updated personal schedule.
-  if (!chosen && prefer === "personal") {
-    const personals = await db
-      .select()
-      .from(recoverySchedules)
-      .where(
-        and(
-          eq(recoverySchedules.createdBy, userId),
-          isNull(recoverySchedules.communityId),
-          eq(recoverySchedules.isArchived, false)
-        )
-      )
-      .orderBy(desc(recoverySchedules.updatedAt))
-      .limit(1);
-    if (personals[0]) {
-      chosen = {
-        assignmentId: null,
-        scheduleId: personals[0].id,
-        effectiveStart: personals[0].createdAt.toISOString().slice(0, 10),
-        effectiveEnd: null,
-        durationLabel: null,
-        source: "personal",
-      };
-    }
-  }
-
-  if (!chosen) {
-    return {
-      schedule: null,
-      assignmentId: null,
-      effectiveStartsOn: null,
-      effectiveEndsOn: null,
-      durationLabel: null,
-      dayIndex: null,
-      weeklyCompleted: 0,
-      slots: [],
-      source: "none",
-    };
-  }
-
+// Hydrates a Chosen schedule into a full RecoveryToday — does the day-index
+// math, slot fetch, and frequency-keyed weekly count.
+async function hydrate(userId: string, date: string, chosen: Chosen): Promise<RecoveryToday> {
   const [schedule] = await db
     .select()
     .from(recoverySchedules)
     .where(eq(recoverySchedules.id, chosen.scheduleId))
     .limit(1);
-  if (!schedule) {
-    return {
-      schedule: null,
-      assignmentId: null,
-      effectiveStartsOn: null,
-      effectiveEndsOn: null,
-      durationLabel: null,
-      dayIndex: null,
-      weeklyCompleted: 0,
-      slots: [],
-      source: "none",
-    };
-  }
+  if (!schedule) return emptyToday();
 
   // Determine day index for day-keyed schedules.
   let dayIndex: number | null = null;
@@ -355,4 +246,164 @@ export async function resolveToday(
     slots,
     source: chosen.source,
   };
+}
+
+// Returns the full set of choices (assignments + personal schedules) that
+// should display on `date`. The page's calendar view consumes this to render
+// a card per schedule.
+async function pickChoices(
+  userId: string,
+  date: string,
+  prefer: RecoveryTodayMode
+): Promise<Chosen[]> {
+  // 1. Active per-user assignment.
+  const userAssignments = await db
+    .select({
+      a: recoveryScheduleAssignments,
+      o: recoveryAssignmentOverrides,
+    })
+    .from(recoveryScheduleAssignments)
+    .leftJoin(
+      recoveryAssignmentOverrides,
+      and(
+        eq(recoveryAssignmentOverrides.assignmentId, recoveryScheduleAssignments.id),
+        eq(recoveryAssignmentOverrides.userId, userId)
+      )
+    )
+    .where(eq(recoveryScheduleAssignments.userId, userId))
+    .orderBy(desc(recoveryScheduleAssignments.createdAt));
+
+  const activeUserAssignment = userAssignments.find(({ a, o }) => {
+    if (o?.isDismissed) return false;
+    const start = o?.startsOn ?? a.startsOn;
+    const end = o?.endsOn ?? a.endsOn;
+    if (start > date) return false;
+    if (end && end < date) return false;
+    return true;
+  });
+
+  // 2. Caller's active gym (used for gym-wide assignment lookup AND for the
+  // personal-vs-gym preference in step 3).
+  const [userRow] = await db
+    .select({ activeCommunityId: users.activeCommunityId })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  const activeGym = userRow?.activeCommunityId ?? null;
+
+  // Assignments intentionally bypass the schedule's isActive / activeDaysOfWeek
+  // filtering — coach-driven prescriptions are gated by the assignment's own
+  // startsOn/endsOn (and the user's per-assignment isDismissed override),
+  // not by the per-schedule day toggles that govern personal use.
+  if (activeUserAssignment && (prefer === "gym" || activeUserAssignment.a.communityId === null || activeUserAssignment.a.communityId === activeGym)) {
+    return [{
+      assignmentId: activeUserAssignment.a.id,
+      scheduleId: activeUserAssignment.a.scheduleId,
+      effectiveStart: activeUserAssignment.o?.startsOn ?? activeUserAssignment.a.startsOn,
+      effectiveEnd: activeUserAssignment.o?.endsOn ?? activeUserAssignment.a.endsOn,
+      durationLabel: activeUserAssignment.a.durationLabel,
+      source: "assignment_user",
+    }];
+  }
+
+  // 3. Gym-wide assignment for caller's active gym.
+  if (activeGym && prefer === "gym") {
+    const gymAssignments = await db
+      .select({
+        a: recoveryScheduleAssignments,
+        o: recoveryAssignmentOverrides,
+      })
+      .from(recoveryScheduleAssignments)
+      .leftJoin(
+        recoveryAssignmentOverrides,
+        and(
+          eq(recoveryAssignmentOverrides.assignmentId, recoveryScheduleAssignments.id),
+          eq(recoveryAssignmentOverrides.userId, userId)
+        )
+      )
+      .where(eq(recoveryScheduleAssignments.communityId, activeGym))
+      .orderBy(desc(recoveryScheduleAssignments.createdAt));
+
+    const active = gymAssignments.find(({ a, o }) => {
+      if (o?.isDismissed) return false;
+      const start = o?.startsOn ?? a.startsOn;
+      const end = o?.endsOn ?? a.endsOn;
+      if (start > date) return false;
+      if (end && end < date) return false;
+      return true;
+    });
+
+    if (active) {
+      return [{
+        assignmentId: active.a.id,
+        scheduleId: active.a.scheduleId,
+        effectiveStart: active.o?.startsOn ?? active.a.startsOn,
+        effectiveEnd: active.o?.endsOn ?? active.a.endsOn,
+        durationLabel: active.a.durationLabel,
+        source: "assignment_gym",
+      }];
+    }
+  }
+
+  // 4. Personal fallback: every active personal schedule whose day-of-week
+  // filter includes the target date. Each schedule renders as its own card
+  // on the recovery page.
+  if (prefer === "personal") {
+    const personals = await db
+      .select()
+      .from(recoverySchedules)
+      .where(
+        and(
+          eq(recoverySchedules.createdBy, userId),
+          isNull(recoverySchedules.communityId),
+          eq(recoverySchedules.isArchived, false),
+          eq(recoverySchedules.isActive, true)
+        )
+      )
+      .orderBy(desc(recoverySchedules.updatedAt));
+
+    const dow = new Date(`${date}T00:00:00`).getDay();
+    const matched = personals.filter((p) => {
+      const days = p.activeDaysOfWeek as number[] | null;
+      if (days == null || days.length === 0) return true; // null = every day
+      return days.includes(dow);
+    });
+
+    return matched.map((p) => ({
+      assignmentId: null,
+      scheduleId: p.id,
+      effectiveStart: p.createdAt.toISOString().slice(0, 10),
+      effectiveEnd: null,
+      durationLabel: null,
+      source: "personal" as const,
+    }));
+  }
+
+  return [];
+}
+
+export async function resolveToday(
+  userId: string,
+  date: string,
+  prefer: RecoveryTodayMode = "personal",
+  scheduleId?: string
+): Promise<RecoveryToday> {
+  const choices = await pickChoices(userId, date, prefer);
+  if (choices.length === 0) return emptyToday();
+
+  const chosen = scheduleId
+    ? choices.find((c) => c.scheduleId === scheduleId) ?? null
+    : choices[0];
+  if (!chosen) return emptyToday();
+
+  return hydrate(userId, date, chosen);
+}
+
+export async function resolveTodayList(
+  userId: string,
+  date: string,
+  prefer: RecoveryTodayMode = "personal"
+): Promise<RecoveryToday[]> {
+  const choices = await pickChoices(userId, date, prefer);
+  return Promise.all(choices.map((c) => hydrate(userId, date, c)));
 }

@@ -74,6 +74,20 @@ export async function PATCH(
     updates.rotationStrategy = body.rotationStrategy;
   }
   if (typeof body.isArchived === "boolean") updates.isArchived = body.isArchived;
+  if (typeof body.isActive === "boolean") updates.isActive = body.isActive;
+  if (body.activeDaysOfWeek === null) {
+    updates.activeDaysOfWeek = null;
+  } else if (Array.isArray(body.activeDaysOfWeek)) {
+    // Validate: each entry is a 0..6 integer; dedupe and sort.
+    const filtered = Array.from(
+      new Set(
+        body.activeDaysOfWeek.filter(
+          (d: unknown) => typeof d === "number" && Number.isInteger(d) && d >= 0 && d <= 6
+        ) as number[]
+      )
+    ).sort((a, b) => a - b);
+    updates.activeDaysOfWeek = filtered;
+  }
   updates.updatedAt = new Date();
 
   await db.transaction(async (tx) => {

@@ -38,6 +38,8 @@ export interface CreateScheduleInput {
   description?: string;
   communityId?: string | null;
   rotationStrategy?: "progress" | "calendar";
+  isActive?: boolean;
+  activeDaysOfWeek?: number[] | null;
   slots: Array<{
     dayIndex?: number | null;
     orderIndex?: number;
@@ -63,14 +65,17 @@ export function useCreateRecoverySchedule() {
       }
       return res.json();
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["recovery-schedules"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["recovery-schedules"] });
+      qc.invalidateQueries({ queryKey: ["recovery-today"] });
+    },
   });
 }
 
 export function useUpdateRecoverySchedule() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { id: string; data: Partial<CreateScheduleInput> & { isArchived?: boolean } }) => {
+    mutationFn: async (input: { id: string; data: Partial<CreateScheduleInput> & { isArchived?: boolean; isActive?: boolean; activeDaysOfWeek?: number[] | null } }) => {
       const res = await fetch(`/api/recovery/schedules/${input.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -82,6 +87,8 @@ export function useUpdateRecoverySchedule() {
     onSuccess: (_d, input) => {
       qc.invalidateQueries({ queryKey: ["recovery-schedules"] });
       qc.invalidateQueries({ queryKey: ["recovery-schedule", input.id] });
+      // Active/days toggle changes which schedules show in the today view.
+      qc.invalidateQueries({ queryKey: ["recovery-today"] });
     },
   });
 }
@@ -93,7 +100,10 @@ export function useDeleteRecoverySchedule() {
       const res = await fetch(`/api/recovery/schedules/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete");
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["recovery-schedules"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["recovery-schedules"] });
+      qc.invalidateQueries({ queryKey: ["recovery-today"] });
+    },
   });
 }
 

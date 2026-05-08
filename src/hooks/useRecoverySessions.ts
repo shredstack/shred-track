@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { RecoverySession, RecoverySessionItem } from "@/types/recovery";
 import type { RecoveryToday } from "@/lib/recovery/today-resolver";
 
-export interface RecoveryTodayResponse extends RecoveryToday {
+export interface RecoveryTodayEntry extends RecoveryToday {
   session: {
     id: string;
     status: string;
@@ -11,7 +11,7 @@ export interface RecoveryTodayResponse extends RecoveryToday {
 }
 
 export function useRecoveryToday(date: string, prefer: "personal" | "gym" = "personal") {
-  return useQuery<RecoveryTodayResponse>({
+  return useQuery<RecoveryTodayEntry[]>({
     queryKey: ["recovery-today", date, prefer],
     queryFn: async () => {
       const res = await fetch(`/api/recovery/sessions?date=${date}&prefer=${prefer}`);
@@ -24,7 +24,7 @@ export function useRecoveryToday(date: string, prefer: "personal" | "gym" = "per
 export function useStartRecoverySession() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { date: string; prefer?: "personal" | "gym" }) => {
+    mutationFn: async (input: { date: string; prefer?: "personal" | "gym"; scheduleId?: string }) => {
       const res = await fetch("/api/recovery/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
