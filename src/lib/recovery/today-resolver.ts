@@ -291,6 +291,10 @@ async function pickChoices(
     .limit(1);
   const activeGym = userRow?.activeCommunityId ?? null;
 
+  // Assignments intentionally bypass the schedule's isActive / activeDaysOfWeek
+  // filtering — coach-driven prescriptions are gated by the assignment's own
+  // startsOn/endsOn (and the user's per-assignment isDismissed override),
+  // not by the per-schedule day toggles that govern personal use.
   if (activeUserAssignment && (prefer === "gym" || activeUserAssignment.a.communityId === null || activeUserAssignment.a.communityId === activeGym)) {
     return [{
       assignmentId: activeUserAssignment.a.id,
