@@ -5,7 +5,10 @@
 import { createClient } from "@supabase/supabase-js";
 
 export const RECOVERY_BUCKET = "recovery-videos";
-export const SIGNED_URL_TTL_SECONDS = 60 * 5; // 5 min, refreshed on the client
+// 30 min — long enough that a session left open on the phone won't expire
+// mid-rep. The client also refetches on <video> error to recover from any
+// URL that does expire.
+export const SIGNED_URL_TTL_SECONDS = 60 * 30;
 
 let _client: ReturnType<typeof createClient> | null = null;
 

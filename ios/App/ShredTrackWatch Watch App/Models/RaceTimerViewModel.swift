@@ -40,8 +40,11 @@ final class RaceTimerViewModel: ObservableObject {
     }
 
     var avgRunPaceSecPerKm: Double? {
+        // Skip Roxzone runs — they're 100m transition jogs, not training
+        // runs. Mirrors the web logic in
+        // `src/components/hyrox/race-timer/use-pace-from-healthkit.ts`.
         let runs = state.completedSegments
-            .filter { $0.segmentType == .run }
+            .filter { $0.segmentType == .run && $0.segmentSubtype != .roxzone }
             .compactMap { c -> CompletedRunSegment? in
                 guard let dist = c.distanceMeters, dist > 0 else { return nil }
                 return CompletedRunSegment(
@@ -64,11 +67,24 @@ final class RaceTimerViewModel: ObservableObject {
 
     // MARK: - Setup
 
-    func configure(divisionKey: String, template: RaceTemplate, planSessionId: String? = nil) {
+    func configure(
+        divisionKey: String,
+        template: RaceTemplate,
+        simulateRoxzone: Bool = false,
+        planSessionId: String? = nil
+    ) {
         let segments: [RaceSegment]
         switch template {
-        case .full: segments = RaceSegmentFactory.buildFullRace(divisionKey: divisionKey)
-        case .half: segments = RaceSegmentFactory.buildHalfRace(divisionKey: divisionKey)
+        case .full:
+            segments = RaceSegmentFactory.buildFullRace(
+                divisionKey: divisionKey,
+                simulateRoxzone: simulateRoxzone
+            )
+        case .half:
+            segments = RaceSegmentFactory.buildHalfRace(
+                divisionKey: divisionKey,
+                simulateRoxzone: simulateRoxzone
+            )
         }
         state = RaceState(
             divisionKey: divisionKey,
@@ -84,26 +100,34 @@ final class RaceTimerViewModel: ObservableObject {
 
     // MARK: - Lifecycle
 
+    /// Begin the race. Flips status to `.running` and starts the timer
+    /// tick *before* awaiting HealthKit so the UI never appears
+    /// unresponsive if HealthKit permission prompts or the workout
+    /// session takes a moment to spin up. The timer is the source of
+    /// truth — pace just degrades to em-dash if HealthKit is unavailable.
     func start() async {
-        // Request HealthKit on first race start, not at install (less scary,
-        // per pace spec §7).
-        if hk.permissionState == .notRequested {
-            _ = await hk.requestPermissions()
-        }
-        do {
-            try await hk.start()
-        } catch {
-            // Timer still works without HealthKit; pace cells just degrade
-            // to em-dash. Do not block race start.
-            print("[Timer] HealthKit start failed: \(error)")
-        }
-        startExtendedRuntimeSession()
         let now = Date()
         state.raceStartedAt = now
         segmentStartedAt = now
         lastDistanceRefreshSecond = -1
         state.status = .running
+        startExtendedRuntimeSession()
         startTick()
+
+        // Kick HealthKit off in the background. Any failure (denied
+        // permissions, hardware unavailable, simulator) is logged and
+        // ignored — pace cells will show "—".
+        Task { [weak self] in
+            guard let self else { return }
+            if await self.hk.permissionState == .notRequested {
+                _ = await self.hk.requestPermissions()
+            }
+            do {
+                try await self.hk.start()
+            } catch {
+                print("[Timer] HealthKit start failed: \(error)")
+            }
+        }
     }
 
     func split() {
@@ -126,6 +150,7 @@ final class RaceTimerViewModel: ObservableObject {
         let completed = CompletedSegment(
             segmentOrder: state.currentSegmentIndex,
             segmentType: current.segmentType,
+            segmentSubtype: current.segmentSubtype,
             label: current.label,
             timeSeconds: elapsed,
             distanceMeters: runDistanceMeters,
@@ -240,6 +265,7 @@ final class RaceTimerViewModel: ObservableObject {
                 SplitPayload(
                     segmentOrder: $0.segmentOrder,
                     segmentType: $0.segmentType.rawValue,
+                    segmentSubtype: $0.segmentSubtype?.rawValue,
                     segmentLabel: $0.label,
                     timeSeconds: $0.timeSeconds,
                     distanceMeters: $0.distanceMeters,

@@ -220,12 +220,14 @@ export type WorkoutScopeFilter =
  */
 export function useWorkoutsByDate(
   date: string,
-  scope: WorkoutScopeFilter = { mode: "all" }
+  scope: WorkoutScopeFilter = { mode: "all" },
+  options?: { enabled?: boolean }
 ) {
   const scopeKey =
     scope.mode === "gym" ? `gym:${scope.communityId}` : scope.mode;
   return useQuery({
     queryKey: ["workouts", "by-date", date, scopeKey],
+    enabled: options?.enabled ?? true,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("date", date);

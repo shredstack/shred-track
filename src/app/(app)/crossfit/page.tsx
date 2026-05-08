@@ -29,6 +29,7 @@ import { useActiveMembership, useGymContext } from "@/hooks/useGymContext";
 import { builderPartToPayload } from "@/lib/crossfit/builder-payload";
 import { formatSecondsAsClock } from "@/lib/crossfit/duration-parser";
 import { useMovements, useCreateMovement } from "@/hooks/useMovements";
+import { useStickyTab } from "@/hooks/useStickyTab";
 import type {
   WorkoutBuilderForm,
   WorkoutBuilderPart,
@@ -208,11 +209,13 @@ export default function CrossfitPage() {
   const [scoringWorkoutId, setScoringWorkoutId] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   // When the user has an active gym, default to the gym programming view.
-  // The toggle lets coaches/members flip to their personal-only list.
-  const [view, setView] = useState<CrossfitView>("gym");
+  // The toggle lets coaches/members flip to their personal-only list, and
+  // their pick is persisted across refreshes (per-page).
+  const [storedView, setView] = useStickyTab<CrossfitView>("crossfit");
+  const view: CrossfitView = storedView ?? "gym";
 
   const dateStr = toDateString(selectedDate);
-  const { data: gymContext } = useGymContext();
+  const { data: gymContext, isPending: gymContextPending } = useGymContext();
   const activeMembership = useActiveMembership();
   const userId = gymContext?.user.id ?? null;
   const isCoach = !!activeMembership && (activeMembership.isAdmin || activeMembership.isCoach);
@@ -229,7 +232,12 @@ export default function CrossfitPage() {
     return { mode: "personal" };
   }, [activeMembership, view]);
 
-  const { data: workouts = [], isLoading } = useWorkoutsByDate(dateStr, scope);
+  // Wait for gym context to settle before firing the workouts query —
+  // otherwise scope falls through to "personal" during the load window and
+  // gym-scoped workouts flash as missing.
+  const { data: workouts = [], isLoading } = useWorkoutsByDate(dateStr, scope, {
+    enabled: !gymContextPending,
+  });
   const { data: movementLibrary = [] } = useMovements();
   const createWorkout = useCreateWorkout();
   const updateWorkout = useUpdateWorkout();
@@ -569,7 +577,7 @@ export default function CrossfitPage() {
         </div>
       )}
 
-      {isLoading ? (
+      {gymContextPending || isLoading ? (
         <div className="flex items-center justify-center py-10">
           <Loader2 className="size-5 animate-spin text-muted-foreground" />
         </div>

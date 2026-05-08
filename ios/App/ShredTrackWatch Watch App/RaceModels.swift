@@ -16,9 +16,15 @@ public enum SegmentType: String, Codable, Sendable {
     case station
 }
 
+public enum SegmentSubtype: String, Codable, Sendable {
+    case prescribedRun = "prescribed_run"
+    case roxzone
+}
+
 public struct RaceSegment: Codable, Identifiable, Sendable {
     public let id: String
     public let segmentType: SegmentType
+    public let segmentSubtype: SegmentSubtype?
     public let label: String
     public let distanceMeters: Int?
     public let reps: Int?
@@ -27,6 +33,7 @@ public struct RaceSegment: Codable, Identifiable, Sendable {
     public init(
         id: String = UUID().uuidString,
         segmentType: SegmentType,
+        segmentSubtype: SegmentSubtype? = nil,
         label: String,
         distanceMeters: Int? = nil,
         reps: Int? = nil,
@@ -34,6 +41,7 @@ public struct RaceSegment: Codable, Identifiable, Sendable {
     ) {
         self.id = id
         self.segmentType = segmentType
+        self.segmentSubtype = segmentSubtype
         self.label = label
         self.distanceMeters = distanceMeters
         self.reps = reps
@@ -45,6 +53,7 @@ public struct CompletedSegment: Codable, Identifiable, Sendable {
     public let id: String
     public let segmentOrder: Int
     public let segmentType: SegmentType
+    public let segmentSubtype: SegmentSubtype?
     public let label: String
     public let timeSeconds: Double
     /// Measured distance from HealthKit. Run segments only; nil for
@@ -57,6 +66,7 @@ public struct CompletedSegment: Codable, Identifiable, Sendable {
         id: String = UUID().uuidString,
         segmentOrder: Int,
         segmentType: SegmentType,
+        segmentSubtype: SegmentSubtype? = nil,
         label: String,
         timeSeconds: Double,
         distanceMeters: Int? = nil,
@@ -65,6 +75,7 @@ public struct CompletedSegment: Codable, Identifiable, Sendable {
         self.id = id
         self.segmentOrder = segmentOrder
         self.segmentType = segmentType
+        self.segmentSubtype = segmentSubtype
         self.label = label
         self.timeSeconds = timeSeconds
         self.distanceMeters = distanceMeters
@@ -129,6 +140,7 @@ public struct RaceState: Codable, Sendable {
 public struct SplitPayload: Codable, Sendable {
     public let segmentOrder: Int
     public let segmentType: String
+    public let segmentSubtype: String?
     public let segmentLabel: String
     public let timeSeconds: Double
     public let distanceMeters: Int?
