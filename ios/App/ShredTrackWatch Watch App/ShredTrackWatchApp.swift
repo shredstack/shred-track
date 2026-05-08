@@ -7,10 +7,12 @@ import SwiftUI
 // commitment in native-app spec §5.1 and the reason the timer keeps
 // running even when the phone is in a locker / airplane mode / at home.
 //
-// Three top-level tabs (native-app spec §5.2):
-//   1. Today — current HYROX session + CrossFit WOD
-//   2. Timer — the race timer (the headline feature)
-//   3. Settings — sign-in status, notification preferences
+// v1 surfaces a single screen — the HYROX race timer — with sign-in /
+// phone-reachability tucked behind a toolbar gear in setup. The
+// previous three-tab layout (Today / Timer / Settings) defaulted users
+// to a "go to your iPhone" placeholder, which buried the headline
+// feature. Today / additional features can come back once they have
+// real value to deliver standalone on the wrist.
 
 @main
 struct ShredTrackWatchApp: App {
@@ -20,24 +22,9 @@ struct ShredTrackWatchApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            TimerView()
                 .environmentObject(session)
                 .environmentObject(watchConn)
-        }
-    }
-}
-
-struct RootView: View {
-    var body: some View {
-        TabView {
-            TodayView()
-                .tabItem { Label("Today", systemImage: "calendar") }
-
-            TimerView()
-                .tabItem { Label("Timer", systemImage: "timer") }
-
-            SettingsView()
-                .tabItem { Label("Settings", systemImage: "gear") }
         }
     }
 }

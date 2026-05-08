@@ -1,10 +1,24 @@
 import SwiftUI
 import WatchKit
 
-// TimerView — the headline screen on the Watch.
+// TimerView — the headline (and only) screen on the Watch.
 //
-// Two states: setup (pick division + template, START) and active
-// (live race readout). Layout follows running_pace_feature_spec.md §4:
+// Three states drive the body:
+//   - idle      → setupScreen (compact, single-tap START)
+//   - running / paused → activeScreen (live race readout)
+//   - complete  → completeScreen
+//
+// Layout decisions:
+//   - The setup screen is a NavigationStack with a primary START button
+//     above-the-fold. Division selection pushes to a dedicated picker
+//     view so we don't burn vertical space on a watch-sized Picker.
+//   - Last-used division/template/roxzone persist via `@AppStorage` so
+//     the next race is one tap.
+//   - Settings is a toolbar item (top-right) — surfaces sign-in / phone
+//     reachability without a bottom tab bar that competed with the
+//     Timer for first-launch attention.
+//
+// Active-screen layout follows running_pace_feature_spec.md §4:
 //   - Current pace (32pt mono, primary on runs)
 //   - Segment time (24pt)
 //   - Avg run pace (16pt persistent reference)
@@ -13,11 +27,19 @@ import WatchKit
 
 struct TimerView: View {
     @StateObject private var vm = RaceTimerViewModel()
-    @State private var divisionKey: String = "women_open"
-    @State private var template: RaceTemplate = .full
+
+    @AppStorage("watch.timer.divisionKey") private var divisionKey: String = "women_open"
+    @AppStorage("watch.timer.template") private var templateRaw: String = RaceTemplate.full.rawValue
+    @AppStorage("watch.timer.simulateRoxzone") private var simulateRoxzone: Bool = false
+
     @State private var showFinishConfirm: Bool = false
+    @State private var isStarting: Bool = false
 
     private let unit: PaceUnit = .kilometer  // TODO read from App Group
+
+    private var template: RaceTemplate {
+        RaceTemplate(rawValue: templateRaw) ?? .full
+    }
 
     var body: some View {
         switch vm.state.status {
@@ -33,34 +55,112 @@ struct TimerView: View {
     // MARK: - Setup
 
     private var setupScreen: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("HYROX Race")
-                    .font(.headline)
-                Picker("Division", selection: $divisionKey) {
-                    Text("Women Open").tag("women_open")
-                    Text("Men Open").tag("men_open")
-                    Text("Women Pro").tag("women_pro")
-                    Text("Men Pro").tag("men_pro")
-                }
-                Picker("Template", selection: $template) {
-                    Text("Full").tag(RaceTemplate.full)
-                    Text("Half").tag(RaceTemplate.half)
-                }
-                Button {
-                    Task {
-                        vm.configure(divisionKey: divisionKey, template: template)
-                        await vm.start()
-                    }
-                } label: {
-                    Text("START")
-                        .font(.headline)
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 8) {
+                    // Primary action — sits above-the-fold so the user
+                    // doesn't have to scroll on a 41mm watch.
+                    Button {
+                        startRace()
+                    } label: {
+                        HStack(spacing: 6) {
+                            if isStarting {
+                                ProgressView()
+                                    .controlSize(.mini)
+                            } else {
+                                Image(systemName: "flag.checkered")
+                            }
+                            Text(isStarting ? "Starting…" : "START RACE")
+                                .font(.headline)
+                        }
                         .frame(maxWidth: .infinity)
+                    }
+                    .tint(.green)
+                    .disabled(isStarting)
+
+                    // Template chips
+                    HStack(spacing: 6) {
+                        templateChip(.full, label: "Full")
+                        templateChip(.half, label: "Half")
+                    }
+
+                    // Division row — pushes to dedicated picker
+                    NavigationLink {
+                        DivisionPickerView(selection: $divisionKey)
+                    } label: {
+                        HStack {
+                            Text("Division")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(divisionLabel(divisionKey))
+                                .font(.caption)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    // Roxzone toggle
+                    Toggle(isOn: $simulateRoxzone) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Simulate Roxzone")
+                                .font(.caption)
+                            Text("+100m run between stations")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(.switch)
                 }
-                .tint(.green)
-                .padding(.top, 4)
+                .padding(.horizontal, 4)
             }
-            .padding(.horizontal, 4)
+            .navigationTitle("HYROX")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        SettingsView()
+                    } label: {
+                        Image(systemName: "gear")
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func templateChip(_ value: RaceTemplate, label: String) -> some View {
+        let selected = template == value
+        Button(label) {
+            templateRaw = value.rawValue
+        }
+        .font(.caption)
+        .frame(maxWidth: .infinity)
+        .tint(selected ? .green : .gray)
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
+    }
+
+    private func startRace() {
+        guard !isStarting else { return }
+        isStarting = true
+        Task {
+            vm.configure(
+                divisionKey: divisionKey,
+                template: template,
+                simulateRoxzone: simulateRoxzone
+            )
+            await vm.start()
+            isStarting = false
+        }
+    }
+
+    private func divisionLabel(_ key: String) -> String {
+        switch key {
+        case "women_open": return "Women Open"
+        case "men_open": return "Men Open"
+        case "women_pro": return "Women Pro"
+        case "men_pro": return "Men Pro"
+        default: return key
         }
     }
 
@@ -175,7 +275,11 @@ struct TimerView: View {
                         .foregroundStyle(.green)
                 }
                 Button("New Race") {
-                    vm.configure(divisionKey: divisionKey, template: template)
+                    vm.configure(
+                        divisionKey: divisionKey,
+                        template: template,
+                        simulateRoxzone: simulateRoxzone
+                    )
                 }
                 .padding(.top, 8)
             }
@@ -210,5 +314,41 @@ struct TimerView: View {
             return String(format: "%d:%02d:%02d", h, m, s)
         }
         return String(format: "%d:%02d", m, s)
+    }
+}
+
+// MARK: - DivisionPickerView
+
+private struct DivisionPickerView: View {
+    @Binding var selection: String
+    @Environment(\.dismiss) private var dismiss
+
+    private let options: [(key: String, label: String)] = [
+        ("women_open", "Women Open"),
+        ("men_open", "Men Open"),
+        ("women_pro", "Women Pro"),
+        ("men_pro", "Men Pro"),
+    ]
+
+    var body: some View {
+        List {
+            ForEach(options, id: \.key) { opt in
+                Button {
+                    selection = opt.key
+                    dismiss()
+                } label: {
+                    HStack {
+                        Text(opt.label)
+                        Spacer()
+                        if selection == opt.key {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(.green)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Division")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

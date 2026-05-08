@@ -29,6 +29,7 @@ import {
 } from "@/hooks/useRecoverySchedules";
 import { formatPrescription, type RecoveryVideo } from "@/types/recovery";
 import { SessionMovementDetail } from "@/components/recovery/session-movement-detail";
+import { useStickyTab } from "@/hooks/useStickyTab";
 
 function toDateString(d: Date) {
   const y = d.getFullYear();
@@ -41,9 +42,10 @@ export default function RecoveryTodayPage() {
   const [date, setDate] = useState<Date>(new Date());
   const dateStr = toDateString(date);
   const activeMembership = useActiveMembership();
-  // Until the user explicitly picks, derive prefer from the gym context so a
-  // late-resolving membership flips the default from "personal" to "gym".
-  const [preferOverride, setPreferOverride] = useState<"personal" | "gym" | null>(null);
+  // Persist the user's pick across refreshes. Until they choose (or on a
+  // fresh device), fall back to the gym-context default so a late-resolving
+  // membership flips from "personal" to "gym".
+  const [preferOverride, setPreferOverride] = useStickyTab<"personal" | "gym">("recovery");
   const prefer = preferOverride ?? (activeMembership ? "gym" : "personal");
 
   const { data: todays, isLoading } = useRecoveryToday(dateStr, prefer);
@@ -119,13 +121,27 @@ function ScheduleSection({
   const completed = sessionItems.filter((i) => i.status === "done").length;
   const totalItems = sessionItems.length;
 
+  // Editing a schedule deletes + re-inserts its slots; the FK on
+  // recovery_session_items.schedule_slot_id is ON DELETE SET NULL, so older
+  // in-progress sessions end up with null scheduleSlotIds. Match on
+  // (slotId, movementId) when available, fall back to movementId so those
+  // sessions still hydrate their videos/description.
   const itemByPair = useMemo(() => {
-    const map = new Map<string, typeof sessionItems[number]>();
+    const byPair = new Map<string, typeof sessionItems[number]>();
+    const byMovement = new Map<string, typeof sessionItems[number]>();
     for (const it of sessionItems) {
-      const key = `${it.scheduleSlotId ?? ""}::${it.movementId}`;
-      map.set(key, it);
+      if (it.scheduleSlotId) {
+        byPair.set(`${it.scheduleSlotId}::${it.movementId}`, it);
+      }
+      if (!byMovement.has(it.movementId)) byMovement.set(it.movementId, it);
     }
-    return map;
+    return {
+      get(slotId: string, movementId: string) {
+        return (
+          byPair.get(`${slotId}::${movementId}`) ?? byMovement.get(movementId)
+        );
+      },
+    };
   }, [sessionItems]);
 
   const handleStart = () => {
@@ -192,6 +208,11 @@ function ScheduleSection({
                     {entry.durationLabel}
                   </span>
                 )}
+                {sessionStatus === "in_progress" && (
+                  <Badge className="text-[10px] bg-amber-500/15 text-amber-300 border-amber-500/30">
+                    In Progress
+                  </Badge>
+                )}
               </div>
             </div>
           </div>
@@ -225,8 +246,9 @@ function ScheduleSection({
                 />
               );
             }
-            const key = `${slot.slotId}::${slot.movementId}`;
-            const item = itemByPair.get(key);
+            const item = slot.movementId
+              ? itemByPair.get(slot.slotId, slot.movementId)
+              : undefined;
             return (
               <MovementRow
                 key={slot.slotId}
@@ -243,7 +265,7 @@ function ScheduleSection({
 
           {sessionStatus !== "complete" && (
             <Button onClick={finishSession} className="mt-2">
-              Finish Session ({completed}/{totalItems})
+              Mark Complete ({completed}/{totalItems})
             </Button>
           )}
           {sessionStatus === "complete" && (
@@ -417,15 +439,15 @@ function RoutineCard(props: {
     }>;
     notes: string | null;
   };
-  itemByPair: Map<string, SessionItemLite>;
+  itemByPair: { get: (slotId: string, movementId: string) => SessionItemLite | undefined };
   onToggle: (itemId: string, status: string) => void;
   onSkip: (itemId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const items = props.slot.routineMovements.map((m) => {
-    const key = `${props.slot.slotId}::${m.movementId}`;
-    return { rm: m, item: props.itemByPair.get(key) };
-  });
+  const items = props.slot.routineMovements.map((m) => ({
+    rm: m,
+    item: props.itemByPair.get(props.slot.slotId, m.movementId),
+  }));
   const done = items.filter((i) => i.item?.status === "done").length;
   const total = items.length;
 
