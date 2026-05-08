@@ -1,0 +1,94 @@
+"use client";
+
+// Native Google Sign-In initialization.
+//
+// In the Capacitor iOS shell we cannot use Supabase's redirect-based
+// `signInWithOAuth({ provider: 'google' })` flow: it bounces out to
+// Safari, completes there, and the WKWebView's session never updates.
+//
+// Instead we use the native Google Sign-In SDK (via
+// @capgo/capacitor-social-login) to obtain an ID token in-process, then
+// exchange it for a Supabase session via `signInWithIdToken({ provider:
+// 'google', token })`. The session is created directly inside the
+// WKWebView, so the user lands on the authenticated app with no browser
+// hop.
+//
+// Required env vars (NEXT_PUBLIC because they're consumed in the browser
+// runtime that the WKWebView loads):
+//   NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID    — iOS OAuth 2.0 Client ID from
+//     Google Cloud Console (audience = the iOS app, used for native
+//     auth).
+//   NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID    — Web OAuth 2.0 Client ID, the
+//     same one Supabase already has configured for its Google provider.
+//     Passed as `iOSServerClientId` so the SDK requests an ID token whose
+//     `aud` claim matches what Supabase will verify against.
+
+import { isNativeApp, nativePlatform } from "./is-native";
+
+let initialized = false;
+let initPromise: Promise<void> | null = null;
+
+async function doInit(): Promise<void> {
+  if (initialized) return;
+  if (!isNativeApp()) return;
+
+  const iOSClientId = process.env.NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID;
+  const webClientId = process.env.NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID;
+
+  if (nativePlatform() === "ios" && (!iOSClientId || !webClientId)) {
+    // Don't throw — let the button click surface a clear error to the
+    // user instead of crashing the app on launch.
+    console.warn(
+      "[google-auth] missing NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID or NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID; native Google sign-in will be disabled",
+    );
+    return;
+  }
+
+  const { SocialLogin } = await import("@capgo/capacitor-social-login");
+
+  await SocialLogin.initialize({
+    google: {
+      iOSClientId,
+      iOSServerClientId: webClientId,
+      // Android wiring is intentionally omitted — when we ship Android,
+      // add a webClientId here from the Android OAuth client.
+    },
+  });
+
+  initialized = true;
+}
+
+export function installNativeGoogleAuth(): Promise<void> {
+  if (!initPromise) initPromise = doInit();
+  return initPromise;
+}
+
+export async function nativeGoogleSignIn(): Promise<{ idToken: string }> {
+  await installNativeGoogleAuth();
+
+  const { SocialLogin } = await import("@capgo/capacitor-social-login");
+
+  const result = await SocialLogin.login({
+    provider: "google",
+    options: {
+      scopes: ["email", "profile"],
+    },
+  });
+
+  // Narrow first to Google, then to the online response — `offline`
+  // returns a serverAuthCode instead of an idToken and isn't what we
+  // want.
+  if (result.provider !== "google") {
+    throw new Error("Unexpected sign-in provider response");
+  }
+  if (result.result.responseType !== "online") {
+    throw new Error("Google sign-in returned offline response (expected online)");
+  }
+
+  const idToken = result.result.idToken;
+  if (!idToken) {
+    throw new Error("Google did not return an ID token");
+  }
+
+  return { idToken };
+}
