@@ -66,6 +66,20 @@ export async function POST(req: NextRequest) {
 
   const slots = Array.isArray(body.slots) ? body.slots : [];
 
+  // is_active defaults to true server-side, but accept an explicit value too.
+  const isActive = typeof body.isActive === "boolean" ? body.isActive : true;
+  // null = every day. Validate the array if one is given.
+  let activeDaysOfWeek: number[] | null = null;
+  if (Array.isArray(body.activeDaysOfWeek)) {
+    activeDaysOfWeek = Array.from(
+      new Set(
+        body.activeDaysOfWeek.filter(
+          (d: unknown) => typeof d === "number" && Number.isInteger(d) && d >= 0 && d <= 6
+        ) as number[]
+      )
+    ).sort((a, b) => a - b);
+  }
+
   const result = await db.transaction(async (tx) => {
     const [schedule] = await tx
       .insert(recoverySchedules)
@@ -78,6 +92,8 @@ export async function POST(req: NextRequest) {
         rotationStrategy: body.rotationStrategy === "calendar" ? "calendar" : "progress",
         communityId,
         createdBy: user.id,
+        isActive,
+        activeDaysOfWeek,
       })
       .returning();
 

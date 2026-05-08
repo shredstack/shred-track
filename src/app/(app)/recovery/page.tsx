@@ -20,6 +20,7 @@ import {
   useRecoveryToday,
   useStartRecoverySession,
   useUpdateRecoverySession,
+  type RecoveryTodayEntry,
 } from "@/hooks/useRecoverySessions";
 import {
   useDismissedAssignments,
@@ -45,64 +46,9 @@ export default function RecoveryTodayPage() {
   const [preferOverride, setPreferOverride] = useState<"personal" | "gym" | null>(null);
   const prefer = preferOverride ?? (activeMembership ? "gym" : "personal");
 
-  const { data: today, isLoading } = useRecoveryToday(dateStr, prefer);
-  const startSession = useStartRecoverySession();
-  const updateSession = useUpdateRecoverySession();
+  const { data: todays, isLoading } = useRecoveryToday(dateStr, prefer);
 
-  const handleStart = () => {
-    startSession.mutate(
-      { date: dateStr, prefer },
-      {
-        onError: (e) => toast.error(e.message),
-      }
-    );
-  };
-
-  const sessionItems = today?.session?.items ?? [];
-  const sessionId = today?.session?.id ?? null;
-  const sessionStatus = today?.session?.status ?? null;
-
-  const completed = sessionItems.filter((i) => i.status === "done").length;
-  const totalItems = sessionItems.length;
-
-  const itemByPair = useMemo(() => {
-    // Map (slotId|movementId) → session item, used to render rows in the
-    // order the schedule prescribed.
-    const map = new Map<string, typeof sessionItems[number]>();
-    for (const it of sessionItems) {
-      const key = `${it.scheduleSlotId ?? ""}::${it.movementId}`;
-      map.set(key, it);
-    }
-    return map;
-  }, [sessionItems]);
-
-  const toggleItem = (itemId: string, currentStatus: string) => {
-    if (!sessionId) return;
-    const next = currentStatus === "done" ? "pending" : "done";
-    updateSession.mutate({
-      id: sessionId,
-      items: [{ id: itemId, status: next }],
-    });
-  };
-
-  const skipItem = (itemId: string) => {
-    if (!sessionId) return;
-    updateSession.mutate({
-      id: sessionId,
-      items: [{ id: itemId, status: "skipped" }],
-    });
-  };
-
-  const finishSession = () => {
-    if (!sessionId) return;
-    updateSession.mutate(
-      { id: sessionId, status: "complete" },
-      {
-        onSuccess: () => toast.success("Session complete"),
-        onError: (e) => toast.error(e.message),
-      }
-    );
-  };
+  const entries = todays ?? [];
 
   return (
     <div className="flex flex-col gap-4">
@@ -135,101 +81,178 @@ export default function RecoveryTodayPage() {
         <div className="flex justify-center py-10">
           <Loader2 className="size-5 animate-spin text-muted-foreground" />
         </div>
-      ) : !today?.schedule ? (
+      ) : entries.length === 0 ? (
         <EmptyState />
       ) : (
-        <>
-          {/* Schedule header */}
-          <Card>
-            <CardContent className="py-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold truncate">{today.schedule.name}</p>
-                  <div className="flex items-center gap-2 mt-1 flex-wrap">
-                    <Badge variant="outline" className="text-[10px]">
-                      {today.schedule.kind === "day_keyed" ? "Day-keyed" : "Frequency"}
-                    </Badge>
-                    {today.schedule.kind === "day_keyed" && today.dayIndex && (
-                      <Badge variant="secondary" className="text-[10px]">
-                        Day {today.dayIndex} / {today.schedule.rotationDays}
-                      </Badge>
-                    )}
-                    {today.schedule.kind === "frequency_keyed" && (
-                      <Badge variant="secondary" className="text-[10px]">
-                        {today.weeklyCompleted} / {today.schedule.weeklyTarget ?? "—"} this week
-                      </Badge>
-                    )}
-                    {today.durationLabel && (
-                      <span className="text-[10px] text-muted-foreground">
-                        {today.durationLabel}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Slot rows */}
-          {today.slots.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-6">
-              No movements scheduled for {today.schedule.kind === "day_keyed" ? `Day ${today.dayIndex}` : "today"}.
-            </p>
-          ) : !sessionId ? (
-            <Button onClick={handleStart} disabled={startSession.isPending}>
-              {startSession.isPending ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Plus className="h-4 w-4 mr-2" />
-              )}
-              Start session
-            </Button>
-          ) : (
-            <>
-              {today.slots.map((slot) => {
-                if (slot.routineId && slot.routineMovements.length > 0) {
-                  return (
-                    <RoutineCard
-                      key={slot.slotId}
-                      slot={slot}
-                      itemByPair={itemByPair}
-                      onToggle={toggleItem}
-                      onSkip={skipItem}
-                    />
-                  );
-                }
-                const key = `${slot.slotId}::${slot.movementId}`;
-                const item = itemByPair.get(key);
-                return (
-                  <MovementRow
-                    key={slot.slotId}
-                    name={slot.movementName ?? "Movement"}
-                    prescription={slot.prescription}
-                    notes={slot.notes}
-                    isPerSide={slot.isPerSide}
-                    item={item}
-                    onToggle={toggleItem}
-                    onSkip={skipItem}
-                  />
-                );
-              })}
-
-              {sessionStatus !== "complete" && (
-                <Button onClick={finishSession} className="mt-2">
-                  Finish Session ({completed}/{totalItems})
-                </Button>
-              )}
-              {sessionStatus === "complete" && (
-                <p className="text-sm text-center text-emerald-500">
-                  ✓ Session complete
-                </p>
-              )}
-            </>
-          )}
-        </>
+        entries.map((entry) =>
+          entry.schedule ? (
+            <ScheduleSection
+              key={entry.schedule.id}
+              entry={entry}
+              dateStr={dateStr}
+              prefer={prefer}
+            />
+          ) : null
+        )
       )}
 
       <ManageLink />
+    </div>
+  );
+}
+
+function ScheduleSection({
+  entry,
+  dateStr,
+  prefer,
+}: {
+  entry: RecoveryTodayEntry;
+  dateStr: string;
+  prefer: "personal" | "gym";
+}) {
+  const startSession = useStartRecoverySession();
+  const updateSession = useUpdateRecoverySession();
+
+  const sessionItems = useMemo(() => entry.session?.items ?? [], [entry.session?.items]);
+  const sessionId = entry.session?.id ?? null;
+  const sessionStatus = entry.session?.status ?? null;
+  const completed = sessionItems.filter((i) => i.status === "done").length;
+  const totalItems = sessionItems.length;
+
+  const itemByPair = useMemo(() => {
+    const map = new Map<string, typeof sessionItems[number]>();
+    for (const it of sessionItems) {
+      const key = `${it.scheduleSlotId ?? ""}::${it.movementId}`;
+      map.set(key, it);
+    }
+    return map;
+  }, [sessionItems]);
+
+  const handleStart = () => {
+    if (!entry.schedule) return;
+    startSession.mutate(
+      { date: dateStr, prefer, scheduleId: entry.schedule.id },
+      { onError: (e) => toast.error(e.message) }
+    );
+  };
+
+  const toggleItem = (itemId: string, currentStatus: string) => {
+    if (!sessionId) return;
+    const next = currentStatus === "done" ? "pending" : "done";
+    updateSession.mutate({
+      id: sessionId,
+      items: [{ id: itemId, status: next }],
+    });
+  };
+
+  const skipItem = (itemId: string) => {
+    if (!sessionId) return;
+    updateSession.mutate({
+      id: sessionId,
+      items: [{ id: itemId, status: "skipped" }],
+    });
+  };
+
+  const finishSession = () => {
+    if (!sessionId) return;
+    updateSession.mutate(
+      { id: sessionId, status: "complete" },
+      {
+        onSuccess: () => toast.success("Session complete"),
+        onError: (e) => toast.error(e.message),
+      }
+    );
+  };
+
+  if (!entry.schedule) return null;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Card>
+        <CardContent className="py-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold truncate">{entry.schedule.name}</p>
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                <Badge variant="outline" className="text-[10px]">
+                  {entry.schedule.kind === "day_keyed" ? "Day-keyed" : "Frequency"}
+                </Badge>
+                {entry.schedule.kind === "day_keyed" && entry.dayIndex && (
+                  <Badge variant="secondary" className="text-[10px]">
+                    Day {entry.dayIndex} / {entry.schedule.rotationDays}
+                  </Badge>
+                )}
+                {entry.schedule.kind === "frequency_keyed" && (
+                  <Badge variant="secondary" className="text-[10px]">
+                    {entry.weeklyCompleted} / {entry.schedule.weeklyTarget ?? "—"} this week
+                  </Badge>
+                )}
+                {entry.durationLabel && (
+                  <span className="text-[10px] text-muted-foreground">
+                    {entry.durationLabel}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {entry.slots.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-6">
+          No movements scheduled for {entry.schedule.kind === "day_keyed" ? `Day ${entry.dayIndex}` : "today"}.
+        </p>
+      ) : !sessionId ? (
+        <Button onClick={handleStart} disabled={startSession.isPending}>
+          {startSession.isPending ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <Plus className="h-4 w-4 mr-2" />
+          )}
+          Start session
+        </Button>
+      ) : (
+        <>
+          {entry.slots.map((slot) => {
+            if (slot.routineId && slot.routineMovements.length > 0) {
+              return (
+                <RoutineCard
+                  key={slot.slotId}
+                  slot={slot}
+                  itemByPair={itemByPair}
+                  onToggle={toggleItem}
+                  onSkip={skipItem}
+                />
+              );
+            }
+            const key = `${slot.slotId}::${slot.movementId}`;
+            const item = itemByPair.get(key);
+            return (
+              <MovementRow
+                key={slot.slotId}
+                name={slot.movementName ?? "Movement"}
+                prescription={slot.prescription}
+                notes={slot.notes}
+                isPerSide={slot.isPerSide}
+                item={item}
+                onToggle={toggleItem}
+                onSkip={skipItem}
+              />
+            );
+          })}
+
+          {sessionStatus !== "complete" && (
+            <Button onClick={finishSession} className="mt-2">
+              Finish Session ({completed}/{totalItems})
+            </Button>
+          )}
+          {sessionStatus === "complete" && (
+            <p className="text-sm text-center text-emerald-500">
+              ✓ Session complete
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 }

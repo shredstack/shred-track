@@ -146,6 +146,9 @@ export interface RecoverySchedule {
   communityId: string | null;
   createdBy: string;
   isArchived: boolean;
+  isActive: boolean;
+  // null = displays every day; array of 0..6 (0=Sun) restricts to those days.
+  activeDaysOfWeek: number[] | null;
   createdAt: string;
   updatedAt: string;
   slots?: RecoveryScheduleSlot[];

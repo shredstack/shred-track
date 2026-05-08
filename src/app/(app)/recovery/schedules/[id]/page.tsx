@@ -12,6 +12,14 @@ import { formatPrescription } from "@/types/recovery";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 
+const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function formatDays(days: number[]): string {
+  return [...days]
+    .sort((a, b) => a - b)
+    .map((d) => DAY_SHORT[d])
+    .join(" · ");
+}
+
 export default function ScheduleDetailPage({
   params,
 }: {
@@ -82,6 +90,14 @@ export default function ScheduleDetailPage({
                 : `${data.weeklyTarget}× per week`}
             </Badge>
             {data.communityId && <Badge variant="secondary" className="text-[10px]">Gym</Badge>}
+            {data.isActive === false && (
+              <Badge variant="outline" className="text-[10px]">Inactive</Badge>
+            )}
+            {data.activeDaysOfWeek && data.activeDaysOfWeek.length > 0 && data.activeDaysOfWeek.length < 7 && (
+              <Badge variant="outline" className="text-[10px]">
+                {formatDays(data.activeDaysOfWeek)}
+              </Badge>
+            )}
           </div>
           {data.description && (
             <p className="text-sm text-muted-foreground mt-2">{data.description}</p>

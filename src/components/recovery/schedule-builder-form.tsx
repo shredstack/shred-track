@@ -47,9 +47,22 @@ export interface ScheduleBuilderInitial {
   rotationDays: number;
   weeklyTarget: number;
   communityId: string | null;
+  isActive: boolean;
+  // null = every day; otherwise array of 0..6 (0=Sun).
+  activeDaysOfWeek: number[] | null;
   daySlots: DraftSlot[][]; // index = dayIndex - 1
   freqSlots: DraftSlot[];
 }
+
+const DAY_OF_WEEK_LABELS: Array<{ value: number; short: string }> = [
+  { value: 0, short: "Sun" },
+  { value: 1, short: "Mon" },
+  { value: 2, short: "Tue" },
+  { value: 3, short: "Wed" },
+  { value: 4, short: "Thu" },
+  { value: 5, short: "Fri" },
+  { value: 6, short: "Sat" },
+];
 
 export function ScheduleBuilderForm({
   initial,
@@ -75,6 +88,22 @@ export function ScheduleBuilderForm({
     initial?.communityId ? "gym" : "personal"
   );
   const [activeDay, setActiveDay] = useState(1);
+  const [isActive, setIsActive] = useState(initial?.isActive ?? true);
+  // "every" = no day-of-week restriction (stored as null); "specific" lets
+  // the user pick days. We track local UI state separately so toggling
+  // between modes doesn't lose the user's selection.
+  const [dowMode, setDowMode] = useState<"every" | "specific">(
+    initial?.activeDaysOfWeek && initial.activeDaysOfWeek.length > 0 ? "specific" : "every"
+  );
+  const [selectedDays, setSelectedDays] = useState<number[]>(
+    initial?.activeDaysOfWeek ?? []
+  );
+
+  const toggleDay = (d: number) => {
+    setSelectedDays((prev) =>
+      prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort((a, b) => a - b)
+    );
+  };
 
   const initDays = (count: number, prefill?: DraftSlot[][]): DraftDay[] =>
     Array.from({ length: count }, (_, i) => ({
@@ -140,6 +169,12 @@ export function ScheduleBuilderForm({
       return;
     }
 
+    // Resolve day-of-week selection: "every" → null, "specific" → array
+    // (empty array also means every day server-side, but we coerce to null
+    // so the data shape stays consistent).
+    const activeDaysOfWeek =
+      dowMode === "every" || selectedDays.length === 0 ? null : selectedDays;
+
     try {
       if (editing && initial?.id) {
         await update.mutateAsync({
@@ -149,6 +184,8 @@ export function ScheduleBuilderForm({
             description: description || undefined,
             rotationDays: kind === "day_keyed" ? rotationDays : undefined,
             weeklyTarget: kind === "frequency_keyed" ? weeklyTarget : undefined,
+            isActive,
+            activeDaysOfWeek,
             slots,
           },
         });
@@ -165,6 +202,8 @@ export function ScheduleBuilderForm({
             scope === "gym" && activeMembership
               ? activeMembership.communityId
               : null,
+          isActive,
+          activeDaysOfWeek,
           slots,
         });
         toast.success("Schedule created");
@@ -273,6 +312,71 @@ export function ScheduleBuilderForm({
                   )
                 }
               />
+            </div>
+          )}
+          <div>
+            <Label className="text-xs">Show on calendar</Label>
+            <div className="flex gap-2 mt-1">
+              <button
+                type="button"
+                onClick={() => setIsActive(true)}
+                className={`flex-1 rounded-md border px-3 py-2 text-sm ${isActive ? "border-primary bg-primary/10 text-primary" : "border-input"}`}
+              >
+                Active
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsActive(false)}
+                className={`flex-1 rounded-md border px-3 py-2 text-sm ${!isActive ? "border-primary bg-primary/10 text-primary" : "border-input"}`}
+              >
+                Inactive
+              </button>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Inactive schedules are hidden from the recovery calendar but stay editable.
+            </p>
+          </div>
+          {isActive && (
+            <div>
+              <Label className="text-xs">Days of week</Label>
+              <div className="flex gap-2 mt-1">
+                <button
+                  type="button"
+                  onClick={() => setDowMode("every")}
+                  className={`flex-1 rounded-md border px-3 py-2 text-sm ${dowMode === "every" ? "border-primary bg-primary/10 text-primary" : "border-input"}`}
+                >
+                  Every day
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDowMode("specific")}
+                  className={`flex-1 rounded-md border px-3 py-2 text-sm ${dowMode === "specific" ? "border-primary bg-primary/10 text-primary" : "border-input"}`}
+                >
+                  Specific days
+                </button>
+              </div>
+              {dowMode === "specific" && (
+                <div className="flex gap-1 mt-2">
+                  {DAY_OF_WEEK_LABELS.map((d) => {
+                    const on = selectedDays.includes(d.value);
+                    return (
+                      <button
+                        type="button"
+                        key={d.value}
+                        onClick={() => toggleDay(d.value)}
+                        className={`flex-1 rounded-md border px-2 py-1.5 text-[11px] ${on ? "border-primary bg-primary/10 text-primary" : "border-input text-muted-foreground"}`}
+                      >
+                        {d.short}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {dowMode === "specific" && selectedDays.length === 0 && (
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  No days selected — schedule will show every day.
+                </p>
+              )}
             </div>
           )}
           {!editing && isCoachOrAdmin && activeMembership && (

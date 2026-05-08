@@ -1151,6 +1151,9 @@ export const recoverySchedules = pgTable("recovery_schedules", {
   communityId: uuid("community_id").references(() => communities.id, { onDelete: "set null" }),
   createdBy: uuid("created_by").notNull().references(() => users.id),
   isArchived: boolean("is_archived").default(false).notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  // null = display every day; otherwise array of 0..6 (0=Sunday, matches Date.getDay()).
+  activeDaysOfWeek: integer("active_days_of_week").array(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });

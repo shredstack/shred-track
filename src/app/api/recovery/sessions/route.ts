@@ -9,11 +9,14 @@ import {
 } from "@/db/schema";
 import { and, eq, desc, gte, lte, inArray } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
-import { resolveToday } from "@/lib/recovery/today-resolver";
+import { resolveToday, resolveTodayList } from "@/lib/recovery/today-resolver";
 
 // GET — two modes:
-//   ?date=YYYY-MM-DD : returns the resolved today view (assignment + slots
-//                      + any in-progress session for that date).
+//   ?date=YYYY-MM-DD : returns the resolved today view as a list — every
+//                      schedule that should display on this date, each with
+//                      any in-progress session attached. Personal users will
+//                      see one entry per active schedule whose day-of-week
+//                      filter includes the date.
 //   ?startDate&endDate : history list (caller's sessions only).
 export async function GET(req: NextRequest) {
   const user = await getSessionUser();
@@ -25,42 +28,69 @@ export async function GET(req: NextRequest) {
   const prefer = req.nextUrl.searchParams.get("prefer") === "gym" ? "gym" : "personal";
 
   if (date) {
-    const today = await resolveToday(user.id, date, prefer);
-    // Also fetch any session that already exists for this date.
-    let existingSession = null as null | { id: string; status: string; items: unknown[] };
-    if (today.schedule) {
-      const [s] = await db
+    const todays = await resolveTodayList(user.id, date, prefer);
+    const scheduleIds = todays
+      .map((t) => t.schedule?.id)
+      .filter((id): id is string => !!id);
+
+    // Single batched fetch for any sessions that already exist for these
+    // (user, date, scheduleId) triples.
+    const sessionsByScheduleId = new Map<string, { id: string; status: string }>();
+    if (scheduleIds.length) {
+      const rows = await db
         .select()
         .from(recoverySessions)
         .where(
           and(
             eq(recoverySessions.userId, user.id),
             eq(recoverySessions.sessionDate, date),
-            eq(recoverySessions.scheduleId, today.schedule.id)
+            inArray(recoverySessions.scheduleId, scheduleIds)
           )
-        )
-        .limit(1);
-      if (s) {
-        const items = await db
-          .select({
-            i: recoverySessionItems,
-            movementName: recoveryMovements.canonicalName,
-            isPerSide: recoveryMovements.isPerSide,
-            description: recoveryMovements.description,
-          })
-          .from(recoverySessionItems)
-          .innerJoin(recoveryMovements, eq(recoverySessionItems.movementId, recoveryMovements.id))
-          .where(eq(recoverySessionItems.sessionId, s.id))
-          .orderBy(recoverySessionItems.orderIndex);
+        );
+      for (const r of rows) {
+        if (r.scheduleId) sessionsByScheduleId.set(r.scheduleId, { id: r.id, status: r.status });
+      }
+    }
 
-        // Pull the visible videos for every movement in this session in a
-        // single query, then group them by movement on the way out.
-        const movementIds = Array.from(new Set(items.map((row) => row.i.movementId)));
-        const videosByMovement = await fetchVisibleVideosByMovement(user.id, movementIds);
+    // Hydrate session items + videos per existing session.
+    const allSessionIds = [...sessionsByScheduleId.values()].map((s) => s.id);
+    let itemsBySession = new Map<string, Array<{
+      i: typeof recoverySessionItems.$inferSelect;
+      movementName: string;
+      isPerSide: boolean;
+      description: string | null;
+    }>>();
+    let videosByMovement = new Map<string, RecoveryVideoRow[]>();
+    if (allSessionIds.length) {
+      const items = await db
+        .select({
+          i: recoverySessionItems,
+          movementName: recoveryMovements.canonicalName,
+          isPerSide: recoveryMovements.isPerSide,
+          description: recoveryMovements.description,
+        })
+        .from(recoverySessionItems)
+        .innerJoin(recoveryMovements, eq(recoverySessionItems.movementId, recoveryMovements.id))
+        .where(inArray(recoverySessionItems.sessionId, allSessionIds))
+        .orderBy(recoverySessionItems.orderIndex);
+      itemsBySession = new Map();
+      for (const row of items) {
+        const arr = itemsBySession.get(row.i.sessionId) ?? [];
+        arr.push(row);
+        itemsBySession.set(row.i.sessionId, arr);
+      }
+      const movementIds = Array.from(new Set(items.map((row) => row.i.movementId)));
+      videosByMovement = await fetchVisibleVideosByMovement(user.id, movementIds);
+    }
 
+    const result = todays.map((today) => {
+      let existingSession = null as null | { id: string; status: string; items: unknown[] };
+      const summary = today.schedule ? sessionsByScheduleId.get(today.schedule.id) : undefined;
+      if (summary) {
+        const items = itemsBySession.get(summary.id) ?? [];
         existingSession = {
-          id: s.id,
-          status: s.status,
+          id: summary.id,
+          status: summary.status,
           items: items.map((row) => ({
             ...row.i,
             movementName: row.movementName,
@@ -70,8 +100,10 @@ export async function GET(req: NextRequest) {
           })),
         };
       }
-    }
-    return NextResponse.json({ ...today, session: existingSession });
+      return { ...today, session: existingSession };
+    });
+
+    return NextResponse.json(result);
   }
 
   if (startDate && endDate) {
@@ -128,8 +160,11 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(recent);
 }
 
-// POST — start a session. Body: { date, prefer? }
-// Snapshots the resolver's slots into recovery_session_items.
+// POST — start a session. Body: { date, prefer?, scheduleId? }
+// Snapshots the resolver's slots into recovery_session_items. With multiple
+// schedules potentially active on the same date, the caller passes
+// scheduleId to specify which one to start; omitting it falls back to the
+// first resolved choice (preserves single-schedule behavior).
 export async function POST(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -138,8 +173,9 @@ export async function POST(req: NextRequest) {
   const date = typeof body.date === "string" ? body.date : null;
   if (!date) return NextResponse.json({ error: "date required" }, { status: 400 });
   const prefer = body.prefer === "gym" ? "gym" : "personal";
+  const scheduleId = typeof body.scheduleId === "string" ? body.scheduleId : undefined;
 
-  const today = await resolveToday(user.id, date, prefer);
+  const today = await resolveToday(user.id, date, prefer, scheduleId);
   if (!today.schedule) {
     return NextResponse.json({ error: "No schedule active for this date" }, { status: 400 });
   }

@@ -55,6 +55,8 @@ export default function EditSchedulePage({
         rotationDays,
         weeklyTarget: data.weeklyTarget ?? 2,
         communityId: data.communityId ?? null,
+        isActive: data.isActive ?? true,
+        activeDaysOfWeek: data.activeDaysOfWeek ?? null,
         daySlots,
         freqSlots,
       }}
