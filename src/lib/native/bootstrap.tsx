@@ -17,12 +17,14 @@ import { useEffect } from "react";
 import { isNativeApp } from "./is-native";
 import { installNativeAuthFetch } from "./auth-fetch";
 import { installWatchTokenRelay } from "./watch-token-relay";
+import { installNativeGoogleAuth } from "./google-auth";
 
 export function NativeBootstrap() {
   useEffect(() => {
     if (!isNativeApp()) return;
     installNativeAuthFetch();
     installWatchTokenRelay();
+    void installNativeGoogleAuth();
   }, []);
 
   return null;

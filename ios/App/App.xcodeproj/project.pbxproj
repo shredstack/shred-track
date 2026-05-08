@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 60;
+	objectVersion = 70;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -17,8 +17,36 @@
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		7F059A3F2FA412CF003078B1 /* HealthKitTimer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F059A3E2FA412CF003078B1 /* HealthKitTimer.swift */; };
 		7F059A402FA412CF003078B1 /* HealthKitTimer.m in Sources */ = {isa = PBXBuildFile; fileRef = 7F059A3D2FA412CF003078B1 /* HealthKitTimer.m */; };
+		7F0BD1D12FAD461C00E4218D /* ShredTrackWatch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 7F0BD1C72FAD461A00E4218D /* ShredTrackWatch Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		7F0BD1F42FAD48A200E4218D /* RaceSegmentFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F0BD1F32FAD48A200E4218D /* RaceSegmentFactory.swift */; };
+		7F0BD1F52FAD48A200E4218D /* RaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F0BD1F22FAD48A200E4218D /* RaceModels.swift */; };
+		7F0BD1F62FAD48A200E4218D /* PaceComputation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F0BD1F12FAD48A200E4218D /* PaceComputation.swift */; };
 		7FA175D02FA42C3C0001A6A0 /* MainViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FA175CF2FA42C3C0001A6A0 /* MainViewController.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		7F0BD1CF2FAD461C00E4218D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7F0BD1C62FAD461A00E4218D;
+			remoteInfo = "ShredTrackWatch Watch App";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		7F0BD1D22FAD461C00E4218D /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				7F0BD1D12FAD461C00E4218D /* ShredTrackWatch Watch App.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
@@ -33,10 +61,18 @@
 		7F059A3D2FA412CF003078B1 /* HealthKitTimer.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = HealthKitTimer.m; sourceTree = "<group>"; };
 		7F059A3E2FA412CF003078B1 /* HealthKitTimer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitTimer.swift; sourceTree = "<group>"; };
 		7F059A412FA412D5003078B1 /* App-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "App-Bridging-Header.h"; sourceTree = "<group>"; };
+		7F0BD1C72FAD461A00E4218D /* ShredTrackWatch Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "ShredTrackWatch Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7F0BD1F12FAD48A200E4218D /* PaceComputation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaceComputation.swift; sourceTree = "<group>"; };
+		7F0BD1F22FAD48A200E4218D /* RaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaceModels.swift; sourceTree = "<group>"; };
+		7F0BD1F32FAD48A200E4218D /* RaceSegmentFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaceSegmentFactory.swift; sourceTree = "<group>"; };
 		7F5D52952FA3CE6D0068829B /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
 		7FA175CF2FA42C3C0001A6A0 /* MainViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainViewController.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		7F0BD1C82FAD461A00E4218D /* ShredTrackWatch Watch App */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "ShredTrackWatch Watch App"; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		504EC3011FED79650016851F /* Frameworks */ = {
@@ -44,6 +80,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7F0BD1C42FAD461A00E4218D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -55,6 +98,7 @@
 			children = (
 				958DCC722DB07C7200EA8C5F /* debug.xcconfig */,
 				504EC3061FED79650016851F /* App */,
+				7F0BD1C82FAD461A00E4218D /* ShredTrackWatch Watch App */,
 				504EC3051FED79650016851F /* Products */,
 			);
 			sourceTree = "<group>";
@@ -63,6 +107,7 @@
 			isa = PBXGroup;
 			children = (
 				504EC3041FED79650016851F /* App.app */,
+				7F0BD1C72FAD461A00E4218D /* ShredTrackWatch Watch App.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -77,6 +122,9 @@
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
+				7F0BD1F12FAD48A200E4218D /* PaceComputation.swift */,
+				7F0BD1F22FAD48A200E4218D /* RaceModels.swift */,
+				7F0BD1F32FAD48A200E4218D /* RaceSegmentFactory.swift */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
 				504EC3131FED79650016851F /* Info.plist */,
@@ -97,10 +145,12 @@
 				504EC3001FED79650016851F /* Sources */,
 				504EC3011FED79650016851F /* Frameworks */,
 				504EC3021FED79650016851F /* Resources */,
+				7F0BD1D22FAD461C00E4218D /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				7F0BD1D02FAD461C00E4218D /* PBXTargetDependency */,
 			);
 			name = App;
 			packageProductDependencies = (
@@ -110,19 +160,44 @@
 			productReference = 504EC3041FED79650016851F /* App.app */;
 			productType = "com.apple.product-type.application";
 		};
+		7F0BD1C62FAD461A00E4218D /* ShredTrackWatch Watch App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7F0BD1D52FAD461C00E4218D /* Build configuration list for PBXNativeTarget "ShredTrackWatch Watch App" */;
+			buildPhases = (
+				7F0BD1C32FAD461A00E4218D /* Sources */,
+				7F0BD1C42FAD461A00E4218D /* Frameworks */,
+				7F0BD1C52FAD461A00E4218D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				7F0BD1C82FAD461A00E4218D /* ShredTrackWatch Watch App */,
+			);
+			name = "ShredTrackWatch Watch App";
+			packageProductDependencies = (
+			);
+			productName = "ShredTrackWatch Watch App";
+			productReference = 7F0BD1C72FAD461A00E4218D /* ShredTrackWatch Watch App.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
 		504EC2FC1FED79650016851F /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastSwiftUpdateCheck = 0920;
+				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 0920;
 				TargetAttributes = {
 					504EC3031FED79650016851F = {
 						CreatedOnToolsVersion = 9.2;
 						LastSwiftMigration = 2620;
 						ProvisioningStyle = Automatic;
+					};
+					7F0BD1C62FAD461A00E4218D = {
+						CreatedOnToolsVersion = 26.2;
 					};
 				};
 			};
@@ -143,6 +218,7 @@
 			projectRoot = "";
 			targets = (
 				504EC3031FED79650016851F /* App */,
+				7F0BD1C62FAD461A00E4218D /* ShredTrackWatch Watch App */,
 			);
 		};
 /* End PBXProject section */
@@ -161,6 +237,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7F0BD1C52FAD461A00E4218D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -169,13 +252,31 @@
 			buildActionMask = 2147483647;
 			files = (
 				7F059A3F2FA412CF003078B1 /* HealthKitTimer.swift in Sources */,
+				7F0BD1F42FAD48A200E4218D /* RaceSegmentFactory.swift in Sources */,
+				7F0BD1F52FAD48A200E4218D /* RaceModels.swift in Sources */,
+				7F0BD1F62FAD48A200E4218D /* PaceComputation.swift in Sources */,
 				7F059A402FA412CF003078B1 /* HealthKitTimer.m in Sources */,
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				7FA175D02FA42C3C0001A6A0 /* MainViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7F0BD1C32FAD461A00E4218D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		7F0BD1D02FAD461C00E4218D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 7F0BD1C62FAD461A00E4218D /* ShredTrackWatch Watch App */;
+			targetProxy = 7F0BD1CF2FAD461C00E4218D /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
 		504EC30B1FED79650016851F /* Main.storyboard */ = {
@@ -359,6 +460,94 @@
 			};
 			name = Release;
 		};
+		7F0BD1D32FAD461C00E4218D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VWU4D8FPH8;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = ShredTrackWatch;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = net.shredstack.shredtrack;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = net.shredstack.shredtrack.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.2;
+			};
+			name = Debug;
+		};
+		7F0BD1D42FAD461C00E4218D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VWU4D8FPH8;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = ShredTrackWatch;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = net.shredstack.shredtrack;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = net.shredstack.shredtrack.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.2;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -376,6 +565,15 @@
 			buildConfigurations = (
 				504EC3171FED79650016851F /* Debug */,
 				504EC3181FED79650016851F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7F0BD1D52FAD461C00E4218D /* Build configuration list for PBXNativeTarget "ShredTrackWatch Watch App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7F0BD1D32FAD461C00E4218D /* Debug */,
+				7F0BD1D42FAD461C00E4218D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 // PendingRaceQueue — local-first storage for finished races on the
 // Watch.

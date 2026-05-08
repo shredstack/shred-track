@@ -28,10 +28,7 @@ struct TodayView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    return
-                }
-
-                if !conn.isReachable {
+                } else if !conn.isReachable {
                     Card {
                         Label("Phone unreachable", systemImage: "iphone.slash")
                             .font(.caption)
@@ -39,25 +36,24 @@ struct TodayView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
-                    return
-                }
+                } else {
+                    Card {
+                        Label("HYROX", systemImage: "figure.run")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                        Text("Today's session loads from your iPhone.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
 
-                Card {
-                    Label("HYROX", systemImage: "figure.run")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                    Text("Today's session loads from your iPhone.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
-                Card {
-                    Label("CrossFit WOD", systemImage: "dumbbell")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                    Text("Today's WOD loads from your iPhone.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    Card {
+                        Label("CrossFit WOD", systemImage: "dumbbell")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                        Text("Today's WOD loads from your iPhone.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .padding(.horizontal, 4)
