@@ -29,12 +29,31 @@ final class AuthSession: ObservableObject {
         accessToken != nil && userId != nil
     }
 
-    func loadFromKeychain() {
-        accessToken = keychain.read(key: "accessToken")
-        userId = keychain.read(key: "userId")
-        if let raw = keychain.read(key: "expiresAt"), let secs = TimeInterval(raw) {
-            expiresAt = Date(timeIntervalSince1970: secs)
-        }
+    /// Reads the cached session from the Keychain. The actual
+    /// `SecItemCopyMatching` calls run on a background queue — on a
+    /// fresh install the first Keychain access can take seconds, and
+    /// blocking the main thread on it surfaced as a hang on the first
+    /// user tap. Once the values are read we hop back to the main actor
+    /// to assign the `@Published` properties.
+    func loadFromKeychain() async {
+        let service = "net.shredstack.shredtrack.watch"
+        let result: (token: String?, userId: String?, expiresAt: Date?) =
+            await Task.detached(priority: .userInitiated) {
+                let kc = KeychainStore(service: service)
+                let token = kc.read(key: "accessToken")
+                let userId = kc.read(key: "userId")
+                let expiresAt: Date?
+                if let raw = kc.read(key: "expiresAt"), let secs = TimeInterval(raw) {
+                    expiresAt = Date(timeIntervalSince1970: secs)
+                } else {
+                    expiresAt = nil
+                }
+                return (token, userId, expiresAt)
+            }.value
+
+        self.accessToken = result.token
+        self.userId = result.userId
+        self.expiresAt = result.expiresAt
     }
 
     func updateFromPhone(accessToken: String, userId: String, expiresAt: Date?) {

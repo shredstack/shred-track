@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Search, Plus } from "lucide-react";
 import { useMovements, useRecentMovements } from "@/hooks/useMovements";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { PickerSheet } from "@/components/shared/picker-sheet";
 import { CategoryPills } from "@/components/shared/category-pills";
 import { inferDefaultMetricType } from "@/lib/crossfit/rep-scheme-parser";
@@ -111,9 +112,6 @@ export function MovementSearch({
   placeholder = "Search movements...",
   movements: movementsOverride,
 }: MovementSearchProps) {
-  const { data: fetched } = useMovements();
-  const { data: recentIds } = useRecentMovements();
-  const movements = movementsOverride ?? fetched ?? FALLBACK_MOVEMENTS;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<CategoryFilter>("all");
@@ -121,17 +119,32 @@ export function MovementSearch({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
+  const debouncedQuery = useDebouncedValue(query.trim(), 250);
+  // Server-side search guarantees that movements added since the picker
+  // mounted are still findable — pure client filtering of a stale cache
+  // returns "no matches" for them.
+  const { data: fetched, refetch: refetchMovements } = useMovements({
+    q: debouncedQuery || undefined,
+  });
+  const { data: recentIds, refetch: refetchRecent } = useRecentMovements();
+  const movements = movementsOverride ?? fetched ?? FALLBACK_MOVEMENTS;
+
+  // Force a fresh fetch the moment the user opens the picker. Catches the
+  // case where movements were created elsewhere and this cache key never
+  // received an invalidation.
+  useEffect(() => {
+    if (!open || movementsOverride) return;
+    refetchMovements();
+    refetchRecent();
+  }, [open, movementsOverride, refetchMovements, refetchRecent]);
+
   const filtered = useMemo(() => {
-    const byCategory =
-      category === "all"
-        ? movements
-        : movements.filter((m) => m.category === category);
-    return query.trim()
-      ? byCategory.filter((m) =>
-          m.canonicalName.toLowerCase().includes(query.toLowerCase()),
-        )
-      : byCategory;
-  }, [movements, query, category]);
+    // Search is applied server-side via `q`; category stays client-side so
+    // toggling pills is instant and we don't burn a request per pill.
+    return category === "all"
+      ? movements
+      : movements.filter((m) => m.category === category);
+  }, [movements, category]);
 
   // Show the "Recent" group only when the user hasn't narrowed the list — once
   // they pick a category or start typing, grouping just gets in the way.

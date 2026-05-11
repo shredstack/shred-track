@@ -67,11 +67,18 @@ function toMovementOption(row: MovementRow): MovementOption {
 // useMovements
 // ============================================
 
-export function useMovements() {
+interface MovementsFilters {
+  q?: string;
+}
+
+export function useMovements(filters: MovementsFilters = {}) {
   return useQuery({
-    queryKey: ["movements"],
+    queryKey: ["movements", filters],
     queryFn: async () => {
-      const res = await fetch("/api/movements");
+      const params = new URLSearchParams();
+      if (filters.q) params.set("q", filters.q);
+      const qs = params.toString();
+      const res = await fetch(`/api/movements${qs ? `?${qs}` : ""}`);
       if (!res.ok) throw new Error("Failed to fetch movements");
       const rows = (await res.json()) as MovementRow[];
       return rows.map(toMovementOption);
@@ -123,13 +130,19 @@ export function useCreateMovement() {
       });
 
       // 409 with a movementId means a system movement already owns the name —
-      // unwrap so the caller can reuse the existing row silently.
+      // unwrap so the caller can reuse the existing row silently. Search every
+      // cached movements query (different `q` filters live under different
+      // keys) so we still find the row when the picker is filtering.
       if (res.status === 409) {
         const body = await res.json().catch(() => null);
         if (body?.movementId) {
-          const list = queryClient.getQueryData<MovementOption[]>(["movements"]);
-          const existing = list?.find((m) => m.id === body.movementId);
-          if (existing) return existing;
+          const cached = queryClient.getQueriesData<MovementOption[]>({
+            queryKey: ["movements"],
+          });
+          for (const [, list] of cached) {
+            const existing = list?.find((m) => m.id === body.movementId);
+            if (existing) return existing;
+          }
         }
         throw new Error(body?.error || "Movement already exists");
       }
