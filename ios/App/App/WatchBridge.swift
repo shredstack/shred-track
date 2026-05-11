@@ -22,6 +22,7 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "setToken", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "clearToken", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "ackRaceSync", returnType: CAPPluginReturnPromise),
     ]
 
     private var session: WCSession?
@@ -65,6 +66,19 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
             call.resolve()
         } catch {
             call.reject("Failed to push sign-out to Watch: \(error.localizedDescription)")
+        }
+    }
+
+    @objc func ackRaceSync(_ call: CAPPluginCall) {
+        guard let raceLocalId = call.getString("raceLocalId") else {
+            call.reject("Missing raceLocalId")
+            return
+        }
+        do {
+            try session?.updateApplicationContext(["ackedRaceLocalId": raceLocalId])
+            call.resolve()
+        } catch {
+            call.reject("Failed to push race ack to Watch: \(error.localizedDescription)")
         }
     }
 

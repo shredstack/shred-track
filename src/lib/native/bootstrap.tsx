@@ -17,6 +17,7 @@ import { useEffect } from "react";
 import { isNativeApp } from "./is-native";
 import { installNativeAuthFetch } from "./auth-fetch";
 import { installWatchTokenRelay } from "./watch-token-relay";
+import { installWatchRaceRelay } from "./watch-race-relay";
 import { installNativeGoogleAuth } from "./google-auth";
 
 export function NativeBootstrap() {
@@ -24,6 +25,7 @@ export function NativeBootstrap() {
     if (!isNativeApp()) return;
     installNativeAuthFetch();
     installWatchTokenRelay();
+    installWatchRaceRelay();
     void installNativeGoogleAuth();
   }, []);
 

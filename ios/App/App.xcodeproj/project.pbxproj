@@ -66,9 +66,9 @@
 		7F0BD1F12FAD48A200E4218D /* PaceComputation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaceComputation.swift; sourceTree = "<group>"; };
 		7F0BD1F22FAD48A200E4218D /* RaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaceModels.swift; sourceTree = "<group>"; };
 		7F0BD1F32FAD48A200E4218D /* RaceSegmentFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaceSegmentFactory.swift; sourceTree = "<group>"; };
-		7FB7B71D9E000000A0000002 /* WatchBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchBridge.swift; sourceTree = "<group>"; };
 		7F5D52952FA3CE6D0068829B /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
 		7FA175CF2FA42C3C0001A6A0 /* MainViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainViewController.swift; sourceTree = "<group>"; };
+		7FB7B71D9E000000A0000002 /* WatchBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchBridge.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
@@ -475,6 +475,7 @@
 				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
 				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
 				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CODE_SIGN_ENTITLEMENTS = "ShredTrackWatch Watch App/ShredTrackWatch Watch App.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = VWU4D8FPH8;
@@ -522,6 +523,7 @@
 				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
 				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
 				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CODE_SIGN_ENTITLEMENTS = "ShredTrackWatch Watch App/ShredTrackWatch Watch App.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = VWU4D8FPH8;
