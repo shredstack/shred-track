@@ -20,6 +20,7 @@ import {
   useRecoveryToday,
   useStartRecoverySession,
   useUpdateRecoverySession,
+  useCancelRecoverySession,
   type RecoveryTodayEntry,
 } from "@/hooks/useRecoverySessions";
 import {
@@ -114,6 +115,7 @@ function ScheduleSection({
 }) {
   const startSession = useStartRecoverySession();
   const updateSession = useUpdateRecoverySession();
+  const cancelSession = useCancelRecoverySession();
 
   const sessionItems = useMemo(() => entry.session?.items ?? [], [entry.session?.items]);
   const sessionId = entry.session?.id ?? null;
@@ -178,6 +180,15 @@ function ScheduleSection({
         onError: (e) => toast.error(e.message),
       }
     );
+  };
+
+  const handleCancel = () => {
+    if (!sessionId) return;
+    if (!confirm("Cancel this session? Any progress will be discarded.")) return;
+    cancelSession.mutate(sessionId, {
+      onSuccess: () => toast.success("Session canceled"),
+      onError: (e) => toast.error(e.message),
+    });
   };
 
   if (!entry.schedule) return null;
@@ -264,9 +275,19 @@ function ScheduleSection({
           })}
 
           {sessionStatus !== "complete" && (
-            <Button onClick={finishSession} className="mt-2">
-              Mark Complete ({completed}/{totalItems})
-            </Button>
+            <>
+              <Button onClick={finishSession} className="mt-2">
+                Mark Complete ({completed}/{totalItems})
+              </Button>
+              <button
+                type="button"
+                onClick={handleCancel}
+                disabled={cancelSession.isPending}
+                className="text-xs text-muted-foreground hover:text-destructive disabled:opacity-50 py-1"
+              >
+                {cancelSession.isPending ? "Canceling…" : "Cancel session"}
+              </button>
+            </>
           )}
           {sessionStatus === "complete" && (
             <p className="text-sm text-center text-emerald-500">

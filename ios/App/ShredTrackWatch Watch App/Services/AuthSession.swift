@@ -23,6 +23,14 @@ final class AuthSession: ObservableObject {
 
     private let keychain = KeychainStore(service: "net.shredstack.shredtrack.watch")
 
+    /// UserDefaults flag set to true the first time the phone pushes a
+    /// token. We use it as a fast-path check to avoid the first-call
+    /// `securityd` warm-up on fresh installs, which can take 20+
+    /// seconds and contends with `cfprefsd` (UserDefaults daemon) on
+    /// watchOS — that contention is what blocks the very first user
+    /// interaction with the timer chips.
+    private static let hasSavedTokenKey = "watch.auth.hasSavedToken"
+
     private init() {}
 
     var isSignedIn: Bool {
@@ -35,7 +43,15 @@ final class AuthSession: ObservableObject {
     /// blocking the main thread on it surfaced as a hang on the first
     /// user tap. Once the values are read we hop back to the main actor
     /// to assign the `@Published` properties.
+    ///
+    /// On a truly fresh install there is nothing in the Keychain to
+    /// load anyway, so we short-circuit on the `hasSavedToken` flag and
+    /// skip the slow first `SecItemCopyMatching` entirely.
     func loadFromKeychain() async {
+        guard UserDefaults.standard.bool(forKey: Self.hasSavedTokenKey) else {
+            print("[AuthSession] no saved token flag — skipping keychain read")
+            return
+        }
         let service = "net.shredstack.shredtrack.watch"
         let result: (token: String?, userId: String?, expiresAt: Date?) =
             await Task.detached(priority: .userInitiated) {
@@ -65,6 +81,7 @@ final class AuthSession: ObservableObject {
         if let expiresAt {
             keychain.write(key: "expiresAt", value: String(expiresAt.timeIntervalSince1970))
         }
+        UserDefaults.standard.set(true, forKey: Self.hasSavedTokenKey)
     }
 
     func clear() {
@@ -74,5 +91,6 @@ final class AuthSession: ObservableObject {
         keychain.delete(key: "accessToken")
         keychain.delete(key: "userId")
         keychain.delete(key: "expiresAt")
+        UserDefaults.standard.set(false, forKey: Self.hasSavedTokenKey)
     }
 }
