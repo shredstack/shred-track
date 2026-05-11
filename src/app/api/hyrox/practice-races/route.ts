@@ -81,12 +81,33 @@ export async function POST(request: Request) {
   const raceType = body.raceType === "actual" ? "actual" : "practice";
   const totalTimeSecondsRounded = Math.round(body.totalTimeSeconds);
 
+  // Dedup splits by segmentOrder. Older watch builds had a bug where
+  // tapping Finish on the last segment appended that segment twice (see
+  // RaceTimerViewModel.finish); the resulting duplicate violated the
+  // UNIQUE (race_id, segment_order) constraint and 500'd the save. The
+  // watch is fixed, but races already queued in PendingRaceQueue on
+  // those builds carry the bad payload, so we defensively dedup here.
+  const seenSegmentOrders = new Set<number>();
+  const splits: SplitPayload[] = [];
+  for (const s of body.splits) {
+    if (seenSegmentOrders.has(s.segmentOrder)) {
+      console.warn("[practice-races POST] dropping duplicate split", {
+        segmentOrder: s.segmentOrder,
+        segmentLabel: s.segmentLabel,
+      });
+      continue;
+    }
+    seenSegmentOrders.add(s.segmentOrder);
+    splits.push(s);
+  }
+
   console.log("[practice-races POST] start", {
     userId: user.id,
     source: body.source,
     template: body.template,
     divisionKey: body.divisionKey,
-    splitsCount: body.splits.length,
+    splitsCount: splits.length,
+    droppedDuplicates: body.splits.length - splits.length,
     totalTimeSeconds: body.totalTimeSeconds,
     startedAt: body.startedAt,
     completedAt: body.completedAt,
@@ -115,7 +136,7 @@ export async function POST(request: Request) {
 
     // 2. Insert splits
     await tx.insert(hyroxPracticeRaceSplits).values(
-      body.splits.map((s) => ({
+      splits.map((s) => ({
         raceId: race.id,
         segmentOrder: s.segmentOrder,
         segmentType: s.segmentType,
@@ -135,7 +156,7 @@ export async function POST(request: Request) {
     );
 
     // 3. Check for personal bests on station segments + insert benchmarks
-    const stationSplits = body.splits.filter((s) => s.segmentType === "station");
+    const stationSplits = splits.filter((s) => s.segmentType === "station");
     const personalBests: string[] = [];
 
     for (const split of stationSplits) {

@@ -226,8 +226,14 @@ final class RaceTimerViewModel: ObservableObject {
     /// `.running` during the outer awaits), and end HealthKit twice.
     func finish() async {
         guard state.status != .complete else { return }
-        if state.status == .running {
-            // Implicit final split if the user taps Finish mid-segment.
+        // Implicit final split if the user taps Finish mid-segment. Skip
+        // when every segment is already completed: the common case is
+        // split() on the last segment queued this finish task *and*
+        // already appended the completed segment. Calling split() again
+        // would re-append the same segmentOrder, which the server's
+        // UNIQUE (race_id, segment_order) constraint rejects with a 500.
+        if state.status == .running
+            && state.completedSegments.count < state.segments.count {
             split()
         }
         state.status = .complete
