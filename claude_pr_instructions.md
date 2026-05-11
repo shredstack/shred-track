@@ -95,28 +95,38 @@ Check that client-side data fetching follows React Query patterns:
 
 ### Native App Configuration Review (if applicable)
 
-When testing the native iOS/Android shell against a local Next.js dev server, contributors typically apply a set of dev-only overrides that route traffic through an ngrok tunnel and proxy local Supabase via a Next.js rewrite. Each of these overrides MUST be reverted before merging to `main` — otherwise the production app will load the wrong host or expose dev-only paths. See the "Local iOS Testing via ngrok" section in `CLAUDE.md` for the full setup.
+Local iOS testing is controlled by a single env var — `NEXT_PUBLIC_NGROK_DOMAIN` in `.env.local` — and the supporting code in `capacitor.config.ts`, `next.config.ts`, `src/proxy.ts`, and `src/lib/supabase/client.ts` reads that var at build/sync time. The committed code is a no-op in production when the var is absent (and `.env.local` is gitignored, so it never reaches `main`). See the "Local iOS Testing via ngrok" section in `CLAUDE.md` and `claude_code_instructions/native_app/ios_local_dev_flag_spec.md` for the full design.
+
+What this means for review: most dev-mode "leftovers" can no longer leak. But there are still a few things to watch for.
 
 If the PR modifies `capacitor.config.ts`:
 
-- [ ] **Production URL**: `server.url` MUST be `https://shredtrack.shredstack.net` before merging to `main`. Any other value (ngrok tunnel, `http://192.168.x.x:3000`, `http://localhost:3000`, etc.) is a development override and will break the production iOS/Android build by pointing the native shell at an unreachable or wrong host. **Flag as [Blocker].**
+- [ ] **Default `server.url`**: When `NEXT_PUBLIC_NGROK_DOMAIN` is absent, `server.url` MUST resolve to `https://shredtrack.shredstack.net`. If a PR replaces the default branch with a hardcoded ngrok URL or `http://192.168.x.x:3000`, that's a [Blocker]. (A conditional `ngrokDomain ? \`https://${ngrokDomain}\` : "https://shredtrack.shredstack.net"` is correct.)
 - [ ] **`cleartext: false`**: Production should never allow cleartext HTTP. If a PR sets `cleartext: true`, flag as [Blocker] unless there's a clearly stated and accepted reason.
-- [ ] **No dev-only ATS exceptions in `ios/App/App/Info.plist`**: `NSAllowsArbitraryLoads` and similar permissive ATS keys should not be present in a merge to `main`. If added for local debugging, they must be reverted before merge. Flag as [Blocker].
+- [ ] **No dev-only ATS exceptions in `ios/App/App/Info.plist`**: `NSAllowsArbitraryLoads` and similar permissive ATS keys should not be present in a merge to `main`. Flag as [Blocker].
 
 If the PR modifies `next.config.ts`:
 
-- [ ] **No `allowedDevOrigins` for ngrok hosts**: An entry like `allowedDevOrigins: ["*.ngrok-free.dev", "*.ngrok-free.app", "<subdomain>.ngrok-free.dev"]` is a dev-only override. It should be removed (the property left absent) before merging. Flag as [Blocker].
-- [ ] **No `/supabase-proxy/*` rewrite**: A `rewrites()` block that proxies `/supabase-proxy/:path*` to a local Supabase URL (e.g. `http://127.0.0.1:54351/:path*`) is dev-only. Production Supabase is reached directly via `NEXT_PUBLIC_SUPABASE_URL`. Remove the rewrite before merge. Flag as [Blocker].
+- [ ] **No hardcoded ngrok hostnames**: `allowedDevOrigins` should only ever contain `process.env.NEXT_PUBLIC_NGROK_DOMAIN` (or be absent entirely when the var is unset). A literal `"*.ngrok-free.dev"` or `"sarah-shredtrack.ngrok-free.dev"` in the source is a [Blocker].
+- [ ] **`/supabase-proxy/*` rewrite stays conditional on the env var**: Removing the `ngrokDomain && {...}` wrapper so the rewrite is always active is a [Blocker]. The rewrite must be gated.
 
 If the PR modifies `src/proxy.ts`:
 
-- [ ] **Middleware matcher does not exclude `supabase-proxy`**: The exclusion is only needed when the dev-only `/supabase-proxy/*` rewrite is in place. The default matcher in `main` is:
+- [ ] **Middleware matcher keeps `supabase-proxy` exclusion**: The current matcher is:
   ```
-  "/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"
+  "/((?!_next/static|_next/image|supabase-proxy|favicon.ico|sitemap.xml|robots.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"
   ```
-  If `supabase-proxy` appears in the negated group, it's a dev leftover. Flag as [Blocker].
+  This is a permanent, intentional exclusion (no production request ever hits `/supabase-proxy/*`, so excluding it is dead code in prod, not a behavior change). Do NOT flag it as a dev leftover.
 
-Note: `.env.local` is gitignored and will not appear in PR diffs, so contributors must remember to revert `NEXT_PUBLIC_SUPABASE_URL` to `http://127.0.0.1:54351` themselves. Reviewers cannot enforce this from the diff alone.
+If the PR modifies `src/lib/supabase/client.ts`:
+
+- [ ] **`NEXT_PUBLIC_NGROK_DOMAIN` branch is preserved**: When the flag is unset, the client must fall back to `process.env.NEXT_PUBLIC_SUPABASE_URL`. Removing the fallback or hardcoding a proxied URL is a [Blocker].
+
+If the PR modifies `src/lib/ios-local-dev.ts`:
+
+- [ ] **`SUPABASE_PROXY_PATH` and `LOCAL_SUPABASE_URL` stay in sync** with the rewrite in `next.config.ts` and the consumer in `src/lib/supabase/client.ts`. The whole point of this module is to keep those two call sites agreeing on the same literal.
+
+Note: `.env.local` is gitignored and will not appear in PR diffs. The new design intentionally keeps all dev-mode toggling in `.env.local`, so there is no longer a per-session source file to revert. A scan of non-gitignored files for `ngrok-free.dev` should only match: `.env.local.example` (if present), `CLAUDE.md`, and `claude_code_instructions/native_app/ios_local_dev_flag_spec.md`. Any other match is a leak.
 
 ### Hydration Safety Review
 
