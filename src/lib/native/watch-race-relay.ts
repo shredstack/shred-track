@@ -80,13 +80,26 @@ export function installWatchRaceRelay(): void {
         return;
       }
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        console.warn(
+          "[watch-race-relay] fetch timed out after 15s — aborting",
+        );
+        controller.abort();
+      }, 15000);
+
       try {
         console.log("[watch-race-relay] POSTing race to /api/hyrox/practice-races");
+        const postStart = Date.now();
         const response = await fetch("/api/hyrox/practice-races", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
+          signal: controller.signal,
         });
+        console.log(
+          `[watch-race-relay] fetch resolved in ${Date.now() - postStart}ms status=${response.status}`,
+        );
 
         if (!response.ok) {
           const body = await response.text().catch(() => "");
@@ -103,7 +116,15 @@ export function installWatchRaceRelay(): void {
         await bridge.ackRaceSync({ raceLocalId });
         console.log("[watch-race-relay] ack sent to watch");
       } catch (err) {
-        console.error("[watch-race-relay] network error saving race", err);
+        const isAbort =
+          err instanceof Error &&
+          (err.name === "AbortError" || err.message.includes("abort"));
+        console.error(
+          `[watch-race-relay] ${isAbort ? "fetch aborted (timeout)" : "network error saving race"}`,
+          err,
+        );
+      } finally {
+        clearTimeout(timeoutId);
       }
     });
     console.log("[watch-race-relay] splitsFromWatch listener registered");

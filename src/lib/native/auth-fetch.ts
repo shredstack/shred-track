@@ -90,21 +90,61 @@ export function installNativeAuthFetch(): void {
       return originalFetch(input, init);
     }
 
-    const token = await getAccessToken();
+    const urlForLog =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+
+    console.log("[auth-fetch] getSession start", urlForLog);
+    const tokenStart = Date.now();
+    let token: string | null = null;
+    try {
+      token = await Promise.race([
+        getAccessToken(),
+        new Promise<null>((resolve) =>
+          setTimeout(() => {
+            console.warn(
+              "[auth-fetch] getSession timed out after 5s — proceeding without bearer",
+              urlForLog,
+            );
+            resolve(null);
+          }, 5000),
+        ),
+      ]);
+    } catch (err) {
+      console.error("[auth-fetch] getSession threw", err);
+    }
+    console.log(
+      `[auth-fetch] getSession done in ${Date.now() - tokenStart}ms (hasToken=${!!token})`,
+      urlForLog,
+    );
+
     if (!token) {
+      console.log("[auth-fetch] no token — calling originalFetch unbearered");
       return originalFetch(input, init);
     }
 
+    console.log("[auth-fetch] originalFetch start (bearer attached)", urlForLog);
+    const fetchStart = Date.now();
     let response = await originalFetch(input, withBearer(init, token));
+    console.log(
+      `[auth-fetch] originalFetch done in ${Date.now() - fetchStart}ms status=${response.status}`,
+      urlForLog,
+    );
 
     if (response.status === 401) {
+      console.log("[auth-fetch] 401 — attempting refresh");
       const refreshed = await refreshAccessToken();
       if (refreshed) {
         response = await originalFetch(input, withBearer(init, refreshed));
         if (response.status === 401) {
+          console.log("[auth-fetch] still 401 after refresh — signing out");
           await signOut();
         }
       } else {
+        console.log("[auth-fetch] refresh failed — signing out");
         await signOut();
       }
     }
