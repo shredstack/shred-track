@@ -115,17 +115,25 @@ final class HealthKitWorkoutService: ObservableObject {
     }
 
     func end() async {
-        session?.end()
+        guard isActive, let session, let builder else {
+            self.session = nil
+            self.builder = nil
+            isActive = false
+            return
+        }
+        // Flip the flag before yielding so re-entry while we await
+        // endCollection bails the second time through.
+        isActive = false
+        self.session = nil
+        self.builder = nil
+        session.end()
         let endDate = Date()
         do {
-            try await builder?.endCollection(at: endDate)
-            _ = try await builder?.finishWorkout()
+            try await builder.endCollection(at: endDate)
+            _ = try await builder.finishWorkout()
         } catch {
             print("[HK] endCollection/finishWorkout error: \(error)")
         }
-        session = nil
-        builder = nil
-        isActive = false
     }
 
     // MARK: - Distance queries

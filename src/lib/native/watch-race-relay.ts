@@ -58,8 +58,10 @@ export function installWatchRaceRelay(): void {
   }
 
   console.log("[watch-race-relay] installing splitsFromWatch listener");
-  void bridge
-    .addListener("splitsFromWatch", async (event) => {
+  try {
+    // Capacitor's plugin proxy returns the listener handle synchronously
+    // for some setups (no .then), so don't await/chain — just register.
+    void bridge.addListener("splitsFromWatch", async (event) => {
       console.log("[watch-race-relay] received splitsFromWatch event", {
         raceLocalId: event?.raceLocalId,
         payloadBytes: event?.payloadJson?.length,
@@ -103,11 +105,9 @@ export function installWatchRaceRelay(): void {
       } catch (err) {
         console.error("[watch-race-relay] network error saving race", err);
       }
-    })
-    .then(() =>
-      console.log("[watch-race-relay] splitsFromWatch listener attached"),
-    )
-    .catch((err) =>
-      console.error("[watch-race-relay] failed to attach listener", err),
-    );
+    });
+    console.log("[watch-race-relay] splitsFromWatch listener registered");
+  } catch (err) {
+    console.error("[watch-race-relay] failed to attach listener", err);
+  }
 }

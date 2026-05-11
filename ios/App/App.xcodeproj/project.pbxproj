@@ -72,8 +72,18 @@
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		7F1C45712FB263B20089D2D3 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"ShredTrackWatch-Watch-App-Info.plist",
+			);
+			target = 7F0BD1C62FAD461A00E4218D /* ShredTrackWatch Watch App */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		7F0BD1C82FAD461A00E4218D /* ShredTrackWatch Watch App */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "ShredTrackWatch Watch App"; sourceTree = "<group>"; };
+		7F0BD1C82FAD461A00E4218D /* ShredTrackWatch Watch App */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (7F1C45712FB263B20089D2D3 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "ShredTrackWatch Watch App"; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -483,6 +493,7 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "ShredTrackWatch-Watch-App-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = ShredTrackWatch;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "ShredTrack reads your heart rate, distance, and active energy to display real-time race metrics on your wrist.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "ShredTrack saves your completed race to the Health app as a workout, including active energy burned.";
@@ -531,6 +542,7 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "ShredTrackWatch-Watch-App-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = ShredTrackWatch;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "ShredTrack reads your heart rate, distance, and active energy to display real-time race metrics on your wrist.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "ShredTrack saves your completed race to the Health app as a workout, including active energy burned.";
