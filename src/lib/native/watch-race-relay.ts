@@ -57,39 +57,57 @@ export function installWatchRaceRelay(): void {
     return;
   }
 
-  void bridge.addListener("splitsFromWatch", async (event) => {
-    const { raceLocalId, payloadJson } = event;
-    if (!raceLocalId || !payloadJson) {
-      console.warn("[watch-race-relay] invalid event payload", event);
-      return;
-    }
-
-    let payload: unknown;
-    try {
-      payload = JSON.parse(payloadJson);
-    } catch (err) {
-      console.error("[watch-race-relay] failed to parse payload", err);
-      return;
-    }
-
-    try {
-      const response = await fetch("/api/hyrox/practice-races", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+  console.log("[watch-race-relay] installing splitsFromWatch listener");
+  void bridge
+    .addListener("splitsFromWatch", async (event) => {
+      console.log("[watch-race-relay] received splitsFromWatch event", {
+        raceLocalId: event?.raceLocalId,
+        payloadBytes: event?.payloadJson?.length,
       });
-
-      if (!response.ok) {
-        const body = await response.text().catch(() => "");
-        console.error(
-          `[watch-race-relay] save failed ${response.status}: ${body}`,
-        );
+      const { raceLocalId, payloadJson } = event;
+      if (!raceLocalId || !payloadJson) {
+        console.warn("[watch-race-relay] invalid event payload", event);
         return;
       }
 
-      await bridge.ackRaceSync({ raceLocalId });
-    } catch (err) {
-      console.error("[watch-race-relay] network error saving race", err);
-    }
-  });
+      let payload: unknown;
+      try {
+        payload = JSON.parse(payloadJson);
+      } catch (err) {
+        console.error("[watch-race-relay] failed to parse payload", err);
+        return;
+      }
+
+      try {
+        console.log("[watch-race-relay] POSTing race to /api/hyrox/practice-races");
+        const response = await fetch("/api/hyrox/practice-races", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          const body = await response.text().catch(() => "");
+          console.error(
+            `[watch-race-relay] save failed ${response.status}: ${body}`,
+          );
+          return;
+        }
+
+        console.log(
+          "[watch-race-relay] POST succeeded, acking race",
+          raceLocalId,
+        );
+        await bridge.ackRaceSync({ raceLocalId });
+        console.log("[watch-race-relay] ack sent to watch");
+      } catch (err) {
+        console.error("[watch-race-relay] network error saving race", err);
+      }
+    })
+    .then(() =>
+      console.log("[watch-race-relay] splitsFromWatch listener attached"),
+    )
+    .catch((err) =>
+      console.error("[watch-race-relay] failed to attach listener", err),
+    );
 }
