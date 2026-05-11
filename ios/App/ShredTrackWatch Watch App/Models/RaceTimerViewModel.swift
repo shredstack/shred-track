@@ -26,6 +26,14 @@ final class RaceTimerViewModel: ObservableObject {
     @Published var segmentElapsedMs: Double = 0
     @Published var totalElapsedMs: Double = 0
     @Published var liveSegmentDistanceMeters: Double = 0
+    /// Set true after the user taps Save on the complete screen. Drives
+    /// the post-save layout (Syncing/Synced + Done) vs the pre-save
+    /// layout (Save / Discard). Cleared on reset/configure.
+    @Published var savedThisRace: Bool = false
+
+    private var pendingPayload: RaceSavePayload?
+    private var pendingLocalId: String?
+    private var queueObserver: AnyCancellable?
 
     /// Live current pace, sec/km, recomputed off the 1Hz tick.
     var currentRunPaceSecPerKm: Double? {
@@ -103,6 +111,18 @@ final class RaceTimerViewModel: ObservableObject {
         segmentElapsedMs = 0
         totalElapsedMs = 0
         liveSegmentDistanceMeters = 0
+        cleanupAfterRace()
+    }
+
+    /// Wipes per-race transient state so the next configure/start begins
+    /// from a clean slate. Idempotent.
+    private func cleanupAfterRace() {
+        pendingPayload = nil
+        pendingLocalId = nil
+        queueObserver?.cancel()
+        queueObserver = nil
+        savedThisRace = false
+        state.pendingSync = false
     }
 
     // MARK: - Lifecycle
@@ -197,6 +217,9 @@ final class RaceTimerViewModel: ObservableObject {
         startDistanceTick()
     }
 
+    /// End the race timer. Stops ticks, closes the HealthKit session,
+    /// and stashes the save payload — but does NOT enqueue. The user
+    /// must explicitly tap Save (or Discard) on the complete screen.
     func finish() async {
         if state.status == .running {
             // Implicit final split if the user taps Finish mid-segment.
@@ -208,9 +231,45 @@ final class RaceTimerViewModel: ObservableObject {
         await hk.end()
         extendedSession?.invalidate()
         extendedSession = nil
-        let payload = buildSavePayload()
+        pendingPayload = buildSavePayload()
+        savedThisRace = false
+        state.pendingSync = false
+    }
+
+    /// Enqueue the finished race for sync to the phone, and start
+    /// observing the queue so `state.pendingSync` flips to false once
+    /// the phone acks (the local file is removed from `PendingRaceQueue`).
+    /// Safe to call multiple times — only enqueues once per race.
+    func saveRace() {
+        guard let payload = pendingPayload, !savedThisRace else { return }
+        savedThisRace = true
         state.pendingSync = true
-        _ = PendingRaceQueue.shared.enqueue(payload)
+        let localId = PendingRaceQueue.shared.enqueue(payload)
+        pendingLocalId = localId
+        queueObserver = PendingRaceQueue.shared.$pending
+            .receive(on: RunLoop.main)
+            .sink { [weak self] pending in
+                guard let self, let id = self.pendingLocalId else { return }
+                if !pending.contains(id) {
+                    self.state.pendingSync = false
+                }
+            }
+    }
+
+    /// Drop the finished race without persisting. Returns to idle so the
+    /// view routes back to the setup screen.
+    func discardRace() {
+        cleanupAfterRace()
+        state.status = .idle
+        segmentElapsedMs = 0
+        totalElapsedMs = 0
+        liveSegmentDistanceMeters = 0
+    }
+
+    /// Used by the post-save "Done" button — same routing as discard,
+    /// but the saved race remains in the pending queue until acked.
+    func dismissCompleteScreen() {
+        discardRace()
     }
 
     // MARK: - Tick

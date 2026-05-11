@@ -33,6 +33,7 @@ struct TimerView: View {
     @AppStorage("watch.timer.simulateRoxzone") private var simulateRoxzone: Bool = false
 
     @State private var showFinishConfirm: Bool = false
+    @State private var showDiscardConfirm: Bool = false
     @State private var isStarting: Bool = false
 
     private let unit: PaceUnit = .kilometer  // TODO read from App Group
@@ -255,7 +256,7 @@ struct TimerView: View {
 
     private var completeScreen: some View {
         ScrollView {
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
                 Text("Race Complete")
                     .font(.headline)
                 Text(formatTime(ms: vm.totalElapsedMs))
@@ -265,25 +266,58 @@ struct TimerView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if vm.state.pendingSync {
-                    Label("Syncing…", systemImage: "arrow.triangle.2.circlepath")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+
+                if vm.savedThisRace {
+                    // Post-save: show sync status + Done.
+                    if vm.state.pendingSync {
+                        Label("Syncing…", systemImage: "arrow.triangle.2.circlepath")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Label("Synced", systemImage: "checkmark.circle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.green)
+                    }
+                    Button("Done") {
+                        vm.dismissCompleteScreen()
+                    }
+                    .padding(.top, 4)
                 } else {
-                    Label("Synced", systemImage: "checkmark.circle.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.green)
+                    // Pre-save: explicit Save / Discard.
+                    Button {
+                        vm.saveRace()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "square.and.arrow.down")
+                            Text("Save Race")
+                                .font(.headline)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .tint(.green)
+                    .padding(.top, 4)
+
+                    Button(role: .destructive) {
+                        showDiscardConfirm = true
+                    } label: {
+                        Text("Discard")
+                            .frame(maxWidth: .infinity)
+                    }
                 }
-                Button("New Race") {
-                    vm.configure(
-                        divisionKey: divisionKey,
-                        template: template,
-                        simulateRoxzone: simulateRoxzone
-                    )
-                }
-                .padding(.top, 8)
             }
             .padding(.horizontal, 4)
+        }
+        .confirmationDialog(
+            "Discard this race?",
+            isPresented: $showDiscardConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Discard Race", role: .destructive) {
+                vm.discardRace()
+            }
+            Button("Keep", role: .cancel) {}
+        } message: {
+            Text("Your splits and total time will be lost forever.")
         }
     }
 
