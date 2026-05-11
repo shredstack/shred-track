@@ -10,10 +10,12 @@ import WatchConnectivity
 //   Capacitor.Plugins.WatchBridge.clearToken()
 //   Capacitor.Plugins.WatchBridge.relaySplits({ raceLocalId, payloadJson })
 //
-// On the iOS side, every call funnels through
-// `WCSession.updateApplicationContext(_:)` (queued, replays when the
-// Watch becomes reachable) — never `sendMessage`, which is the wrong
-// primitive for asynchronous, durable updates.
+// Token pushes use `WCSession.updateApplicationContext(_:)` (latest
+// value wins — fine for a single current token). Race-sync acks use
+// `WCSession.transferUserInfo(_:)` because each ack must be delivered
+// independently: if the user saves two races offline, an
+// applicationContext-based ack for the first would be clobbered by the
+// second before the Watch ever sees it.
 
 @objc(WatchBridge)
 public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
@@ -22,6 +24,7 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "setToken", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "clearToken", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "ackRaceSync", returnType: CAPPluginReturnPromise),
     ]
 
     private var session: WCSession?
@@ -66,6 +69,18 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
         } catch {
             call.reject("Failed to push sign-out to Watch: \(error.localizedDescription)")
         }
+    }
+
+    @objc func ackRaceSync(_ call: CAPPluginCall) {
+        guard let raceLocalId = call.getString("raceLocalId") else {
+            call.reject("Missing raceLocalId")
+            return
+        }
+        session?.transferUserInfo([
+            "kind": "race.ack",
+            "ackedRaceLocalId": raceLocalId,
+        ])
+        call.resolve()
     }
 
     // MARK: - Splits sync from Watch

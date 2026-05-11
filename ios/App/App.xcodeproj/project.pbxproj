@@ -22,6 +22,7 @@
 		7F0BD1F52FAD48A200E4218D /* RaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F0BD1F22FAD48A200E4218D /* RaceModels.swift */; };
 		7F0BD1F62FAD48A200E4218D /* PaceComputation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F0BD1F12FAD48A200E4218D /* PaceComputation.swift */; };
 		7FA175D02FA42C3C0001A6A0 /* MainViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FA175CF2FA42C3C0001A6A0 /* MainViewController.swift */; };
+		7FB7B71D9E000000A0000001 /* WatchBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FB7B71D9E000000A0000002 /* WatchBridge.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -67,6 +68,7 @@
 		7F0BD1F32FAD48A200E4218D /* RaceSegmentFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaceSegmentFactory.swift; sourceTree = "<group>"; };
 		7F5D52952FA3CE6D0068829B /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
 		7FA175CF2FA42C3C0001A6A0 /* MainViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainViewController.swift; sourceTree = "<group>"; };
+		7FB7B71D9E000000A0000002 /* WatchBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchBridge.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
@@ -125,6 +127,7 @@
 				7F0BD1F12FAD48A200E4218D /* PaceComputation.swift */,
 				7F0BD1F22FAD48A200E4218D /* RaceModels.swift */,
 				7F0BD1F32FAD48A200E4218D /* RaceSegmentFactory.swift */,
+				7FB7B71D9E000000A0000002 /* WatchBridge.swift */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
 				504EC3131FED79650016851F /* Info.plist */,
@@ -258,6 +261,7 @@
 				7F059A402FA412CF003078B1 /* HealthKitTimer.m in Sources */,
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				7FA175D02FA42C3C0001A6A0 /* MainViewController.swift in Sources */,
+				7FB7B71D9E000000A0000001 /* WatchBridge.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -471,6 +475,7 @@
 				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
 				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
 				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CODE_SIGN_ENTITLEMENTS = "ShredTrackWatch Watch App/ShredTrackWatch Watch App.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = VWU4D8FPH8;
@@ -479,6 +484,8 @@
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = ShredTrackWatch;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "ShredTrack reads your heart rate, distance, and active energy to display real-time race metrics on your wrist.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "ShredTrack saves your completed race to the Health app as a workout, including active energy burned.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = net.shredstack.shredtrack;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -516,6 +523,7 @@
 				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
 				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
 				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CODE_SIGN_ENTITLEMENTS = "ShredTrackWatch Watch App/ShredTrackWatch Watch App.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = VWU4D8FPH8;
@@ -524,6 +532,8 @@
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = ShredTrackWatch;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "ShredTrack reads your heart rate, distance, and active energy to display real-time race metrics on your wrist.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "ShredTrack saves your completed race to the Health app as a workout, including active energy burned.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = net.shredstack.shredtrack;
 				LD_RUNPATH_SEARCH_PATHS = (

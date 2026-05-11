@@ -4,17 +4,19 @@ import WatchConnectivity
 
 // WatchConnectivityManager — owns the `WCSession` on the Watch side.
 //
-// Two flows (native-app spec §4.2 + §5.4):
+// Flows (native-app spec §4.2 + §5.4):
 //   1. Inbound `applicationContext` from the phone — carries the latest
-//      Supabase access token so the Watch session stays warm.
-//   2. Outbound `transferUserInfo` to the phone — carries finished race
+//      Supabase access token so the Watch session stays warm. Token is
+//      latest-value-wins, which is what we want.
+//   2. Inbound `didReceiveUserInfo` from the phone — carries per-race
+//      sync acks. Acks must be delivered independently (two finished
+//      races shouldn't race for the same applicationContext slot), so
+//      they ride the queued `transferUserInfo` channel.
+//   3. Outbound `transferUserInfo` to the phone — carries finished race
 //      payloads. We use `transferUserInfo`, NOT `sendMessage`, because
 //      it queues automatically when the phone is unreachable and replays
 //      on next connection. That's the whole point of the offline-first
 //      Watch design.
-//
-// Phone acks a successful sync by sending an `ackedRaceId` back via
-// `applicationContext`; on receipt we clear the pending save.
 
 @MainActor
 final class WatchConnectivityManager: NSObject, ObservableObject {
@@ -77,6 +79,15 @@ extension WatchConnectivityManager: WCSessionDelegate {
         }
     }
 
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveUserInfo userInfo: [String: Any] = [:]
+    ) {
+        Task { @MainActor in
+            self.handleUserInfo(userInfo)
+        }
+    }
+
     @MainActor
     private func handleApplicationContext(_ ctx: [String: Any]) {
         // Token push from the phone.
@@ -98,9 +109,12 @@ extension WatchConnectivityManager: WCSessionDelegate {
         if ctx["signOut"] as? Bool == true {
             AuthSession.shared.clear()
         }
+    }
 
-        // Race-save ack from the phone — clear the pending flag locally.
-        if let ackedId = ctx["ackedRaceLocalId"] as? String {
+    @MainActor
+    private func handleUserInfo(_ userInfo: [String: Any]) {
+        guard userInfo["kind"] as? String == "race.ack" else { return }
+        if let ackedId = userInfo["ackedRaceLocalId"] as? String {
             PendingRaceQueue.shared.clear(localId: ackedId)
         }
     }

@@ -26,6 +26,14 @@ final class RaceTimerViewModel: ObservableObject {
     @Published var segmentElapsedMs: Double = 0
     @Published var totalElapsedMs: Double = 0
     @Published var liveSegmentDistanceMeters: Double = 0
+    /// Set true after the user taps Save on the complete screen. Drives
+    /// the post-save layout (Syncing/Synced + Done) vs the pre-save
+    /// layout (Save / Discard). Cleared on reset/configure.
+    @Published var savedThisRace: Bool = false
+
+    private var pendingPayload: RaceSavePayload?
+    private var pendingLocalId: String?
+    private var queueObserver: AnyCancellable?
 
     /// Live current pace, sec/km, recomputed off the 1Hz tick.
     var currentRunPaceSecPerKm: Double? {
@@ -55,9 +63,16 @@ final class RaceTimerViewModel: ObservableObject {
         return PaceComputation.avgRunPaceSecPerKm(completedRuns: runs)
     }
 
+    /// 10Hz wall-clock tick. Updates `segmentElapsedMs` /
+    /// `totalElapsedMs` only and never awaits HealthKit, so the
+    /// on-screen clock can't be frozen by a stalled HK query.
     private var tickTask: Task<Void, Never>?
+    /// 1Hz distance refresh. Gated on `hk.isActive` so the HK
+    /// statistics-query callback can never block the loop before the
+    /// workout session is live (the cause of the wrist-side "timer
+    /// doesn't tick" bug we hit when HK init was made parallel).
+    private var distanceTask: Task<Void, Never>?
     private var segmentStartedAt: Date?
-    private var lastDistanceRefreshSecond: Int = -1
     private var extendedSession: WKExtendedRuntimeSession?
     private let hk = HealthKitWorkoutService.shared
 
@@ -96,6 +111,18 @@ final class RaceTimerViewModel: ObservableObject {
         segmentElapsedMs = 0
         totalElapsedMs = 0
         liveSegmentDistanceMeters = 0
+        cleanupAfterRace()
+    }
+
+    /// Wipes per-race transient state so the next configure/start begins
+    /// from a clean slate. Idempotent.
+    private func cleanupAfterRace() {
+        pendingPayload = nil
+        pendingLocalId = nil
+        queueObserver?.cancel()
+        queueObserver = nil
+        savedThisRace = false
+        state.pendingSync = false
     }
 
     // MARK: - Lifecycle
@@ -109,10 +136,11 @@ final class RaceTimerViewModel: ObservableObject {
         let now = Date()
         state.raceStartedAt = now
         segmentStartedAt = now
-        lastDistanceRefreshSecond = -1
+        liveSegmentDistanceMeters = 0
         state.status = .running
         startExtendedRuntimeSession()
         startTick()
+        startDistanceTick()
 
         // Kick HealthKit off in the background. Any failure (denied
         // permissions, hardware unavailable, simulator) is logged and
@@ -165,7 +193,6 @@ final class RaceTimerViewModel: ObservableObject {
         } else {
             state.currentSegmentIndex = nextIdx
             segmentStartedAt = now
-            lastDistanceRefreshSecond = -1
             liveSegmentDistanceMeters = 0
         }
     }
@@ -176,6 +203,7 @@ final class RaceTimerViewModel: ObservableObject {
         state.pausedAt = Date()
         hk.pause()
         stopTick()
+        stopDistanceTick()
     }
 
     func resume() {
@@ -186,8 +214,12 @@ final class RaceTimerViewModel: ObservableObject {
         state.status = .running
         hk.resume()
         startTick()
+        startDistanceTick()
     }
 
+    /// End the race timer. Stops ticks, closes the HealthKit session,
+    /// and stashes the save payload — but does NOT enqueue. The user
+    /// must explicitly tap Save (or Discard) on the complete screen.
     func finish() async {
         if state.status == .running {
             // Implicit final split if the user taps Finish mid-segment.
@@ -195,12 +227,49 @@ final class RaceTimerViewModel: ObservableObject {
         }
         state.status = .complete
         stopTick()
+        stopDistanceTick()
         await hk.end()
         extendedSession?.invalidate()
         extendedSession = nil
-        let payload = buildSavePayload()
+        pendingPayload = buildSavePayload()
+        savedThisRace = false
+        state.pendingSync = false
+    }
+
+    /// Enqueue the finished race for sync to the phone, and start
+    /// observing the queue so `state.pendingSync` flips to false once
+    /// the phone acks (the local file is removed from `PendingRaceQueue`).
+    /// Safe to call multiple times — only enqueues once per race.
+    func saveRace() {
+        guard let payload = pendingPayload, !savedThisRace else { return }
+        savedThisRace = true
         state.pendingSync = true
-        _ = PendingRaceQueue.shared.enqueue(payload)
+        let localId = PendingRaceQueue.shared.enqueue(payload)
+        pendingLocalId = localId
+        queueObserver = PendingRaceQueue.shared.$pending
+            .receive(on: RunLoop.main)
+            .sink { [weak self] pending in
+                guard let self, let id = self.pendingLocalId else { return }
+                if !pending.contains(id) {
+                    self.state.pendingSync = false
+                }
+            }
+    }
+
+    /// Drop the finished race without persisting. Returns to idle so the
+    /// view routes back to the setup screen.
+    func discardRace() {
+        cleanupAfterRace()
+        state.status = .idle
+        segmentElapsedMs = 0
+        totalElapsedMs = 0
+        liveSegmentDistanceMeters = 0
+    }
+
+    /// Used by the post-save "Done" button — same routing as discard,
+    /// but the saved race remains in the pending queue until acked.
+    func dismissCompleteScreen() {
+        discardRace()
     }
 
     // MARK: - Tick
@@ -228,18 +297,41 @@ final class RaceTimerViewModel: ObservableObject {
         if let raceStart = state.raceStartedAt {
             totalElapsedMs = (now.timeIntervalSince(raceStart) * 1000) - state.totalPausedMs
         }
-        // Refresh distance only on run segments and only at 1Hz to keep
-        // the cost down (HealthKit queries aren't free).
-        let segIdx = state.currentSegmentIndex
-        if segIdx < state.segments.count, state.segments[segIdx].segmentType == .run {
-            let currentSecond = Int(segmentElapsedMs / 1000)
-            if currentSecond != lastDistanceRefreshSecond {
-                lastDistanceRefreshSecond = currentSecond
-                liveSegmentDistanceMeters = await hk.distanceMeters(from: segStart, to: now)
+    }
+
+    private func startDistanceTick() {
+        stopDistanceTick()
+        distanceTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.refreshDistance()
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1Hz
             }
-        } else {
-            liveSegmentDistanceMeters = 0
         }
+    }
+
+    private func stopDistanceTick() {
+        distanceTask?.cancel()
+        distanceTask = nil
+    }
+
+    private func refreshDistance() async {
+        guard state.status == .running,
+              hk.isActive,
+              let segStart = segmentStartedAt
+        else { return }
+        let segIdx = state.currentSegmentIndex
+        guard segIdx < state.segments.count,
+              state.segments[segIdx].segmentType == .run
+        else {
+            liveSegmentDistanceMeters = 0
+            return
+        }
+        let meters = await hk.distanceMeters(from: segStart, to: Date())
+        // Re-check status after the await; user may have paused/finished
+        // while the HK query was in flight.
+        guard state.status == .running else { return }
+        liveSegmentDistanceMeters = meters
     }
 
     // MARK: - Payload
