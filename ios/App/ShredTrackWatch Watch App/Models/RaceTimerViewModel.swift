@@ -55,9 +55,16 @@ final class RaceTimerViewModel: ObservableObject {
         return PaceComputation.avgRunPaceSecPerKm(completedRuns: runs)
     }
 
+    /// 10Hz wall-clock tick. Updates `segmentElapsedMs` /
+    /// `totalElapsedMs` only and never awaits HealthKit, so the
+    /// on-screen clock can't be frozen by a stalled HK query.
     private var tickTask: Task<Void, Never>?
+    /// 1Hz distance refresh. Gated on `hk.isActive` so the HK
+    /// statistics-query callback can never block the loop before the
+    /// workout session is live (the cause of the wrist-side "timer
+    /// doesn't tick" bug we hit when HK init was made parallel).
+    private var distanceTask: Task<Void, Never>?
     private var segmentStartedAt: Date?
-    private var lastDistanceRefreshSecond: Int = -1
     private var extendedSession: WKExtendedRuntimeSession?
     private let hk = HealthKitWorkoutService.shared
 
@@ -109,10 +116,11 @@ final class RaceTimerViewModel: ObservableObject {
         let now = Date()
         state.raceStartedAt = now
         segmentStartedAt = now
-        lastDistanceRefreshSecond = -1
+        liveSegmentDistanceMeters = 0
         state.status = .running
         startExtendedRuntimeSession()
         startTick()
+        startDistanceTick()
 
         // Kick HealthKit off in the background. Any failure (denied
         // permissions, hardware unavailable, simulator) is logged and
@@ -165,7 +173,6 @@ final class RaceTimerViewModel: ObservableObject {
         } else {
             state.currentSegmentIndex = nextIdx
             segmentStartedAt = now
-            lastDistanceRefreshSecond = -1
             liveSegmentDistanceMeters = 0
         }
     }
@@ -176,6 +183,7 @@ final class RaceTimerViewModel: ObservableObject {
         state.pausedAt = Date()
         hk.pause()
         stopTick()
+        stopDistanceTick()
     }
 
     func resume() {
@@ -186,6 +194,7 @@ final class RaceTimerViewModel: ObservableObject {
         state.status = .running
         hk.resume()
         startTick()
+        startDistanceTick()
     }
 
     func finish() async {
@@ -195,6 +204,7 @@ final class RaceTimerViewModel: ObservableObject {
         }
         state.status = .complete
         stopTick()
+        stopDistanceTick()
         await hk.end()
         extendedSession?.invalidate()
         extendedSession = nil
@@ -228,18 +238,41 @@ final class RaceTimerViewModel: ObservableObject {
         if let raceStart = state.raceStartedAt {
             totalElapsedMs = (now.timeIntervalSince(raceStart) * 1000) - state.totalPausedMs
         }
-        // Refresh distance only on run segments and only at 1Hz to keep
-        // the cost down (HealthKit queries aren't free).
-        let segIdx = state.currentSegmentIndex
-        if segIdx < state.segments.count, state.segments[segIdx].segmentType == .run {
-            let currentSecond = Int(segmentElapsedMs / 1000)
-            if currentSecond != lastDistanceRefreshSecond {
-                lastDistanceRefreshSecond = currentSecond
-                liveSegmentDistanceMeters = await hk.distanceMeters(from: segStart, to: now)
+    }
+
+    private func startDistanceTick() {
+        stopDistanceTick()
+        distanceTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.refreshDistance()
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1Hz
             }
-        } else {
-            liveSegmentDistanceMeters = 0
         }
+    }
+
+    private func stopDistanceTick() {
+        distanceTask?.cancel()
+        distanceTask = nil
+    }
+
+    private func refreshDistance() async {
+        guard state.status == .running,
+              hk.isActive,
+              let segStart = segmentStartedAt
+        else { return }
+        let segIdx = state.currentSegmentIndex
+        guard segIdx < state.segments.count,
+              state.segments[segIdx].segmentType == .run
+        else {
+            liveSegmentDistanceMeters = 0
+            return
+        }
+        let meters = await hk.distanceMeters(from: segStart, to: Date())
+        // Re-check status after the await; user may have paused/finished
+        // while the HK query was in flight.
+        guard state.status == .running else { return }
+        liveSegmentDistanceMeters = meters
     }
 
     // MARK: - Payload
