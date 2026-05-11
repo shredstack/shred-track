@@ -132,7 +132,14 @@ struct TimerView: View {
     private func templateChip(_ value: RaceTemplate, label: String) -> some View {
         let selected = template == value
         Button(label) {
+            let t0 = Date()
+            print("[TemplateChip] tap=\(value.rawValue) start")
             templateRaw = value.rawValue
+            let elapsed = Date().timeIntervalSince(t0)
+            print(String(
+                format: "[TemplateChip] tap=%@ wrote AppStorage in %.4fs",
+                value.rawValue, elapsed
+            ))
         }
         .font(.caption)
         .frame(maxWidth: .infinity)

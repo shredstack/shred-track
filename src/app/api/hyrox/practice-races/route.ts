@@ -81,8 +81,21 @@ export async function POST(request: Request) {
   const raceType = body.raceType === "actual" ? "actual" : "practice";
   const totalTimeSecondsRounded = Math.round(body.totalTimeSeconds);
 
+  console.log("[practice-races POST] start", {
+    userId: user.id,
+    source: body.source,
+    template: body.template,
+    divisionKey: body.divisionKey,
+    splitsCount: body.splits.length,
+    totalTimeSeconds: body.totalTimeSeconds,
+    startedAt: body.startedAt,
+    completedAt: body.completedAt,
+  });
+
+  let result;
+  try {
   // Use a transaction for atomicity
-  const result = await db.transaction(async (tx) => {
+  result = await db.transaction(async (tx) => {
     // 1. Insert the race
     const [race] = await tx
       .insert(hyroxPracticeRaces)
@@ -180,6 +193,24 @@ export async function POST(request: Request) {
       .onConflictDoNothing();
 
     return { race, personalBests, isFinishPR, priorBestFinishSeconds };
+  });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
+    console.error("[practice-races POST] save failed", {
+      userId: user.id,
+      message,
+      stack,
+    });
+    return NextResponse.json(
+      { error: "Failed to save race", detail: message },
+      { status: 500 },
+    );
+  }
+
+  console.log("[practice-races POST] saved", {
+    raceId: result.race.id,
+    personalBests: result.personalBests,
   });
 
   // Fire Inngest event to generate the AI race report (fire-and-forget).

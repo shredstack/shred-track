@@ -31,6 +31,12 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
         super.init()
     }
 
+    /// Assigns the delegate and calls `WCSession.activate()`. Both are
+    /// non-blocking — the actual pairing handshake runs on WCSession's
+    /// internal queues and surfaces through the delegate callbacks —
+    /// but we still want callers to dispatch this off the main thread
+    /// at launch so that any first-reference initialization of
+    /// `WCSession.default` doesn't pile onto the launch critical path.
     func activate() {
         session?.delegate = self
         session?.activate()

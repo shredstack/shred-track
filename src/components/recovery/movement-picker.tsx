@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Plus, Clock } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useRecoveryMovements } from "@/hooks/useRecoveryMovements";
 import { useRecoveryRoutines } from "@/hooks/useRecoveryRoutines";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import type { RecoveryPrescription } from "@/types/recovery";
 
 export interface PickedMovement {
@@ -40,23 +41,35 @@ export function MovementPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const { data: movements } = useRecoveryMovements();
-  const { data: routines } = useRecoveryRoutines();
+  const debouncedSearch = useDebouncedValue(search.trim(), 250);
+  // Server-side search guarantees that movements added since the picker mounted
+  // (e.g. just now in another tab, or by an admin) are still findable — pure
+  // client filtering of a stale cache returns "no matches" for them.
+  const { data: movements, refetch: refetchMovements } = useRecoveryMovements({
+    q: debouncedSearch || undefined,
+  });
+  const { data: routines, refetch: refetchRoutines } = useRecoveryRoutines();
+
+  // Force a fresh fetch the moment the user opens the picker. Catches the
+  // common case where movements were added in this tab but the cache for
+  // this exact filter combination wasn't invalidated.
+  useEffect(() => {
+    if (!open) return;
+    refetchMovements();
+    if (includeRoutines) refetchRoutines();
+  }, [open, refetchMovements, refetchRoutines, includeRoutines]);
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    // The list API already returns only movements visible to the caller
-    // (validated movements + the caller's own pending submissions). We don't
-    // re-filter on isValidated here so users can pick a movement they just
-    // added — a "Pending" badge tells them validation is still required.
-    const m = (movements ?? []).filter((mv) =>
-      mv.canonicalName.toLowerCase().includes(q)
-    );
+    const q = debouncedSearch.toLowerCase();
+    // Movements are filtered server-side via `q`; we don't re-filter here.
+    // Routines stay client-side (the routines API doesn't accept a search
+    // param) but the same refetch-on-open keeps the list fresh.
+    const m = movements ?? [];
     const r = includeRoutines
       ? (routines ?? []).filter((r) => r.name.toLowerCase().includes(q))
       : [];
     return { movements: m, routines: r };
-  }, [movements, routines, search, includeRoutines]);
+  }, [movements, routines, debouncedSearch, includeRoutines]);
 
   if (!open) {
     return (
