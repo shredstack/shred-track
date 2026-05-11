@@ -89,12 +89,17 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
         _ session: WCSession,
         didReceiveUserInfo userInfo: [String: Any] = [:]
     ) {
+        print("[WatchBridge] didReceiveUserInfo keys=\(Array(userInfo.keys)) kind=\(userInfo["kind"] ?? "nil")")
         guard
             userInfo["kind"] as? String == "race.save",
             let raceLocalId = userInfo["raceLocalId"] as? String,
             let payloadJson = userInfo["payloadJson"] as? String
-        else { return }
+        else {
+            print("[WatchBridge] dropping userInfo — not a race.save or missing fields")
+            return
+        }
 
+        print("[WatchBridge] forwarding splitsFromWatch raceLocalId=\(raceLocalId) bytes=\(payloadJson.count)")
         // Forward the payload to the JS layer. The JS handler does the
         // bearer-auth POST and then calls back into a future
         // `WatchBridge.ackRaceSync(raceLocalId)` method to clear the

@@ -73,7 +73,6 @@ final class RaceTimerViewModel: ObservableObject {
     /// doesn't tick" bug we hit when HK init was made parallel).
     private var distanceTask: Task<Void, Never>?
     private var segmentStartedAt: Date?
-    private var extendedSession: WKExtendedRuntimeSession?
     private let hk = HealthKitWorkoutService.shared
 
     init(state: RaceState = RaceState()) {
@@ -138,7 +137,6 @@ final class RaceTimerViewModel: ObservableObject {
         segmentStartedAt = now
         liveSegmentDistanceMeters = 0
         state.status = .running
-        startExtendedRuntimeSession()
         startTick()
         startDistanceTick()
 
@@ -220,7 +218,14 @@ final class RaceTimerViewModel: ObservableObject {
     /// End the race timer. Stops ticks, closes the HealthKit session,
     /// and stashes the save payload — but does NOT enqueue. The user
     /// must explicitly tap Save (or Discard) on the complete screen.
+    ///
+    /// Re-entry guard: tapping FINISH on the last segment routes through
+    /// `split()`, which queues a `Task { await finish() }` *without*
+    /// advancing `currentSegmentIndex`. Without this guard, the queued
+    /// task would re-enter, call `split()` again (since status is still
+    /// `.running` during the outer awaits), and end HealthKit twice.
     func finish() async {
+        guard state.status != .complete else { return }
         if state.status == .running {
             // Implicit final split if the user taps Finish mid-segment.
             split()
@@ -229,8 +234,6 @@ final class RaceTimerViewModel: ObservableObject {
         stopTick()
         stopDistanceTick()
         await hk.end()
-        extendedSession?.invalidate()
-        extendedSession = nil
         pendingPayload = buildSavePayload()
         savedThisRace = false
         state.pendingSync = false
@@ -367,11 +370,4 @@ final class RaceTimerViewModel: ObservableObject {
         )
     }
 
-    // MARK: - Background runtime
-
-    private func startExtendedRuntimeSession() {
-        let session = WKExtendedRuntimeSession()
-        session.start()
-        extendedSession = session
-    }
 }
