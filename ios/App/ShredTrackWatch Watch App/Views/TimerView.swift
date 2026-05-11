@@ -25,12 +25,31 @@ import WatchKit
 //   - Total elapsed (caption)
 //   - Current segment label
 
+private enum TimerDefaultsKey {
+    static let divisionKey = "watch.timer.divisionKey"
+    static let template = "watch.timer.template"
+    static let simulateRoxzone = "watch.timer.simulateRoxzone"
+}
+
 struct TimerView: View {
     @StateObject private var vm = RaceTimerViewModel()
 
-    @AppStorage("watch.timer.divisionKey") private var divisionKey: String = "women_open"
-    @AppStorage("watch.timer.template") private var templateRaw: String = RaceTemplate.full.rawValue
-    @AppStorage("watch.timer.simulateRoxzone") private var simulateRoxzone: Bool = false
+    // These were previously `@AppStorage`. On a fresh install the first
+    // synchronous write through `@AppStorage` blocked the main thread
+    // for ~9 s — `cfprefsd` (UserDefaults daemon) appears to contend
+    // with the first `securityd` (Keychain) read during launch on
+    // watchOS. We now hold the value in `@State` so the chip redraws
+    // instantly on tap, and dispatch the actual UserDefaults write to a
+    // detached background task.
+    @State private var divisionKey: String = UserDefaults.standard.string(
+        forKey: TimerDefaultsKey.divisionKey
+    ) ?? "women_open"
+    @State private var templateRaw: String = UserDefaults.standard.string(
+        forKey: TimerDefaultsKey.template
+    ) ?? RaceTemplate.full.rawValue
+    @State private var simulateRoxzone: Bool = UserDefaults.standard.bool(
+        forKey: TimerDefaultsKey.simulateRoxzone
+    )
 
     @State private var showFinishConfirm: Bool = false
     @State private var showDiscardConfirm: Bool = false
@@ -40,6 +59,14 @@ struct TimerView: View {
 
     private var template: RaceTemplate {
         RaceTemplate(rawValue: templateRaw) ?? .full
+    }
+
+    /// Write a setting to UserDefaults off the main thread so the UI
+    /// never blocks on first-call cfprefsd warm-up.
+    private func persistSetting(_ key: String, _ value: Any) {
+        Task.detached(priority: .utility) {
+            UserDefaults.standard.set(value, forKey: key)
+        }
     }
 
     var body: some View {
@@ -125,6 +152,12 @@ struct TimerView: View {
                     }
                 }
             }
+            .onChange(of: divisionKey) { _, newValue in
+                persistSetting(TimerDefaultsKey.divisionKey, newValue)
+            }
+            .onChange(of: simulateRoxzone) { _, newValue in
+                persistSetting(TimerDefaultsKey.simulateRoxzone, newValue)
+            }
         }
     }
 
@@ -133,11 +166,15 @@ struct TimerView: View {
         let selected = template == value
         Button(label) {
             let t0 = Date()
-            print("[TemplateChip] tap=\(value.rawValue) start")
+            print(String(
+                format: "[TemplateChip] tap=%@ start @%.3fs",
+                value.rawValue, LaunchClock.sinceLaunch()
+            ))
             templateRaw = value.rawValue
+            persistSetting(TimerDefaultsKey.template, value.rawValue)
             let elapsed = Date().timeIntervalSince(t0)
             print(String(
-                format: "[TemplateChip] tap=%@ wrote AppStorage in %.4fs",
+                format: "[TemplateChip] tap=%@ updated state in %.4fs",
                 value.rawValue, elapsed
             ))
         }

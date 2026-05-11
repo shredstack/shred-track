@@ -68,6 +68,23 @@ export function useUpdateRecoverySession() {
   });
 }
 
+export function useCancelRecoverySession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/recovery/sessions/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "Failed to cancel session");
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["recovery-today"] });
+      qc.invalidateQueries({ queryKey: ["recovery-history"] });
+    },
+  });
+}
+
 export function useRecoveryHistory(startDate: string, endDate: string) {
   return useQuery<RecoverySession[]>({
     queryKey: ["recovery-history", startDate, endDate],

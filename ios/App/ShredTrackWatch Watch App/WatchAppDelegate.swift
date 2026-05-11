@@ -12,10 +12,21 @@ import Foundation
 // up to 60 s (the WCSession handshake timeout). Prewarming
 // `UserDefaults` for the timer keys also avoids first-write churn.
 
+/// Wall-clock time the app finished launching. Used by other modules to
+/// log "@<n>s after launch" so we can correlate timing across the
+/// keychain, WC activation, and user taps without parsing console
+/// timestamps by hand.
+enum LaunchClock {
+    static var start: Date = .distantPast
+    static func sinceLaunch() -> Double {
+        Date().timeIntervalSince(start)
+    }
+}
+
 final class WatchAppDelegate: NSObject, WKApplicationDelegate {
     func applicationDidFinishLaunching() {
-        let t0 = Date()
-        print("[Launch] applicationDidFinishLaunching")
+        LaunchClock.start = Date()
+        print("[Launch] applicationDidFinishLaunching @0.000s")
 
         prewarmTimerDefaults()
 
@@ -23,7 +34,8 @@ final class WatchAppDelegate: NSObject, WKApplicationDelegate {
             let wcStart = Date()
             WatchConnectivityManager.shared.activate()
             print(String(
-                format: "[Launch] WC activate kicked off in %.3fs",
+                format: "[Launch] WC activate kicked off @%.3fs (took %.3fs)",
+                LaunchClock.sinceLaunch(),
                 Date().timeIntervalSince(wcStart)
             ))
         }
@@ -32,14 +44,15 @@ final class WatchAppDelegate: NSObject, WKApplicationDelegate {
             let kcStart = Date()
             await AuthSession.shared.loadFromKeychain()
             print(String(
-                format: "[Launch] Keychain load completed in %.3fs",
+                format: "[Launch] Keychain load completed @%.3fs (took %.3fs)",
+                LaunchClock.sinceLaunch(),
                 Date().timeIntervalSince(kcStart)
             ))
         }
 
         print(String(
-            format: "[Launch] applicationDidFinishLaunching returned in %.3fs",
-            Date().timeIntervalSince(t0)
+            format: "[Launch] applicationDidFinishLaunching returned @%.3fs",
+            LaunchClock.sinceLaunch()
         ))
     }
 
