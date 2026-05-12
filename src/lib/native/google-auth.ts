@@ -36,12 +36,20 @@ async function doInit(): Promise<void> {
   const webClientId = process.env.NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID;
 
   if (nativePlatform() === "ios" && (!iOSClientId || !webClientId)) {
-    // Don't throw — let the button click surface a clear error to the
-    // user instead of crashing the app on launch.
-    console.warn(
-      "[google-auth] missing NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID or NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID; native Google sign-in will be disabled",
+    // Throw a precise message — without these the underlying GoogleSignIn
+    // iOS SDK has no GIDClientID and raises NSException at sign-in time,
+    // which closes the app. Caught by the button's try/catch and shown to
+    // the user.
+    const missing = [
+      !iOSClientId && "NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID",
+      !webClientId && "NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID",
+    ]
+      .filter(Boolean)
+      .join(" and ");
+    throw new Error(
+      `Google sign-in is not configured for this build: missing ${missing}. ` +
+        `Set both vars in the deploy environment (Vercel) and redeploy.`,
     );
-    return;
   }
 
   const { SocialLogin } = await import("@capgo/capacitor-social-login");
@@ -59,7 +67,14 @@ async function doInit(): Promise<void> {
 }
 
 export function installNativeGoogleAuth(): Promise<void> {
-  if (!initPromise) initPromise = doInit();
+  if (!initPromise) {
+    initPromise = doInit().catch((err) => {
+      // Clear so the next attempt re-runs init instead of replaying the
+      // cached rejection (matters if the failure was transient).
+      initPromise = null;
+      throw err;
+    });
+  }
   return initPromise;
 }
 

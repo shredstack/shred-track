@@ -30,11 +30,56 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
 
     private var session: WCSession?
 
+    /// Last-known context keys. Merged across `setToken` / `clearToken` /
+    /// `pushTodaySnapshot` calls so that:
+    ///   1. If a call arrives before `WCSession` finishes activating, we
+    ///      can flush the pending context once `activationDidCompleteWith`
+    ///      fires with `.activated` instead of dropping it on the floor.
+    ///      (Without this queueing, the very common case "user signed in
+    ///      on phone before the WCSession handshake completed" results in
+    ///      the Watch never seeing the token — `updateApplicationContext`
+    ///      throws when called pre-activation, and the JS bootstrap
+    ///      `void`s the promise so the rejection is invisible.)
+    ///   2. A later partial update (e.g. just `todaySnapshot`) doesn't
+    ///      wipe the existing token from the Watch's view of the context.
+    ///      `WCSession.updateApplicationContext` is whole-dictionary
+    ///      replace; merging preserves prior keys.
+    private var lastContext: [String: Any] = [:]
+    private let contextLock = NSLock()
+
     public override func load() {
         guard WCSession.isSupported() else { return }
         session = WCSession.default
         session?.delegate = self
         session?.activate()
+    }
+
+    /// Merges keys into `lastContext` (set or remove) and pushes the
+    /// merged dictionary to the Watch if the session is already
+    /// activated. If not, the next `activationDidCompleteWith(.activated)`
+    /// will flush the merged context.
+    private func updateContext(
+        sets: [String: Any] = [:],
+        removes: [String] = [],
+        from caller: String
+    ) -> Result<Void, Error> {
+        contextLock.lock()
+        for (k, v) in sets { lastContext[k] = v }
+        for k in removes { lastContext.removeValue(forKey: k) }
+        let snapshot = lastContext
+        contextLock.unlock()
+
+        guard let session, session.activationState == .activated else {
+            print("[WatchBridge] \(caller): WCSession not activated yet — queued, will flush on activation")
+            return .success(())
+        }
+        do {
+            try session.updateApplicationContext(snapshot)
+            return .success(())
+        } catch {
+            print("[WatchBridge] \(caller): updateApplicationContext failed: \(error.localizedDescription)")
+            return .failure(error)
+        }
     }
 
     @objc func setToken(_ call: CAPPluginCall) {
@@ -47,27 +92,34 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
         }
         let expiresAt = call.getDouble("expiresAt")
 
-        var ctx: [String: Any] = [
+        var sets: [String: Any] = [
             "accessToken": accessToken,
             "userId": userId,
         ]
         if let expiresAt {
-            ctx["expiresAt"] = expiresAt
+            sets["expiresAt"] = expiresAt
         }
+        // Drop any prior sign-out flag — the user is signed back in.
+        let removes: [String] = ["signOut"]
 
-        do {
-            try session?.updateApplicationContext(ctx)
-            call.resolve()
-        } catch {
+        switch updateContext(sets: sets, removes: removes, from: "setToken") {
+        case .success: call.resolve()
+        case .failure(let error):
             call.reject("Failed to push to Watch: \(error.localizedDescription)")
         }
     }
 
     @objc func clearToken(_ call: CAPPluginCall) {
-        do {
-            try session?.updateApplicationContext(["signOut": true])
-            call.resolve()
-        } catch {
+        // Wipe the cached token keys and set the sign-out flag so the
+        // Watch's handleApplicationContext path clears AuthSession on
+        // next delivery.
+        switch updateContext(
+            sets: ["signOut": true],
+            removes: ["accessToken", "userId", "expiresAt"],
+            from: "clearToken"
+        ) {
+        case .success: call.resolve()
+        case .failure(let error):
             call.reject("Failed to push sign-out to Watch: \(error.localizedDescription)")
         }
     }
@@ -84,10 +136,9 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
         guard let json = call.getString("json") else {
             call.reject("Missing json"); return
         }
-        do {
-            try session?.updateApplicationContext(["todaySnapshot": json])
-            call.resolve()
-        } catch {
+        switch updateContext(sets: ["todaySnapshot": json], from: "pushTodaySnapshot") {
+        case .success: call.resolve()
+        case .failure(let error):
             call.reject("Failed to push snapshot: \(error.localizedDescription)")
         }
     }
@@ -163,6 +214,23 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
     ) {
         if let error {
             print("[WatchBridge] activation error: \(error)")
+        }
+        guard activationState == .activated else { return }
+
+        // Flush any context that arrived before activation completed.
+        // This is the common case on cold launch: NativeBootstrap's
+        // useEffect runs and calls setToken before WCSession finishes
+        // its handshake, so the very first push would otherwise throw
+        // and the Watch would never see the token.
+        contextLock.lock()
+        let pending = lastContext
+        contextLock.unlock()
+        guard !pending.isEmpty else { return }
+        do {
+            try session.updateApplicationContext(pending)
+            print("[WatchBridge] flushed pending context on activation: keys=\(Array(pending.keys))")
+        } catch {
+            print("[WatchBridge] flush-on-activation failed: \(error.localizedDescription)")
         }
     }
 
