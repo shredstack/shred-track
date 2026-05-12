@@ -303,6 +303,10 @@ export async function POST(
   // comment — the row is already durable.
   try {
     await inngest.send({
+      // Idempotency key on the comment id — a duplicate POST that somehow
+      // gets retried after insert (or replays from a queue) won't fan out
+      // notifications twice.
+      id: `comment-created:${insertedId}`,
       name: "social/comment.created",
       data: {
         commentId: insertedId,

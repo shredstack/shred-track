@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, sql, inArray } from "drizzle-orm";
+import { aliasedTable, and, eq, sql, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
   workoutParts,
@@ -11,6 +11,8 @@ import {
   workoutMovements,
   movements,
 } from "@/db/schema";
+
+const substitutionMovements = aliasedTable(movements, "subs");
 import { getSessionUser } from "@/lib/session";
 import { getWorkoutAccess } from "@/lib/authz/workout";
 import { formatBestScore } from "@/lib/crossfit/benchmark-stats";
@@ -175,7 +177,7 @@ export async function GET(
         actualWeight: scoreMovementDetails.actualWeight,
         actualReps: scoreMovementDetails.actualReps,
         modification: scoreMovementDetails.modification,
-        substitutionName: sql<string | null>`subs.canonical_name`,
+        substitutionName: substitutionMovements.canonicalName,
       })
       .from(scoreMovementDetails)
       .innerJoin(
@@ -184,8 +186,8 @@ export async function GET(
       )
       .innerJoin(movements, eq(movements.id, workoutMovements.movementId))
       .leftJoin(
-        sql`${movements} AS subs`,
-        sql`subs.id = ${scoreMovementDetails.substitutionMovementId}`
+        substitutionMovements,
+        eq(substitutionMovements.id, scoreMovementDetails.substitutionMovementId)
       )
       .where(inArray(scoreMovementDetails.scoreId, scoreIds));
   }

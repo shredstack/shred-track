@@ -88,6 +88,10 @@ export async function POST(
     // Fire-and-forget. Failure to enqueue must not roll back the reaction.
     try {
       await inngest.send({
+        // Idempotency key — a duplicate POST (network retry, double-tap)
+        // creates the same row via ON CONFLICT and ends up here with the
+        // same reactionId. Deduping on it prevents duplicate notifications.
+        id: `reaction-created:${reactionId}`,
         name: "social/reaction.created",
         data: { reactionId, scoreId, actorId: user.id },
       });

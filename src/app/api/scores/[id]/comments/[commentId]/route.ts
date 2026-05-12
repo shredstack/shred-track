@@ -124,8 +124,13 @@ export async function PATCH(
     .map((id) => id.toLowerCase())
     .filter((id) => !prevIds.has(id));
   if (newlyMentioned.length > 0) {
+    // Idempotency key includes the sorted set of newly-mentioned ids so a
+    // retried PATCH with the same body dedupes, but a follow-up edit that
+    // adds a different user still fires.
+    const dedupSuffix = [...newlyMentioned].sort().join(",");
     try {
       await inngest.send({
+        id: `comment-mentioned:${commentId}:${dedupSuffix}`,
         name: "social/comment.mentioned",
         data: {
           commentId,
