@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { workouts, communityMemberships, communities } from "@/db/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import {
+  workouts,
+  communityMemberships,
+  communities,
+  scores,
+} from "@/db/schema";
+import { eq, and, inArray, desc } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 
 // GET /api/crossfit/wod/today
@@ -61,23 +66,51 @@ export async function GET(req: NextRequest) {
       ),
     );
 
+  // 3. Per-user logged state — map workoutId → most-recent score for the user.
+  // Used by the Watch's "logged ✓" indicator and the midday nudge suppression.
+  const workoutIds = rows.map((r) => r.workout.id);
+  const scoresByWorkoutId = new Map<string, string>();
+  if (workoutIds.length > 0) {
+    const userScores = await db
+      .select({ id: scores.id, workoutId: scores.workoutId })
+      .from(scores)
+      .where(
+        and(
+          eq(scores.userId, user.id),
+          inArray(scores.workoutId, workoutIds),
+        ),
+      )
+      .orderBy(desc(scores.createdAt));
+    for (const s of userScores) {
+      // First (most recent) score wins thanks to the desc order.
+      if (!scoresByWorkoutId.has(s.workoutId)) {
+        scoresByWorkoutId.set(s.workoutId, s.id);
+      }
+    }
+  }
+
   return NextResponse.json({
     date,
-    workouts: rows.map((r) => ({
-      id: r.workout.id,
-      title: r.workout.title,
-      description: r.workout.description,
-      rawText: r.workout.rawText,
-      workoutType: r.workout.workoutType,
-      timeCapSeconds: r.workout.timeCapSeconds,
-      amrapDurationSeconds: r.workout.amrapDurationSeconds,
-      repScheme: r.workout.repScheme,
-      rounds: r.workout.rounds,
-      workoutDate: r.workout.workoutDate,
-      community: {
-        id: r.community.id,
-        name: r.community.name,
-      },
-    })),
+    workouts: rows.map((r) => {
+      const loggedScoreId = scoresByWorkoutId.get(r.workout.id) ?? null;
+      return {
+        id: r.workout.id,
+        title: r.workout.title,
+        description: r.workout.description,
+        rawText: r.workout.rawText,
+        workoutType: r.workout.workoutType,
+        timeCapSeconds: r.workout.timeCapSeconds,
+        amrapDurationSeconds: r.workout.amrapDurationSeconds,
+        repScheme: r.workout.repScheme,
+        rounds: r.workout.rounds,
+        workoutDate: r.workout.workoutDate,
+        community: {
+          id: r.community.id,
+          name: r.community.name,
+        },
+        loggedByUser: loggedScoreId !== null,
+        loggedScoreId,
+      };
+    }),
   });
 }

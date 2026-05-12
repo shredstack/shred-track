@@ -7,24 +7,40 @@ import SwiftUI
 // commitment in native-app spec §5.1 and the reason the timer keeps
 // running even when the phone is in a locker / airplane mode / at home.
 //
-// v1 surfaces a single screen — the HYROX race timer — with sign-in /
-// phone-reachability tucked behind a toolbar gear in setup. The
-// previous three-tab layout (Today / Timer / Settings) defaulted users
-// to a "go to your iPhone" placeholder, which buried the headline
-// feature. Today / additional features can come back once they have
-// real value to deliver standalone on the wrist.
+// As of the Today-view spec (watch_today_view_and_nudges_spec.md §6.1)
+// we're back to a three-tab layout: Today / Timer / Settings. The
+// previous reason for collapsing to a single TimerView ("Today was a
+// placeholder that buried the headline") no longer applies — Today now
+// fetches real, daily-changing content directly over HTTPS using the
+// cached token the phone pushes.
+//
+// Default tab is Today: athletes glance at the wrist in the morning to
+// see what's programmed. Timer is one swipe away, which is fine — it's
+// a deliberate race-only action with its own START button.
 
 @main
 struct ShredTrackWatchApp: App {
     @WKApplicationDelegateAdaptor(WatchAppDelegate.self) private var appDelegate
     @StateObject private var session = AuthSession.shared
     @StateObject private var watchConn = WatchConnectivityManager.shared
+    @StateObject private var today = TodaySnapshotStore.shared
+
+    @AppStorage("watch.lastTab") private var lastTab: Int = 0
 
     var body: some Scene {
         WindowGroup {
-            TimerView()
-                .environmentObject(session)
-                .environmentObject(watchConn)
+            TabView(selection: $lastTab) {
+                TodayView()
+                    .tag(0)
+                TimerView()
+                    .tag(1)
+                SettingsView()
+                    .tag(2)
+            }
+            .tabViewStyle(.verticalPage)
+            .environmentObject(session)
+            .environmentObject(watchConn)
+            .environmentObject(today)
         }
     }
 }

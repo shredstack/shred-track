@@ -42,6 +42,26 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
         session?.activate()
     }
 
+    /// Asks the phone to open a specific Today item — used by the Watch's
+    /// "Open on iPhone" button (spec §6.2). Uses `sendMessage` because we
+    /// only need delivery while the phone is reachable; if it's not, the
+    /// Watch shows a fallback "Open the ShredTrack iPhone app to log
+    /// this" hint and bails.
+    func sendOpenItem(type: String, id: String) {
+        guard
+            let session,
+            session.activationState == .activated,
+            session.isReachable
+        else { return }
+        session.sendMessage(
+            ["kind": "openItem", "type": type, "id": id],
+            replyHandler: nil,
+            errorHandler: { error in
+                print("[WC] openItem failed: \(error)")
+            }
+        )
+    }
+
     func sendCompletedRace(_ payload: RaceSavePayload, raceLocalId: String) {
         guard let session, session.activationState == .activated else { return }
         do {
@@ -114,6 +134,16 @@ extension WatchConnectivityManager: WCSessionDelegate {
         // Sign-out push from the phone.
         if ctx["signOut"] as? Bool == true {
             AuthSession.shared.clear()
+            TodaySnapshotStore.shared.clear()
+        }
+
+        // Opportunistic Today snapshot push from the phone (spec §3.2
+        // step 5). Phone assembles the same shape the Watch would
+        // assemble from the three /today endpoints, so the Watch can
+        // skip the HTTP round-trip and flip "logged ✓" within seconds
+        // of the user logging on the iPhone.
+        if let snapshotJson = ctx["todaySnapshot"] as? String {
+            TodaySnapshotStore.shared.ingestFromApplicationContext(snapshotJson)
         }
     }
 

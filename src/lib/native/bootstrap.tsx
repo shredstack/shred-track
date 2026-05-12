@@ -18,7 +18,9 @@ import { isNativeApp } from "./is-native";
 import { installNativeAuthFetch } from "./auth-fetch";
 import { installWatchTokenRelay } from "./watch-token-relay";
 import { installWatchRaceRelay } from "./watch-race-relay";
+import { installWatchOpenItemListener } from "./watch-open-item";
 import { installNativeGoogleAuth } from "./google-auth";
+import { installRescheduleOnForeground } from "./notifications/install-reschedule-on-foreground";
 
 export function NativeBootstrap() {
   useEffect(() => {
@@ -26,6 +28,8 @@ export function NativeBootstrap() {
     installNativeAuthFetch();
     installWatchTokenRelay();
     installWatchRaceRelay();
+    installWatchOpenItemListener();
+    installRescheduleOnForeground();
     void installNativeGoogleAuth();
   }, []);
 
