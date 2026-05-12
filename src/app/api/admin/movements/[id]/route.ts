@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { movements } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getAdminUser } from "@/lib/admin";
+import { ensureWeightliftingBenchmark } from "@/lib/crossfit/weightlifting-benchmarks";
 
 // PUT /api/admin/movements/[id] — update a movement
 export async function PUT(
@@ -40,32 +41,48 @@ export async function PUT(
   }
 
   try {
-    const [updated] = await db
-      .update(movements)
-      .set({
-        canonicalName: canonicalName?.trim() || existing.canonicalName,
-        category: category || existing.category,
-        isWeighted: isWeighted ?? existing.isWeighted,
-        is1rmApplicable: is1rmApplicable ?? existing.is1rmApplicable,
-        commonRxWeightMale: commonRxWeightMale !== undefined
-          ? (commonRxWeightMale?.toString() || null)
-          : existing.commonRxWeightMale,
-        commonRxWeightFemale: commonRxWeightFemale !== undefined
-          ? (commonRxWeightFemale?.toString() || null)
-          : existing.commonRxWeightFemale,
-        videoUrl: videoUrl !== undefined ? (videoUrl || null) : existing.videoUrl,
-        isValidated: isValidated ?? existing.isValidated,
-        ...(typeof metricType === "string" ? { metricType } : {}),
-        ...(Array.isArray(supportedMetricTypes) && supportedMetricTypes.length > 0
-          ? { supportedMetricTypes }
-          : {}),
-        ...(Array.isArray(rxFields) ? { rxFields } : {}),
-        ...(rxDefaults !== undefined && rxDefaults !== null && typeof rxDefaults === "object"
-          ? { rxDefaults }
-          : {}),
-      })
-      .where(eq(movements.id, id))
-      .returning();
+    const updated = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(movements)
+        .set({
+          canonicalName: canonicalName?.trim() || existing.canonicalName,
+          category: category || existing.category,
+          isWeighted: isWeighted ?? existing.isWeighted,
+          is1rmApplicable: is1rmApplicable ?? existing.is1rmApplicable,
+          commonRxWeightMale: commonRxWeightMale !== undefined
+            ? (commonRxWeightMale?.toString() || null)
+            : existing.commonRxWeightMale,
+          commonRxWeightFemale: commonRxWeightFemale !== undefined
+            ? (commonRxWeightFemale?.toString() || null)
+            : existing.commonRxWeightFemale,
+          videoUrl: videoUrl !== undefined ? (videoUrl || null) : existing.videoUrl,
+          isValidated: isValidated ?? existing.isValidated,
+          ...(typeof metricType === "string" ? { metricType } : {}),
+          ...(Array.isArray(supportedMetricTypes) && supportedMetricTypes.length > 0
+            ? { supportedMetricTypes }
+            : {}),
+          ...(Array.isArray(rxFields) ? { rxFields } : {}),
+          ...(rxDefaults !== undefined && rxDefaults !== null && typeof rxDefaults === "object"
+            ? { rxDefaults }
+            : {}),
+        })
+        .where(eq(movements.id, id))
+        .returning();
+
+      // Keep the weightlifting benchmark in sync with the movement.
+      //   - newly applicable (false → true): upsert the benchmark
+      //   - rename while applicable: ensureWeightliftingBenchmark refreshes the name
+      //   - flipped off (true → false): leave the existing benchmark; the
+      //     list endpoint hides it on read so existing history isn't orphaned
+      if (row.is1rmApplicable) {
+        await ensureWeightliftingBenchmark(tx, {
+          id: row.id,
+          canonicalName: row.canonicalName,
+        });
+      }
+
+      return row;
+    });
 
     return NextResponse.json(updated);
   } catch (err: unknown) {

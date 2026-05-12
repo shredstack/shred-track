@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Plus, ClipboardPaste, Wrench, Zap, Trophy, Loader2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -48,6 +49,22 @@ function toDateString(d: Date) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+// Parse a YYYY-MM-DD param into a Date in local time (no UTC drift), or
+// null when the value is missing/malformed. Used by ?date=... deep links
+// from the benchmarks page so the user lands on the day they just added
+// a workout to.
+function parseLocalDate(s: string | null): Date | null {
+  if (!s) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const dt = new Date(y, mo - 1, d);
+  if (Number.isNaN(dt.getTime())) return null;
+  return dt;
 }
 
 // ============================================
@@ -203,7 +220,14 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
 type CrossfitView = "gym" | "personal";
 
 export default function CrossfitPage() {
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  // Honor ?date=YYYY-MM-DD on first render so deep links from the
+  // benchmarks page (e.g. "Log a 3RM") land on the day the new workout
+  // was added to. The param is read once on mount — subsequent date
+  // navigation is local state.
+  const searchParams = useSearchParams();
+  const [selectedDate, setSelectedDate] = useState(
+    () => parseLocalDate(searchParams.get("date")) ?? new Date()
+  );
   const [showAddWorkout, setShowAddWorkout] = useState(false);
   const [editingWorkoutId, setEditingWorkoutId] = useState<string | null>(null);
   const [scoringWorkoutId, setScoringWorkoutId] = useState<string | null>(null);

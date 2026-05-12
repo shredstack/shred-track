@@ -26,6 +26,7 @@ import {
 } from "@/lib/crossfit/rep-scheme-parser";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
 import { parseDurationToSeconds } from "@/lib/crossfit/duration-parser";
+import { inferWeightliftingBenchmark } from "@/lib/crossfit/weightlifting-benchmarks";
 
 // ============================================
 // Types
@@ -935,6 +936,34 @@ export async function POST(req: NextRequest) {
             notes: m.notes || null,
           }))
         );
+      }
+    }
+
+    // Auto-link single-movement for_load workouts at rep targets {1,2,3,5}
+    // to the matching weightlifting benchmark, so the score shows up under
+    // the right rep-max tab without the athlete having to remember to add
+    // the benchmark first. Skipped when the client supplied an explicit
+    // benchmarkWorkoutId (handled in the fast path above) or an explicit
+    // source — those signal user intent that overrides inference.
+    if (!source) {
+      const autoLink = await inferWeightliftingBenchmark(
+        tx,
+        parts.map((p) => ({
+          workoutType: p.workoutType,
+          repScheme: p.repScheme,
+          movementIds: p.movements.map((m) => m.movementId),
+        }))
+      );
+      if (autoLink) {
+        await tx
+          .update(workouts)
+          .set({
+            benchmarkWorkoutId: autoLink.benchmarkId,
+            source: "benchmark_inferred",
+          })
+          .where(eq(workouts.id, workout.id));
+        workout.benchmarkWorkoutId = autoLink.benchmarkId;
+        workout.source = "benchmark_inferred";
       }
     }
 

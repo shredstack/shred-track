@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { movements, users } from "@/db/schema";
 import { ilike, asc, eq, and, type SQL } from "drizzle-orm";
 import { getAdminUser } from "@/lib/admin";
+import { ensureWeightliftingBenchmark } from "@/lib/crossfit/weightlifting-benchmarks";
 
 // GET /api/admin/movements — list all movements (admin only).
 // Optional filters: ?search=&category=&status=pending|validated|all (default all)
@@ -77,27 +78,41 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const [movement] = await db
-      .insert(movements)
-      .values({
-        canonicalName: trimmedName,
-        category,
-        isWeighted: isWeighted ?? false,
-        is1rmApplicable: is1rmApplicable ?? false,
-        commonRxWeightMale: commonRxWeightMale?.toString() || null,
-        commonRxWeightFemale: commonRxWeightFemale?.toString() || null,
-        videoUrl: videoUrl || null,
-        isValidated: true,
-        ...(typeof metricType === "string" ? { metricType } : {}),
-        ...(Array.isArray(supportedMetricTypes) && supportedMetricTypes.length > 0
-          ? { supportedMetricTypes }
-          : {}),
-        ...(Array.isArray(rxFields) ? { rxFields } : {}),
-        ...(rxDefaults && typeof rxDefaults === "object"
-          ? { rxDefaults }
-          : {}),
-      })
-      .returning();
+    const movement = await db.transaction(async (tx) => {
+      const [inserted] = await tx
+        .insert(movements)
+        .values({
+          canonicalName: trimmedName,
+          category,
+          isWeighted: isWeighted ?? false,
+          is1rmApplicable: is1rmApplicable ?? false,
+          commonRxWeightMale: commonRxWeightMale?.toString() || null,
+          commonRxWeightFemale: commonRxWeightFemale?.toString() || null,
+          videoUrl: videoUrl || null,
+          isValidated: true,
+          ...(typeof metricType === "string" ? { metricType } : {}),
+          ...(Array.isArray(supportedMetricTypes) && supportedMetricTypes.length > 0
+            ? { supportedMetricTypes }
+            : {}),
+          ...(Array.isArray(rxFields) ? { rxFields } : {}),
+          ...(rxDefaults && typeof rxDefaults === "object"
+            ? { rxDefaults }
+            : {}),
+        })
+        .returning();
+
+      // Auto-create the matching weightlifting benchmark so the new movement
+      // shows up on the benchmarks tab immediately — no separate admin step
+      // and no waiting for the seed to re-run.
+      if (inserted.is1rmApplicable) {
+        await ensureWeightliftingBenchmark(tx, {
+          id: inserted.id,
+          canonicalName: inserted.canonicalName,
+        });
+      }
+
+      return inserted;
+    });
 
     return NextResponse.json(movement, { status: 201 });
   } catch (err: unknown) {

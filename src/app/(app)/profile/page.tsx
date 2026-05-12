@@ -26,9 +26,11 @@ import {
   Lock,
   Eye,
   EyeOff,
+  Camera,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { AvatarEditModal } from "@/components/profile/avatar-edit-modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1033,6 +1035,7 @@ function GymsSection() {
 export default function ProfilePage() {
   const router = useRouter();
   const { data: user } = useUserProfile();
+  const [avatarOpen, setAvatarOpen] = useState(false);
 
   async function handleSignOut() {
     const supabase = createClient();
@@ -1047,16 +1050,36 @@ export default function ProfilePage() {
     <div className="flex flex-col gap-6">
       {/* Profile header */}
       <div className="flex flex-col items-center gap-3 pt-2">
-        <Avatar className="h-20 w-20 ring-2 ring-primary/20">
-          <AvatarFallback className="bg-primary/10 text-xl font-bold text-primary">
-            {initials}
-          </AvatarFallback>
-        </Avatar>
+        <button
+          type="button"
+          onClick={() => setAvatarOpen(true)}
+          aria-label="Edit profile picture"
+          className="group relative rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          <Avatar className="h-20 w-20 ring-2 ring-primary/20">
+            {user?.image && <AvatarImage src={user.image} alt={user.name} />}
+            <AvatarFallback className="bg-primary/10 text-xl font-bold text-primary">
+              {initials}
+            </AvatarFallback>
+          </Avatar>
+          <span
+            className="absolute right-0 bottom-0 inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground ring-2 ring-background"
+            aria-hidden="true"
+          >
+            <Camera className="h-3 w-3" />
+          </span>
+        </button>
         <div className="text-center">
           <h1 className="text-xl font-bold tracking-tight">{user?.name ?? "Athlete"}</h1>
           <p className="text-sm text-muted-foreground">{user?.email ?? "ShredTrack Member"}</p>
         </div>
       </div>
+
+      <AvatarEditModal
+        open={avatarOpen}
+        onOpenChange={setAvatarOpen}
+        currentImage={user?.image ?? null}
+      />
 
       {/* Tabbed sections */}
       <Tabs defaultValue="general">

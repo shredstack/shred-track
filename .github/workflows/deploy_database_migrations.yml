@@ -7,6 +7,7 @@ on:
       - 'supabase/migrations/**'
       - 'src/db/seeds/**'
       - 'src/lib/hyrox-generic-plans/**'
+      - 'src/lib/crossfit/weightlifting-benchmarks.ts'
 
   # Allow manual trigger from GitHub UI
   workflow_dispatch:
@@ -36,6 +37,7 @@ jobs:
             seeds:
               - 'src/db/seeds/**'
               - 'src/lib/hyrox-generic-plans/**'
+              - 'src/lib/crossfit/weightlifting-benchmarks.ts'
 
   deploy-migrations:
     needs: changes
