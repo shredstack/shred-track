@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { Suspense, useState, useMemo } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
@@ -219,7 +219,18 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
 
 type CrossfitView = "gym" | "personal";
 
+// Wrap the page body in <Suspense> because it calls useSearchParams() to
+// honor ?date=... deep links. Without the boundary, Next.js bails out of
+// static prerender for the whole route at build time.
 export default function CrossfitPage() {
+  return (
+    <Suspense fallback={null}>
+      <CrossfitPageBody />
+    </Suspense>
+  );
+}
+
+function CrossfitPageBody() {
   // Honor ?date=YYYY-MM-DD on first render so deep links from the
   // benchmarks page (e.g. "Log a 3RM") land on the day the new workout
   // was added to. The param is read once on mount — subsequent date
