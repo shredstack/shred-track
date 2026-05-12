@@ -617,7 +617,11 @@ export async function POST(req: NextRequest) {
           amrapDurationSeconds: benchmark.amrapDurationSeconds,
           repScheme: benchmark.repScheme,
           workoutDate,
-          published: published ?? false,
+          // Gym workouts default to published — the UI has no draft flow yet,
+          // so a coach who programs a workout for the gym means for athletes
+          // (and their watches) to see it. Personal workouts stay unpublished
+          // by default since the flag is meaningless there.
+          published: published ?? targetCommunityId !== null,
           source: "benchmark",
           benchmarkWorkoutId,
           // Inherit vest prescription from the benchmark.
@@ -827,7 +831,8 @@ export async function POST(req: NextRequest) {
         repScheme: firstPart.repScheme || null,
         rounds: firstPart.rounds ?? null,
         workoutDate,
-        published: published ?? false,
+        // See benchmark path above for the rationale on this default.
+        published: published ?? !!communityId,
         source: source || "manual",
         requiresVest: !!requiresVest,
         vestWeightMaleLb: toNumericOrNull(vestWeightMaleLb),
