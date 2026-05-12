@@ -98,6 +98,14 @@ export async function nativeGoogleSignIn(): Promise<{ idToken: string; rawNonce:
     options: {
       scopes: ["email", "profile"],
       nonce: hashedNonce,
+      // Without this the plugin takes a `restorePreviousSignIn` +
+      // `refreshTokensIfNeeded` fast-path whenever GIDSignIn has a cached
+      // session, and that path silently ignores `nonce` — the returned ID
+      // token then has no `nonce` claim, so Supabase rejects with "passed
+      // nonce and nonce id_token should either both exist or not".
+      // `forcePrompt: true` forces a fresh `GIDSignIn.signIn` call that
+      // respects the nonce we passed.
+      forcePrompt: true,
     },
   });
 
