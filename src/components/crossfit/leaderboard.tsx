@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -10,9 +11,12 @@ import {
   ChevronDown,
   ChevronUp,
   User,
+  Flame,
+  MessageCircle,
 } from "lucide-react";
 import type { LeaderboardEntry, WorkoutType } from "@/types/crossfit";
 import { WORKOUT_TYPE_LABELS } from "@/types/crossfit";
+import { useToggleReaction } from "@/hooks/useLeaderboard";
 
 // ============================================
 // Props
@@ -22,6 +26,12 @@ interface LeaderboardProps {
   workoutTitle?: string;
   workoutType: WorkoutType;
   entries: LeaderboardEntry[];
+  /** Workout id — required to scope reaction toggle cache updates. When
+   *  omitted, the social affordances are hidden (lets the component be
+   *  rendered in a read-only / preview context). */
+  workoutId?: string;
+  /** Tap a row's comment button to open the comments drawer for that score. */
+  onOpenComments?: (scoreId: string) => void;
 }
 
 // ============================================
@@ -61,16 +71,39 @@ function getRankIcon(rank: number) {
 // LeaderboardRow
 // ============================================
 
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  const now = Date.now();
+  const diffSec = Math.max(1, Math.round((now - then) / 1000));
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const m = Math.round(diffSec / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.round(h / 24);
+  if (d < 30) return `${d}d ago`;
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
 function LeaderboardRow({
   entry,
   rank,
+  workoutId,
+  onOpenComments,
 }: {
   entry: LeaderboardEntry;
   rank: number;
+  workoutId?: string;
+  onOpenComments?: (scoreId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasDetails =
     entry.scalingDetails && entry.scalingDetails.some((s) => !s.wasRx);
+  const toggleReaction = useToggleReaction();
+  const showSocial = !!workoutId;
 
   return (
     <div>
@@ -91,9 +124,16 @@ function LeaderboardRow({
           <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted">
             <User className="size-3.5 text-muted-foreground" />
           </div>
-          <span className="truncate text-sm font-medium">
-            {entry.userName}
-          </span>
+          <div className="flex min-w-0 flex-col">
+            <span className="truncate text-sm font-medium leading-tight">
+              {entry.userName}
+            </span>
+            {entry.userUsername && (
+              <span className="truncate text-[10px] text-muted-foreground leading-tight">
+                @{entry.userUsername}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Score */}
@@ -128,6 +168,59 @@ function LeaderboardRow({
           </div>
         )}
       </button>
+
+      {/* Social footer strip */}
+      {showSocial && (
+        <div className="ml-11 mt-0.5 flex items-center gap-1 pb-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className={`h-7 gap-1 px-2 text-xs ${
+              entry.viewerReacted
+                ? "text-orange-400 hover:text-orange-300"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            disabled={toggleReaction.isPending}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleReaction.mutate({
+                scoreId: entry.scoreId,
+                workoutId: workoutId!,
+                currentlyReacted: entry.viewerReacted,
+              });
+            }}
+            aria-pressed={entry.viewerReacted}
+            aria-label={entry.viewerReacted ? "Remove fire" : "Add fire"}
+          >
+            <Flame
+              className={`size-3.5 ${
+                entry.viewerReacted ? "fill-orange-400/40" : ""
+              }`}
+            />
+            {entry.reactionCount > 0 && <span>{entry.reactionCount}</span>}
+          </Button>
+          {onOpenComments && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenComments(entry.scoreId);
+              }}
+              aria-label="Open comments"
+            >
+              <MessageCircle className="size-3.5" />
+              {entry.commentCount > 0 && <span>{entry.commentCount}</span>}
+            </Button>
+          )}
+          <span className="ml-auto pr-2 text-[10px] text-muted-foreground">
+            {relativeTime(entry.createdAt)}
+          </span>
+        </div>
+      )}
 
       {/* Expanded details */}
       {expanded && entry.scalingDetails && (
@@ -187,6 +280,8 @@ export function Leaderboard({
   workoutTitle,
   workoutType,
   entries,
+  workoutId,
+  onOpenComments,
 }: LeaderboardProps) {
   const [filter, setFilter] = useState<"all" | "rx" | "scaled">("all");
 
@@ -246,7 +341,12 @@ export function Leaderboard({
             ) : (
               sortedEntries.map((entry, idx) => (
                 <div key={entry.scoreId}>
-                  <LeaderboardRow entry={entry} rank={idx + 1} />
+                  <LeaderboardRow
+                    entry={entry}
+                    rank={idx + 1}
+                    workoutId={workoutId}
+                    onOpenComments={onOpenComments}
+                  />
                   {idx < sortedEntries.length - 1 && (
                     <Separator className="opacity-30" />
                   )}

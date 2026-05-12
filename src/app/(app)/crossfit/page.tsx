@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState, useMemo } from "react";
+import { Suspense, useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
@@ -14,6 +14,7 @@ import { SmartBuilder } from "@/components/crossfit/smart-builder";
 import { WorkoutParser } from "@/components/crossfit/workout-parser";
 import { BenchmarkPicker } from "@/components/crossfit/benchmark-picker";
 import { ScoreEntry } from "@/components/crossfit/score-entry";
+import { LeaderboardSheet } from "@/components/crossfit/leaderboard-sheet";
 import { DateNavigator } from "@/components/shared/date-navigator";
 import {
   useWorkoutsByDate,
@@ -242,7 +243,27 @@ function CrossfitPageBody() {
   const [showAddWorkout, setShowAddWorkout] = useState(false);
   const [editingWorkoutId, setEditingWorkoutId] = useState<string | null>(null);
   const [scoringWorkoutId, setScoringWorkoutId] = useState<string | null>(null);
+  const [leaderboardWorkoutId, setLeaderboardWorkoutId] = useState<string | null>(null);
+  // Pre-opens the comments drawer when the leaderboard sheet opens via a
+  // notification deep-link (?scoreComment=<id>).
+  const [deepLinkScoreCommentId, setDeepLinkScoreCommentId] = useState<
+    string | null
+  >(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Honor ?leaderboard=<id>&scoreComment=<id> deep links from the
+  // notifications inbox. We wait for the workouts list to load so the
+  // sheet's WorkoutDisplay lookup finds the row. Once consumed, the
+  // params are cleared from React state so a second tap on the same link
+  // still re-opens.
+  useEffect(() => {
+    const lbId = searchParams.get("leaderboard");
+    const cmtId = searchParams.get("scoreComment");
+    if (lbId) setLeaderboardWorkoutId(lbId);
+    if (cmtId) setDeepLinkScoreCommentId(cmtId);
+    // We only consume on mount — subsequent navigation is local state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // When the user has an active gym, default to the gym programming view.
   // The toggle lets coaches/members flip to their personal-only list, and
   // their pick is persisted across refreshes (per-page).
@@ -644,6 +665,13 @@ function CrossfitPageBody() {
                 moveToGymName={
                   showMoveToGym ? activeMembership?.communityName : undefined
                 }
+                onViewLeaderboard={
+                  // Leaderboards are gym-only in v1. Hide the affordance for
+                  // personal workouts and for the personal-view tab.
+                  inGymMode && workout.communityId
+                    ? (id) => setLeaderboardWorkoutId(id)
+                    : undefined
+                }
               />
             );
           })}
@@ -738,6 +766,20 @@ function CrossfitPageBody() {
           onSubmit={handlePartScoreSubmit}
         />
       )}
+
+      <LeaderboardSheet
+        workout={
+          workouts.find((w) => w.id === leaderboardWorkoutId) ?? null
+        }
+        commentScoreId={deepLinkScoreCommentId}
+        onCommentScoreIdChange={setDeepLinkScoreCommentId}
+        onOpenChange={(open) => {
+          if (!open) {
+            setLeaderboardWorkoutId(null);
+            setDeepLinkScoreCommentId(null);
+          }
+        }}
+      />
 
       <Dialog
         open={!!editingWorkoutId}

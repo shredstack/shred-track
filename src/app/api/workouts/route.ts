@@ -518,6 +518,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Benchmark not found" }, { status: 404 });
     }
 
+    // Weightlifting benchmarks are stat-tracker anchors, not workouts to
+    // copy from — their movements have no prescribedReps and the part has
+    // no repScheme. When the client supplies `parts` alongside a
+    // weightlifting benchmarkWorkoutId, taking the fast-path would silently
+    // discard the user's typed rep scheme and weights. Fall through to the
+    // user-data path instead; the post-insert `inferWeightliftingBenchmark`
+    // call re-attaches the benchmark link. When the client sends no parts
+    // (legacy benchmark-picker flow), keep the fast-path so we don't break
+    // existing callers — empty is the expected outcome there.
+    const hasParts =
+      Array.isArray(body.parts) && body.parts.length > 0;
+    if (benchmark.weightliftingMovementId && hasParts) {
+      // no-op — drop into the normal path below
+    } else {
+
     // Multi-part benchmark support — when the benchmark has explicit
     // parts (newer / Drew-style), copy each part to the new workout. The
     // legacy single-part path is preserved as a fallback for benchmarks
@@ -774,6 +789,7 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json(result, { status: 201 });
+    } // end else (non-weightlifting benchmark fast-path)
   }
 
   // ============================================
@@ -952,6 +968,7 @@ export async function POST(req: NextRequest) {
           workoutType: p.workoutType,
           repScheme: p.repScheme,
           movementIds: p.movements.map((m) => m.movementId),
+          movementPrescribedReps: p.movements.map((m) => m.prescribedReps),
         }))
       );
       if (autoLink) {

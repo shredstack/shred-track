@@ -154,6 +154,11 @@ async function weightliftingHistory(
       notes: scores.notes,
       createdAt: scores.createdAt,
       partRepScheme: workoutParts.repScheme,
+      // For_load workouts carry the rep scheme on the movement, not the
+      // part. Read both and prefer the movement-level value at classify
+      // time so per-movement schemes like "5-5-5-5-5" route into the right
+      // rep-max tab.
+      movementPrescribedReps: workoutMovements.prescribedReps,
     })
     .from(scores)
     .innerJoin(workouts, eq(workouts.id, scores.workoutId))
@@ -183,7 +188,9 @@ async function weightliftingHistory(
   // to {1, 2, 3, 5} — those can't be attributed to any tab.
   const buckets = new Map<RepMaxTarget, BenchmarkAttempt[]>();
   for (const r of rows) {
-    const target = inferRepMaxTarget(r.partRepScheme ?? null);
+    const target = inferRepMaxTarget(
+      r.movementPrescribedReps ?? r.partRepScheme ?? null
+    );
     if (!target) continue;
     const list = buckets.get(target) ?? [];
     list.push({

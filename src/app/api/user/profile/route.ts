@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { users } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { isAdminEmail } from "@/lib/admin";
+
+// Lowercase letters, digits, underscores, hyphens; 3–24 chars.
+const USERNAME_RE = /^[a-z0-9_-]{3,24}$/;
 
 // GET /api/user/profile — get basic user info
 export async function GET() {
@@ -14,6 +17,7 @@ export async function GET() {
     .select({
       id: users.id,
       name: users.name,
+      username: users.username,
       email: users.email,
       gender: users.gender,
       unitPreference: users.unitPreference,
@@ -62,6 +66,42 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "Invalid gender" }, { status: 400 });
     }
   }
+  if ("username" in body) {
+    if (body.username === null || body.username === "") {
+      updates.username = null;
+    } else if (typeof body.username !== "string") {
+      return NextResponse.json({ error: "Invalid username" }, { status: 400 });
+    } else {
+      const candidate = body.username.trim().toLowerCase();
+      if (!USERNAME_RE.test(candidate)) {
+        return NextResponse.json(
+          {
+            error:
+              "Username must be 3–24 characters, lowercase letters, digits, _ or -",
+          },
+          { status: 400 }
+        );
+      }
+      // Case-insensitive uniqueness check excluding the current user.
+      const [conflict] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(
+          and(
+            sql`lower(${users.username}) = ${candidate}`,
+            ne(users.id, session.id)
+          )
+        )
+        .limit(1);
+      if (conflict) {
+        return NextResponse.json(
+          { error: "That username is taken" },
+          { status: 409 }
+        );
+      }
+      updates.username = candidate;
+    }
+  }
   if ("bodyWeightLb" in body) {
     if (body.bodyWeightLb === null || body.bodyWeightLb === "") {
       updates.bodyWeightLb = null;
@@ -87,6 +127,7 @@ export async function PUT(req: Request) {
     .returning({
       id: users.id,
       name: users.name,
+      username: users.username,
       email: users.email,
       gender: users.gender,
       unitPreference: users.unitPreference,

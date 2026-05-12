@@ -85,6 +85,12 @@ interface InferencePart {
   workoutType: string;
   repScheme: string | null | undefined;
   movementIds: string[];
+  // For_load parts carry the rep scheme on each movement, not the part —
+  // the caller should populate this alongside movementIds (parallel array)
+  // so we can classify "5-5-5-5-5 Back Squat" workouts that wouldn't fit
+  // otherwise. Position matters: movementPrescribedReps[i] corresponds to
+  // movementIds[i].
+  movementPrescribedReps?: Array<string | null | undefined>;
 }
 
 /**
@@ -111,7 +117,11 @@ export async function inferWeightliftingBenchmark(
   if (part.workoutType !== "for_load") return null;
   if (part.movementIds.length !== 1) return null;
 
-  const repTarget = inferRepMaxTarget(part.repScheme ?? null);
+  // Prefer the movement-level rep scheme — For Load workouts surface that
+  // input per-movement, not at the part level — and fall back to the
+  // part-level scheme for legacy/admin-authored benchmarks.
+  const movementScheme = part.movementPrescribedReps?.[0] ?? null;
+  const repTarget = inferRepMaxTarget(movementScheme ?? part.repScheme ?? null);
   if (!repTarget) return null;
 
   const movementId = part.movementIds[0];

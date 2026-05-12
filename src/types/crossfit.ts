@@ -722,6 +722,8 @@ export interface LeaderboardEntry {
   scoreId: string;
   userId: string;
   userName: string;
+  userUsername?: string | null;
+  userImage?: string | null;
   division: "rx" | "scaled" | "rx_plus";
   displayScore: string;
   sortValue: number;
@@ -734,6 +736,11 @@ export interface LeaderboardEntry {
   hitTimeCap: boolean;
   rpe?: number;
   scalingDetails?: MovementScalingDisplay[];
+  // Social — added per spec §7.
+  reactionCount: number;
+  commentCount: number;
+  viewerReacted: boolean;
+  createdAt: string;
 }
 
 // ============================================
