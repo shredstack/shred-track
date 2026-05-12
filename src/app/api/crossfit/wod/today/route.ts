@@ -6,19 +6,19 @@ import {
   communities,
   scores,
 } from "@/db/schema";
-import { eq, and, inArray, desc } from "drizzle-orm";
+import { eq, and, or, inArray, isNull, desc } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 
 // GET /api/crossfit/wod/today
 //
-// Returns published WODs scheduled for today (or for ?date=YYYY-MM-DD) from
-// communities the user belongs to. Used by the native + Watch "Today" tab.
+// Returns workouts scheduled for today (or for ?date=YYYY-MM-DD) — both the
+// caller's personal workouts and published WODs from any gym they belong to.
+// Used by the native + Watch "Today" tab.
 //
 // Response shape: { date, workouts: [{ id, title, description, ..., community }] }
+// `community` is null for personal workouts.
 //
-// If the user belongs to no communities, or no WOD is published for today,
-// returns `{ date, workouts: [] }` so the client can show "No CrossFit
-// workout posted for today" rather than treating it as an error.
+// If nothing is scheduled for today, returns `{ date, workouts: [] }`.
 
 function parseDateParam(input: string | null): string {
   // Returns YYYY-MM-DD (UTC-anchored to today's local date if no param).
@@ -38,33 +38,45 @@ export async function GET(req: NextRequest) {
 
   const date = parseDateParam(req.nextUrl.searchParams.get("date"));
 
-  // 1. Communities the user belongs to.
+  // 1. Communities the user is an active member of. Inactive memberships
+  // (left the gym, removed) shouldn't see that gym's programming.
   const memberships = await db
     .select({ communityId: communityMemberships.communityId })
     .from(communityMemberships)
-    .where(eq(communityMemberships.userId, user.id));
+    .where(
+      and(
+        eq(communityMemberships.userId, user.id),
+        eq(communityMemberships.isActive, true),
+      ),
+    );
 
   const communityIds = memberships.map((m) => m.communityId);
 
-  if (communityIds.length === 0) {
-    return NextResponse.json({ date, workouts: [] });
-  }
+  // 2. Workouts for today — personal (createdBy=user, no community) plus
+  // published gym workouts from any community the user belongs to. The
+  // `published` filter only applies to gym workouts; personal workouts
+  // default to published=false and shouldn't be hidden from their author.
+  const personalCond = and(
+    eq(workouts.createdBy, user.id),
+    isNull(workouts.communityId),
+  );
+  const gymCond =
+    communityIds.length > 0
+      ? and(
+          inArray(workouts.communityId, communityIds),
+          eq(workouts.published, true),
+        )
+      : undefined;
+  const scopeCond = gymCond ? or(personalCond, gymCond) : personalCond;
 
-  // 2. Published workouts for today within those communities.
   const rows = await db
     .select({
       workout: workouts,
       community: communities,
     })
     .from(workouts)
-    .innerJoin(communities, eq(workouts.communityId, communities.id))
-    .where(
-      and(
-        inArray(workouts.communityId, communityIds),
-        eq(workouts.workoutDate, date),
-        eq(workouts.published, true),
-      ),
-    );
+    .leftJoin(communities, eq(workouts.communityId, communities.id))
+    .where(and(eq(workouts.workoutDate, date), scopeCond));
 
   // 3. Per-user logged state — map workoutId → most-recent score for the user.
   // Used by the Watch's "logged ✓" indicator and the midday nudge suppression.
@@ -104,10 +116,9 @@ export async function GET(req: NextRequest) {
         repScheme: r.workout.repScheme,
         rounds: r.workout.rounds,
         workoutDate: r.workout.workoutDate,
-        community: {
-          id: r.community.id,
-          name: r.community.name,
-        },
+        community: r.community
+          ? { id: r.community.id, name: r.community.name }
+          : null,
         loggedByUser: loggedScoreId !== null,
         loggedScoreId,
       };

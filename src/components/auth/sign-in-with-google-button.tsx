@@ -48,11 +48,12 @@ export function SignInWithGoogleButton({
     setLoading(true);
     try {
       if (useNative) {
-        const { idToken } = await nativeGoogleSignIn();
+        const { idToken, rawNonce } = await nativeGoogleSignIn();
         const supabase = createClient();
         const { error } = await supabase.auth.signInWithIdToken({
           provider: "google",
           token: idToken,
+          nonce: rawNonce,
         });
         if (error) throw error;
         router.push(redirectTo);

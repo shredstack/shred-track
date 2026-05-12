@@ -78,15 +78,26 @@ export function installNativeGoogleAuth(): Promise<void> {
   return initPromise;
 }
 
-export async function nativeGoogleSignIn(): Promise<{ idToken: string }> {
+export async function nativeGoogleSignIn(): Promise<{ idToken: string; rawNonce: string }> {
   await installNativeGoogleAuth();
 
   const { SocialLogin } = await import("@capgo/capacitor-social-login");
+
+  // Supabase's `signInWithIdToken` rejects with "passed nonce and nonce
+  // id_token should either both exist or not" whenever the JWT's `nonce`
+  // claim and the `nonce` argument don't agree. GIDSignIn (and its
+  // restored-session path) can populate that claim on its own, so we
+  // always supply our own nonce to keep the two sides in sync:
+  //   - hash → Google (becomes the `nonce` claim verbatim)
+  //   - raw  → Supabase (server SHA-256s it and compares to the claim)
+  const rawNonce = crypto.randomUUID();
+  const hashedNonce = await sha256Hex(rawNonce);
 
   const result = await SocialLogin.login({
     provider: "google",
     options: {
       scopes: ["email", "profile"],
+      nonce: hashedNonce,
     },
   });
 
@@ -105,5 +116,12 @@ export async function nativeGoogleSignIn(): Promise<{ idToken: string }> {
     throw new Error("Google did not return an ID token");
   }
 
-  return { idToken };
+  return { idToken, rawNonce };
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }

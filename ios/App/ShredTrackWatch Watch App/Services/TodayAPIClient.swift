@@ -42,8 +42,17 @@ final class TodayAPIClient {
         let dateString = Self.todayLocalDateString()
 
         do {
-            async let hyroxData = get("/api/hyrox/plan/today", token: token)
-            async let crossfitData = get("/api/crossfit/wod/today", token: token)
+            // Pass the watch's local date to every endpoint — otherwise the
+            // server falls back to `new Date()` in UTC and returns the wrong
+            // day's data once UTC has rolled over from local.
+            async let hyroxData = get(
+                "/api/hyrox/plan/today?date=\(dateString)",
+                token: token
+            )
+            async let crossfitData = get(
+                "/api/crossfit/wod/today?date=\(dateString)",
+                token: token
+            )
             async let recoveryData = get(
                 "/api/recovery/sessions?date=\(dateString)",
                 token: token
