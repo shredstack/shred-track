@@ -10,17 +10,7 @@ import {
   type RepMaxTarget,
   type WeightliftingRepMaxVariant,
 } from "@/types/crossfit";
-
-function formatShortDate(iso: string) {
-  const [y, m, d] = iso.split("-").map(Number);
-  if (!y || !m || !d) return iso;
-  const date = new Date(y, m - 1, d);
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
+import { formatShortDate } from "@/lib/format-date";
 
 interface Props {
   variants: WeightliftingRepMaxVariant[];

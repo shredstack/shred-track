@@ -221,7 +221,6 @@ export async function GET(req: NextRequest) {
       string,
       Array<{
         scoreId: string;
-        workoutId: string;
         workoutDate: string;
         weightLbs: number;
         repTarget: RepMaxTarget;
@@ -235,7 +234,6 @@ export async function GET(req: NextRequest) {
       const list = byMovement.get(r.movementId) ?? [];
       list.push({
         scoreId: r.scoreId,
-        workoutId: "",
         workoutDate: r.workoutDate,
         weightLbs: lbs,
         repTarget: target,

@@ -93,7 +93,6 @@ describe("inferRepMaxTarget", () => {
 describe("pickBestPerRepTarget", () => {
   const score = (overrides: Partial<RepTargetScore>): RepTargetScore => ({
     scoreId: "score-1",
-    workoutId: "wo-1",
     workoutDate: "2026-04-01",
     weightLbs: 100,
     repTarget: 1,

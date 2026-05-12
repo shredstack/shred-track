@@ -231,7 +231,6 @@ export async function ensureWeightliftingBenchmark(
 
 export interface RepTargetScore {
   scoreId: string;
-  workoutId: string;
   workoutDate: string;
   weightLbs: number | null;
   repTarget: RepMaxTarget;

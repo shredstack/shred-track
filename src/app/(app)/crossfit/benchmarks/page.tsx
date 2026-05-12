@@ -44,10 +44,12 @@ import type {
   WorkoutType,
   BenchmarkMovement,
   BenchmarkWorkoutBlock,
+  RepMaxStat,
   RepMaxTarget,
   WeightliftingBenchmarkHistory,
 } from "@/types/crossfit";
 import { WeightliftingBenchmarkTabs } from "@/components/crossfit/weightlifting-benchmark-tabs";
+import { formatShortDate } from "@/lib/format-date";
 
 // Pills mix two filter axes:
 //   - "all" / "custom" filter by ownership (the existing /api/benchmarks
@@ -71,18 +73,6 @@ function toLocalDateString(d: Date) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
-}
-
-function formatShortDate(iso: string) {
-  // iso is YYYY-MM-DD (workout_date column).
-  const [y, m, d] = iso.split("-").map(Number);
-  if (!y || !m || !d) return iso;
-  const date = new Date(y, m - 1, d);
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
 }
 
 export default function BenchmarksPage() {
@@ -284,7 +274,7 @@ function BenchmarkRow({
 function RepMaxTeaserGrid({
   stats,
 }: {
-  stats: Partial<Record<RepMaxTarget, { weightLbs: number; workoutDate: string }>> | undefined;
+  stats: Partial<Record<RepMaxTarget, RepMaxStat>> | undefined;
 }) {
   return (
     <div className="grid grid-cols-4 gap-1 pt-1">

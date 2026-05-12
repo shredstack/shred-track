@@ -16,6 +16,7 @@ import {
   REP_MAX_TARGETS,
 } from "@/lib/crossfit/weightlifting-benchmarks";
 import type {
+  BenchmarkAttempt,
   RepMaxTarget,
   WorkoutType,
 } from "@/types/crossfit";
@@ -180,23 +181,7 @@ async function weightliftingHistory(
 
   // Bucket by rep target. Drop rows where the rep scheme doesn't classify
   // to {1, 2, 3, 5} — those can't be attributed to any tab.
-  type Attempt = {
-    scoreId: string;
-    workoutId: string;
-    workoutDate: string;
-    division: string;
-    timeSeconds: number | null;
-    rounds: number | null;
-    remainderReps: number | null;
-    weightLbs: number | null;
-    totalReps: number | null;
-    scoreText: string | null;
-    hitTimeCap: boolean;
-    notes: string | null;
-    createdAt: string;
-    isPR: boolean;
-  };
-  const buckets = new Map<RepMaxTarget, Attempt[]>();
+  const buckets = new Map<RepMaxTarget, BenchmarkAttempt[]>();
   for (const r of rows) {
     const target = inferRepMaxTarget(r.partRepScheme ?? null);
     if (!target) continue;
@@ -224,7 +209,7 @@ async function weightliftingHistory(
   // workoutDate so the PR points at the original lift.
   const variants = REP_MAX_TARGETS.map((target) => {
     const attempts = buckets.get(target) ?? [];
-    let prAttempt: Attempt | null = null;
+    let prAttempt: BenchmarkAttempt | null = null;
     for (const a of attempts) {
       if (a.weightLbs == null) continue;
       if (
