@@ -13,7 +13,7 @@ import { SmartBuilder } from "@/components/crossfit/smart-builder";
 import { WorkoutParser } from "@/components/crossfit/workout-parser";
 import { BenchmarkPicker } from "@/components/crossfit/benchmark-picker";
 import { ScoreEntry } from "@/components/crossfit/score-entry";
-import { DateNavigator } from "@/components/crossfit/date-navigator";
+import { DateNavigator } from "@/components/shared/date-navigator";
 import {
   useWorkoutsByDate,
   useCreateWorkout,

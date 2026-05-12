@@ -33,6 +33,7 @@ private enum TimerDefaultsKey {
 
 struct TimerView: View {
     @StateObject private var vm = RaceTimerViewModel()
+    @StateObject private var hk = HealthKitWorkoutService.shared
 
     // These were previously `@AppStorage`. On a fresh install the first
     // synchronous write through `@AppStorage` blocked the main thread
@@ -158,6 +159,14 @@ struct TimerView: View {
             .onChange(of: simulateRoxzone) { _, newValue in
                 persistSetting(TimerDefaultsKey.simulateRoxzone, newValue)
             }
+            // Request HealthKit permission proactively while the user is
+            // still on the setup screen, so the system dialog never
+            // interrupts a running timer. No-op once granted/denied.
+            .task {
+                if hk.permissionState == .notRequested {
+                    _ = await hk.requestPermissions()
+                }
+            }
         }
     }
 
@@ -189,6 +198,13 @@ struct TimerView: View {
         guard !isStarting else { return }
         isStarting = true
         Task {
+            // Belt-and-suspenders: if the user taps START before the
+            // setup-screen `.task` has finished requesting permission,
+            // await it here so the system dialog never appears with a
+            // race clock already ticking.
+            if hk.permissionState == .notRequested {
+                _ = await hk.requestPermissions()
+            }
             vm.configure(
                 divisionKey: divisionKey,
                 template: template,

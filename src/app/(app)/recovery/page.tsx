@@ -14,7 +14,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { DateNavigator } from "@/components/crossfit/date-navigator";
+import { DateNavigator } from "@/components/shared/date-navigator";
 import { useGymContext, useActiveMembership } from "@/hooks/useGymContext";
 import {
   useRecoveryToday,

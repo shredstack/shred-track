@@ -1,6 +1,5 @@
 "use client";
 
-import { useRef } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -45,27 +44,11 @@ export function DateNavigator({ selectedDate, onDateChange }: DateNavigatorProps
   const today = new Date();
   const weekDays = getWeekDays(selectedDate);
   const isToday = isSameDay(selectedDate, today);
-  const dateInputRef = useRef<HTMLInputElement>(null);
 
   const monthYear = selectedDate.toLocaleDateString("en-US", {
     month: "long",
     year: "numeric",
   });
-
-  const openPicker = () => {
-    const input = dateInputRef.current;
-    if (!input) return;
-    if (typeof input.showPicker === "function") {
-      try {
-        input.showPicker();
-      } catch {
-        // Some browsers throw outside a user gesture — fall through to focus.
-        input.focus();
-      }
-    } else {
-      input.focus();
-    }
-  };
 
   return (
     <div className="flex flex-col gap-3">
@@ -79,29 +62,40 @@ export function DateNavigator({ selectedDate, onDateChange }: DateNavigatorProps
           <ChevronLeft className="h-4 w-4" />
         </Button>
         <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={openPicker}
-            className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-0.5 text-sm font-semibold transition-colors hover:bg-white/[0.04]"
-            aria-label="Jump to date"
-          >
+          {/*
+           * Tap target = native date input overlaid on the styled label.
+           * - iOS Safari: tap focuses the real input and the OS slides up
+           *   its wheel picker (input.showPicker() is not reliable on iOS).
+           * - Desktop: appearance-none strips the native dropdown arrow, so
+           *   a bare click just focuses the input without opening the
+           *   picker — we call showPicker() explicitly to force it open.
+           */}
+          <div className="relative flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-sm font-semibold transition-colors hover:bg-white/[0.04]">
             <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
-            {monthYear}
-          </button>
-          <input
-            ref={dateInputRef}
-            type="date"
-            value={toLocalDateString(selectedDate)}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (!v) return;
-              const [y, m, d] = v.split("-").map(Number);
-              onDateChange(new Date(y, m - 1, d));
-            }}
-            tabIndex={-1}
-            aria-hidden="true"
-            className="sr-only"
-          />
+            <span>{monthYear}</span>
+            <input
+              type="date"
+              value={toLocalDateString(selectedDate)}
+              onClick={(e) => {
+                const input = e.currentTarget;
+                if (typeof input.showPicker === "function") {
+                  try {
+                    input.showPicker();
+                  } catch {
+                    // iOS / older browsers throw — native focus handles it.
+                  }
+                }
+              }}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (!v) return;
+                const [y, m, d] = v.split("-").map(Number);
+                onDateChange(new Date(y, m - 1, d));
+              }}
+              aria-label="Jump to date"
+              className="absolute inset-0 h-full w-full cursor-pointer appearance-none border-0 bg-transparent p-0 opacity-0"
+            />
+          </div>
           {!isToday && (
             <button
               onClick={() => onDateChange(today)}
