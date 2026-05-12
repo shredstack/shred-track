@@ -43,8 +43,12 @@ async function fetchTodayState(): Promise<TodayState | null> {
   try {
     const date = todayLocalDateString();
     const [hyrox, crossfit, recovery] = await Promise.all([
-      fetch("/api/hyrox/plan/today").then((r) => (r.ok ? r.json() : null)),
-      fetch("/api/crossfit/wod/today").then((r) => (r.ok ? r.json() : null)),
+      fetch(`/api/hyrox/plan/today?date=${date}`).then((r) =>
+        r.ok ? r.json() : null,
+      ),
+      fetch(`/api/crossfit/wod/today?date=${date}`).then((r) =>
+        r.ok ? r.json() : null,
+      ),
       fetch(`/api/recovery/sessions?date=${date}`).then((r) =>
         r.ok ? r.json() : null,
       ),

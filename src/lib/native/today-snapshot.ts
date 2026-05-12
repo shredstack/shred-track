@@ -193,10 +193,10 @@ export async function pushTodaySnapshotToWatch(): Promise<void> {
     try {
       const date = todayLocalDateString();
       const [hyroxRes, crossfitRes, recoveryRes] = await Promise.all([
-        fetch("/api/hyrox/plan/today").then((r) =>
+        fetch(`/api/hyrox/plan/today?date=${date}`).then((r) =>
           r.ok ? r.json() : null,
         ),
-        fetch("/api/crossfit/wod/today").then((r) =>
+        fetch(`/api/crossfit/wod/today?date=${date}`).then((r) =>
           r.ok ? r.json() : null,
         ),
         fetch(`/api/recovery/sessions?date=${date}`).then((r) =>
