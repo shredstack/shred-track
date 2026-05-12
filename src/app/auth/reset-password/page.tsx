@@ -3,33 +3,37 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { ArrowRight, Loader2, Eye, EyeOff } from "lucide-react";
+import { ArrowRight, Loader2, Eye, EyeOff, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { createClient } from "@/lib/supabase/client";
-import { SignInWithAppleButton } from "@/components/auth/sign-in-with-apple-button";
-import { SignInWithGoogleButton } from "@/components/auth/sign-in-with-google-button";
 
-export default function LoginPage() {
+export default function ResetPasswordPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isDone, setIsDone] = useState(false);
 
-  async function handleEmailLogin(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setIsLoading(true);
     setError(null);
 
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters");
+      return;
+    }
+    if (password !== confirm) {
+      setError("Passwords don't match");
+      return;
+    }
+
+    setIsLoading(true);
     const supabase = createClient();
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { error } = await supabase.auth.updateUser({ password });
 
     if (error) {
       setError(error.message);
@@ -37,14 +41,13 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/crossfit");
-    router.refresh();
+    setIsDone(true);
+    setIsLoading(false);
   }
 
   return (
     <div className="flex min-h-full flex-col items-center justify-center px-4 bg-mesh">
       <div className="w-full max-w-sm">
-        {/* Brand */}
         <div className="mb-10 flex flex-col items-center gap-4">
           <Image
             src="/shredtrack_logo.png"
@@ -57,72 +60,54 @@ export default function LoginPage() {
             <h1 className="text-3xl font-extrabold tracking-tight text-gradient-primary">
               ShredTrack
             </h1>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Track workouts. Crush goals. Compete.
-            </p>
           </div>
         </div>
 
         <div className="gradient-border rounded-2xl">
           <div className="rounded-2xl bg-card/80 p-6 backdrop-blur-sm">
             <h2 className="mb-6 text-center text-lg font-semibold">
-              Sign in to your account
+              {isDone ? "Password updated" : "Set a new password"}
             </h2>
 
-            <div className="flex flex-col gap-4">
-              <SignInWithGoogleButton onError={setError} />
-
-              {/* Apple sign-in renders only inside the iOS native shell. */}
-              <SignInWithAppleButton onError={setError} />
-
-              <div className="flex items-center gap-3">
-                <Separator className="flex-1" />
-                <span className="text-xs text-muted-foreground/60">or</span>
-                <Separator className="flex-1" />
-              </div>
-
-              {/* Email/Password form */}
-              <form onSubmit={handleEmailLogin} className="flex flex-col gap-4">
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="email" className="text-xs text-muted-foreground">
-                    Email
-                  </Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="you@example.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    autoComplete="email"
-                    autoFocus
-                    suppressHydrationWarning
-                    className="h-11 bg-white/[0.03] border-white/[0.08]"
-                  />
+            {isDone ? (
+              <div className="flex flex-col items-center gap-4 py-4">
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/10 glow-primary-sm">
+                  <CheckCircle className="h-7 w-7 text-emerald-400" />
                 </div>
+                <p className="text-center text-sm text-muted-foreground">
+                  Your password has been updated. You&apos;re signed in and
+                  ready to go.
+                </p>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    router.push("/crossfit");
+                    router.refresh();
+                  }}
+                >
+                  Continue
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </div>
+            ) : (
+              <form onSubmit={handleSubmit} className="flex flex-col gap-4">
                 <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="password" className="text-xs text-muted-foreground">
-                      Password
-                    </Label>
-                    <a
-                      href="/forgot-password"
-                      className="text-xs font-medium text-primary hover:text-primary/80 transition-colors"
-                    >
-                      Forgot?
-                    </a>
-                  </div>
+                  <Label htmlFor="password" className="text-xs text-muted-foreground">
+                    New password
+                  </Label>
                   <div className="relative">
                     <Input
                       id="password"
                       type={showPassword ? "text" : "password"}
-                      placeholder="Enter your password"
+                      placeholder="At least 6 characters"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
-                      autoComplete="current-password"
-                      className="h-11 pr-10 bg-white/[0.03] border-white/[0.08]"
+                      minLength={6}
+                      autoComplete="new-password"
+                      autoFocus
                       suppressHydrationWarning
+                      className="h-11 pr-10 bg-white/[0.03] border-white/[0.08]"
                     />
                     <button
                       type="button"
@@ -138,6 +123,24 @@ export default function LoginPage() {
                   </div>
                 </div>
 
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="confirm" className="text-xs text-muted-foreground">
+                    Confirm password
+                  </Label>
+                  <Input
+                    id="confirm"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Re-enter password"
+                    value={confirm}
+                    onChange={(e) => setConfirm(e.target.value)}
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
+                    suppressHydrationWarning
+                    className="h-11 bg-white/[0.03] border-white/[0.08]"
+                  />
+                </div>
+
                 {error && (
                   <div className="rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-2">
                     <p className="text-sm text-destructive">{error}</p>
@@ -149,29 +152,15 @@ export default function LoginPage() {
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <>
-                      Sign In
+                      Update Password
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </>
                   )}
                 </Button>
               </form>
-            </div>
+            )}
           </div>
         </div>
-
-        <p className="mt-6 text-center text-sm text-muted-foreground">
-          Don&apos;t have an account?{" "}
-          <a
-            href="/signup"
-            className="font-semibold text-primary hover:text-primary/80 transition-colors"
-          >
-            Sign up
-          </a>
-        </p>
-
-        <p className="mt-4 text-center text-[11px] text-muted-foreground/50">
-          By continuing, you agree to our Terms of Service and Privacy Policy.
-        </p>
       </div>
     </div>
   );

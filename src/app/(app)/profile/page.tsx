@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -23,6 +23,9 @@ import {
   ShieldCheck,
   Star,
   Heart,
+  Lock,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -1151,6 +1154,9 @@ export default function ProfilePage() {
         </Card>
       )}
 
+      {/* Security — change/set password */}
+      <SecuritySection />
+
       {/* Sign out */}
       <Card>
         <CardContent className="pt-4">
@@ -1171,6 +1177,234 @@ export default function ProfilePage() {
 
       <p className="text-center text-[11px] text-muted-foreground/40">ShredTrack v0.1.0</p>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Security — change/set password
+//
+// Two flows, picked by whether the user already has an email/password
+// identity:
+//   - hasPassword: ask for current + new + confirm, verify current by
+//     re-signing-in, then call updateUser({ password }).
+//   - !hasPassword (OAuth-only): ask for new + confirm and call
+//     updateUser({ password }) to attach a password to the existing
+//     account. Lets Google/Apple users add an email/password fallback.
+// ---------------------------------------------------------------------------
+
+function SecuritySection() {
+  const [open, setOpen] = useState(false);
+  const [hasPassword, setHasPassword] = useState<boolean | null>(null);
+  const [email, setEmail] = useState<string>("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data }) => {
+      const user = data.user;
+      if (!user) return;
+      setEmail(user.email ?? "");
+      const has = (user.identities ?? []).some(
+        (i) => i.provider === "email"
+      );
+      setHasPassword(has);
+    });
+  }, []);
+
+  const resetForm = useCallback(() => {
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirm("");
+    setShowPassword(false);
+  }, []);
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword.length < 6) {
+      toast.error("Password must be at least 6 characters");
+      return;
+    }
+    if (newPassword !== confirm) {
+      toast.error("Passwords don't match");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const supabase = createClient();
+
+      // For users who already have a password, verify the current
+      // password before allowing a change. Supabase's updateUser does
+      // not require this, so we enforce it client-side to prevent an
+      // unattended browser from being used to lock the owner out.
+      if (hasPassword) {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password: currentPassword,
+        });
+        if (signInError) {
+          toast.error("Current password is incorrect");
+          setSubmitting(false);
+          return;
+        }
+      }
+
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+      if (error) {
+        toast.error(error.message);
+        setSubmitting(false);
+        return;
+      }
+
+      toast.success(hasPassword ? "Password updated" : "Password set");
+      setHasPassword(true);
+      setOpen(false);
+      resetForm();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update password");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // While we don't yet know whether they have a password, don't render
+  // — keeps the button text from flickering between "Change" and "Set".
+  if (hasPassword === null) return null;
+
+  return (
+    <>
+      <Card>
+        <CardContent className="pt-4">
+          <button
+            onClick={() => setOpen(true)}
+            className="flex w-full items-center gap-3 rounded-lg px-2 py-3.5 text-sm transition-colors hover:bg-muted/40 group"
+          >
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+              <Lock className="h-4 w-4 text-primary" />
+            </div>
+            <div className="flex-1 text-left">
+              <p className="font-medium">
+                {hasPassword ? "Change password" : "Set a password"}
+              </p>
+              {!hasPassword && (
+                <p className="text-[11px] text-muted-foreground">
+                  Add a password so you can also sign in with email.
+                </p>
+              )}
+            </div>
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          </button>
+        </CardContent>
+      </Card>
+
+      <Dialog
+        open={open}
+        onOpenChange={(v) => {
+          setOpen(v);
+          if (!v) resetForm();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {hasPassword ? "Change your password" : "Set a password"}
+            </DialogTitle>
+            <DialogDescription>
+              {hasPassword
+                ? "Enter your current password to confirm, then choose a new one."
+                : "You currently sign in with Google or Apple. Set a password to also sign in with email."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={onSubmit} className="space-y-4">
+            {hasPassword && (
+              <div className="space-y-1.5">
+                <Label htmlFor="current-password" className="text-xs">
+                  Current password
+                </Label>
+                <Input
+                  id="current-password"
+                  type={showPassword ? "text" : "password"}
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  required
+                  autoComplete="current-password"
+                />
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="new-password" className="text-xs">
+                New password
+              </Label>
+              <div className="relative">
+                <Input
+                  id="new-password"
+                  type={showPassword ? "text" : "password"}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  autoComplete="new-password"
+                  placeholder="At least 6 characters"
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                  tabIndex={-1}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="confirm-password" className="text-xs">
+                Confirm new password
+              </Label>
+              <Input
+                id="confirm-password"
+                type={showPassword ? "text" : "password"}
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                required
+                minLength={6}
+                autoComplete="new-password"
+              />
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setOpen(false)}
+                disabled={submitting}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={submitting}>
+                {submitting && (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                )}
+                {hasPassword ? "Update password" : "Set password"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
