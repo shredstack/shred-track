@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Cropper, { type Area } from "react-easy-crop";
 import { Camera, Loader2, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
@@ -14,8 +14,20 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { cropAndCompress, fileToDataUrl } from "@/lib/avatars/compress";
+import { cropAndCompress, prepareImageForCrop } from "@/lib/avatars/compress";
 import { useUploadAvatar, useDeleteAvatar } from "@/hooks/useProfile";
+
+// HEIC/HEIF support in iOS Safari's <img> decoder is inconsistent across
+// versions. Reject them up front with a clear message rather than letting
+// the cropper silently fail with a generic decode error.
+const UNSUPPORTED_TYPES = new Set(["image/heic", "image/heif"]);
+const UNSUPPORTED_EXTENSIONS = [".heic", ".heif"];
+
+function isUnsupportedImage(file: File): boolean {
+  if (UNSUPPORTED_TYPES.has(file.type.toLowerCase())) return true;
+  const name = file.name.toLowerCase();
+  return UNSUPPORTED_EXTENSIONS.some((ext) => name.endsWith(ext));
+}
 
 interface Props {
   open: boolean;
@@ -34,6 +46,16 @@ export function AvatarEditModal({ open, onOpenChange, currentImage }: Props) {
   const uploadAvatar = useUploadAvatar();
   const deleteAvatar = useDeleteAvatar();
   const busy = uploadAvatar.isPending || deleteAvatar.isPending;
+
+  // The cropper renders from a blob: URL backed by the user's File (or a
+  // downscaled JPEG we produced). Revoke it whenever it changes or the modal
+  // tears down to avoid leaking large bitmaps in Safari's memory cache.
+  useEffect(() => {
+    if (!imageSrc) return;
+    return () => {
+      URL.revokeObjectURL(imageSrc);
+    };
+  }, [imageSrc]);
 
   const reset = useCallback(() => {
     setImageSrc(null);
@@ -60,16 +82,23 @@ export function AvatarEditModal({ open, onOpenChange, currentImage }: Props) {
     // Reset the input so picking the same file twice still fires onChange.
     e.target.value = "";
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
+    if (!file.type.startsWith("image/") && !isUnsupportedImage(file)) {
       toast.error("Please choose an image file");
       return;
     }
+    if (isUnsupportedImage(file)) {
+      toast.error(
+        "HEIC photos aren't supported. In iPhone Settings → Camera → Formats, choose Most Compatible, or pick a JPEG."
+      );
+      return;
+    }
     try {
-      const dataUrl = await fileToDataUrl(file);
-      setImageSrc(dataUrl);
+      const prepared = await prepareImageForCrop(file);
+      setImageSrc(prepared.url);
       setCrop({ x: 0, y: 0 });
       setZoom(1);
-    } catch {
+    } catch (err) {
+      console.error("[avatar] prepareImageForCrop failed", err);
       toast.error("Could not read that image. Try a different file.");
     }
   }, []);
@@ -83,6 +112,7 @@ export function AvatarEditModal({ open, onOpenChange, currentImage }: Props) {
       reset();
       onOpenChange(false);
     } catch (e) {
+      console.error("[avatar] save failed", e);
       toast.error(e instanceof Error ? e.message : "Failed to upload");
     }
   }, [imageSrc, croppedPixels, uploadAvatar, reset, onOpenChange]);
