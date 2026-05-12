@@ -60,7 +60,7 @@
 				     com.googleusercontent.apps.<digits>-<hash>
 				     Get this from Google Cloud Console → Credentials → your iOS
 				     OAuth client → "iOS URL scheme". -->
-				<string>REPLACE_WITH_REVERSED_IOS_CLIENT_ID</string>
+				<string>com.googleusercontent.apps.62982768400-qj6o8cbnmsm2ff2f6ccq9ei87adfvjr4</string>
 			</array>
 		</dict>
 	</array>
