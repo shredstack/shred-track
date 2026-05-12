@@ -938,15 +938,22 @@ export function ScoreEntry({
         );
 
       case "for_load": {
+        // For Load: weight IS the score, so render per-set inputs for every
+        // movement in the part. We don't gate on `isWeighted` because that
+        // flag lives on the canonical movement and is unreliable when a row
+        // was created on-the-fly via the typeahead (the POST handler
+        // defaults it to false). Duration-typed movements (Rest, Plank) are
+        // skipped — a weight input there doesn't make sense.
+        const loadMovements = activePart.movements.filter(
+          (m) => m.metricType !== "duration"
+        );
         return (
           <div className="space-y-4">
             {/* Per-movement set weights — the canonical data. Each movement
                 carries its own rep scheme (e.g. Deadlift "10-10-7-7-3-3-3"),
                 so we derive set count per movement and fall back to the
                 part-level scheme for legacy/parsed workouts. */}
-            {activePart.movements
-              .filter((m) => m.isWeighted)
-              .map((mov) => {
+            {loadMovements.map((mov) => {
                 const movScheme =
                   mov.prescribedReps || activePart.repScheme;
                 const sets = setsFromRepScheme(movScheme);
@@ -1062,7 +1069,7 @@ export function ScoreEntry({
                 );
               })}
 
-            {activePart.movements.filter((m) => m.isWeighted).length === 0 && (
+            {loadMovements.length === 0 && (
               <div className="space-y-2">
                 <Label htmlFor="se-weight">Max Weight (lb)</Label>
                 <Input

@@ -6,7 +6,7 @@ import {
   benchmarkWorkoutMovements,
   movements,
 } from "@/db/schema";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, and, isNull } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { WORKOUT_TYPE_LABELS, type WorkoutType } from "@/types/crossfit";
 
@@ -82,10 +82,23 @@ async function findBenchmarkMatch(
 ): Promise<{ exact?: { id: string; name: string }; near?: { id: string; name: string } }> {
   if (part.movementIds.length === 0) return {};
 
+  // Skip weightlifting benchmarks. Those are auto-generated stat-trackers
+  // (one per 1RM-applicable movement) with null repScheme — any single-
+  // movement for_load submission with no part-level repScheme would
+  // false-positive against them, and the POST handler would then take the
+  // benchmark fast-path and discard the user's typed prescribedReps. The
+  // workout creation path links to weightlifting benchmarks separately via
+  // inferWeightliftingBenchmark after the user-typed parts are inserted,
+  // so excluding them here loses nothing.
   const candidates = await db
     .select()
     .from(benchmarkWorkouts)
-    .where(eq(benchmarkWorkouts.workoutType, part.workoutType));
+    .where(
+      and(
+        eq(benchmarkWorkouts.workoutType, part.workoutType),
+        isNull(benchmarkWorkouts.weightliftingMovementId)
+      )
+    );
 
   if (candidates.length === 0) return {};
 

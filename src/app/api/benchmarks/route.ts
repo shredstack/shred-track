@@ -201,6 +201,9 @@ export async function GET(req: NextRequest) {
         workoutDate: workouts.workoutDate,
         movementId: workoutMovements.movementId,
         partRepScheme: workoutParts.repScheme,
+        // For_load workouts carry the rep scheme on the movement, not the
+        // part — read both and prefer the movement value when classifying.
+        movementPrescribedReps: workoutMovements.prescribedReps,
       })
       .from(scores)
       .innerJoin(workouts, eq(workouts.id, scores.workoutId))
@@ -227,7 +230,9 @@ export async function GET(req: NextRequest) {
       }>
     >();
     for (const r of wlRows) {
-      const target = inferRepMaxTarget(r.partRepScheme ?? null);
+      const target = inferRepMaxTarget(
+        r.movementPrescribedReps ?? r.partRepScheme ?? null
+      );
       if (!target) continue;
       const lbs = r.weightLbs != null ? Number(r.weightLbs) : null;
       if (lbs == null) continue;
