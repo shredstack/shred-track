@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { aliasedTable, and, desc, eq, lt, sql } from "drizzle-orm";
+import { aliasedTable, and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   notifications,
@@ -8,7 +8,11 @@ import {
   workouts,
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
+import { parseMentionsFromBody } from "@/lib/social/mentions";
 import type { NotificationDisplay, NotificationKind } from "@/types/social";
+
+const MENTION_TOKEN_RE =
+  /\[mention:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]/gi;
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
@@ -64,6 +68,42 @@ export async function GET(req: NextRequest) {
     .orderBy(desc(notifications.createdAt))
     .limit(limit);
 
+  // Resolve mention tokens in comment previews to @username so the inbox
+  // doesn't show "@user" or raw [mention:<uuid>] tokens. One round trip
+  // for all mentioned ids across the page.
+  const mentionIds = new Set<string>();
+  for (const r of rows) {
+    if (!r.commentBody) continue;
+    for (const id of parseMentionsFromBody(r.commentBody)) mentionIds.add(id);
+  }
+  const mentionMap = new Map<
+    string,
+    { name: string | null; username: string | null }
+  >();
+  if (mentionIds.size > 0) {
+    const mentionRows = await db
+      .select({
+        id: users.id,
+        name: users.name,
+        username: users.username,
+      })
+      .from(users)
+      .where(inArray(users.id, [...mentionIds]));
+    for (const m of mentionRows) {
+      mentionMap.set(m.id, { name: m.name, username: m.username });
+    }
+  }
+
+  const renderPreview = (body: string): string =>
+    body
+      .replace(MENTION_TOKEN_RE, (_match, id: string) => {
+        const m = mentionMap.get(id.toLowerCase());
+        if (m?.username) return `@${m.username}`;
+        if (m?.name) return `@${m.name}`;
+        return "@user";
+      })
+      .slice(0, 80);
+
   const items: NotificationDisplay[] = rows.map((r) => ({
     id: r.id,
     kind: r.kind as NotificationKind,
@@ -75,12 +115,7 @@ export async function GET(req: NextRequest) {
     workoutPartId: r.workoutPartId ?? null,
     scoreId: r.scoreId ?? null,
     commentId: r.commentId ?? null,
-    bodyPreview:
-      r.commentBody
-        ? r.commentBody
-            .replace(/\[mention:[0-9a-f-]{36}\]/gi, "@user")
-            .slice(0, 80)
-        : undefined,
+    bodyPreview: r.commentBody ? renderPreview(r.commentBody) : undefined,
     hasAttachment: r.commentHasAttachment ?? undefined,
     readAt: r.readAt ? r.readAt.toISOString() : null,
     createdAt: r.createdAt.toISOString(),

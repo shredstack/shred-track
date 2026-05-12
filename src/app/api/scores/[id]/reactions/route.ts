@@ -47,6 +47,11 @@ export async function POST(
     // ON CONFLICT lets us return either the freshly inserted row or the
     // pre-existing one in a single round trip. The DO UPDATE is a no-op
     // touch — it's required because DO NOTHING returns no rows.
+    //
+    // `xmax = 0` on the returned row means an INSERT happened (no prior
+    // version exists); a non-zero xmax means DO UPDATE fired on an existing
+    // row. This is the canonical way to distinguish insert vs. update in
+    // ON CONFLICT and avoids the race in any time-based heuristic.
     const [row] = await tx
       .insert(scoreReactions)
       .values({
@@ -64,14 +69,10 @@ export async function POST(
       })
       .returning({
         id: scoreReactions.id,
-        createdAt: scoreReactions.createdAt,
+        inserted: sql<boolean>`(xmax = 0)`,
       });
 
-    // If the row's createdAt is within the last second, treat it as freshly
-    // created. Cheaper than a separate SELECT for "did we just insert?".
-    const created =
-      row.createdAt instanceof Date &&
-      Date.now() - row.createdAt.getTime() < 2_000;
+    const created = row.inserted === true;
 
     if (created) {
       await tx
