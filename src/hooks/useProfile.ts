@@ -61,49 +61,69 @@ export function useUpdateUserProfile() {
 // Avatar upload / delete
 // ---------------------------------------------------------------------------
 
+// Wraps a step in the avatar upload pipeline so a failure surfaces *which*
+// step failed (issue / upload / finalize) instead of a bare "Load failed".
+// The original cause is preserved both via `Error.cause` and a console.error
+// so we can grab it from Safari Web Inspector on a phone.
+async function runStep<T>(step: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    console.error(`[avatar upload] step "${step}" failed`, err);
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`${step}: ${message}`, { cause: err });
+  }
+}
+
 export function useUploadAvatar() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (blob: Blob) => {
       // Step 1: ask the API for a signed upload URL + the eventual public URL.
-      const issueRes = await fetch("/api/user/profile/avatar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind: "upload" }),
+      const issued = await runStep("issue signed URL", async () => {
+        const res = await fetch("/api/user/profile/avatar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind: "upload" }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          throw new Error(body?.error ?? `HTTP ${res.status}`);
+        }
+        return (await res.json()) as {
+          storagePath: string;
+          uploadUrl: string;
+          token: string;
+          publicUrl: string;
+        };
       });
-      if (!issueRes.ok) {
-        const body = await issueRes.json().catch(() => null);
-        throw new Error(body?.error ?? "Failed to start avatar upload");
-      }
-      const issued: {
-        storagePath: string;
-        uploadUrl: string;
-        token: string;
-        publicUrl: string;
-      } = await issueRes.json();
 
       // Step 2: PUT the compressed JPEG to storage. Lazy-import the
       // browser supabase client so other pages don't pull it in.
-      const { createClient } = await import("@/lib/supabase/client");
-      const supabase = createClient();
-      const { error: uploadErr } = await supabase.storage
-        .from("avatars")
-        .uploadToSignedUrl(issued.storagePath, issued.token, blob, {
-          contentType: "image/jpeg",
-        });
-      if (uploadErr) throw uploadErr;
+      await runStep("upload to storage", async () => {
+        const { createClient } = await import("@/lib/supabase/client");
+        const supabase = createClient();
+        const { error } = await supabase.storage
+          .from("avatars")
+          .uploadToSignedUrl(issued.storagePath, issued.token, blob, {
+            contentType: "image/jpeg",
+          });
+        if (error) throw error;
+      });
 
       // Step 3: finalize — writes users.image and deletes the prior object.
-      const finalizeRes = await fetch("/api/user/profile/avatar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind: "finalize", storagePath: issued.storagePath }),
+      return runStep("finalize", async () => {
+        const res = await fetch("/api/user/profile/avatar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind: "finalize", storagePath: issued.storagePath }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          throw new Error(body?.error ?? `HTTP ${res.status}`);
+        }
+        return (await res.json()) as { image: string };
       });
-      if (!finalizeRes.ok) {
-        const body = await finalizeRes.json().catch(() => null);
-        throw new Error(body?.error ?? "Failed to finalize avatar");
-      }
-      return (await finalizeRes.json()) as { image: string };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["user-profile"] });

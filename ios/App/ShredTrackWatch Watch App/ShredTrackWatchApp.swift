@@ -17,6 +17,14 @@ import SwiftUI
 // Default tab is Today: athletes glance at the wrist in the morning to
 // see what's programmed. Timer is one swipe away, which is fine — it's
 // a deliberate race-only action with its own START button.
+//
+// Tab style is `.page` (horizontal paging), NOT `.verticalPage`.
+// Reason: TodayView wraps its content in a ScrollView. With
+// `.verticalPage`, the Digital Crown is captured by the TabView for
+// vertical tab switching, which conflicts with the ScrollView's own
+// crown-driven scrolling — the result was an app that appeared frozen
+// on Today (can't scroll the card list, can't swipe to Timer).
+// Horizontal page swipes leave the Crown free for in-page scrolling.
 
 @main
 struct ShredTrackWatchApp: App {
@@ -37,7 +45,7 @@ struct ShredTrackWatchApp: App {
                 SettingsView()
                     .tag(2)
             }
-            .tabViewStyle(.verticalPage)
+            .tabViewStyle(.page)
             .environmentObject(session)
             .environmentObject(watchConn)
             .environmentObject(today)
