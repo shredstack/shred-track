@@ -96,6 +96,7 @@ function GeneralSection() {
   const updateUser = useUpdateUserProfile();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
+  const [username, setUsername] = useState<string>("");
   // "" represents "unset" in the form; on save we send null.
   const [gender, setGender] = useState<"" | "male" | "female" | "other">("");
   const [bodyWeightLb, setBodyWeightLb] = useState<string>("");
@@ -103,6 +104,7 @@ function GeneralSection() {
   const startEditing = useCallback(() => {
     if (user) {
       setName(user.name);
+      setUsername(user.username ?? "");
       const g = user.gender;
       setGender(g === "male" || g === "female" || g === "other" ? g : "");
       setBodyWeightLb(user.bodyWeightLb != null ? String(user.bodyWeightLb) : "");
@@ -114,15 +116,20 @@ function GeneralSection() {
     if (!name.trim()) return;
     const bw = bodyWeightLb.trim();
     const parsedBw = bw ? parseFloat(bw) : null;
+    const handle = username.trim().toLowerCase();
     updateUser.mutate(
       {
         name: name.trim(),
+        username: handle === "" ? null : handle,
         gender: gender === "" ? null : gender,
         bodyWeightLb: parsedBw,
       },
-      { onSuccess: () => setEditing(false) }
+      {
+        onSuccess: () => setEditing(false),
+        onError: (e: Error) => toast.error(e.message),
+      }
     );
-  }, [name, gender, bodyWeightLb, updateUser]);
+  }, [name, username, gender, bodyWeightLb, updateUser]);
 
   if (isLoading) {
     return (
@@ -153,6 +160,26 @@ function GeneralSection() {
             <div className="space-y-2">
               <Label>Name</Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Username</Label>
+              <div className="flex items-center gap-1">
+                <span className="text-sm text-muted-foreground">@</span>
+                <Input
+                  value={username}
+                  onChange={(e) =>
+                    setUsername(e.target.value.toLowerCase())
+                  }
+                  placeholder="optional handle"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Lowercase letters, digits, _ or -. 3–24 chars. Used for
+                @mentions in gym comments. Leave blank to skip.
+              </p>
             </div>
             <div className="space-y-2">
               <Label>Gender</Label>
@@ -216,6 +243,12 @@ function GeneralSection() {
             <div>
               <p className="text-xs text-muted-foreground">Name</p>
               <p className="text-sm font-medium">{user.name}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Username</p>
+              <p className="text-sm font-medium">
+                {user.username ? `@${user.username}` : "—"}
+              </p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Gender</p>

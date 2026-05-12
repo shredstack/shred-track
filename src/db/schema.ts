@@ -11,6 +11,7 @@ import {
   uniqueIndex,
   index,
   foreignKey,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { TimeLossEntry, FocusEntry } from "@/types/hyrox-race-report";
@@ -29,6 +30,9 @@ export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
   email: text("email").unique().notNull(),
   name: text("name").notNull(),
+  // Optional public handle for @mentions. Case-insensitive unique index in
+  // SQL (see migration 20260512140500). Null until user opts in.
+  username: text("username"),
   gender: text("gender"), // 'male' | 'female' | 'other'
   unitPreference: text("unit_preference").default("mixed").notNull(), // 'metric' | 'mixed'
   image: text("image"),
@@ -307,6 +311,10 @@ export const scores = pgTable(
     // without flipping the division to scaled.
     woreVest: boolean("wore_vest"),
     vestWeightLb: numeric("vest_weight_lb"),
+    // Denormalized aggregates kept in sync by transactional bumps in the
+    // reaction / comment write paths; a nightly cron reconciles drift.
+    reactionCount: integer("reaction_count").default(0).notNull(),
+    commentCount: integer("comment_count").default(0).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -1228,3 +1236,71 @@ export const recoverySessionItems = pgTable("recovery_session_items", {
   status: text("status").default("pending").notNull(),
   notes: text("notes"),
 });
+
+// ============================================
+// Social — Reactions, Comments, Notifications
+// ============================================
+//
+// See claude_code_instructions/social/crossfit_leaderboard_social_spec.md
+// and migration 20260512140600_add_social_tables.sql.
+
+export const scoreReactions = pgTable("score_reactions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  scoreId: uuid("score_id").notNull().references(() => scores.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  reaction: text("reaction").default("fire").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  uniqueReaction: uniqueIndex("score_reactions_unique").on(table.scoreId, table.userId, table.reaction),
+  scoreIdx: index("score_reactions_score_idx").on(table.scoreId),
+  userIdx: index("score_reactions_user_idx").on(table.userId),
+}));
+
+export const scoreComments = pgTable("score_comments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  scoreId: uuid("score_id").notNull().references(() => scores.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  body: text("body").notNull(),
+  // Postgres uuid[] — list of user ids tagged in the comment body.
+  mentionedUserIds: uuid("mentioned_user_ids").array().notNull().default(sql`ARRAY[]::uuid[]`),
+  attachmentProvider: text("attachment_provider"), // 'klipy' in v1
+  attachmentKind: text("attachment_kind"),         // 'gif' | 'meme' | 'sticker'
+  attachmentId: text("attachment_id"),             // provider-side id
+  attachmentUrl: text("attachment_url"),           // provider CDN URL
+  attachmentPreviewUrl: text("attachment_preview_url"),
+  attachmentWidth: integer("attachment_width"),
+  attachmentHeight: integer("attachment_height"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  // Soft delete — read paths filter for deleted_at IS NULL.
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+});
+
+export const notifications = pgTable("notifications", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  recipientId: uuid("recipient_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  // Nullable so deleting an actor doesn't blow away notifications.
+  actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+  // 'score_reaction' | 'score_comment' | 'score_mention' in v1.
+  kind: text("kind").notNull(),
+  // Polymorphic target — exactly one is non-null per row.
+  scoreId: uuid("score_id").references(() => scores.id, { onDelete: "cascade" }),
+  commentId: uuid("comment_id").references(() => scoreComments.id, { onDelete: "cascade" }),
+  reactionId: uuid("reaction_id").references(() => scoreReactions.id, { onDelete: "cascade" }),
+  // Denormalized routing context (avoids 3 joins on every render).
+  workoutId: uuid("workout_id").references(() => workouts.id, { onDelete: "cascade" }),
+  workoutPartId: uuid("workout_part_id").references(() => workoutParts.id, { onDelete: "cascade" }),
+  communityId: uuid("community_id").references(() => communities.id, { onDelete: "cascade" }),
+  readAt: timestamp("read_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const notificationPreferences = pgTable("notification_preferences", {
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  inAppEnabled: boolean("in_app_enabled").default(true).notNull(),
+  pushEnabled: boolean("push_enabled").default(true).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.kind] }),
+}));

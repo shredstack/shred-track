@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useState } from "react";
-import { ChevronDown, Plus, User as UserIcon } from "lucide-react";
+import { Bell, ChevronDown, Plus, User as UserIcon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,6 +19,7 @@ import {
   type GymMembership,
 } from "@/hooks/useGymContext";
 import { JoinGymDialog } from "@/components/shared/join-gym-dialog";
+import { useUnreadNotificationCount } from "@/hooks/useNotifications";
 
 const PERSONAL_LABEL = "Personal";
 
@@ -35,6 +36,8 @@ export function AppHeader() {
   const { data, isLoading } = useGymContext();
   const setActive = useSetActiveCommunity();
   const [joinOpen, setJoinOpen] = useState(false);
+  const { data: unread } = useUnreadNotificationCount();
+  const unreadCount = unread?.count ?? 0;
 
   const memberships = data?.memberships.filter((m) => m.isActive) ?? [];
   const label = isLoading ? PERSONAL_LABEL : activeLabel(data?.activeCommunityId ?? null, memberships);
@@ -57,6 +60,25 @@ export function AppHeader() {
           <span className="font-heading text-lg font-bold uppercase tracking-wide text-gradient-primary">
             ShredTrack
           </span>
+        </Link>
+
+        <div className="flex items-center gap-2">
+        {/* Notification bell */}
+        <Link
+          href="/notifications"
+          className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.06] bg-white/[0.04] text-muted-foreground transition-colors hover:bg-white/[0.08] hover:text-foreground"
+          aria-label={
+            unreadCount > 0
+              ? `Notifications, ${unreadCount} unread`
+              : "Notifications"
+          }
+        >
+          <Bell className="h-4 w-4" />
+          {unreadCount > 0 && (
+            <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground">
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          )}
         </Link>
 
         {/* Gym switcher — falls back to "Personal" when the user has no
@@ -122,6 +144,7 @@ export function AppHeader() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        </div>
       </div>
 
       <JoinGymDialog open={joinOpen} onOpenChange={setJoinOpen} />

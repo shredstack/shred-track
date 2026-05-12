@@ -7,6 +7,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 export interface UserProfile {
   id: string;
   name: string;
+  username: string | null;
   email: string;
   gender: string | null;
   unitPreference: string;
@@ -35,6 +36,7 @@ export function useUpdateUserProfile() {
   return useMutation({
     mutationFn: async (data: {
       name?: string;
+      username?: string | null;
       gender?: "male" | "female" | "other" | null;
       bodyWeightLb?: number | null;
     }) => {
@@ -43,7 +45,10 @@ export function useUpdateUserProfile() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
-      if (!res.ok) throw new Error("Failed to update profile");
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "Failed to update profile");
+      }
       return res.json() as Promise<UserProfile>;
     },
     onSuccess: () => {
