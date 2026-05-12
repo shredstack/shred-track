@@ -190,8 +190,26 @@ function ScoreRow({ part }: { part: WorkoutPartDisplay }) {
 // movement name). All formatting flows through the single source of
 // truth in `lib/crossfit/prescription.ts`. The reps prefix is filtered
 // out because the workout-card renders it next to the movement name.
-function formatMovementMetric(mov: WorkoutMovementDisplay): string | null {
-  const full = formatMovementPrescription(mov, null, null);
+//
+// for_load parts: weight is the score, not a prescription. Older saved
+// workouts may still carry phantom common-Rx defaults from the builder
+// (the input was hidden but the state field was populated). Nulling the
+// weight fields here keeps those from rendering as bogus "(95/65 lb)".
+function formatMovementMetric(
+  mov: WorkoutMovementDisplay,
+  partWorkoutType: WorkoutPartDisplay["workoutType"]
+): string | null {
+  const source =
+    partWorkoutType === "for_load"
+      ? {
+          ...mov,
+          prescribedWeightMale: null,
+          prescribedWeightFemale: null,
+          prescribedWeightMaleBwMultiplier: null,
+          prescribedWeightFemaleBwMultiplier: null,
+        }
+      : mov;
+  const full = formatMovementPrescription(source, null, null);
   if (!full) return null;
   // The reps segment is rendered separately on the card. Strip it so we
   // don't duplicate "21" once before the name and again in parens.
@@ -209,8 +227,14 @@ function parseRepsPerSet(repScheme: string): number | undefined {
   return parseInt(parts[parts.length - 1], 10);
 }
 
-function MovementRow({ mov }: { mov: WorkoutMovementDisplay }) {
-  const metricText = formatMovementMetric(mov);
+function MovementRow({
+  mov,
+  partWorkoutType,
+}: {
+  mov: WorkoutMovementDisplay;
+  partWorkoutType: WorkoutPartDisplay["workoutType"];
+}) {
+  const metricText = formatMovementMetric(mov, partWorkoutType);
   const prefix =
     mov.equipmentCount && mov.equipmentCount > 1
       ? `${mov.equipmentCount} × `
@@ -405,7 +429,11 @@ function PartSection({
               {ungrouped.length > 0 && (
                 <div className="space-y-1.5">
                   {ungrouped.map((mov) => (
-                    <MovementRow key={mov.id} mov={mov} />
+                    <MovementRow
+                      key={mov.id}
+                      mov={mov}
+                      partWorkoutType={part.workoutType}
+                    />
                   ))}
                 </div>
               )}
@@ -426,7 +454,11 @@ function PartSection({
                     </h4>
                     <div className="space-y-1.5">
                       {blockMovements.map((mov) => (
-                        <MovementRow key={mov.id} mov={mov} />
+                        <MovementRow
+                          key={mov.id}
+                          mov={mov}
+                          partWorkoutType={part.workoutType}
+                        />
                       ))}
                     </div>
                   </div>

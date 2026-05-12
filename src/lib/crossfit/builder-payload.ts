@@ -158,6 +158,10 @@ export function builderPartToPayload(
 ): CreatePartInput | null {
   const movements = part.movements.filter((m) => m.movementId);
   if (movements.length === 0) return null;
+  // for_load parts: weight IS the score, so any prescribed weight values
+  // are phantom defaults (auto-filled from movement library commonRx) that
+  // the builder hides from the UI but still carries in state.
+  const stripRxWeights = part.workoutType === "for_load";
   return {
     id: part.id,
     label: part.label || undefined,
@@ -199,11 +203,11 @@ export function builderPartToPayload(
       orderIndex: i,
       prescribedReps: m.prescribedReps || undefined,
       prescribedWeightMale:
-        !m.useBwMultiplier && m.prescribedWeightMale
+        !stripRxWeights && !m.useBwMultiplier && m.prescribedWeightMale
           ? parseFloat(m.prescribedWeightMale)
           : undefined,
       prescribedWeightFemale:
-        !m.useBwMultiplier && m.prescribedWeightFemale
+        !stripRxWeights && !m.useBwMultiplier && m.prescribedWeightFemale
           ? parseFloat(m.prescribedWeightFemale)
           : undefined,
       prescribedCaloriesMale: m.prescribedCaloriesMale || undefined,
@@ -219,11 +223,15 @@ export function builderPartToPayload(
       prescribedHeightInchesFemale:
         m.prescribedHeightInchesFemale || undefined,
       prescribedWeightMaleBwMultiplier:
-        m.useBwMultiplier && m.prescribedWeightMaleBwMultiplier
+        !stripRxWeights &&
+        m.useBwMultiplier &&
+        m.prescribedWeightMaleBwMultiplier
           ? parseFloat(m.prescribedWeightMaleBwMultiplier)
           : undefined,
       prescribedWeightFemaleBwMultiplier:
-        m.useBwMultiplier && m.prescribedWeightFemaleBwMultiplier
+        !stripRxWeights &&
+        m.useBwMultiplier &&
+        m.prescribedWeightFemaleBwMultiplier
           ? parseFloat(m.prescribedWeightFemaleBwMultiplier)
           : undefined,
       tempo: m.tempo?.trim() || undefined,
