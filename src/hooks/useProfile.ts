@@ -13,6 +13,7 @@ export interface UserProfile {
   // Pounds. Used to resolve "1.5× BW" Rx prescriptions to a concrete
   // weight; null means BW prescriptions display symbolically.
   bodyWeightLb: number | null;
+  image: string | null;
   isAdmin: boolean;
   isVip: boolean;
   createdAt: string;
@@ -44,6 +45,74 @@ export function useUpdateUserProfile() {
       });
       if (!res.ok) throw new Error("Failed to update profile");
       return res.json() as Promise<UserProfile>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["user-profile"] });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Avatar upload / delete
+// ---------------------------------------------------------------------------
+
+export function useUploadAvatar() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (blob: Blob) => {
+      // Step 1: ask the API for a signed upload URL + the eventual public URL.
+      const issueRes = await fetch("/api/user/profile/avatar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "upload" }),
+      });
+      if (!issueRes.ok) {
+        const body = await issueRes.json().catch(() => null);
+        throw new Error(body?.error ?? "Failed to start avatar upload");
+      }
+      const issued: {
+        storagePath: string;
+        uploadUrl: string;
+        token: string;
+        publicUrl: string;
+      } = await issueRes.json();
+
+      // Step 2: PUT the compressed JPEG to storage. Lazy-import the
+      // browser supabase client so other pages don't pull it in.
+      const { createClient } = await import("@/lib/supabase/client");
+      const supabase = createClient();
+      const { error: uploadErr } = await supabase.storage
+        .from("avatars")
+        .uploadToSignedUrl(issued.storagePath, issued.token, blob, {
+          contentType: "image/jpeg",
+        });
+      if (uploadErr) throw uploadErr;
+
+      // Step 3: finalize — writes users.image and deletes the prior object.
+      const finalizeRes = await fetch("/api/user/profile/avatar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "finalize", storagePath: issued.storagePath }),
+      });
+      if (!finalizeRes.ok) {
+        const body = await finalizeRes.json().catch(() => null);
+        throw new Error(body?.error ?? "Failed to finalize avatar");
+      }
+      return (await finalizeRes.json()) as { image: string };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["user-profile"] });
+    },
+  });
+}
+
+export function useDeleteAvatar() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/user/profile/avatar", { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to remove avatar");
+      return (await res.json()) as { image: null };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["user-profile"] });

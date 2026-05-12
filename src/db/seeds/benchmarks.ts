@@ -467,99 +467,10 @@ const benchmarkSeeds: BenchmarkSeed[] = [
     ],
   },
 
-  // ============================================
-  // Strength Benchmarks (for_load / 1RM)
-  // ============================================
-  {
-    name: "Back Squat 1RM",
-    description: "Find your 1-rep max back squat.",
-    workoutType: "for_load",
-    repScheme: "1RM",
-    category: "weightlifting",
-    movements: [
-      { canonicalName: "Back Squat", prescribedReps: "1" },
-    ],
-  },
-  {
-    name: "Back Squat 5RM",
-    description: "Find your 5-rep max back squat — heaviest weight you can hit for 5 straight reps.",
-    workoutType: "for_load",
-    repScheme: "5-5-5-5-5",
-    category: "weightlifting",
-    movements: [
-      { canonicalName: "Back Squat", prescribedReps: "5-5-5-5-5" },
-    ],
-  },
-  {
-    name: "Deadlift 1RM",
-    description: "Find your 1-rep max deadlift.",
-    workoutType: "for_load",
-    repScheme: "1RM",
-    category: "weightlifting",
-    movements: [
-      { canonicalName: "Deadlift", prescribedReps: "1" },
-    ],
-  },
-  {
-    name: "Front Squat 1RM",
-    description: "Find your 1-rep max front squat.",
-    workoutType: "for_load",
-    repScheme: "1RM",
-    category: "weightlifting",
-    movements: [
-      { canonicalName: "Front Squat", prescribedReps: "1" },
-    ],
-  },
-  {
-    name: "Overhead Squat 1RM",
-    description: "Find your 1-rep max overhead squat.",
-    workoutType: "for_load",
-    repScheme: "1RM",
-    category: "weightlifting",
-    movements: [
-      { canonicalName: "Overhead Squat", prescribedReps: "1" },
-    ],
-  },
-  {
-    name: "Clean and Jerk 1RM",
-    description: "Find your 1-rep max clean and jerk.",
-    workoutType: "for_load",
-    repScheme: "1RM",
-    category: "weightlifting",
-    movements: [
-      { canonicalName: "Clean and Jerk", prescribedReps: "1" },
-    ],
-  },
-  {
-    name: "Snatch 1RM",
-    description: "Find your 1-rep max snatch.",
-    workoutType: "for_load",
-    repScheme: "1RM",
-    category: "weightlifting",
-    movements: [
-      { canonicalName: "Snatch", prescribedReps: "1" },
-    ],
-  },
-  {
-    name: "Bench Press 1RM",
-    description: "Find your 1-rep max bench press.",
-    workoutType: "for_load",
-    repScheme: "1RM",
-    category: "weightlifting",
-    movements: [
-      { canonicalName: "Bench Press", prescribedReps: "1" },
-    ],
-  },
-  {
-    name: "Shoulder Press 1RM",
-    description: "Find your 1-rep max strict shoulder press.",
-    workoutType: "for_load",
-    repScheme: "1RM",
-    category: "weightlifting",
-    movements: [
-      { canonicalName: "Shoulder Press", prescribedReps: "1" },
-    ],
-  },
+  // Strength benchmarks are no longer hand-seeded here. Every 1RM-applicable
+  // movement gets an auto-generated benchmark row keyed by movement_id (see
+  // src/db/seeds/weightlifting_benchmarks.ts). The "1RM / 2RM / 3RM / 5RM"
+  // tabs are derived at query time from the athlete's for_load history.
 
   // ============================================
   // CrossFit Open — recent selections

@@ -197,10 +197,26 @@ export const BENCHMARK_CATEGORY_COLORS: Record<BenchmarkCategoryName, string> = 
   gym_benchmark: "bg-zinc-500/15 text-zinc-300 border-zinc-500/30",
 };
 
+// Targeted rep counts surfaced as tabs on a weightlifting benchmark.
+// Stored neither on scores nor benchmarks — derived at query time from the
+// for_load part's rep_scheme via inferRepMaxTarget().
+export type RepMaxTarget = 1 | 2 | 3 | 5;
+export const REP_MAX_TARGETS: readonly RepMaxTarget[] = [1, 2, 3, 5];
+
+export interface RepMaxStat {
+  weightLbs: number;
+  workoutDate: string;
+  scoreId: string;
+}
+
 export interface BenchmarkUserStats {
   attempts: number;
   bestScore: BenchmarkBestScore | null;
   lastAttemptDate: string | null;
+  // Only populated for weightlifting benchmarks (where the response also
+  // carries weightliftingMovementId). One entry per rep target the athlete
+  // has logged — missing keys mean "no attempts at that target".
+  repMaxStats?: Partial<Record<RepMaxTarget, RepMaxStat>>;
 }
 
 export interface BenchmarkBestScore {
@@ -239,6 +255,35 @@ export interface BenchmarkHistory {
   attempts: BenchmarkAttempt[];
 }
 
+// Weightlifting benchmark history. Same attempts list, but split by the
+// rep-max target inferred from each attempt's part rep_scheme. PRs are
+// per-target (one heaviest weight per tab) rather than a single PR across
+// the whole benchmark.
+export interface WeightliftingRepMaxVariant {
+  repTarget: RepMaxTarget;
+  attempts: BenchmarkAttempt[];
+  pr: { weightLbs: number; workoutDate: string; scoreId: string } | null;
+}
+
+export interface WeightliftingBenchmarkHistory {
+  benchmarkId: string;
+  benchmarkName: string;
+  workoutType: WorkoutType;
+  // Discriminator: presence of repMaxHistory tells the client this is a
+  // weightlifting benchmark and the tabs UI should render.
+  repMaxHistory: {
+    movementId: string;
+    movementName: string;
+    variants: WeightliftingRepMaxVariant[];
+  };
+}
+
+// Union returned by /api/benchmarks/[id]/history. Discriminate via
+// `repMaxHistory in response`.
+export type BenchmarkHistoryResponse =
+  | BenchmarkHistory
+  | WeightliftingBenchmarkHistory;
+
 export interface BenchmarkWorkout {
   id: string;
   name: string;
@@ -268,6 +313,10 @@ export interface BenchmarkWorkout {
   // field is the single source of truth for renderers going forward.
   parts: BenchmarkWorkoutPart[];
   userStats?: BenchmarkUserStats;
+  // When non-null, this is an auto-generated weightlifting benchmark
+  // anchored to the named movement. Drives the rep-max tabs UI on the
+  // detail dialog and the per-target teaser on the list row.
+  weightliftingMovementId?: string | null;
 }
 
 export interface BenchmarkWorkoutPart {

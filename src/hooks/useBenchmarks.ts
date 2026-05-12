@@ -3,7 +3,7 @@ import type {
   BenchmarkWorkout,
   BenchmarkCategory,
   BenchmarkCategoryName,
-  BenchmarkHistory,
+  BenchmarkHistoryResponse,
 } from "@/types/crossfit";
 import type { CreatePartInput } from "@/hooks/useWorkouts";
 
@@ -41,10 +41,13 @@ export function useBenchmarks(params?: {
   });
 }
 
+// Returns BenchmarkHistory for non-weightlifting benchmarks, and
+// WeightliftingBenchmarkHistory for weightlifting ones (discriminated by
+// presence of `repMaxHistory`).
 export function useBenchmarkHistory(benchmarkId: string | null) {
   return useQuery({
     queryKey: ["benchmark-history", benchmarkId],
-    queryFn: async (): Promise<BenchmarkHistory> => {
+    queryFn: async (): Promise<BenchmarkHistoryResponse> => {
       const response = await fetch(`/api/benchmarks/${benchmarkId}/history`);
       if (!response.ok) throw new Error("Failed to fetch benchmark history");
       return response.json();
@@ -130,6 +133,54 @@ export function useCreateWorkoutFromBenchmark() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["workouts"] });
       queryClient.invalidateQueries({ queryKey: ["benchmarks"] });
+    },
+  });
+}
+
+// Build a single-movement for_load workout at the named rep target and
+// let the server's auto-link inference tie it to the matching
+// weightlifting benchmark. Used by the rep-max tabs' "Log a {N}RM" CTA.
+export function useCreateRepMaxAttempt() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (data: {
+      movementId: string;
+      movementName: string;
+      repTarget: 1 | 2 | 3 | 5;
+      workoutDate: string;
+    }) => {
+      const body = {
+        title: `${data.movementName} ${data.repTarget}RM`,
+        workoutDate: data.workoutDate,
+        parts: [
+          {
+            workoutType: "for_load",
+            repScheme: String(data.repTarget),
+            movements: [
+              {
+                movementId: data.movementId,
+                prescribedReps: String(data.repTarget),
+              },
+            ],
+          },
+        ],
+      };
+      const response = await fetch("/api/workouts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || "Failed to create workout");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["workouts"] });
+      queryClient.invalidateQueries({ queryKey: ["benchmarks"] });
+      queryClient.invalidateQueries({ queryKey: ["benchmark-history"] });
     },
   });
 }

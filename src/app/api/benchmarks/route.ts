@@ -6,13 +6,16 @@ import {
   benchmarkWorkoutMovements,
   benchmarkWorkoutParts,
   communityMemberships,
+  movements,
   scores,
   workouts,
+  workoutMovements,
+  workoutParts,
 } from "@/db/schema";
-import { eq, and, or, ilike, inArray } from "drizzle-orm";
+import { eq, and, or, ilike, inArray, isNull } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { pickBestScore, type ScoreRow } from "@/lib/crossfit/benchmark-stats";
-import type { WorkoutType } from "@/types/crossfit";
+import type { RepMaxTarget, RepMaxStat, WorkoutType } from "@/types/crossfit";
 import {
   assembleBenchmarkParts,
   coerceBenchmarkBlockValues,
@@ -21,6 +24,10 @@ import {
   fetchBenchmarkPartsAndMovements,
   type BenchmarkPartInput,
 } from "@/lib/crossfit/benchmark-parts";
+import {
+  inferRepMaxTarget,
+  pickBestPerRepTarget,
+} from "@/lib/crossfit/weightlifting-benchmarks";
 
 // GET /api/benchmarks — list benchmarks visible to the user
 export async function GET(req: NextRequest) {
@@ -75,6 +82,21 @@ export async function GET(req: NextRequest) {
   if (benchmarkCategory) {
     conditions.push(eq(benchmarkWorkouts.category, benchmarkCategory));
   }
+
+  // Hide weightlifting benchmarks anchored to a movement that has lost
+  // `is_1rm_applicable` since seeding. The benchmark row stays in the DB
+  // so existing history isn't orphaned (and direct deep-links still work),
+  // but it disappears from browse.
+  const oneRmMovementIds = db
+    .select({ id: movements.id })
+    .from(movements)
+    .where(eq(movements.is1rmApplicable, true));
+  conditions.push(
+    or(
+      isNull(benchmarkWorkouts.weightliftingMovementId),
+      inArray(benchmarkWorkouts.weightliftingMovementId, oneRmMovementIds)
+    )!
+  );
 
   const rows = await db
     .select()
@@ -159,6 +181,84 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Per-rep-max stats for weightlifting benchmarks. Pulls every for_load
+  // score whose part movement matches a weightlifting anchor — even when
+  // the workout wasn't auto-linked (e.g. logged before the feature
+  // shipped) — so the rep-max teaser captures full history.
+  const repMaxStatsByBenchmark = new Map<
+    string,
+    Partial<Record<RepMaxTarget, RepMaxStat>>
+  >();
+  const weightliftingAnchors = rows
+    .filter((r) => r.weightliftingMovementId)
+    .map((r) => ({ benchmarkId: r.id, movementId: r.weightliftingMovementId! }));
+  if (includeStats && weightliftingAnchors.length > 0) {
+    const wlMovementIds = weightliftingAnchors.map((a) => a.movementId);
+    const wlRows = await db
+      .select({
+        scoreId: scores.id,
+        weightLbs: scores.weightLbs,
+        workoutDate: workouts.workoutDate,
+        movementId: workoutMovements.movementId,
+        partRepScheme: workoutParts.repScheme,
+      })
+      .from(scores)
+      .innerJoin(workouts, eq(workouts.id, scores.workoutId))
+      .innerJoin(workoutParts, eq(workoutParts.id, scores.workoutPartId))
+      .innerJoin(
+        workoutMovements,
+        eq(workoutMovements.workoutPartId, workoutParts.id)
+      )
+      .where(
+        and(
+          eq(scores.userId, user.id),
+          eq(workoutParts.workoutType, "for_load"),
+          inArray(workoutMovements.movementId, wlMovementIds)
+        )
+      );
+
+    const byMovement = new Map<
+      string,
+      Array<{
+        scoreId: string;
+        workoutDate: string;
+        weightLbs: number;
+        repTarget: RepMaxTarget;
+      }>
+    >();
+    for (const r of wlRows) {
+      const target = inferRepMaxTarget(r.partRepScheme ?? null);
+      if (!target) continue;
+      const lbs = r.weightLbs != null ? Number(r.weightLbs) : null;
+      if (lbs == null) continue;
+      const list = byMovement.get(r.movementId) ?? [];
+      list.push({
+        scoreId: r.scoreId,
+        workoutDate: r.workoutDate,
+        weightLbs: lbs,
+        repTarget: target,
+      });
+      byMovement.set(r.movementId, list);
+    }
+
+    for (const anchor of weightliftingAnchors) {
+      const list = byMovement.get(anchor.movementId) ?? [];
+      const best = pickBestPerRepTarget(list);
+      const stats: Partial<Record<RepMaxTarget, RepMaxStat>> = {};
+      for (const t of [1, 2, 3, 5] as const) {
+        const b = best[t];
+        if (b && b.weightLbs != null) {
+          stats[t] = {
+            weightLbs: b.weightLbs,
+            workoutDate: b.workoutDate,
+            scoreId: b.scoreId,
+          };
+        }
+      }
+      repMaxStatsByBenchmark.set(anchor.benchmarkId, stats);
+    }
+  }
+
   const result = rows.map((bw) => {
     const { parts, flatMovements } = assembleBenchmarkParts(
       bw,
@@ -166,6 +266,12 @@ export async function GET(req: NextRequest) {
       movementsByBenchmark.get(bw.id) ?? [],
       blocksByPart
     );
+    const baseStats = includeStats
+      ? statsByBenchmark.get(bw.id) ?? { attempts: 0, bestScore: null, lastAttemptDate: null }
+      : undefined;
+    const repMaxStats = bw.weightliftingMovementId
+      ? repMaxStatsByBenchmark.get(bw.id) ?? {}
+      : undefined;
     return {
       id: bw.id,
       name: bw.name,
@@ -185,10 +291,13 @@ export async function GET(req: NextRequest) {
         bw.vestWeightFemaleLb != null ? Number(bw.vestWeightFemaleLb) : null,
       isPartner: bw.isPartner,
       partnerCount: bw.partnerCount,
+      weightliftingMovementId: bw.weightliftingMovementId ?? null,
       movements: flatMovements,
       parts,
-      userStats: includeStats
-        ? statsByBenchmark.get(bw.id) ?? { attempts: 0, bestScore: null, lastAttemptDate: null }
+      userStats: baseStats
+        ? repMaxStats
+          ? { ...baseStats, repMaxStats }
+          : baseStats
         : undefined,
     };
   });

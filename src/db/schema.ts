@@ -370,6 +370,14 @@ export const benchmarkWorkouts = pgTable("benchmark_workouts", {
   // benchmark.
   isPartner: boolean("is_partner").default(false).notNull(),
   partnerCount: integer("partner_count"),
+  // When non-null, this row is an auto-generated weightlifting benchmark
+  // anchored to the named movement. The "1RM / 2RM / 3RM / 5RM" tabs in the
+  // detail UI are derived at query time from the athlete's for_load history
+  // against this movement — there is no per-rep-max row.
+  weightliftingMovementId: uuid("weightlifting_movement_id").references(
+    () => movements.id,
+    { onDelete: "cascade" }
+  ),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });

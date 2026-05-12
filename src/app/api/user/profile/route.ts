@@ -18,6 +18,7 @@ export async function GET() {
       gender: users.gender,
       unitPreference: users.unitPreference,
       bodyWeightLb: users.bodyWeightLb,
+      image: users.image,
       isAdmin: users.isAdmin,
       isVip: users.isVip,
       createdAt: users.createdAt,

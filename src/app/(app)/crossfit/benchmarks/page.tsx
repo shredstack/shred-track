@@ -27,6 +27,7 @@ import {
 import {
   useBenchmarks,
   useBenchmarkHistory,
+  useCreateRepMaxAttempt,
   useCreateWorkoutFromBenchmark,
 } from "@/hooks/useBenchmarks";
 import {
@@ -34,6 +35,7 @@ import {
   WORKOUT_TYPE_COLORS,
   BENCHMARK_CATEGORY_SHORT_LABELS,
   BENCHMARK_CATEGORY_COLORS,
+  REP_MAX_TARGETS,
 } from "@/types/crossfit";
 import type {
   BenchmarkWorkout,
@@ -42,7 +44,12 @@ import type {
   WorkoutType,
   BenchmarkMovement,
   BenchmarkWorkoutBlock,
+  RepMaxStat,
+  RepMaxTarget,
+  WeightliftingBenchmarkHistory,
 } from "@/types/crossfit";
+import { WeightliftingBenchmarkTabs } from "@/components/crossfit/weightlifting-benchmark-tabs";
+import { formatShortDate } from "@/lib/format-date";
 
 // Pills mix two filter axes:
 //   - "all" / "custom" filter by ownership (the existing /api/benchmarks
@@ -66,18 +73,6 @@ function toLocalDateString(d: Date) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
-}
-
-function formatShortDate(iso: string) {
-  // iso is YYYY-MM-DD (workout_date column).
-  const [y, m, d] = iso.split("-").map(Number);
-  if (!y || !m || !d) return iso;
-  const date = new Date(y, m - 1, d);
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
 }
 
 export default function BenchmarksPage() {
@@ -202,12 +197,19 @@ function BenchmarkRow({
   onSelect: (b: BenchmarkWorkout) => void;
 }) {
   const stats = benchmark.userStats;
+  const isWeightlifting = !!benchmark.weightliftingMovementId;
   const movementSummary = useMemo(() => {
+    if (isWeightlifting) {
+      // The movement name is the benchmark name for weightlifting rows, so
+      // repeating it as "Back Squat · Back Squat" reads as a bug. Skip the
+      // movements line entirely — the rep-max grid below is the value.
+      return "Rep-max benchmark · 1RM / 2RM / 3RM / 5RM";
+    }
     const parts: string[] = [];
     if (benchmark.repScheme) parts.push(benchmark.repScheme);
     parts.push(benchmark.movements.map((m) => m.movementName).join(", "));
     return parts.filter(Boolean).join(" · ");
-  }, [benchmark]);
+  }, [benchmark, isWeightlifting]);
 
   return (
     <button
@@ -240,7 +242,9 @@ function BenchmarkRow({
         </div>
       </div>
 
-      {stats && stats.attempts > 0 && stats.bestScore && (
+      {isWeightlifting ? (
+        <RepMaxTeaserGrid stats={stats?.repMaxStats} />
+      ) : stats && stats.attempts > 0 && stats.bestScore ? (
         <div className="flex items-center gap-2 pt-1">
           <Badge className="gap-1 bg-amber-500/15 text-amber-300 border border-amber-500/30 hover:bg-amber-500/15">
             <Trophy className="size-3" />
@@ -253,15 +257,50 @@ function BenchmarkRow({
               : ""}
           </span>
         </div>
-      )}
-
-      {stats && stats.attempts === 0 && (
+      ) : stats && stats.attempts === 0 ? (
         <div className="flex items-center gap-1 pt-1 text-[11px] text-muted-foreground">
           <Sparkles className="size-3" />
           Not yet logged
         </div>
-      )}
+      ) : null}
     </button>
+  );
+}
+
+// Compact 4-up grid teaser for weightlifting benchmarks. Each cell shows
+// the heaviest weight for that rep target or an em-dash when the athlete
+// hasn't tested it. Drives discoverability of stale rep targets (e.g.
+// "I haven't tested my 2RM in 6 months").
+function RepMaxTeaserGrid({
+  stats,
+}: {
+  stats: Partial<Record<RepMaxTarget, RepMaxStat>> | undefined;
+}) {
+  return (
+    <div className="grid grid-cols-4 gap-1 pt-1">
+      {REP_MAX_TARGETS.map((target) => {
+        const s = stats?.[target];
+        return (
+          <div
+            key={target}
+            className="flex flex-col items-center justify-center rounded border border-border/40 bg-muted/20 px-1 py-1"
+          >
+            <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+              {target}RM
+            </span>
+            <span
+              className={
+                s
+                  ? "text-xs font-semibold text-amber-200"
+                  : "text-xs text-muted-foreground"
+              }
+            >
+              {s ? `${s.weightLbs} lb` : "—"}
+            </span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -356,7 +395,14 @@ function BenchmarkDetailDialog({
     benchmark.id
   );
   const createWorkout = useCreateWorkoutFromBenchmark();
+  const createRepMaxAttempt = useCreateRepMaxAttempt();
   const [date, setDate] = useState(toLocalDateString(new Date()));
+
+  const isWeightlifting = !!benchmark.weightliftingMovementId;
+  const wlHistory =
+    history && "repMaxHistory" in history
+      ? (history as WeightliftingBenchmarkHistory)
+      : null;
 
   const handleLogAttempt = useCallback(() => {
     createWorkout.mutate(
@@ -367,7 +413,9 @@ function BenchmarkDetailDialog({
             description: "Tap WODs to log your score.",
           });
           onClose();
-          router.push("/crossfit");
+          // Deep-link to the day the workout was added to, not "today",
+          // so the user lands directly on the new workout.
+          router.push(`/crossfit?date=${date}`);
         },
         onError: (err) => {
           toast.error(
@@ -377,6 +425,44 @@ function BenchmarkDetailDialog({
       }
     );
   }, [benchmark.id, benchmark.name, createWorkout, date, onClose, router]);
+
+  const handleLogRepMaxAttempt = useCallback(
+    (repTarget: RepMaxTarget) => {
+      if (!benchmark.weightliftingMovementId) return;
+      createRepMaxAttempt.mutate(
+        {
+          movementId: benchmark.weightliftingMovementId,
+          movementName: benchmark.name,
+          repTarget,
+          workoutDate: date,
+        },
+        {
+          onSuccess: () => {
+            toast.success(
+              `Added ${benchmark.name} ${repTarget}RM to ${formatShortDate(date)}`,
+              { description: "Tap WODs to log your score." }
+            );
+            onClose();
+            // Deep-link to the day the rep-max workout was added to.
+            router.push(`/crossfit?date=${date}`);
+          },
+          onError: (err) => {
+            toast.error(
+              err instanceof Error ? err.message : "Failed to add workout"
+            );
+          },
+        }
+      );
+    },
+    [
+      benchmark.name,
+      benchmark.weightliftingMovementId,
+      createRepMaxAttempt,
+      date,
+      onClose,
+      router,
+    ]
+  );
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -393,7 +479,7 @@ function BenchmarkDetailDialog({
                   {BENCHMARK_CATEGORY_SHORT_LABELS[benchmark.category]}
                 </Badge>
               )}
-              {benchmark.parts.length === 1 && (
+              {!isWeightlifting && benchmark.parts.length === 1 && (
                 <Badge
                   variant="outline"
                   className={WORKOUT_TYPE_COLORS[benchmark.workoutType]}
@@ -412,130 +498,171 @@ function BenchmarkDetailDialog({
             </p>
           )}
 
-          {/* Prescription — iterate parts so multi-part benchmarks (and
-              chipper-style benchmarks with blocks like Drew) render with
-              their proper structure. Single-part benchmarks collapse to
-              one section. */}
-          <div className="space-y-3">
-            {benchmark.parts.map((part, idx) => {
-              const showPartHeader = benchmark.parts.length > 1;
-              const partLabel =
-                part.label || `Part ${String.fromCharCode(65 + idx)}`;
-              return (
-                <div
-                  key={part.id}
-                  className={
-                    showPartHeader
-                      ? "rounded-md border border-border/40 bg-muted/20 p-3 space-y-2"
-                      : "space-y-2"
-                  }
-                >
-                  {showPartHeader && (
-                    <div className="flex items-center gap-2">
-                      <Badge
-                        variant="outline"
-                        className={WORKOUT_TYPE_COLORS[part.workoutType]}
-                      >
-                        {partLabel}
-                      </Badge>
-                      <span className="text-xs text-muted-foreground">
-                        {WORKOUT_TYPE_LABELS[part.workoutType]}
-                      </span>
-                    </div>
-                  )}
+          {isWeightlifting ? (
+            // Weightlifting branch: skip the prescription block entirely
+            // (the rep target is the prescription) and render rep-max tabs.
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="bench-date">Workout Date</Label>
+                <Input
+                  id="bench-date"
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                />
+                <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <CalendarDays className="size-3" />
+                  Used when you log a new attempt below.
+                </p>
+              </div>
 
-                  {part.repScheme && (
-                    <p className="text-sm font-medium">{part.repScheme}</p>
-                  )}
-                  {part.rounds && (
-                    <p className="text-xs text-muted-foreground">
-                      {part.rounds} rounds
-                    </p>
-                  )}
-                  {part.timeCapSeconds != null && (
-                    <p className="text-xs text-muted-foreground">
-                      Time cap: {Math.floor(part.timeCapSeconds / 60)} min
-                    </p>
-                  )}
-                  {part.amrapDurationSeconds != null && (
-                    <p className="text-xs text-muted-foreground">
-                      Duration: {Math.floor(part.amrapDurationSeconds / 60)} min
-                    </p>
-                  )}
+              <Separator />
 
-                  <BenchmarkPartMovementList
-                    blocks={part.blocks}
-                    movements={part.movements}
-                  />
+              {historyLoading ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
                 </div>
-              );
-            })}
-          </div>
-
-          <Separator />
-
-          {/* History */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold">Your History</h3>
-              {history && history.attempts.length > 0 && (
-                <span className="text-xs text-muted-foreground">
-                  {history.attempts.length} attempt
-                  {history.attempts.length === 1 ? "" : "s"}
-                </span>
+              ) : (
+                <WeightliftingBenchmarkTabs
+                  variants={wlHistory?.repMaxHistory.variants ?? []}
+                  onLogAttempt={handleLogRepMaxAttempt}
+                />
               )}
-            </div>
 
-            {historyLoading ? (
-              <div className="flex items-center justify-center py-4">
-                <Loader2 className="size-4 animate-spin text-muted-foreground" />
+              {createRepMaxAttempt.isPending && (
+                <p className="text-center text-xs text-muted-foreground">
+                  Adding workout…
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              {/* Prescription — iterate parts so multi-part benchmarks (and
+                  chipper-style benchmarks with blocks like Drew) render with
+                  their proper structure. Single-part benchmarks collapse to
+                  one section. */}
+              <div className="space-y-3">
+                {benchmark.parts.map((part, idx) => {
+                  const showPartHeader = benchmark.parts.length > 1;
+                  const partLabel =
+                    part.label || `Part ${String.fromCharCode(65 + idx)}`;
+                  return (
+                    <div
+                      key={part.id}
+                      className={
+                        showPartHeader
+                          ? "rounded-md border border-border/40 bg-muted/20 p-3 space-y-2"
+                          : "space-y-2"
+                      }
+                    >
+                      {showPartHeader && (
+                        <div className="flex items-center gap-2">
+                          <Badge
+                            variant="outline"
+                            className={WORKOUT_TYPE_COLORS[part.workoutType]}
+                          >
+                            {partLabel}
+                          </Badge>
+                          <span className="text-xs text-muted-foreground">
+                            {WORKOUT_TYPE_LABELS[part.workoutType]}
+                          </span>
+                        </div>
+                      )}
+
+                      {part.repScheme && (
+                        <p className="text-sm font-medium">{part.repScheme}</p>
+                      )}
+                      {part.rounds && (
+                        <p className="text-xs text-muted-foreground">
+                          {part.rounds} rounds
+                        </p>
+                      )}
+                      {part.timeCapSeconds != null && (
+                        <p className="text-xs text-muted-foreground">
+                          Time cap: {Math.floor(part.timeCapSeconds / 60)} min
+                        </p>
+                      )}
+                      {part.amrapDurationSeconds != null && (
+                        <p className="text-xs text-muted-foreground">
+                          Duration: {Math.floor(part.amrapDurationSeconds / 60)} min
+                        </p>
+                      )}
+
+                      <BenchmarkPartMovementList
+                        blocks={part.blocks}
+                        movements={part.movements}
+                      />
+                    </div>
+                  );
+                })}
               </div>
-            ) : history && history.attempts.length > 0 ? (
-              <div className="flex flex-col gap-1.5">
-                {history.attempts.map((a) => (
-                  <AttemptRow
-                    key={a.scoreId}
-                    workoutType={benchmark.workoutType}
-                    attempt={a}
+
+              <Separator />
+
+              {/* Legacy flat history */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold">Your History</h3>
+                  {history && "attempts" in history && history.attempts.length > 0 && (
+                    <span className="text-xs text-muted-foreground">
+                      {history.attempts.length} attempt
+                      {history.attempts.length === 1 ? "" : "s"}
+                    </span>
+                  )}
+                </div>
+
+                {historyLoading ? (
+                  <div className="flex items-center justify-center py-4">
+                    <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                  </div>
+                ) : history && "attempts" in history && history.attempts.length > 0 ? (
+                  <div className="flex flex-col gap-1.5">
+                    {history.attempts.map((a) => (
+                      <AttemptRow
+                        key={a.scoreId}
+                        workoutType={benchmark.workoutType}
+                        attempt={a}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-md border border-dashed border-white/[0.06] py-4 text-center text-xs text-muted-foreground">
+                    No attempts yet — log one below to start tracking your PR.
+                  </p>
+                )}
+              </div>
+
+              <Separator />
+
+              {/* Log new attempt */}
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="bench-date">Workout Date</Label>
+                  <Input
+                    id="bench-date"
+                    type="date"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
                   />
-                ))}
+                  <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <CalendarDays className="size-3" />
+                    Adds the workout to that day so you can log your score.
+                  </p>
+                </div>
+
+                <Button
+                  className="w-full"
+                  onClick={handleLogAttempt}
+                  disabled={createWorkout.isPending}
+                >
+                  <Plus className="size-4" />
+                  {createWorkout.isPending
+                    ? "Adding..."
+                    : "Log this benchmark"}
+                </Button>
               </div>
-            ) : (
-              <p className="rounded-md border border-dashed border-white/[0.06] py-4 text-center text-xs text-muted-foreground">
-                No attempts yet — log one below to start tracking your PR.
-              </p>
-            )}
-          </div>
-
-          <Separator />
-
-          {/* Log new attempt */}
-          <div className="space-y-3">
-            <div className="space-y-2">
-              <Label htmlFor="bench-date">Workout Date</Label>
-              <Input
-                id="bench-date"
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-              />
-              <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                <CalendarDays className="size-3" />
-                Adds the workout to that day so you can log your score.
-              </p>
-            </div>
-
-            <Button
-              className="w-full"
-              onClick={handleLogAttempt}
-              disabled={createWorkout.isPending}
-            >
-              <Plus className="size-4" />
-              {createWorkout.isPending
-                ? "Adding..."
-                : "Log this benchmark"}
-            </Button>
-          </div>
+            </>
+          )}
         </div>
       </DialogContent>
     </Dialog>
