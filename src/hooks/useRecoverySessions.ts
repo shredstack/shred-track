@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { pushTodaySnapshotToWatch } from "@/lib/native/today-snapshot";
 import type { RecoverySession, RecoverySessionItem } from "@/types/recovery";
 import type { RecoveryToday } from "@/lib/recovery/today-resolver";
 
@@ -61,9 +62,14 @@ export function useUpdateRecoverySession() {
       });
       if (!res.ok) throw new Error("Failed to update session");
     },
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["recovery-today"] });
       qc.invalidateQueries({ queryKey: ["recovery-history"] });
+      // Only push to Watch when the session was completed — partial
+      // updates (item-level toggles) don't move the Today "logged" pill.
+      if (vars.status === "complete") {
+        void pushTodaySnapshotToWatch();
+      }
     },
   });
 }

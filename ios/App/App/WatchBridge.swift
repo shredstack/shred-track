@@ -25,6 +25,7 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
         CAPPluginMethod(name: "setToken", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "clearToken", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "ackRaceSync", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "pushTodaySnapshot", returnType: CAPPluginReturnPromise),
     ]
 
     private var session: WCSession?
@@ -71,6 +72,26 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
         }
     }
 
+    /// Optional optimization (spec §3.2 step 5 / §5.2): after a score-log
+    /// mutation succeeds in the WebView, push the freshly assembled
+    /// "today" snapshot to the Watch so the green checkmark flips within
+    /// seconds instead of waiting for the Watch's next pull-to-refresh.
+    ///
+    /// Snapshot is sent as a JSON **string** — `updateApplicationContext`
+    /// requires plist-safe types and the nested structure is easier to
+    /// round-trip as text. The Watch decodes it on receipt.
+    @objc func pushTodaySnapshot(_ call: CAPPluginCall) {
+        guard let json = call.getString("json") else {
+            call.reject("Missing json"); return
+        }
+        do {
+            try session?.updateApplicationContext(["todaySnapshot": json])
+            call.resolve()
+        } catch {
+            call.reject("Failed to push snapshot: \(error.localizedDescription)")
+        }
+    }
+
     @objc func ackRaceSync(_ call: CAPPluginCall) {
         guard let raceLocalId = call.getString("raceLocalId") else {
             call.reject("Missing raceLocalId")
@@ -112,6 +133,27 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
                 "payloadJson": payloadJson,
             ]
         )
+    }
+
+    /// "Open on iPhone" tap from the Watch's TodayDetailView (spec §6.2).
+    /// The Watch sends `{kind: "openItem", type, id}` via sendMessage and
+    /// we forward it to the WebView. JS picks the relevant deep link
+    /// (e.g. /hyrox/plan/sessions/<id>) and `router.push`es it.
+    public func session(
+        _ session: WCSession,
+        didReceiveMessage message: [String: Any]
+    ) {
+        guard
+            message["kind"] as? String == "openItem",
+            let type = message["type"] as? String,
+            let id = message["id"] as? String
+        else { return }
+        DispatchQueue.main.async {
+            self.notifyListeners(
+                "openItemFromWatch",
+                data: ["type": type, "id": id]
+            )
+        }
     }
 
     public func session(

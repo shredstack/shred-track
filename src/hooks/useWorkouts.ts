@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { pushTodaySnapshotToWatch } from "@/lib/native/today-snapshot";
 import type {
   WorkoutDisplay,
   WorkoutPartDisplay,
@@ -512,6 +513,7 @@ export function useLogScore() {
       queryClient.invalidateQueries({ queryKey: ["workouts"] });
       queryClient.invalidateQueries({ queryKey: ["benchmarks"] });
       queryClient.invalidateQueries({ queryKey: ["benchmark-history"] });
+      void pushTodaySnapshotToWatch();
     },
   });
 }

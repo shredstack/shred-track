@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { pushTodaySnapshotToWatch } from "@/lib/native/today-snapshot";
 
 // ---------------------------------------------------------------------------
 // Per-movement result type (stored in JSONB)
@@ -281,6 +282,7 @@ export function useLogSession() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["hyrox-plan-weeks"] });
+      void pushTodaySnapshotToWatch();
     },
   });
 }
