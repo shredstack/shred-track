@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { usePlanCredits } from "@/hooks/usePlanCredits";
+import { useIsNative } from "@/hooks/useIsNative";
 import {
   PurchaseCancelledError,
   usePurchasePersonalized,
@@ -21,6 +22,7 @@ export function PlanChooser() {
   const router = useRouter();
   const credits = usePlanCredits();
   const purchase = usePurchasePersonalized();
+  const isNative = useIsNative();
 
   async function handleUpgrade() {
     // If a credit is already available (VIP, bypass, or a past purchase),
@@ -61,7 +63,9 @@ export function PlanChooser() {
         </div>
         <h1 className="mt-1 text-xl font-bold tracking-tight">Build your HYROX plan</h1>
         <p className="max-w-sm text-sm text-muted-foreground">
-          Pick the plan that fits where you are right now. You can upgrade any time.
+          {isNative
+            ? "Answer 5 quick questions and we'll build your structured 18-week plan in seconds."
+            : "Pick the plan that fits where you are right now. You can upgrade any time."}
         </p>
       </header>
 
@@ -71,13 +75,17 @@ export function PlanChooser() {
           <div className="flex items-baseline justify-between gap-2">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-widest text-primary">
-                Free Plan
+                {isNative ? "Your Plan" : "Free Plan"}
               </p>
-              <p className="mt-0.5 text-lg font-bold">$0 &middot; Ready in seconds</p>
+              <p className="mt-0.5 text-lg font-bold">
+                {isNative ? "Ready in seconds" : "$0 · Ready in seconds"}
+              </p>
             </div>
-            <Badge variant="secondary" className="text-[10px]">
-              Recommended to start
-            </Badge>
+            {!isNative && (
+              <Badge variant="secondary" className="text-[10px]">
+                Recommended to start
+              </Badge>
+            )}
           </div>
 
           <FeatureList
@@ -85,7 +93,9 @@ export function PlanChooser() {
               "Structured 18-week plan with periodized phases",
               "Built for your gender, race format, and running level",
               "All 8 HYROX stations, progressive weight + pace targets",
-              "Same plan view, logging, and race tools as personalized",
+              isNative
+                ? "Plan view, logging, and full race tools included"
+                : "Same plan view, logging, and race tools as personalized",
             ]}
           />
 
@@ -94,7 +104,7 @@ export function PlanChooser() {
             className="w-full"
             onClick={() => router.push("/hyrox/free-onboarding")}
           >
-            Start Free
+            {isNative ? "Get Started" : "Start Free"}
           </Button>
           <p className="text-center text-[10px] text-muted-foreground">
             Just 5 questions — no credit card.
@@ -102,7 +112,8 @@ export function PlanChooser() {
         </CardContent>
       </Card>
 
-      {/* Personalized card — secondary emphasis */}
+      {/* Personalized card — secondary emphasis. Hidden on native (Apple IAP). */}
+      {!isNative && (
       <Card>
         <CardContent className="flex flex-col gap-4 py-5">
           <div className="flex items-baseline justify-between gap-2">
@@ -143,6 +154,7 @@ export function PlanChooser() {
           )}
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }

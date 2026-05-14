@@ -12,6 +12,7 @@ import { PlanChooser } from "@/components/hyrox/plan-chooser";
 import { UpgradeCard } from "@/components/hyrox/upgrade-card";
 import { RecalibrationBanner } from "@/components/hyrox/race-history/recalibration-banner";
 import { usePlanCredits } from "@/hooks/usePlanCredits";
+import { useIsNative } from "@/hooks/useIsNative";
 import {
   PurchaseCancelledError,
   usePurchasePersonalized,
@@ -22,6 +23,7 @@ export default function HyroxPage() {
   const { data: plan, isLoading } = useActivePlan();
   const credits = usePlanCredits();
   const purchase = usePurchasePersonalized();
+  const isNative = useIsNative();
 
   // Poll status if plan is generating
   const isGenerating =
@@ -164,19 +166,22 @@ export default function HyroxPage() {
         </Button>
       </div>
 
-      {/* New personalized plan — purchases if no credit is available */}
-      <Button
-        variant="ghost"
-        className="w-full h-auto py-3 flex-col gap-0.5 text-muted-foreground"
-        onClick={handleNewPersonalizedPlan}
-        disabled={purchase.isPending || credits.isLoading}
-      >
-        <span className="text-xs font-medium inline-flex items-center gap-1.5">
-          {purchase.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
-          {newPlanLabel}
-        </span>
-        <span className="text-[10px]">{newPlanSubLabel}</span>
-      </Button>
+      {/* New personalized plan — purchases if no credit is available.
+          Hidden on native (Apple IAP); web users keep the full flow. */}
+      {!isNative && (
+        <Button
+          variant="ghost"
+          className="w-full h-auto py-3 flex-col gap-0.5 text-muted-foreground"
+          onClick={handleNewPersonalizedPlan}
+          disabled={purchase.isPending || credits.isLoading}
+        >
+          <span className="text-xs font-medium inline-flex items-center gap-1.5">
+            {purchase.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
+            {newPlanLabel}
+          </span>
+          <span className="text-[10px]">{newPlanSubLabel}</span>
+        </Button>
+      )}
 
       {/* Philosophy summary */}
       {philosophy?.summary && (

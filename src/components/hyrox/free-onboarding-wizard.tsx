@@ -10,6 +10,7 @@ import {
   useCreateFreePlan,
   RaceTooSoonError,
 } from "@/hooks/useHyroxPlan";
+import { useIsNative } from "@/hooks/useIsNative";
 import { DisclaimerModal } from "./disclaimer-modal";
 
 type Gender = "women" | "men";
@@ -74,6 +75,7 @@ export function FreeOnboardingWizard({ onCompleted }: Props) {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const createFreePlan = useCreateFreePlan();
+  const isNative = useIsNative();
 
   // Validation: what's the first unanswered question?
   const firstMissing = !gender
@@ -144,6 +146,7 @@ export function FreeOnboardingWizard({ onCompleted }: Props) {
           <RaceTooSoonNotice
             weeksUntilRace={raceTooSoon.weeksUntilRace}
             message={raceTooSoon.message}
+            isNative={isNative}
             onUpgrade={() => router.push("/hyrox/onboarding")}
             onReset={() => {
               setRaceDate(null);
@@ -293,14 +296,16 @@ export function FreeOnboardingWizard({ onCompleted }: Props) {
             <ArrowRight className="h-4 w-4" />
           </Button>
 
-          <button
-            type="button"
-            onClick={() => router.push("/hyrox/onboarding")}
-            className="text-center text-xs text-muted-foreground hover:text-foreground py-2"
-          >
-            Want a plan that fits your actual station times and weak spots?{" "}
-            <span className="underline underline-offset-2">Try Personalized →</span>
-          </button>
+          {!isNative && (
+            <button
+              type="button"
+              onClick={() => router.push("/hyrox/onboarding")}
+              className="text-center text-xs text-muted-foreground hover:text-foreground py-2"
+            >
+              Want a plan that fits your actual station times and weak spots?{" "}
+              <span className="underline underline-offset-2">Try Personalized →</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -449,14 +454,21 @@ function PaceTierCard({
 function RaceTooSoonNotice({
   weeksUntilRace,
   message,
+  isNative,
   onUpgrade,
   onReset,
 }: {
   weeksUntilRace: number;
   message: string;
+  isNative: boolean;
   onUpgrade: () => void;
   onReset: () => void;
 }) {
+  // The server message references the personalized upgrade. On native we
+  // can't surface that path, so swap in a self-contained explanation.
+  const displayMessage = isNative
+    ? "We need at least 14 weeks of runway to build a structured plan. Pick a later race date or start today and target a future race."
+    : message;
   return (
     <Card className="border-amber-500/30 bg-amber-500/5">
       <CardContent className="flex flex-col gap-3 py-4">
@@ -464,13 +476,20 @@ function RaceTooSoonNotice({
           <p className="text-sm font-semibold text-amber-500">
             Your race is only {weeksUntilRace} weeks away
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">{message}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{displayMessage}</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <Button size="sm" onClick={onUpgrade} className="flex-1">
-            Upgrade to Personalized
-          </Button>
-          <Button variant="outline" size="sm" onClick={onReset} className="flex-1">
+          {!isNative && (
+            <Button size="sm" onClick={onUpgrade} className="flex-1">
+              Upgrade to Personalized
+            </Button>
+          )}
+          <Button
+            variant={isNative ? "default" : "outline"}
+            size="sm"
+            onClick={onReset}
+            className="flex-1"
+          >
             Start today instead
           </Button>
         </div>

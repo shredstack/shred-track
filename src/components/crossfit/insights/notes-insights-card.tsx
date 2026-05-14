@@ -4,6 +4,7 @@ import { Sparkles, Loader2, AlertCircle, Trophy, Wrench } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useNotesInsights } from "@/hooks/useCrossfitInsights";
+import { useIsNative } from "@/hooks/useIsNative";
 import { useUserProfile } from "@/hooks/useProfile";
 import type {
   NotesAggregateComplaint,
@@ -15,6 +16,7 @@ import type {
 export function NotesInsightsCard() {
   const { data: user, isLoading: userLoading } = useUserProfile();
   const isVip = !!user?.isVip;
+  const isNative = useIsNative();
 
   const {
     data,
@@ -23,6 +25,10 @@ export function NotesInsightsCard() {
   } = useNotesInsights({ enabled: isVip });
 
   const isLoading = userLoading || (isVip && insightsLoading);
+
+  // On native, the only thing non-VIPs would see is the upsell teaser. Hide
+  // the whole card for them — no surfacing of paid-feature copy on iOS.
+  if (isNative && !isVip) return null;
 
   return (
     <Card className="gradient-border">
