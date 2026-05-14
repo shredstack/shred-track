@@ -144,6 +144,110 @@ export function formatStationPace(
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Custom race helpers — distance parsing, pace normalization, PR eligibility
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a distance display string into integer meters. Accepts forms like
+ * "1000m", "1 km", "50m", "100 m". Returns null when the value can't be
+ * understood — callers should treat that the same as "no distance set".
+ */
+export function parseDistanceToMeters(s?: string | null): number | null {
+  if (!s) return null;
+  const trimmed = s.trim().toLowerCase();
+  const match = trimmed.match(/^([\d.]+)\s*(km|m)?$/);
+  if (!match) return null;
+  const value = parseFloat(match[1]);
+  if (!isFinite(value) || value <= 0) return null;
+  return match[2] === "km" ? Math.round(value * 1000) : Math.round(value);
+}
+
+/**
+ * Normalized pace seconds for comparing two station attempts at potentially
+ * different distances / rep counts.
+ *
+ * - per500m stations: seconds per 500m
+ * - perRep stations: seconds per rep
+ * - total stations: null (cannot meaningfully normalize)
+ *
+ * Returns null if the required input (distance or reps) is missing.
+ */
+export function normalizeStationPaceSeconds(
+  stationName: string,
+  timeSeconds: number,
+  distanceM?: number | null,
+  reps?: number | null,
+): number | null {
+  const paceType = STATION_PACE_TYPE[stationName] ?? "total";
+  if (paceType === "per500m") {
+    if (!distanceM || distanceM <= 0) return null;
+    return (timeSeconds / distanceM) * 500;
+  }
+  if (paceType === "perRep") {
+    if (!reps || reps <= 0) return null;
+    return timeSeconds / reps;
+  }
+  return null;
+}
+
+/**
+ * Whether a station attempt is eligible to set a personal best. To rule
+ * out sprints and scaled work, the attempt must be at least 90% of the
+ * canonical distance, 90% of the canonical reps, and 95% of the
+ * canonical weight (for stations that have those fields).
+ *
+ * When any of (distanceM, reps, weightKg) is null/undefined we treat
+ * that dimension as "matches canonical" — this preserves legacy
+ * benchmark rows that were inserted before these columns existed.
+ */
+export function isCanonicalAttempt(
+  stationName: string,
+  divisionKey: DivisionKey | null | undefined,
+  distanceM?: number | null,
+  reps?: number | null,
+  weightKg?: number | null,
+): boolean {
+  if (!divisionKey) return true;
+  const div = DIVISIONS[divisionKey];
+  if (!div) return true;
+  const spec = div.stations.find((st) => st.name === stationName);
+  if (!spec) return true;
+
+  if (distanceM != null && spec.distance) {
+    const canonical = parseDistanceToMeters(spec.distance);
+    if (canonical && distanceM < canonical * 0.9) return false;
+  }
+  if (reps != null && spec.reps) {
+    if (reps < spec.reps * 0.9) return false;
+  }
+  if (weightKg != null && spec.weightKg) {
+    if (weightKg < spec.weightKg * 0.95) return false;
+  }
+  return true;
+}
+
+/**
+ * Standard adult baseline for a named station — distance in meters and
+ * reps. Used by display-side PR filters where we don't have the
+ * division key for each historical attempt. All adult Open/Pro/Elite
+ * divisions share these distances and rep counts; only weight differs,
+ * which we don't filter on at read time.
+ *
+ * Returns null for stations not in the standard adult set
+ * (e.g. youngstars-specific names like "Wall Ball Squats").
+ */
+export function getStandardStationBaseline(
+  stationName: string,
+): { distanceM: number | null; reps: number | null } | null {
+  const spec = DIVISIONS.women_open.stations.find((s) => s.name === stationName);
+  if (!spec) return null;
+  return {
+    distanceM: spec.distance ? parseDistanceToMeters(spec.distance) : null,
+    reps: spec.reps ?? null,
+  };
+}
+
 /**
  * Compute the average run pace (seconds per kilometer) across the run
  * splits of a saved race. Per pace spec §3, weights by measured

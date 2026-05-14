@@ -5,6 +5,14 @@ export interface HyroxStationBenchmark {
   userId: string;
   station: string;
   timeSeconds: number;
+  /** Distance achieved during this attempt in meters. NULL on legacy
+   *  rows means "assume the canonical distance for the source race's
+   *  division." */
+  distanceMeters: number | null;
+  reps: number | null;
+  /** Numeric column — postgres returns as string. */
+  weightKg: string | null;
+  weightLabel: string | null;
   loggedAt: string;
   source: string | null;
   notes: string | null;

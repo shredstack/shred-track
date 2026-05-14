@@ -4,12 +4,45 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { Trophy, ExternalLink } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatTime, STATION_ORDER } from "@/lib/hyrox-data";
+import {
+  formatTime,
+  getStandardStationBaseline,
+  STATION_ORDER,
+} from "@/lib/hyrox-data";
 import { StationSparkline } from "./station-sparkline";
 import {
   useHyroxStationBenchmarks,
   type HyroxStationBenchmark,
 } from "@/hooks/useHyroxStationBenchmarks";
+
+/**
+ * Whether a benchmark row is eligible to be displayed as a "best time"
+ * here. Distance and reps come back NULL on legacy rows — those are
+ * treated as canonical (preserves the pre-feature behavior). Custom
+ * races store the actual values; we filter those out when they fall
+ * below ~90% of the standard adult baseline so a short sprint can't
+ * displace a full-distance PR. Weight is not filtered at read time —
+ * the time itself implicitly captures heavier scaling (slower).
+ */
+function isStandardAttempt(b: HyroxStationBenchmark): boolean {
+  const baseline = getStandardStationBaseline(b.station);
+  if (!baseline) return true;
+  if (
+    b.distanceMeters != null &&
+    baseline.distanceM != null &&
+    b.distanceMeters < baseline.distanceM * 0.9
+  ) {
+    return false;
+  }
+  if (
+    b.reps != null &&
+    baseline.reps != null &&
+    b.reps < baseline.reps * 0.9
+  ) {
+    return false;
+  }
+  return true;
+}
 
 interface RowData {
   station: string;
@@ -31,11 +64,17 @@ export function StationBestTimes() {
     }
     const result: RowData[] = [];
     for (const [station, entries] of byStation.entries()) {
-      const sorted = [...entries].sort(
+      // Canonical-only sources for the "Best" pick and the sparkline.
+      // If the user has no canonical attempts yet (all their logged
+      // benchmarks are short sprints), fall back to all entries — this
+      // keeps something on screen instead of dropping the station row.
+      const canonical = entries.filter(isStandardAttempt);
+      const pool = canonical.length > 0 ? canonical : entries;
+      const sorted = [...pool].sort(
         (a, b) =>
           new Date(a.loggedAt).getTime() - new Date(b.loggedAt).getTime(),
       );
-      const best = entries.reduce((m, e) =>
+      const best = pool.reduce((m, e) =>
         e.timeSeconds < m.timeSeconds ? e : m,
       );
       result.push({

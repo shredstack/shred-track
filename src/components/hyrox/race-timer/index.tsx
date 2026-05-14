@@ -177,6 +177,11 @@ export function RaceTimerFlow() {
             ...(typeof s.distanceMeters === "number"
               ? { distanceMeters: s.distanceMeters }
               : {}),
+            ...(typeof s.reps === "number" ? { reps: s.reps } : {}),
+            ...(typeof s.weightKg === "number" ? { weightKg: s.weightKg } : {}),
+            ...(typeof s.weightLabel === "string" && s.weightLabel
+              ? { weightLabel: s.weightLabel }
+              : {}),
           })),
         };
 
