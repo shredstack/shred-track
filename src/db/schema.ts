@@ -1017,6 +1017,11 @@ export const hyroxPracticeRaces = pgTable(
     notes: text("notes"),
     raceType: text("race_type").notNull().default("practice"), // 'practice' | 'actual'
     planSessionId: uuid("plan_session_id").references(() => hyroxPlanSessions.id, { onDelete: "set null" }),
+    // Client-supplied dedup key. Both the paired watch and phone share
+    // the same UUID for a given race, so a duplicate POST from either
+    // device is treated as an idempotent no-op (partial UNIQUE index
+    // on user_id + client_race_id where NOT NULL).
+    clientRaceId: text("client_race_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [

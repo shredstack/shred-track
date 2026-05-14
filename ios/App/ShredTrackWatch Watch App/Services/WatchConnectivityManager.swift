@@ -446,6 +446,12 @@ extension WatchConnectivityManager: WCSessionDelegate {
             )
         case "race.cancel":
             timer.applyRemoteCancel(raceId: raceId)
+        case "race.saved":
+            // Phone POSTed this race to the server. Dismiss the
+            // watch's complete-screen Save? prompt — server-side
+            // idempotency makes a duplicate watch-save a no-op,
+            // but UX-wise the user shouldn't be asked twice.
+            timer.applyRemoteSaved(raceId: raceId)
         default:
             break
         }

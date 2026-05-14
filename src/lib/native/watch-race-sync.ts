@@ -24,6 +24,17 @@
 //   race.finish   — bidirectional. End-race tap. { raceId, at }
 //   race.cancel   — bidirectional. Cancel pre-race countdown / discard
 //                   the in-progress race. { raceId }
+//   race.saved    — phone → watch: the phone POSTed this race to the
+//                   server and got back a server-side id. The watch
+//                   uses this to dismiss its "Save?" prompt and avoid
+//                   a duplicate POST. Safe under server-side
+//                   idempotency (client_race_id) even if the watch
+//                   user taps Save before this arrives.
+//                   { raceId, serverRaceId }
+//   race.discard  — watch → phone: the watch user tapped Discard on
+//                   the complete screen for a finished race. Phone
+//                   drops its complete-screen state so it doesn't
+//                   linger as a ghost. { raceId }
 //
 // The Swift plugin uses `WCSession.sendMessage` for low-latency delivery
 // when reachable, with a `transferUserInfo` fallback if not — that
@@ -55,7 +66,9 @@ interface SendRaceEventArgs {
     | "race.pause"
     | "race.resume"
     | "race.finish"
-    | "race.cancel";
+    | "race.cancel"
+    | "race.saved"
+    | "race.discard";
   /** JSON-encoded payload — keeps the bridge schema flat. */
   payloadJson: string;
 }
@@ -108,6 +121,9 @@ export interface RaceSyncHandlers {
     startAt: number;
     segments: RaceSegment[];
   }) => void;
+  /** Watch user discarded a *finished* race from the complete screen.
+   *  Phone drops its mirror so it doesn't linger as a ghost. */
+  onDiscard: (event: { raceId: string }) => void;
 }
 
 let handlers: Partial<RaceSyncHandlers> = {};
@@ -180,6 +196,22 @@ export function sendFinishToWatch(args: { raceId: string; at: number }): Promise
 
 export function sendCancelToWatch(args: { raceId: string }): Promise<void> {
   return sendEvent(args.raceId, "race.cancel", {});
+}
+
+/**
+ * Phone → Watch: a race we know the phone POSTed to the server (with
+ * the shared `raceId` as its idempotency key) is now saved. The watch
+ * uses this to dismiss its complete-screen "Save?" prompt — server-
+ * side idempotency makes it safe either way, this just keeps the UI
+ * from prompting for a save that's already happened.
+ */
+export function sendRaceSavedToWatch(args: {
+  raceId: string;
+  serverRaceId: string;
+}): Promise<void> {
+  return sendEvent(args.raceId, "race.saved", {
+    serverRaceId: args.serverRaceId,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +298,14 @@ export function installWatchRaceSyncListener(): void {
         case "race.cancel":
           handlers.onCancel?.({ raceId });
           break;
+        case "race.discard":
+          // Watch user discarded a finished race; phone should drop
+          // its mirror. Reuse the cancel handler semantics so we end
+          // up back at setup.
+          handlers.onDiscard?.({ raceId });
+          break;
+        // race.saved flows phone → watch only. If it ever arrives the
+        // other direction we ignore it; the phone is the POSTing side.
       }
     });
   } catch (err) {

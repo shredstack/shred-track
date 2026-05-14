@@ -20,8 +20,26 @@
 // it'll auto-resend on next reachability flip once that hook lands).
 
 import { isNativeApp } from "./is-native";
+import { sendRaceSavedToWatch } from "./watch-race-sync";
 
 let installed = false;
+
+// ---------------------------------------------------------------------------
+// Phone-side "watch race was just saved" subscribe API. The race-timer
+// flow uses this to flip its complete screen from "Saved on Watch
+// (syncing)…" → "Saved from your Watch ✓" without round-tripping
+// through the watch first. Independent of `race.saved` (which flows
+// phone → watch); this is a same-process notification on the phone.
+// ---------------------------------------------------------------------------
+
+type WatchRaceSavedEvent = { raceId: string; serverRaceId?: string };
+type WatchRaceSavedListener = (event: WatchRaceSavedEvent) => void;
+const watchRaceSavedListeners = new Set<WatchRaceSavedListener>();
+
+export function onWatchRaceSaved(listener: WatchRaceSavedListener): () => void {
+  watchRaceSavedListeners.add(listener);
+  return () => watchRaceSavedListeners.delete(listener);
+}
 
 interface SplitsFromWatchEvent {
   raceLocalId: string;
@@ -80,6 +98,15 @@ export function installWatchRaceRelay(): void {
         return;
       }
 
+      // Client-supplied race id, shared between watch and phone. Older
+      // watch builds (pre-watch_finish_owns_save_spec) didn't include
+      // it, so leave undefined when absent — the server will mint a
+      // new id like before.
+      const clientRaceId =
+        typeof (payload as { raceId?: unknown }).raceId === "string"
+          ? ((payload as { raceId: string }).raceId)
+          : undefined;
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => {
         console.warn(
@@ -109,12 +136,47 @@ export function installWatchRaceRelay(): void {
           return;
         }
 
+        // Read the server's race id once and reuse for both the ack
+        // and the race.saved broadcast. response.json() can only be
+        // called once — don't try again later.
+        let serverRaceId: string | undefined;
+        try {
+          const json = (await response.json()) as { id?: string };
+          if (typeof json.id === "string") serverRaceId = json.id;
+        } catch {
+          // Non-JSON or empty body — fine, race.saved still works
+          // without a serverRaceId (the watch only needs raceId).
+        }
+
         console.log(
           "[watch-race-relay] POST succeeded, acking race",
           raceLocalId,
         );
         await bridge.ackRaceSync({ raceLocalId });
         console.log("[watch-race-relay] ack sent to watch");
+
+        // Tell the watch the server now has this race so it can
+        // dismiss its complete-screen Save? prompt. Server-side
+        // idempotency (client_race_id) means a redundant watch-tap
+        // is harmless, but UX-wise we don't want the watch to prompt
+        // the user for a save that's already happened.
+        if (clientRaceId) {
+          void sendRaceSavedToWatch({
+            raceId: clientRaceId,
+            serverRaceId: serverRaceId ?? "",
+          });
+
+          // Notify same-process listeners (the race timer flow) so
+          // its complete screen can flip out of the "Saved on Watch
+          // (syncing)…" placeholder into the success state.
+          for (const fn of watchRaceSavedListeners) {
+            try {
+              fn({ raceId: clientRaceId, serverRaceId });
+            } catch (err) {
+              console.warn("[watch-race-relay] saved listener threw", err);
+            }
+          }
+        }
       } catch (err) {
         const isAbort =
           err instanceof Error &&

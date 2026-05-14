@@ -8,7 +8,7 @@ import {
   hyroxProfiles,
   hyroxRaceReports,
 } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import { inngest } from "@/inngest/client";
 import {
   isCanonicalAttempt,
@@ -65,6 +65,10 @@ interface RacePayload {
   raceType?: "practice" | "actual";
   planSessionId?: string;
   source?: "web" | "phone" | "watch";
+  /** Client-supplied id shared between phone + watch for the same
+   *  race. When present, dedups against an existing row scoped to
+   *  this user — a duplicate POST is an idempotent no-op. */
+  raceId?: string;
   totalTimeSeconds: number;
   startedAt: string;
   completedAt: string;
@@ -121,10 +125,60 @@ export async function POST(request: Request) {
     completedAt: body.completedAt,
   });
 
-  let result;
+  const clientRaceId =
+    typeof body.raceId === "string" && body.raceId.length > 0
+      ? body.raceId
+      : null;
+
+  type TxResult = {
+    // Only `id` is read downstream; title etc come back on the full row
+    // in the non-dedup path but aren't part of the response shape.
+    race: { id: string };
+    personalBests: string[];
+    isFinishPR: boolean;
+    priorBestFinishSeconds: number | null;
+    dedupHit?: boolean;
+  };
+
+  let result: TxResult;
   try {
   // Use a transaction for atomicity
-  result = await db.transaction(async (tx) => {
+  result = await db.transaction(async (tx): Promise<TxResult> => {
+    // Idempotency check: if the client supplied a raceId and a row
+    // already exists for (userId, clientRaceId), return it without
+    // re-inserting splits or recomputing benchmarks. The partial
+    // UNIQUE index on (user_id, client_race_id) WHERE NOT NULL is the
+    // safety net for the genuinely-concurrent insert race — the
+    // second tx hits the constraint and throws, which the outer
+    // handler re-reads below.
+    if (clientRaceId) {
+      const [existing] = await tx
+        .select({ id: hyroxPracticeRaces.id })
+        .from(hyroxPracticeRaces)
+        .where(
+          and(
+            eq(hyroxPracticeRaces.userId, user.id),
+            eq(hyroxPracticeRaces.clientRaceId, clientRaceId),
+          ),
+        )
+        .limit(1);
+
+      if (existing) {
+        console.log("[practice-races POST] dedup hit", {
+          userId: user.id,
+          clientRaceId,
+          existingRaceId: existing.id,
+        });
+        return {
+          race: { id: existing.id },
+          personalBests: [],
+          isFinishPR: false,
+          priorBestFinishSeconds: null,
+          dedupHit: true,
+        };
+      }
+    }
+
     // 1. Insert the race
     const [race] = await tx
       .insert(hyroxPracticeRaces)
@@ -139,6 +193,7 @@ export async function POST(request: Request) {
         notes: body.notes,
         raceType,
         planSessionId: body.planSessionId ?? null,
+        clientRaceId,
       })
       .returning();
 
@@ -302,6 +357,42 @@ export async function POST(request: Request) {
     return { race, personalBests, isFinishPR, priorBestFinishSeconds };
   });
   } catch (err) {
+    // Concurrent-insert race against the partial UNIQUE index on
+    // (user_id, client_race_id). The pre-check inside the tx caught
+    // 99% of cases; this is the safety net for the microsecond window
+    // where two transactions both pre-check empty before either
+    // commits. Postgres throws 23505; re-read and return the winner.
+    const code = (err as { code?: unknown })?.code;
+    if (code === "23505" && clientRaceId) {
+      try {
+        const [existing] = await db
+          .select({ id: hyroxPracticeRaces.id })
+          .from(hyroxPracticeRaces)
+          .where(
+            and(
+              eq(hyroxPracticeRaces.userId, user.id),
+              eq(hyroxPracticeRaces.clientRaceId, clientRaceId),
+            ),
+          )
+          .limit(1);
+        if (existing) {
+          console.log("[practice-races POST] dedup hit via unique-violation", {
+            userId: user.id,
+            clientRaceId,
+            existingRaceId: existing.id,
+          });
+          return NextResponse.json({
+            id: existing.id,
+            personalBests: [] as string[],
+            isFinishPR: false,
+            priorBestFinishSeconds: null,
+            raceType,
+          });
+        }
+      } catch {
+        // fall through to 500 below
+      }
+    }
     const message = err instanceof Error ? err.message : String(err);
     const stack = err instanceof Error ? err.stack : undefined;
     console.error("[practice-races POST] save failed", {
@@ -318,20 +409,24 @@ export async function POST(request: Request) {
   console.log("[practice-races POST] saved", {
     raceId: result.race.id,
     personalBests: result.personalBests,
+    dedupHit: result.dedupHit ?? false,
   });
 
-  // Fire Inngest event to generate the AI race report (fire-and-forget).
-  // Failures here should not break the save response.
-  try {
-    await inngest.send({
-      name: "hyrox/race.completed",
-      data: {
-        raceId: result.race.id,
-        userId: user.id,
-      },
-    });
-  } catch (err) {
-    console.error("Failed to dispatch hyrox/race.completed event:", err);
+  // On dedup hit the splits/benchmarks/report were already created on
+  // the first save. Skip the Inngest dispatch — re-firing would
+  // generate a second AI race report for the same race.
+  if (!result.dedupHit) {
+    try {
+      await inngest.send({
+        name: "hyrox/race.completed",
+        data: {
+          raceId: result.race.id,
+          userId: user.id,
+        },
+      });
+    } catch (err) {
+      console.error("Failed to dispatch hyrox/race.completed event:", err);
+    }
   }
 
   return NextResponse.json({
