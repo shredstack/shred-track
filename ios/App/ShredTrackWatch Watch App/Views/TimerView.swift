@@ -61,6 +61,7 @@ struct TimerView: View {
 
     @State private var showFinishConfirm: Bool = false
     @State private var showDiscardConfirm: Bool = false
+    @State private var showPauseConfirm: Bool = false
     @State private var isStarting: Bool = false
 
     private let unit: PaceUnit = .kilometer  // TODO read from App Group
@@ -252,51 +253,66 @@ struct TimerView: View {
     // MARK: - Active
 
     private var activeScreen: some View {
-        VStack(spacing: 4) {
-            // Current segment label
-            Text(currentLabel)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        // NavigationStack so the segment label sits in the system title
+        // band — watchOS lays the title out next to the clock instead of
+        // under it, so long names like "Burpee Broad Jumps" stop getting
+        // clipped by the time-of-day.
+        NavigationStack {
+            VStack(spacing: 4) {
+                // Pace primary
+                if isOnRun {
+                    Text(PaceComputation.format(secPerKm: vm.currentRunPaceSecPerKm, unit: unit))
+                        .font(.system(size: 32, weight: .bold, design: .monospaced))
+                        .minimumScaleFactor(0.5)
+                        .lineLimit(1)
+                        .foregroundStyle(.blue)
+                } else {
+                    Text("—")
+                        .font(.system(size: 32, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
 
-            // Pace primary
-            if isOnRun {
-                Text(PaceComputation.format(secPerKm: vm.currentRunPaceSecPerKm, unit: unit))
-                    .font(.system(size: 32, weight: .bold, design: .monospaced))
+                // Segment time (medium)
+                Text(formatTime(ms: vm.segmentElapsedMs))
+                    .font(.system(size: 24, weight: .semibold, design: .monospaced))
                     .minimumScaleFactor(0.5)
                     .lineLimit(1)
-                    .foregroundStyle(.blue)
-            } else {
-                Text("—")
-                    .font(.system(size: 32, weight: .bold, design: .monospaced))
+
+                // Avg run pace
+                HStack(spacing: 4) {
+                    Text("avg")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Text(PaceComputation.format(secPerKm: vm.avgRunPaceSecPerKm, unit: unit))
+                        .font(.system(size: 16, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+
+                // Total elapsed
+                Text("Total \(formatTime(ms: vm.totalElapsedMs))")
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
+
+                // Next-up hint, runs only — most useful when planning
+                // the path through roxzone. Yellow so it pops without
+                // colliding with the green/red action semantics.
+                if isOnRun, let next = nextSegment {
+                    Text("Next: \(Self.shortLabel(next.label))")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.yellow)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+
+                // Action buttons
+                actionButtons
+                    .padding(.top, 4)
             }
-
-            // Segment time (medium)
-            Text(formatTime(ms: vm.segmentElapsedMs))
-                .font(.system(size: 24, weight: .semibold, design: .monospaced))
-                .minimumScaleFactor(0.5)
-                .lineLimit(1)
-
-            // Avg run pace
-            HStack(spacing: 4) {
-                Text("avg")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                Text(PaceComputation.format(secPerKm: vm.avgRunPaceSecPerKm, unit: unit))
-                    .font(.system(size: 16, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-
-            // Total elapsed
-            Text("Total \(formatTime(ms: vm.totalElapsedMs))")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            // Action buttons
-            actionButtons
-                .padding(.top, 4)
+            .padding(.horizontal, 6)
+            .navigationTitle(Self.shortLabel(currentLabel))
+            .navigationBarTitleDisplayMode(.inline)
         }
-        .padding(.horizontal, 6)
         .confirmationDialog(
             "End the race?",
             isPresented: $showFinishConfirm,
@@ -307,30 +323,42 @@ struct TimerView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        .confirmationDialog(
+            "Pause the race?",
+            isPresented: $showPauseConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Pause") { vm.pause() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your clock will stop until you tap Resume.")
+        }
     }
 
     @ViewBuilder
     private var actionButtons: some View {
         switch vm.state.status {
         case .running:
-            VStack(spacing: 4) {
-                // Primary tap target — large and obvious.
+            // Pause sits beside SPLIT (not below it) so it never scrolls
+            // off the bottom of a 41mm screen. Tap shows a confirm sheet
+            // so an accidental tap doesn't quietly stop the clock.
+            HStack(spacing: 6) {
+                // Fixed 50pt keeps Pause above the 44pt min-tap target
+                // but visually subordinate to SPLIT, which takes the
+                // remaining width.
+                Button(action: { showPauseConfirm = true }) {
+                    Image(systemName: "pause.fill")
+                        .font(.title3)
+                }
+                .tint(.orange)
+                .frame(width: 50)
+
                 Button(action: { vm.split() }) {
                     Text(isLastSegment ? "FINISH" : "SPLIT")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                 }
                 .tint(isLastSegment ? .red : .green)
-
-                // Secondary: visible Pause button. Replaces the
-                // long-press-on-SPLIT gesture that nobody knew about.
-                Button(action: { vm.pause() }) {
-                    Label("Pause", systemImage: "pause.circle")
-                        .font(.caption2)
-                        .frame(maxWidth: .infinity)
-                }
-                .controlSize(.mini)
-                .tint(.orange)
             }
         case .paused:
             HStack {
@@ -440,6 +468,22 @@ struct TimerView: View {
 
     private var isLastSegment: Bool {
         vm.state.currentSegmentIndex >= vm.state.segments.count - 1
+    }
+
+    private var nextSegment: RaceSegment? {
+        let nextIdx = vm.state.currentSegmentIndex + 1
+        guard nextIdx < vm.state.segments.count else { return nil }
+        return vm.state.segments[nextIdx]
+    }
+
+    /// Display-only abbreviation for labels that don't fit the watch's
+    /// title band or the "Next:" caption. Canonical labels stay
+    /// unchanged in the data model and on saved splits.
+    static func shortLabel(_ label: String) -> String {
+        switch label {
+        case "Burpee Broad Jumps": return "Burpees"
+        default: return label
+        }
     }
 
     private func formatTime(ms: Double) -> String {
