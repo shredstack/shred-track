@@ -8,7 +8,11 @@ import WatchConnectivity
 // The WebView calls these methods via:
 //   Capacitor.Plugins.WatchBridge.setToken({ accessToken, expiresAt, userId })
 //   Capacitor.Plugins.WatchBridge.clearToken()
-//   Capacitor.Plugins.WatchBridge.relaySplits({ raceLocalId, payloadJson })
+//   Capacitor.Plugins.WatchBridge.pushTodaySnapshot({ json })
+//   Capacitor.Plugins.WatchBridge.ackRaceSync({ raceLocalId })
+//   Capacitor.Plugins.WatchBridge.sendRaceStart({ raceId, divisionKey,
+//     template, simulateRoxzone, startAt, segments })
+//   Capacitor.Plugins.WatchBridge.sendRaceEvent({ raceId, kind, payloadJson })
 //
 // Token pushes use `WCSession.updateApplicationContext(_:)` (latest
 // value wins — fine for a single current token). Race-sync acks use
@@ -16,6 +20,11 @@ import WatchConnectivity
 // independently: if the user saves two races offline, an
 // applicationContext-based ack for the first would be clobbered by the
 // second before the Watch ever sees it.
+//
+// In-race events (`sendRaceEvent`) prefer `sendMessage` for low-latency
+// delivery while the watch app is in the foreground, with a
+// `transferUserInfo` fallback when the watch is not reachable so a tap
+// is never silently lost.
 
 @objc(WatchBridge)
 public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
@@ -26,12 +35,14 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
         CAPPluginMethod(name: "clearToken", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "ackRaceSync", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "pushTodaySnapshot", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "sendRaceStart", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "sendRaceEvent", returnType: CAPPluginReturnPromise),
     ]
 
     private var session: WCSession?
 
     /// Last-known context keys. Merged across `setToken` / `clearToken` /
-    /// `pushTodaySnapshot` calls so that:
+    /// `pushTodaySnapshot` / `sendRaceStart` calls so that:
     ///   1. If a call arrives before `WCSession` finishes activating, we
     ///      can flush the pending context once `activationDidCompleteWith`
     ///      fires with `.activated` instead of dropping it on the floor.
@@ -155,6 +166,85 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
         call.resolve()
     }
 
+    // MARK: - Bidirectional race sync
+
+    /// Phone → Watch: hand off a freshly-started race so the watch app
+    /// can adopt it and start showing the same countdown + clock.
+    /// Delivered via `updateApplicationContext` (whole-snapshot,
+    /// latest-value-wins) so a stale in-flight "start" can't clobber a
+    /// fresher one. The watch reads the snapshot under the
+    /// `pendingRaceStart` key on receipt.
+    @objc func sendRaceStart(_ call: CAPPluginCall) {
+        guard let raceId = call.getString("raceId") else {
+            call.reject("Missing raceId"); return
+        }
+        // Serialize the start payload as JSON inside the context so we
+        // don't have to flatten/unflatten plist-incompatible structures.
+        var startPayload: [String: Any] = [
+            "raceId": raceId,
+            "divisionKey": call.getString("divisionKey") ?? "women_open",
+            "template": call.getString("template") ?? "full",
+            "simulateRoxzone": call.getBool("simulateRoxzone") ?? false,
+            "startAt": call.getDouble("startAt") ?? Double(Date().timeIntervalSince1970 * 1000),
+            "originDevice": "phone",
+        ]
+        if let segments = call.getArray("segments") {
+            // Round-trip via JSONSerialization to strip non-plist types
+            // before stuffing the JSON-string into the context.
+            if let data = try? JSONSerialization.data(withJSONObject: segments) {
+                startPayload["segmentsJson"] = String(data: data, encoding: .utf8) ?? "[]"
+            }
+        }
+        guard let payloadData = try? JSONSerialization.data(withJSONObject: startPayload),
+              let payloadString = String(data: payloadData, encoding: .utf8)
+        else {
+            call.reject("Failed to encode race start payload"); return
+        }
+        switch updateContext(
+            sets: ["pendingRaceStart": payloadString],
+            from: "sendRaceStart"
+        ) {
+        case .success: call.resolve()
+        case .failure(let error):
+            call.reject("Failed to send race start: \(error.localizedDescription)")
+        }
+    }
+
+    /// Phone → Watch: live race event (split / pause / resume / finish /
+    /// cancel / enrichment). Prefer `sendMessage` for low-latency
+    /// delivery while both apps are in the foreground; fall back to
+    /// `transferUserInfo` when the watch isn't reachable so a tap can't
+    /// be silently lost during a brief connectivity dip.
+    @objc func sendRaceEvent(_ call: CAPPluginCall) {
+        guard
+            let raceId = call.getString("raceId"),
+            let kind = call.getString("kind"),
+            let payloadJson = call.getString("payloadJson")
+        else {
+            call.reject("Missing raceId, kind, or payloadJson")
+            return
+        }
+        let message: [String: Any] = [
+            "kind": kind,
+            "raceId": raceId,
+            "payloadJson": payloadJson,
+        ]
+        guard let session, session.activationState == .activated else {
+            print("[WatchBridge] sendRaceEvent: WCSession not activated — dropping \(kind)")
+            call.resolve()
+            return
+        }
+        if session.isReachable {
+            session.sendMessage(message, replyHandler: nil) { error in
+                print("[WatchBridge] sendMessage(\(kind)) failed: \(error.localizedDescription) — falling back to transferUserInfo")
+                session.transferUserInfo(message)
+            }
+        } else {
+            session.transferUserInfo(message)
+        }
+        call.resolve()
+    }
+
     // MARK: - Splits sync from Watch
 
     public func session(
@@ -162,28 +252,35 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
         didReceiveUserInfo userInfo: [String: Any] = [:]
     ) {
         print("[WatchBridge] didReceiveUserInfo keys=\(Array(userInfo.keys)) kind=\(userInfo["kind"] ?? "nil")")
-        guard
-            userInfo["kind"] as? String == "race.save",
-            let raceLocalId = userInfo["raceLocalId"] as? String,
-            let payloadJson = userInfo["payloadJson"] as? String
-        else {
-            print("[WatchBridge] dropping userInfo — not a race.save or missing fields")
+        let kind = userInfo["kind"] as? String
+
+        // Existing race-save flow: watch enqueues finished race for
+        // server-side persistence via the JS relay.
+        if kind == "race.save",
+           let raceLocalId = userInfo["raceLocalId"] as? String,
+           let payloadJson = userInfo["payloadJson"] as? String {
+            print("[WatchBridge] forwarding splitsFromWatch raceLocalId=\(raceLocalId) bytes=\(payloadJson.count)")
+            notifyListeners(
+                "splitsFromWatch",
+                data: [
+                    "raceLocalId": raceLocalId,
+                    "payloadJson": payloadJson,
+                ]
+            )
             return
         }
 
-        print("[WatchBridge] forwarding splitsFromWatch raceLocalId=\(raceLocalId) bytes=\(payloadJson.count)")
-        // Forward the payload to the JS layer. The JS handler does the
-        // bearer-auth POST and then calls back into a future
-        // `WatchBridge.ackRaceSync(raceLocalId)` method to clear the
-        // pending save on the Watch. For the v1 ship the WebView listens
-        // on a custom event:
-        notifyListeners(
-            "splitsFromWatch",
-            data: [
-                "raceLocalId": raceLocalId,
-                "payloadJson": payloadJson,
-            ]
-        )
+        // Live race events forwarded from the watch (split, pause,
+        // resume, finish, enrichment, start when the user started the
+        // race on the watch). Route them through the same JS event so
+        // the orchestrator's `setRaceSyncHandlers` handles both
+        // delivery modes (sendMessage + transferUserInfo) uniformly.
+        if let k = kind, k.hasPrefix("race.") {
+            forwardRaceEvent(userInfo)
+            return
+        }
+
+        print("[WatchBridge] dropping userInfo — unhandled kind=\(kind ?? "nil")")
     }
 
     /// "Open on iPhone" tap from the Watch's TodayDetailView (spec §6.2).
@@ -194,17 +291,41 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
         _ session: WCSession,
         didReceiveMessage message: [String: Any]
     ) {
-        guard
-            message["kind"] as? String == "openItem",
-            let type = message["type"] as? String,
-            let id = message["id"] as? String
-        else { return }
-        DispatchQueue.main.async {
-            self.notifyListeners(
-                "openItemFromWatch",
-                data: ["type": type, "id": id]
-            )
+        let kind = message["kind"] as? String
+        if kind == "openItem",
+           let type = message["type"] as? String,
+           let id = message["id"] as? String {
+            DispatchQueue.main.async {
+                self.notifyListeners(
+                    "openItemFromWatch",
+                    data: ["type": type, "id": id]
+                )
+            }
+            return
         }
+        if let k = kind, k.hasPrefix("race.") {
+            DispatchQueue.main.async {
+                self.forwardRaceEvent(message)
+            }
+            return
+        }
+    }
+
+    /// Common forwarding helper for watch-originated race events. Both
+    /// the `sendMessage` and `transferUserInfo` delegate paths land
+    /// here so the JS layer sees a single event regardless of transport.
+    private func forwardRaceEvent(_ info: [String: Any]) {
+        guard
+            let kind = info["kind"] as? String,
+            let payloadJson = info["payloadJson"] as? String
+        else { return }
+        notifyListeners(
+            "raceEventFromWatch",
+            data: [
+                "kind": kind,
+                "payloadJson": payloadJson,
+            ]
+        )
     }
 
     public func session(

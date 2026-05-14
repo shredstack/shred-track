@@ -42,10 +42,27 @@ export interface CompletedSegment {
 
 export type TimerStatus = "idle" | "countdown" | "running" | "paused" | "complete";
 
+/** Which device originally started the current race. Determines save
+ *  authority: at finish, only the origin device writes/enqueues the
+ *  race. The other device transitions to a passive "view results"
+ *  screen so the same race never lands in the DB twice. */
+export type RaceSource = "phone" | "watch";
+
 export interface TimerState {
   status: TimerStatus;
+  /** Stable identifier minted at race-start time on the originating
+   *  device. Used to dedupe sync events arriving from the paired
+   *  device so a late `race.split` from the watch can't be applied to
+   *  a stale race after the user has already started a new one. */
+  raceId: string | null;
+  /** Which device started this race. Null when idle. */
+  source: RaceSource | null;
   raceStartedAt: number | null;
   segmentStartedAt: number | null;
+  /** UTC ms when the running clock should begin. While `status === "countdown"`
+   *  this is in the future; once the countdown fires it becomes equal
+   *  to `raceStartedAt` and the clock starts ticking. */
+  countdownEndsAt: number | null;
   pausedAt: number | null;
   totalPausedMs: number;
   segments: RaceSegment[];

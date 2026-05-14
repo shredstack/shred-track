@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Pause, Play, Square, ChevronRight } from "lucide-react";
+import { Pause, Play, Square, ChevronRight, X } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { setRaceMode } from "@/hooks/useRaceMode";
 import { formatRunPace } from "@/lib/hyrox-data";
@@ -43,6 +43,11 @@ interface TimerActiveProps {
   segmentElapsedMs: number;
   totalElapsedMs: number;
   completedCount: number;
+  /** Integer seconds left on the pre-race countdown. Only meaningful
+   *  when `status === "countdown"`. */
+  countdownRemainingSec?: number;
+  /** Cancel an in-progress countdown and return to the setup screen. */
+  onCancelCountdown?: () => void;
   onSplit: () => void;
   onPause: () => void;
   onResume: () => void;
@@ -67,6 +72,8 @@ export function TimerActive({
   segmentElapsedMs,
   totalElapsedMs,
   completedCount,
+  countdownRemainingSec = 0,
+  onCancelCountdown,
   onSplit,
   onPause,
   onResume,
@@ -132,6 +139,45 @@ export function TimerActive({
   }, [showEndConfirm, onEndRace]);
 
   const isPaused = status === "paused";
+
+  // Pre-race countdown screen. Takes over the whole viewport so the big
+  // number is unmissable. The user can tap CANCEL to bail back to setup.
+  if (status === "countdown") {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background select-none">
+        <div
+          className="flex flex-col items-center gap-6 px-6"
+          style={{
+            paddingTop: "env(safe-area-inset-top)",
+            paddingBottom: "env(safe-area-inset-bottom)",
+          }}
+        >
+          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground font-medium">
+            Get ready
+          </p>
+          <span
+            key={countdownRemainingSec}
+            className="text-[160px] leading-none font-mono font-bold tabular-nums text-primary animate-in zoom-in-50 duration-200"
+          >
+            {countdownRemainingSec}
+          </span>
+          <p className="text-sm text-muted-foreground text-center max-w-[260px]">
+            Race starts when the clock hits zero. Put your phone down and get
+            on the line.
+          </p>
+          {onCancelCountdown && (
+            <button
+              onClick={onCancelCountdown}
+              className="mt-4 flex items-center gap-2 rounded-full border border-white/[0.1] bg-white/[0.04] px-5 py-2.5 text-xs font-medium text-muted-foreground hover:bg-white/[0.08] active:scale-[0.97] transition-all"
+            >
+              <X className="h-4 w-4" />
+              Cancel
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background select-none overflow-y-auto">

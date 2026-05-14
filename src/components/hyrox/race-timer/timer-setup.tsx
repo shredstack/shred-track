@@ -12,6 +12,7 @@ import {
   Bookmark,
   Save,
   X,
+  Hourglass,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,10 @@ import {
   useDeleteRaceTemplate,
   type RaceTemplate as SavedRaceTemplate,
 } from "@/hooks/useRaceTemplates";
+import {
+  useCountdownPreference,
+  type CountdownSeconds,
+} from "@/hooks/useCountdownPreference";
 
 // ---------------------------------------------------------------------------
 // Roxzone toggle persistence
@@ -105,6 +110,11 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
     buildFullRaceSegments("women_open"),
   );
   const [showAddMenu, setShowAddMenu] = useState(false);
+
+  // Pre-race countdown preference (shared via localStorage with the
+  // active screen and the watch-bridge relay).
+  const { seconds: countdownSeconds, setSeconds: setCountdownSeconds, options: countdownOptions } =
+    useCountdownPreference();
 
   // Saved-template UI state.
   const templatesQuery = useRaceTemplates();
@@ -431,6 +441,40 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
               transition.
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Pre-race countdown */}
+      <Card>
+        <CardContent className="py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+              <Hourglass className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <div className="min-w-0">
+                <p className="text-xs font-medium">Pre-race countdown</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  Time to stash your phone and get on the line
+                </p>
+              </div>
+            </div>
+            <div className="flex rounded-md bg-white/[0.03] p-0.5 gap-0.5">
+              {countdownOptions.map((opt) => (
+                <button
+                  key={opt}
+                  onClick={() => setCountdownSeconds(opt as CountdownSeconds)}
+                  className={`min-w-[34px] rounded px-2 py-1 text-[11px] font-medium transition-all duration-150 ${
+                    countdownSeconds === opt
+                      ? "bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:bg-white/[0.06]"
+                  }`}
+                  aria-pressed={countdownSeconds === opt}
+                  aria-label={opt === 0 ? "No countdown" : `${opt} second countdown`}
+                >
+                  {opt === 0 ? "Off" : `${opt}s`}
+                </button>
+              ))}
+            </div>
+          </div>
         </CardContent>
       </Card>
 

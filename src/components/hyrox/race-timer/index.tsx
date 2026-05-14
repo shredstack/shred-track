@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { TimerSetup } from "./timer-setup";
@@ -13,6 +13,16 @@ import type { RaceSegment, RaceTemplate, PracticeRaceResult } from "./types";
 import type { DivisionKey } from "@/lib/hyrox-data";
 import { practiceRaceKeys } from "@/hooks/usePracticeRaces";
 import { formatLongTime } from "@/lib/hyrox-data";
+import { getCountdownPreference } from "@/hooks/useCountdownPreference";
+import {
+  sendRaceStartToWatch,
+  sendSplitToWatch,
+  sendPauseToWatch,
+  sendResumeToWatch,
+  sendFinishToWatch,
+  sendCancelToWatch,
+  setRaceSyncHandlers,
+} from "@/lib/native/watch-race-sync";
 
 // ---------------------------------------------------------------------------
 // Pending save queue for offline support
@@ -77,6 +87,8 @@ export function RaceTimerFlow() {
 
   const defaultSegments = buildFullRaceSegments("women_open");
   const timer = useRaceTimer(defaultSegments);
+  const timerRef = useRef(timer);
+  timerRef.current = timer;
 
   // iOS-only: live pace from HealthKit. Returns nulls on web / non-iOS,
   // which the UI uses to hide the pace block. Per pace spec §5.
@@ -100,6 +112,58 @@ export function RaceTimerFlow() {
     }
   }, [timer.recovered]);
 
+  // -------------------------------------------------------------------------
+  // Watch race-sync handlers. Plug remote events from the paired Apple
+  // Watch into the local timer state machine. Re-bound on every render
+  // so the closures always see the latest action handles, but the
+  // outbound listener installation happens once via NativeBootstrap.
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    setRaceSyncHandlers({
+      onSplit: (event) => {
+        timerRef.current.applyRemoteSplit(event);
+      },
+      onSplitEnrichment: (event) => {
+        timerRef.current.applyRemoteEnrichment(event);
+      },
+      onPause: (event) => {
+        timerRef.current.applyRemotePause(event);
+      },
+      onResume: (event) => {
+        timerRef.current.applyRemoteResume(event);
+      },
+      onFinish: (event) => {
+        timerRef.current.applyRemoteFinish(event);
+      },
+      onCancel: () => {
+        // Watch user discarded the race — bring the phone back to setup.
+        const state = timerRef.current.state;
+        if (state.status === "countdown") {
+          timerRef.current.cancelCountdown();
+        } else {
+          timerRef.current.reset(state.segments);
+        }
+        setScreen("setup");
+      },
+      onAdoptFromWatch: (event) => {
+        // Watch started a race — adopt it so the phone mirrors live.
+        // The save authority stays with the watch (source: "watch").
+        setDivisionKey(event.divisionKey as DivisionKey);
+        const tpl = (event.template as RaceTemplate) ?? "full";
+        setTemplate(tpl);
+        timerRef.current.reset(event.segments);
+        requestAnimationFrame(() => {
+          timerRef.current.start({
+            raceId: event.raceId,
+            source: "watch",
+            startAt: event.startAt,
+          });
+          setScreen("active");
+        });
+      },
+    });
+  }, []);
+
   const handleStart = useCallback(
     (segments: RaceSegment[], dk: DivisionKey, t: RaceTemplate) => {
       setDivisionKey(dk);
@@ -108,14 +172,40 @@ export function RaceTimerFlow() {
       setPersonalBests([]);
       setSavedRaceId(null);
       timer.reset(segments);
+      const countdownSeconds = getCountdownPreference();
+      const raceId =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `r-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const startAt = Date.now() + countdownSeconds * 1000;
       // Small delay to let reset propagate, then start
       requestAnimationFrame(() => {
-        timer.start();
+        timer.start({ countdownSeconds, raceId, source: "phone" });
         setScreen("active");
+        // Push the race to the paired Apple Watch. No-op off native /
+        // when the watch app isn't installed. The watch will display
+        // the same countdown and start ticking at `startAt`.
+        void sendRaceStartToWatch({
+          raceId,
+          divisionKey: dk,
+          template: t,
+          simulateRoxzone: segments.some((s) => s.segmentSubtype === "roxzone"),
+          startAt,
+          segments,
+        });
       });
     },
     [timer],
   );
+
+  const handleCancelCountdown = useCallback(() => {
+    const raceId = timer.state.raceId;
+    timer.cancelCountdown();
+    setScreen("setup");
+    if (raceId) {
+      void sendCancelToWatch({ raceId });
+    }
+  }, [timer]);
 
   const handleSplit = useCallback(async () => {
     // On iOS native + run segment, capture the HealthKit-measured
@@ -126,8 +216,33 @@ export function RaceTimerFlow() {
       currentSegment?.segmentType === "run"
         ? await pace.captureSegmentDistance()
         : null;
+    const completedAt = Date.now();
+    const segmentOrder = timer.state.currentSegmentIndex + 1;
+    const raceId = timer.state.raceId;
     timer.split({ distanceMeters });
+    if (raceId) {
+      void sendSplitToWatch({
+        raceId,
+        segmentOrder,
+        completedAt,
+        distanceMeters,
+      });
+    }
   }, [timer, currentSegment, pace]);
+
+  const handlePause = useCallback(() => {
+    const at = Date.now();
+    const raceId = timer.state.raceId;
+    timer.pause();
+    if (raceId) void sendPauseToWatch({ raceId, at });
+  }, [timer]);
+
+  const handleResume = useCallback(() => {
+    const at = Date.now();
+    const raceId = timer.state.raceId;
+    timer.resume();
+    if (raceId) void sendResumeToWatch({ raceId, at });
+  }, [timer]);
 
   // Watch for race completion via the timer state
   useEffect(() => {
@@ -141,9 +256,12 @@ export function RaceTimerFlow() {
       currentSegment?.segmentType === "run"
         ? await pace.captureSegmentDistance()
         : null;
+    const raceId = timer.state.raceId;
+    const at = Date.now();
     const result = timer.endRace({ distanceMeters });
     setRaceResult(result);
     setScreen("complete");
+    if (raceId) void sendFinishToWatch({ raceId, at });
   }, [timer, currentSegment, pace]);
 
   const handleSave = useCallback(
@@ -328,6 +446,12 @@ export function RaceTimerFlow() {
     0,
   );
 
+  // Save authority: only the device that started the race owns the
+  // save. If the watch was the source, the phone has been a live mirror
+  // — at finish, hand the user a passive "view results" screen routed
+  // through the same complete component but without save controls.
+  const isWatchOrigin = timer.state.source === "watch";
+
   if (screen === "setup") {
     return <TimerSetup onStart={handleStart} />;
   }
@@ -341,9 +465,11 @@ export function RaceTimerFlow() {
         segmentElapsedMs={timer.segmentElapsedMs}
         totalElapsedMs={timer.totalElapsedMs}
         completedCount={timer.state.completedSegments.length}
+        countdownRemainingSec={timer.countdownRemainingSec}
+        onCancelCountdown={handleCancelCountdown}
         onSplit={handleSplit}
-        onPause={timer.pause}
-        onResume={timer.resume}
+        onPause={handlePause}
+        onResume={handleResume}
         onEndRace={handleEndRace}
         currentRunPaceSecPerKm={pace.currentRunPaceSecPerKm}
         avgRunPaceSecPerKm={pace.avgRunPaceSecPerKm}
@@ -367,6 +493,7 @@ export function RaceTimerFlow() {
       isSaving={isSaving}
       saved={saved}
       savedRaceId={savedRaceId}
+      readOnly={isWatchOrigin}
     />
   );
 }

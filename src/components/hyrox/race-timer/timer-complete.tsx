@@ -73,6 +73,10 @@ interface TimerCompleteProps {
   saved?: boolean;
   /** ID of the saved race (if any), used for the post-save link to detail page. */
   savedRaceId?: string | null;
+  /** When true, hide the save controls. Used when the race was started
+   *  on the paired Apple Watch — that device owns the save, and the
+   *  phone is just displaying results to avoid double-writes. */
+  readOnly?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +96,7 @@ export function TimerComplete({
   isSaving = false,
   saved = false,
   savedRaceId = null,
+  readOnly = false,
 }: TimerCompleteProps) {
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
@@ -267,8 +272,19 @@ export function TimerComplete({
         </CardContent>
       </Card>
 
+      {/* Watch-origin notice: save lives on the watch. */}
+      {readOnly && (
+        <div className="rounded-xl bg-white/[0.04] border border-white/[0.08] px-4 py-3 text-center">
+          <p className="text-sm font-medium">Saving on your Apple Watch</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            This race started on the watch — finish the save there and it&apos;ll
+            sync back to your races list automatically.
+          </p>
+        </div>
+      )}
+
       {/* Save section */}
-      {isLoggedIn && !saved && (
+      {!readOnly && isLoggedIn && !saved && (
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-bold flex items-center gap-2">
@@ -339,7 +355,7 @@ export function TimerComplete({
       )}
 
       {/* Save success */}
-      {saved && (
+      {!readOnly && saved && (
         <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 text-center flex flex-col gap-2 items-center">
           <p className="text-sm font-medium text-emerald-400">
             Race saved! Your benchmarks have been updated.
@@ -356,7 +372,7 @@ export function TimerComplete({
       )}
 
       {/* Not logged in CTA */}
-      {!isLoggedIn && (
+      {!readOnly && !isLoggedIn && (
         <div className="rounded-xl bg-primary/10 border border-primary/20 p-4 text-center">
           <p className="text-sm font-medium">Want to save your results?</p>
           <p className="text-xs text-muted-foreground mt-1">

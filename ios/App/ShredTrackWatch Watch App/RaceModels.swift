@@ -85,15 +85,29 @@ public struct CompletedSegment: Codable, Identifiable, Sendable {
 
 public enum RaceTimerStatus: String, Codable, Sendable {
     case idle
+    case countdown
     case running
     case paused
     case complete
+}
+
+/// Which device originally started the current race. Save authority
+/// stays with the origin device — the other side is a live mirror.
+public enum RaceSource: String, Codable, Sendable {
+    case phone
+    case watch
 }
 
 /// Snapshot of an in-progress or completed race. Persisted to Watch
 /// local storage; sent up to the server via `transferUserInfo` once the
 /// phone is reachable.
 public struct RaceState: Codable, Sendable {
+    /// Stable identifier for the race, shared between phone and watch.
+    /// Used to dedupe sync events and decide save authority. Nil while
+    /// idle.
+    public var raceId: String?
+    /// Which device started this race.
+    public var source: RaceSource?
     public var divisionKey: String
     public var template: String  // "full" | "half"
     public var planSessionId: String?
@@ -102,6 +116,10 @@ public struct RaceState: Codable, Sendable {
     public var currentSegmentIndex: Int
     public var status: RaceTimerStatus
     public var raceStartedAt: Date?
+    /// When the running clock should begin. While status == .countdown
+    /// this is in the future; the view-model transitions to .running
+    /// automatically when the deadline passes.
+    public var countdownEndsAt: Date?
     public var pausedAt: Date?
     public var totalPausedMs: Double
     /// Pending-save flag: true once the user taps Finish but the phone
@@ -109,6 +127,8 @@ public struct RaceState: Codable, Sendable {
     public var pendingSync: Bool
 
     public init(
+        raceId: String? = nil,
+        source: RaceSource? = nil,
         divisionKey: String = "women_open",
         template: String = "full",
         planSessionId: String? = nil,
@@ -117,10 +137,13 @@ public struct RaceState: Codable, Sendable {
         currentSegmentIndex: Int = 0,
         status: RaceTimerStatus = .idle,
         raceStartedAt: Date? = nil,
+        countdownEndsAt: Date? = nil,
         pausedAt: Date? = nil,
         totalPausedMs: Double = 0,
         pendingSync: Bool = false
     ) {
+        self.raceId = raceId
+        self.source = source
         self.divisionKey = divisionKey
         self.template = template
         self.planSessionId = planSessionId
@@ -129,6 +152,7 @@ public struct RaceState: Codable, Sendable {
         self.currentSegmentIndex = currentSegmentIndex
         self.status = status
         self.raceStartedAt = raceStartedAt
+        self.countdownEndsAt = countdownEndsAt
         self.pausedAt = pausedAt
         self.totalPausedMs = totalPausedMs
         self.pendingSync = pendingSync
