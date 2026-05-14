@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { usePlanCredits } from "@/hooks/usePlanCredits";
+import { useIsNative } from "@/hooks/useIsNative";
 import {
   PurchaseCancelledError,
   usePurchasePersonalized,
@@ -28,6 +29,7 @@ export function UpgradeCard() {
   const [dismissed, setDismissed] = useState(true);
   const credits = usePlanCredits();
   const purchase = usePurchasePersonalized();
+  const isNative = useIsNative();
 
   // Hydrate client-side only to avoid SSR mismatch on localStorage read.
   useEffect(() => {
@@ -38,6 +40,8 @@ export function UpgradeCard() {
     }
   }, []);
 
+  // Personalized-plan purchases are web-only for the initial iOS release.
+  if (isNative) return null;
   if (dismissed) return null;
 
   function dismiss() {

@@ -7,21 +7,31 @@ import { toast } from "sonner";
 import { OnboardingWizard } from "@/components/hyrox/onboarding-wizard";
 import { usePlanStatus } from "@/hooks/useHyroxPlan";
 import { usePlanCredits } from "@/hooks/usePlanCredits";
+import { useIsNative } from "@/hooks/useIsNative";
 
 export default function HyroxOnboardingPage() {
   const router = useRouter();
   const [planId, setPlanId] = useState<string | null>(null);
 
+  // Personalized plan generation is web-only on the initial iOS release.
+  // The CTAs that route here are hidden on native, but bounce anyone who
+  // arrives via deep link or a stale tab back to the dashboard.
+  const isNative = useIsNative();
+  useEffect(() => {
+    if (isNative) router.replace("/hyrox");
+  }, [isNative, router]);
+
   // Credit gate — personalized onboarding assumes the user has something to
-  // spend. If not, send them back to the chooser where they can purchase.
+  // spend. If not, send them back to the chooser where they can start free.
   const credits = usePlanCredits();
   useEffect(() => {
+    if (isNative) return;
     if (credits.isLoading) return;
     if (!credits.canGenerate) {
       toast.info("Purchase a personalized plan to continue.");
       router.replace("/hyrox");
     }
-  }, [credits.isLoading, credits.canGenerate, router]);
+  }, [isNative, credits.isLoading, credits.canGenerate, router]);
 
   // Poll generation status after onboarding completes
   const { data: statusData } = usePlanStatus(planId);
@@ -37,7 +47,7 @@ export default function HyroxOnboardingPage() {
     return null;
   }
 
-  if (credits.isLoading || !credits.canGenerate) {
+  if (isNative || credits.isLoading || !credits.canGenerate) {
     return (
       <div className="flex items-center justify-center py-14">
         <Loader2 className="h-6 w-6 text-muted-foreground animate-spin" />
