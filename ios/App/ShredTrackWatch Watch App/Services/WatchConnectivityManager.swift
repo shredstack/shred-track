@@ -45,6 +45,15 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
     /// on each app launch with the most recent snapshot).
     private var consumedRaceStartIds: Set<String> = []
 
+    /// Outbound race events that arrived before `WCSession` finished
+    /// activating. WCSession activation runs on its own internal queue
+    /// and typically completes within hundreds of ms of launch, but the
+    /// user can absolutely tap SPLIT during that window — without this
+    /// queue the tap would be silently dropped while the local watch
+    /// state advanced, leaving the phone permanently a segment behind.
+    /// Flushed in `activationDidCompleteWith(.activated)`.
+    private var pendingOutboundEvents: [[String: Any]] = []
+
     private let session: WCSession?
 
     override private init() {
@@ -157,7 +166,7 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
         raceId: String,
         payload: [String: Any]
     ) {
-        guard let session, session.activationState == .activated else { return }
+        guard let session else { return }
         var merged = payload
         merged["raceId"] = raceId
         guard let data = try? JSONSerialization.data(withJSONObject: merged),
@@ -171,13 +180,38 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
             "raceId": raceId,
             "payloadJson": json,
         ]
+        if session.activationState == .activated {
+            dispatchOutboundEvent(session: session, message: message)
+        } else {
+            pendingOutboundEvents.append(message)
+        }
+    }
+
+    /// Dispatch an outbound race event over WCSession, preferring
+    /// `sendMessage` for low-latency delivery and falling back to
+    /// `transferUserInfo` (which queues offline) on either unreachable
+    /// state or sendMessage error.
+    private func dispatchOutboundEvent(session: WCSession, message: [String: Any]) {
         if session.isReachable {
             session.sendMessage(message, replyHandler: nil) { error in
+                let kind = (message["kind"] as? String) ?? "?"
                 print("[WC] sendRaceEvent(\(kind)) failed: \(error.localizedDescription) — falling back to transferUserInfo")
                 session.transferUserInfo(message)
             }
         } else {
             session.transferUserInfo(message)
+        }
+    }
+
+    /// Drain any race events queued while WCSession was activating.
+    /// Called from the activation-complete delegate callback.
+    @MainActor
+    private func flushPendingOutboundEvents() {
+        guard let session, session.activationState == .activated else { return }
+        let queued = pendingOutboundEvents
+        pendingOutboundEvents.removeAll()
+        for message in queued {
+            dispatchOutboundEvent(session: session, message: message)
         }
     }
 }
@@ -190,6 +224,11 @@ extension WatchConnectivityManager: WCSessionDelegate {
     ) {
         if let error {
             print("[WC] activation error: \(error)")
+        }
+        if activationState == .activated {
+            Task { @MainActor in
+                self.flushPendingOutboundEvents()
+            }
         }
     }
 

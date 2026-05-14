@@ -242,6 +242,17 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
         } else {
             session.transferUserInfo(message)
         }
+
+        // Clear `pendingRaceStart` from the applicationContext when the
+        // race ends. Otherwise the stale start would replay on the next
+        // watch cold launch — applicationContext is whole-snapshot
+        // latest-wins and persists on the watch until overwritten, so a
+        // raceId already finished/cancelled here would re-trigger
+        // `adoptFromPhone` weeks later and start a phantom race.
+        if kind == "race.finish" || kind == "race.cancel" {
+            _ = updateContext(removes: ["pendingRaceStart"], from: "sendRaceEvent(\(kind))")
+        }
+
         call.resolve()
     }
 
