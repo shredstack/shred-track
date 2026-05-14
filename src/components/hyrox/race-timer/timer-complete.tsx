@@ -73,10 +73,17 @@ interface TimerCompleteProps {
   saved?: boolean;
   /** ID of the saved race (if any), used for the post-save link to detail page. */
   savedRaceId?: string | null;
-  /** When true, hide the save controls. Used when the race was started
-   *  on the paired Apple Watch — that device owns the save, and the
-   *  phone is just displaying results to avoid double-writes. */
-  readOnly?: boolean;
+  /** True while the watch owns the save authority for this finish —
+   *  either because the race started on the watch, or because the
+   *  watch tapped Finish on a phone-origin race. The phone suppresses
+   *  its save controls during this window so the user doesn't tap
+   *  Save twice. Cleared when the relay POSTs successfully
+   *  (savedFromWatch flips on) or when a 5-min fallback timer
+   *  exposes the form so the user can save here as a safety net. */
+  pendingWatchSave?: boolean;
+  /** True once the relay POSTed the watch-queued race to the server.
+   *  Renders a "Saved from your Watch" success state. */
+  savedFromWatch?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -96,7 +103,8 @@ export function TimerComplete({
   isSaving = false,
   saved = false,
   savedRaceId = null,
-  readOnly = false,
+  pendingWatchSave = false,
+  savedFromWatch = false,
 }: TimerCompleteProps) {
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
@@ -272,19 +280,37 @@ export function TimerComplete({
         </CardContent>
       </Card>
 
-      {/* Watch-origin notice: save lives on the watch. */}
-      {readOnly && (
+      {/* Watch is the canonical saver for this finish — placeholder
+          while we wait for the watch to sync. The fallback timer in
+          RaceTimerFlow eventually flips pendingWatchSave off so the
+          user can save here if the watch never reaches the server. */}
+      {pendingWatchSave && !savedFromWatch && !saved && (
         <div className="rounded-xl bg-white/[0.04] border border-white/[0.08] px-4 py-3 text-center">
-          <p className="text-sm font-medium">Saving on your Apple Watch</p>
+          <p className="text-sm font-medium">Saved on Apple Watch</p>
           <p className="text-xs text-muted-foreground mt-1">
-            This race started on the watch — finish the save there and it&apos;ll
-            sync back to your races list automatically.
+            Your watch is syncing this race — it&apos;ll show up in your races
+            list automatically. If it doesn&apos;t arrive within a few minutes
+            you can save it from this device instead.
+          </p>
+        </div>
+      )}
+
+      {/* Saved-from-Watch success — relay POSTed and the server has
+          the race. */}
+      {savedFromWatch && !saved && (
+        <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 text-center flex flex-col gap-2 items-center">
+          <p className="text-sm font-medium text-emerald-400">
+            Saved from your Apple Watch
+          </p>
+          <p className="text-xs text-muted-foreground">
+            This race is in your history. Open the races list to view splits
+            and your AI report.
           </p>
         </div>
       )}
 
       {/* Save section */}
-      {!readOnly && isLoggedIn && !saved && (
+      {!pendingWatchSave && !savedFromWatch && isLoggedIn && !saved && (
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-bold flex items-center gap-2">
@@ -355,7 +381,7 @@ export function TimerComplete({
       )}
 
       {/* Save success */}
-      {!readOnly && saved && (
+      {saved && (
         <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 text-center flex flex-col gap-2 items-center">
           <p className="text-sm font-medium text-emerald-400">
             Race saved! Your benchmarks have been updated.
@@ -372,7 +398,7 @@ export function TimerComplete({
       )}
 
       {/* Not logged in CTA */}
-      {!readOnly && !isLoggedIn && (
+      {!pendingWatchSave && !savedFromWatch && !isLoggedIn && (
         <div className="rounded-xl bg-primary/10 border border-primary/20 p-4 text-center">
           <p className="text-sm font-medium">Want to save your results?</p>
           <p className="text-xs text-muted-foreground mt-1">

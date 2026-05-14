@@ -23,6 +23,14 @@ import {
   sendCancelToWatch,
   setRaceSyncHandlers,
 } from "@/lib/native/watch-race-sync";
+import { onWatchRaceSaved } from "@/lib/native/watch-race-relay";
+
+/// How long the phone waits for the watch's `race.saved` event after
+/// the watch taps Finish before falling back to letting the user save
+/// the race from the phone. The watch is the canonical saver under
+/// watch_finish_owns_save_spec.md §6.2, but if the watch app dies
+/// before sync completes the phone needs to be a safety net.
+const WATCH_SAVE_FALLBACK_MS = 5 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Pending save queue for offline support
@@ -81,6 +89,12 @@ export function RaceTimerFlow() {
   const [saved, setSaved] = useState(false);
   const [personalBests, setPersonalBests] = useState<string[]>([]);
   const [savedRaceId, setSavedRaceId] = useState<string | null>(null);
+  // Watch tapped Finish — defer save authority to the watch until the
+  // server-side save lands (savedFromWatch) or the fallback timer
+  // exposes the phone-side save form. See watch-race spec §6.2.
+  const [finishedOnWatch, setFinishedOnWatch] = useState(false);
+  const [savedFromWatch, setSavedFromWatch] = useState(false);
+  const watchSaveFallbackRef = useRef<number | null>(null);
 
   const queryClient = useQueryClient();
   const isLoggedIn = useIsLoggedIn();
@@ -134,6 +148,21 @@ export function RaceTimerFlow() {
       },
       onFinish: (event) => {
         timerRef.current.applyRemoteFinish(event);
+        // Watch tapped Finish — defer save authority to the watch.
+        // The complete screen will show "Saved on Watch (syncing)…"
+        // until either (a) the relay broadcasts savedFromWatch or
+        // (b) the fallback timer fires and exposes the phone's save
+        // form so the user can save here. Server-side idempotency
+        // makes a double-save harmless.
+        setFinishedOnWatch(true);
+        setSavedFromWatch(false);
+        if (watchSaveFallbackRef.current !== null) {
+          window.clearTimeout(watchSaveFallbackRef.current);
+        }
+        watchSaveFallbackRef.current = window.setTimeout(() => {
+          setFinishedOnWatch(false);
+          watchSaveFallbackRef.current = null;
+        }, WATCH_SAVE_FALLBACK_MS);
       },
       onCancel: () => {
         // Watch user discarded the race — bring the phone back to setup.
@@ -143,6 +172,19 @@ export function RaceTimerFlow() {
         } else {
           timerRef.current.reset(state.segments);
         }
+        setScreen("setup");
+      },
+      onDiscard: () => {
+        // Watch user tapped Discard on the complete screen. Mirror
+        // that locally so the phone doesn't sit on a ghost race.
+        if (watchSaveFallbackRef.current !== null) {
+          window.clearTimeout(watchSaveFallbackRef.current);
+          watchSaveFallbackRef.current = null;
+        }
+        setFinishedOnWatch(false);
+        setSavedFromWatch(false);
+        const state = timerRef.current.state;
+        timerRef.current.reset(state.segments);
         setScreen("setup");
       },
       onAdoptFromWatch: (event) => {
@@ -162,6 +204,31 @@ export function RaceTimerFlow() {
         });
       },
     });
+  }, []);
+
+  // The phone's relay POSTs queued watch-races to the server. When
+  // that completes, flip the local complete-screen UI out of the
+  // pending-Save-on-Watch placeholder into the "Saved from your
+  // Watch" success state. Only react if the raceId matches the
+  // current timer state — we don't want to flash success for an old
+  // race the user already cleared.
+  useEffect(() => {
+    const unsubscribe = onWatchRaceSaved(({ raceId }) => {
+      if (timerRef.current.state.raceId !== raceId) return;
+      if (watchSaveFallbackRef.current !== null) {
+        window.clearTimeout(watchSaveFallbackRef.current);
+        watchSaveFallbackRef.current = null;
+      }
+      setSavedFromWatch(true);
+      setFinishedOnWatch(false);
+    });
+    return () => {
+      unsubscribe();
+      if (watchSaveFallbackRef.current !== null) {
+        window.clearTimeout(watchSaveFallbackRef.current);
+        watchSaveFallbackRef.current = null;
+      }
+    };
   }, []);
 
   const handleStart = useCallback(
@@ -276,6 +343,12 @@ export function RaceTimerFlow() {
         const totalMs = segments.reduce((sum, s) => sum + s.timeMs, 0);
 
         const payload = {
+          // Client-supplied race id, shared with the paired watch.
+          // The server dedups against (user_id, raceId) so a race
+          // already saved from the watch becomes an idempotent no-op
+          // here. Omitted for legacy state that pre-dates raceId
+          // tracking — the server falls back to inserting a new row.
+          ...(timer.state.raceId ? { raceId: timer.state.raceId } : {}),
           title,
           notes,
           divisionKey,
@@ -422,14 +495,24 @@ export function RaceTimerFlow() {
     [timer, divisionKey, template, queryClient],
   );
 
+  const resetDeferredSaveState = useCallback(() => {
+    if (watchSaveFallbackRef.current !== null) {
+      window.clearTimeout(watchSaveFallbackRef.current);
+      watchSaveFallbackRef.current = null;
+    }
+    setFinishedOnWatch(false);
+    setSavedFromWatch(false);
+  }, []);
+
   const handleNewRace = useCallback(() => {
     timer.reset(buildFullRaceSegments(divisionKey));
     setSaved(false);
     setSavedRaceId(null);
     setPersonalBests([]);
     setRaceResult(null);
+    resetDeferredSaveState();
     setScreen("setup");
-  }, [timer, divisionKey]);
+  }, [timer, divisionKey, resetDeferredSaveState]);
 
   const handleBack = useCallback(() => {
     timer.reset(buildFullRaceSegments(divisionKey));
@@ -437,8 +520,9 @@ export function RaceTimerFlow() {
     setSavedRaceId(null);
     setPersonalBests([]);
     setRaceResult(null);
+    resetDeferredSaveState();
     setScreen("setup");
-  }, [timer, divisionKey]);
+  }, [timer, divisionKey, resetDeferredSaveState]);
 
   // Compute total time from completed segments
   const totalTimeMs = timer.state.completedSegments.reduce(
@@ -446,11 +530,14 @@ export function RaceTimerFlow() {
     0,
   );
 
-  // Save authority: only the device that started the race owns the
-  // save. If the watch was the source, the phone has been a live mirror
-  // — at finish, hand the user a passive "view results" screen routed
-  // through the same complete component but without save controls.
-  const isWatchOrigin = timer.state.source === "watch";
+  // Save authority follows the Finish tap, not the start. When the
+  // watch was the finisher (either watch-origin or phone-origin
+  // finished on the watch), defer to the watch's save until either
+  // the relay POSTs successfully (savedFromWatch flips on) or the
+  // fallback timer fires and exposes the phone-side save form. While
+  // pending, the complete screen suppresses save controls. See
+  // watch_finish_owns_save_spec.md §6.2.
+  const pendingWatchSave = finishedOnWatch && !saved;
 
   if (screen === "setup") {
     return <TimerSetup onStart={handleStart} />;
@@ -493,7 +580,8 @@ export function RaceTimerFlow() {
       isSaving={isSaving}
       saved={saved}
       savedRaceId={savedRaceId}
-      readOnly={isWatchOrigin}
+      pendingWatchSave={pendingWatchSave}
+      savedFromWatch={savedFromWatch}
     />
   );
 }

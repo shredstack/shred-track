@@ -172,6 +172,12 @@ public struct SplitPayload: Codable, Sendable {
 }
 
 public struct RaceSavePayload: Codable, Sendable {
+    /// Client-supplied race id, shared between phone and watch from the
+    /// moment a race starts. Sent so the server can dedupe across
+    /// watch + phone saves of the same race (the server enforces
+    /// UNIQUE on user_id + client_race_id). Nil for legacy queue
+    /// entries that pre-date this field.
+    public let raceId: String?
     public let title: String
     public let notes: String?
     public let divisionKey: String?

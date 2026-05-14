@@ -387,19 +387,23 @@ struct TimerView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                // Phone-origin races: the phone owns the save. Show a
-                // passive notice and a Done button to clear the watch
-                // back to setup.
-                if vm.state.source == .phone {
-                    Label("Saving on iPhone", systemImage: "iphone")
+                // Save authority follows the Finish tap. Three states:
+                //   1. savedRemotely (phone POSTed already) → "Saved
+                //      on iPhone ✓" + Done. No local save needed.
+                //   2. savedThisRace (we tapped Save here) → Syncing
+                //      → Synced + Done.
+                //   3. otherwise → pre-save Save / Discard.
+                // Server-side idempotency (client_race_id) makes the
+                // worst case (both devices POST) a safe no-op.
+                if vm.savedRemotely && !vm.savedThisRace {
+                    Label("Saved on iPhone", systemImage: "checkmark.circle.fill")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.green)
                     Button("Done") {
                         vm.dismissCompleteScreen()
                     }
                     .padding(.top, 4)
                 } else if vm.savedThisRace {
-                    // Post-save (watch-origin): show sync status + Done.
                     if vm.state.pendingSync {
                         Label("Syncing…", systemImage: "arrow.triangle.2.circlepath")
                             .font(.caption2)
@@ -414,7 +418,6 @@ struct TimerView: View {
                     }
                     .padding(.top, 4)
                 } else {
-                    // Pre-save (watch-origin): explicit Save / Discard.
                     Button {
                         vm.saveRace()
                     } label: {

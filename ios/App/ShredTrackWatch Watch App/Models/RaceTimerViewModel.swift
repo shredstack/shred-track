@@ -38,6 +38,11 @@ final class RaceTimerViewModel: ObservableObject {
     /// the post-save layout (Syncing/Synced + Done) vs the pre-save
     /// layout (Save / Discard). Cleared on reset/configure.
     @Published var savedThisRace: Bool = false
+    /// Set true when the phone broadcasts `race.saved` for this raceId
+    /// — i.e., the server already has the race. Lets the watch show
+    /// "Saved on iPhone ✓" + Done instead of prompting the user for a
+    /// redundant save. Cleared on reset/configure.
+    @Published var savedRemotely: Bool = false
 
     private var pendingPayload: RaceSavePayload?
     private var pendingLocalId: String?
@@ -135,6 +140,7 @@ final class RaceTimerViewModel: ObservableObject {
         queueObserver?.cancel()
         queueObserver = nil
         savedThisRace = false
+        savedRemotely = false
         state.pendingSync = false
         countdownTask?.cancel()
         countdownTask = nil
@@ -409,8 +415,13 @@ final class RaceTimerViewModel: ObservableObject {
     }
 
     /// Drop the finished race without persisting. Returns to idle so the
-    /// view routes back to the setup screen.
+    /// view routes back to the setup screen. For a finished race, also
+    /// notifies the phone so its mirror UI doesn't linger as a ghost
+    /// (per watch_finish_owns_save_spec.md §9). Pre-finish discards
+    /// don't reach here — those go through `cancelCountdown()` /
+    /// `applyRemoteCancel()`.
     func discardRace() {
+        let raceIdForBroadcast = (state.status == .complete) ? state.raceId : nil
         cleanupAfterRace()
         state.status = .idle
         state.raceId = nil
@@ -419,6 +430,13 @@ final class RaceTimerViewModel: ObservableObject {
         totalElapsedMs = 0
         countdownRemainingSec = 0
         liveSegmentDistanceMeters = 0
+        if let raceId = raceIdForBroadcast {
+            WatchConnectivityManager.shared.sendRaceEvent(
+                kind: "race.discard",
+                raceId: raceId,
+                payload: [:]
+            )
+        }
     }
 
     /// Used by the post-save "Done" button — same routing as discard,
@@ -574,6 +592,20 @@ final class RaceTimerViewModel: ObservableObject {
         Task { await finishFromRemote(at: at) }
     }
 
+    /// Phone broadcast: the server now has this race (POSTed under
+    /// the shared client_race_id). Suppress the local Save? prompt
+    /// and stop any in-flight watch-side sync — we don't want to
+    /// fight the phone's ack pipeline. If the watch already enqueued
+    /// its own save, leave the queue entry alone: the phone's ack
+    /// path will clear it via `race.ack`, and server idempotency
+    /// makes a duplicate POST a no-op either way.
+    func applyRemoteSaved(raceId: String) {
+        guard state.raceId == raceId else { return }
+        savedRemotely = true
+        // If we never tapped Save locally, there's no pending sync
+        // to clear here — pendingSync is only set inside `saveRace`.
+    }
+
     func applyRemoteCancel(raceId: String) {
         guard state.raceId == raceId else { return }
         countdownTask?.cancel()
@@ -624,14 +656,14 @@ final class RaceTimerViewModel: ObservableObject {
         stopTick()
         stopDistanceTick()
         await hk.end()
-        // Only the origin device persists. If the watch is the origin,
-        // stash a payload so the user can tap Save on the complete
-        // screen; otherwise leave it nil — the phone owns the save.
-        if state.source == .watch {
-            pendingPayload = buildSavePayload()
-        } else {
-            pendingPayload = nil
-        }
+        // Whichever device the user taps Finish on owns the save. We
+        // always stash a payload so the watch can offer Save / Discard
+        // regardless of origin — critical when the phone is out of
+        // range at the finish line and would otherwise lose the race
+        // if the watch app gets killed before reachability returns.
+        // Server-side idempotency (client_race_id) protects against
+        // duplicate POSTs if the phone also saves the same raceId.
+        pendingPayload = buildSavePayload()
         savedThisRace = false
         state.pendingSync = false
     }
@@ -706,8 +738,16 @@ final class RaceTimerViewModel: ObservableObject {
         let totalMs = state.completedSegments.reduce(0.0) { $0 + ($1.timeSeconds * 1000) }
         let started = state.raceStartedAt ?? Date()
         let completed = Date()
+        // Locale-formatted timestamp so the user has multiple watch
+        // races in their history without collisions. The user can
+        // rename later from the race detail page on web/phone.
+        let titleFormatter = DateFormatter()
+        titleFormatter.dateStyle = .short
+        titleFormatter.timeStyle = .short
+        let title = "Watch Race · \(titleFormatter.string(from: started))"
         return RaceSavePayload(
-            title: "Watch Race",
+            raceId: state.raceId,
+            title: title,
             notes: nil,
             divisionKey: state.divisionKey,
             template: state.template,
