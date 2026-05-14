@@ -12,11 +12,15 @@ export interface RaceSegment {
   segmentType: "run" | "station";
   segmentSubtype?: SegmentSubtype | null;
   label: string;
-  /** e.g. "1000m", "50m" */
+  /** Display string, e.g. "1000m" / "1 km" / "50m". Source of truth is `distanceMeters` */
   distance?: string;
+  /** Numeric distance for the segment. Mirrors `distance` for display. */
+  distanceMeters?: number;
   /** e.g. 100 for wall balls */
   reps?: number;
-  /** Display-only weight context from division, e.g. "2×16 kg" */
+  /** Weight in kilograms for stations that use weighted equipment. */
+  weightKg?: number;
+  /** Display-only weight label, e.g. "2×16 kg" */
   weightLabel?: string;
 }
 
@@ -26,8 +30,14 @@ export interface CompletedSegment {
   segmentSubtype?: SegmentSubtype | null;
   label: string;
   timeMs: number;
-  /** Measured distance for run segments on iOS (HealthKit). Null on web / stations. */
+  /** Measured (HealthKit) or prescribed distance in meters. Null on stations with no distance. */
   distanceMeters?: number | null;
+  /** Prescribed reps for the station segment, if any. */
+  reps?: number | null;
+  /** Prescribed station weight in kilograms, if any. */
+  weightKg?: number | null;
+  /** Prescribed station weight display label, if any. */
+  weightLabel?: string | null;
 }
 
 export type TimerStatus = "idle" | "countdown" | "running" | "paused" | "complete";

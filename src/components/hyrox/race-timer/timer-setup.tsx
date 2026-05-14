@@ -16,6 +16,7 @@ import { DivisionPicker } from "@/components/shared/division-picker";
 import {
   DIVISIONS,
   STATION_ORDER,
+  parseDistanceToMeters,
   type DivisionKey,
 } from "@/lib/hyrox-data";
 import { SegmentList } from "./segment-list";
@@ -157,7 +158,9 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
         {
           ...createStationSegment(name),
           distance: stationSpec?.distance,
+          distanceMeters: parseDistanceToMeters(stationSpec?.distance) ?? undefined,
           reps: stationSpec?.reps,
+          weightKg: stationSpec?.weightKg,
           weightLabel: stationSpec?.weightLabel,
         },
       ]);
@@ -284,13 +287,26 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
         )}
       </div>
 
-      {/* Segment list */}
-      <Card>
+      {/* Segment list. overflow-visible so the "Add Segment" dropdown
+          isn't clipped by Card's default overflow-hidden — the menu
+          opens downward via absolute positioning. */}
+      <Card className="overflow-visible">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-bold">Race Order</CardTitle>
+          {template === "custom" && (
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              Tap any distance, reps, or weight to edit. The system uses
+              your custom values for pace, splits, and PR comparisons.
+            </p>
+          )}
         </CardHeader>
         <CardContent>
-          <SegmentList segments={segments} onChange={handleSegmentsChange} />
+          <SegmentList
+            segments={segments}
+            onChange={handleSegmentsChange}
+            editable={template === "custom"}
+            divisionKey={divisionKey}
+          />
 
           {/* Add segment buttons */}
           <div className="mt-3 relative">
@@ -305,7 +321,18 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
             </Button>
 
             {showAddMenu && (
-              <div className="absolute top-full left-0 right-0 mt-1 rounded-lg border border-white/[0.08] bg-background shadow-xl z-10 max-h-64 overflow-y-auto">
+              <div
+                // Callback ref: when the menu mounts, scroll its bottom
+                // into view so the last items (e.g. Wall Balls) are
+                // reachable on a phone where the button sits near the
+                // viewport bottom. Smooth scroll keeps it feeling native.
+                ref={(el) => {
+                  if (el) {
+                    el.scrollIntoView({ behavior: "smooth", block: "end" });
+                  }
+                }}
+                className="absolute top-full left-0 right-0 mt-1 rounded-lg border border-white/[0.08] bg-background shadow-xl z-10 max-h-64 overflow-y-auto"
+              >
                 <button
                   onClick={addRun}
                   className="w-full flex items-center gap-2 px-3 py-2.5 text-xs hover:bg-white/[0.04] transition-colors border-b border-white/[0.06]"

@@ -29,6 +29,9 @@ export interface PracticeRaceSplit {
   segmentLabel: string;
   distanceMeters: number | null;
   reps: number | null;
+  /** Numeric (numeric column serializes as string from postgres). */
+  weightKg: string | null;
+  weightLabel: string | null;
   timeSeconds: string;
 }
 

@@ -1,4 +1,10 @@
-import { DIVISIONS, STATION_ORDER, type DivisionKey } from "@/lib/hyrox-data";
+import {
+  DIVISIONS,
+  STATION_ORDER,
+  parseDistanceToMeters,
+  type DivisionKey,
+  type StationSpec,
+} from "@/lib/hyrox-data";
 import type { RaceSegment } from "./types";
 
 let nextId = 1;
@@ -7,6 +13,20 @@ function uid(): string {
 }
 
 export const ROXZONE_DISTANCE_M = 100;
+
+/** Build a RaceSegment from a station spec, carrying numeric truth alongside display strings. */
+function stationSegmentFromSpec(spec: StationSpec): RaceSegment {
+  return {
+    id: uid(),
+    segmentType: "station",
+    label: spec.name,
+    distance: spec.distance,
+    distanceMeters: parseDistanceToMeters(spec.distance) ?? undefined,
+    reps: spec.reps,
+    weightKg: spec.weightKg,
+    weightLabel: spec.weightLabel,
+  };
+}
 
 export interface BuildRaceOptions {
   /** When true, insert a 100m Roxzone segment after every station that is
@@ -22,6 +42,7 @@ function createRoxzoneSegment(): RaceSegment {
     segmentSubtype: "roxzone",
     label: "Roxzone",
     distance: `${ROXZONE_DISTANCE_M}m`,
+    distanceMeters: ROXZONE_DISTANCE_M,
   };
 }
 
@@ -68,15 +89,9 @@ export function buildFullRaceSegments(
         segmentSubtype: "prescribed_run",
         label: `Run ${i + 1}`,
         distance: runDist,
+        distanceMeters: div.runDistanceM,
       });
-      segments.push({
-        id: uid(),
-        segmentType: "station",
-        label: station.name,
-        distance: station.distance,
-        reps: station.reps,
-        weightLabel: station.weightLabel,
-      });
+      segments.push(stationSegmentFromSpec(station));
     }
   } else {
     // Youngstars grouped format — still create run/station pairs for timing
@@ -92,17 +107,11 @@ export function buildFullRaceSegments(
         segmentSubtype: "prescribed_run",
         label: `Run ${runNum++}`,
         distance: runDist,
+        distanceMeters: div.runDistanceM,
       });
       for (let j = 0; j < count && stationIdx < div.stations.length; j++) {
         const station = div.stations[stationIdx++];
-        segments.push({
-          id: uid(),
-          segmentType: "station",
-          label: station.name,
-          distance: station.distance,
-          reps: station.reps,
-          weightLabel: station.weightLabel,
-        });
+        segments.push(stationSegmentFromSpec(station));
       }
     }
   }
@@ -124,7 +133,13 @@ export function buildHalfRaceSegments(
 
 /** Create a blank run segment */
 export function createRunSegment(distance = "1 km"): RaceSegment {
-  return { id: uid(), segmentType: "run", label: "Run", distance };
+  return {
+    id: uid(),
+    segmentType: "run",
+    label: "Run",
+    distance,
+    distanceMeters: parseDistanceToMeters(distance) ?? undefined,
+  };
 }
 
 /** Create a blank station segment */

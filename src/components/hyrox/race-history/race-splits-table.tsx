@@ -7,6 +7,7 @@ import {
   formatLongTime,
   formatStationPace,
   estimatePercentile,
+  parseDistanceToMeters,
   DIVISIONS,
   DIVISION_REF_DATA,
   type DivisionKey,
@@ -69,8 +70,11 @@ export function RaceSplitsTable({
           }
         }
 
-        // Pace string
+        // Pace string + modified-vs-canonical detection + the "what
+        // did the athlete actually do" spec line (distance / reps / weight).
         let paceDisplay: string | null = null;
+        let specDisplay: string | null = null;
+        let modified = false;
         if (isRun) {
           // Roxzone is a fixed 100m segment; everyone else falls back to
           // the division's prescribed run distance.
@@ -79,19 +83,66 @@ export function RaceSplitsTable({
           const m = Math.floor(perKm / 60);
           const s = Math.round(perKm % 60);
           paceDisplay = `${m}:${s.toString().padStart(2, "0")}/km`;
+          if (!isRoxzone && division && split.distanceMeters != null) {
+            modified = split.distanceMeters !== division.runDistanceM;
+          }
+          specDisplay = distM >= 1000 && distM % 1000 === 0
+            ? `${distM / 1000} km`
+            : `${distM}m`;
         } else if (division) {
           const stationSpec = division.stations.find(
             (st) => st.name === split.segmentLabel,
           );
-          const distanceM = stationSpec?.distance
-            ? parseInt(stationSpec.distance.replace(/[^\d]/g, ""), 10)
-            : (split.distanceMeters ?? undefined);
+          // Prefer per-split (custom) values; fall back to canonical when null.
+          const canonicalDistanceM = stationSpec?.distance
+            ? parseDistanceToMeters(stationSpec.distance) ?? undefined
+            : undefined;
+          const distanceM = split.distanceMeters ?? canonicalDistanceM;
+          const reps = split.reps ?? stationSpec?.reps ?? undefined;
           paceDisplay = formatStationPace(
             split.segmentLabel,
             seconds,
             distanceM,
-            stationSpec?.reps ?? split.reps ?? undefined,
+            reps,
           );
+
+          // Build the spec string from what was actually performed.
+          // Prefer per-split numbers (custom) and fall back to the
+          // station's canonical spec for legacy/full/half rows.
+          const specParts: string[] = [];
+          if (distanceM != null) specParts.push(`${distanceM}m`);
+          if (reps != null) specParts.push(`${reps} reps`);
+          const weightLabel =
+            split.weightLabel ??
+            (split.weightKg != null ? `${split.weightKg} kg` : null) ??
+            stationSpec?.weightLabel ??
+            null;
+          if (weightLabel) specParts.push(`@ ${weightLabel}`);
+          specDisplay = specParts.length > 0 ? specParts.join(" · ") : null;
+
+          if (stationSpec) {
+            if (
+              split.distanceMeters != null &&
+              canonicalDistanceM != null &&
+              split.distanceMeters !== canonicalDistanceM
+            ) {
+              modified = true;
+            }
+            if (
+              split.reps != null &&
+              stationSpec.reps != null &&
+              split.reps !== stationSpec.reps
+            ) {
+              modified = true;
+            }
+            if (
+              split.weightKg != null &&
+              stationSpec.weightKg != null &&
+              Number(split.weightKg) !== stationSpec.weightKg
+            ) {
+              modified = true;
+            }
+          }
         }
 
         // Roxzone uses a third (muted teal) variant to disambiguate from
@@ -142,13 +193,21 @@ export function RaceSplitsTable({
                     Transition
                   </span>
                 )}
-                {showPercentiles && percentile != null && (
+                {modified && (
+                  <span
+                    className="text-[9px] uppercase tracking-wider rounded-sm border border-orange-400/30 bg-orange-400/[0.08] px-1 py-px text-orange-300"
+                    title="Distance, reps, or weight differs from the division default"
+                  >
+                    modified
+                  </span>
+                )}
+                {showPercentiles && percentile != null && !modified && (
                   <PercentileChip percentile={percentile} />
                 )}
               </div>
-              {paceDisplay && (
+              {(specDisplay || paceDisplay) && (
                 <span className="text-[10px] text-muted-foreground">
-                  {paceDisplay}
+                  {[specDisplay, paceDisplay].filter(Boolean).join(" · ")}
                 </span>
               )}
             </div>

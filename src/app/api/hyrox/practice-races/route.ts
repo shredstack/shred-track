@@ -10,6 +10,12 @@ import {
 } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { inngest } from "@/inngest/client";
+import {
+  isCanonicalAttempt,
+  normalizeStationPaceSeconds,
+  STATION_PACE_TYPE,
+  type DivisionKey,
+} from "@/lib/hyrox-data";
 
 // ---------------------------------------------------------------------------
 // GET — list user's practice races
@@ -45,6 +51,8 @@ interface SplitPayload {
   timeSeconds: number;
   distanceMeters?: number;
   reps?: number;
+  weightKg?: number;
+  weightLabel?: string;
 }
 
 const VALID_SEGMENT_SUBTYPES = new Set(["prescribed_run", "roxzone"]);
@@ -152,41 +160,114 @@ export async function POST(request: Request) {
         timeSeconds: s.timeSeconds.toFixed(1),
         distanceMeters: s.distanceMeters,
         reps: s.reps,
+        weightKg:
+          typeof s.weightKg === "number" ? s.weightKg.toString() : null,
+        weightLabel: s.weightLabel ?? null,
       })),
     );
 
     // 3. Check for personal bests on station segments + insert benchmarks
     const stationSplits = splits.filter((s) => s.segmentType === "station");
     const personalBests: string[] = [];
+    const divisionKeyTyped =
+      (body.divisionKey as DivisionKey | undefined) ?? null;
+
+    // Pull existing benchmarks once for this user; we'll filter per station.
+    const allExisting = await tx
+      .select()
+      .from(hyroxStationBenchmarks)
+      .where(eq(hyroxStationBenchmarks.userId, user.id))
+      .orderBy(desc(hyroxStationBenchmarks.loggedAt));
 
     for (const split of stationSplits) {
       const timeSeconds = Math.round(split.timeSeconds);
-
-      // Get the current best for this station
-      const existing = await tx
-        .select()
-        .from(hyroxStationBenchmarks)
-        .where(eq(hyroxStationBenchmarks.userId, user.id))
-        .orderBy(desc(hyroxStationBenchmarks.loggedAt));
-
-      const currentBest = existing.find(
-        (b) => b.station === split.segmentLabel,
+      const stationName = split.segmentLabel;
+      const eligibleForPR = isCanonicalAttempt(
+        stationName,
+        divisionKeyTyped,
+        split.distanceMeters ?? null,
+        split.reps ?? null,
+        split.weightKg ?? null,
       );
 
-      const isNewBest = !currentBest || timeSeconds < currentBest.timeSeconds;
-
-      // Always record the benchmark, linked to this race
+      // Always record the benchmark, linked to this race. Non-canonical
+      // attempts still get stored so the athlete sees a full history;
+      // they just can't displace a canonical PR.
       await tx.insert(hyroxStationBenchmarks).values({
         userId: user.id,
-        station: split.segmentLabel,
+        station: stationName,
         timeSeconds,
+        distanceMeters: split.distanceMeters ?? null,
+        reps: split.reps ?? null,
+        weightKg:
+          typeof split.weightKg === "number"
+            ? split.weightKg.toString()
+            : null,
+        weightLabel: split.weightLabel ?? null,
         source: "practice_race",
         notes: `Practice race: ${race.title}`,
         sourceRaceId: race.id,
       });
 
+      if (!eligibleForPR) continue;
+
+      // Compare against prior canonical attempts only. Legacy rows
+      // (NULL distance/reps/weight) are treated as canonical by
+      // isCanonicalAttempt, so they participate.
+      const priorCanonical = allExisting.filter(
+        (b) =>
+          b.station === stationName &&
+          isCanonicalAttempt(
+            stationName,
+            divisionKeyTyped,
+            b.distanceMeters,
+            b.reps,
+            b.weightKg != null ? Number(b.weightKg) : null,
+          ),
+      );
+
+      const paceType = STATION_PACE_TYPE[stationName] ?? "total";
+      let isNewBest = priorCanonical.length === 0;
+
+      if (!isNewBest) {
+        if (paceType === "per500m" || paceType === "perRep") {
+          const newNorm = normalizeStationPaceSeconds(
+            stationName,
+            timeSeconds,
+            split.distanceMeters ?? null,
+            split.reps ?? null,
+          );
+          if (newNorm == null) {
+            // Fall back to raw time if we can't normalize (e.g. missing
+            // distance/reps on this attempt).
+            isNewBest = priorCanonical.every(
+              (b) => timeSeconds < b.timeSeconds,
+            );
+          } else {
+            isNewBest = priorCanonical.every((b) => {
+              const bNorm = normalizeStationPaceSeconds(
+                stationName,
+                b.timeSeconds,
+                b.distanceMeters,
+                b.reps,
+              );
+              // Treat unnormalizable priors as canonical-distance — use
+              // raw time. Legacy rows fall through this path.
+              if (bNorm == null) return timeSeconds < b.timeSeconds;
+              return newNorm < bNorm;
+            });
+          }
+        } else {
+          // "total" type — compare apples-to-apples raw time across
+          // prior canonical attempts.
+          isNewBest = priorCanonical.every(
+            (b) => timeSeconds < b.timeSeconds,
+          );
+        }
+      }
+
       if (isNewBest) {
-        personalBests.push(split.segmentLabel);
+        personalBests.push(stationName);
       }
     }
 

@@ -204,10 +204,18 @@ export function useRaceTimer(initialSegments: RaceSegment[]): UseRaceTimerReturn
           segmentSubtype: seg.segmentSubtype ?? null,
           label: seg.label,
           timeMs: segTime,
+          // Distance: HealthKit measurement wins for runs; otherwise fall
+          // back to the prescribed numeric distance on the source segment.
+          // Stations don't have measured distance, but custom races set a
+          // numeric distance for stations like SkiErg / Rowing that the
+          // rest of the app needs to honor on save.
           distanceMeters:
             seg.segmentType === "run" && typeof opts?.distanceMeters === "number"
               ? Math.round(opts.distanceMeters)
-              : null,
+              : seg.distanceMeters ?? null,
+          reps: seg.reps ?? null,
+          weightKg: seg.weightKg ?? null,
+          weightLabel: seg.weightLabel ?? null,
         };
 
         const nextIndex = prev.currentSegmentIndex + 1;
@@ -286,7 +294,10 @@ export function useRaceTimer(initialSegments: RaceSegment[]): UseRaceTimerReturn
               seg.segmentType === "run" &&
               typeof opts?.distanceMeters === "number"
                 ? Math.round(opts.distanceMeters)
-                : null,
+                : seg.distanceMeters ?? null,
+            reps: seg.reps ?? null,
+            weightKg: seg.weightKg ?? null,
+            weightLabel: seg.weightLabel ?? null,
           });
         }
 

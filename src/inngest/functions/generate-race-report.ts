@@ -174,7 +174,17 @@ export const generateRaceReport = inngest.createFunction(
       const { race, splits, profile } = inputs;
       const divisionKey =
         (race.divisionKey as DivisionKey | null) ?? null;
-      const refData = divisionKey ? DIVISION_REF_DATA[divisionKey] : null;
+      // DIVISION_REF_DATA distributions are calibrated to the canonical
+      // Full / Half formats. A custom race may have shortened runs,
+      // reduced reps, or scaled weights — comparing those times to the
+      // standard percentile distribution is misleading, so skip the
+      // percentile-based time-loss block for custom races entirely.
+      const isCustom = race.template === "custom";
+      const refData = isCustom
+        ? null
+        : divisionKey
+          ? DIVISION_REF_DATA[divisionKey]
+          : null;
 
       // Compute seconds lost vs p25 for every segment with reference data.
       // (Lower percentile = better; p25 = "Top 25%" benchmark.)
@@ -296,9 +306,14 @@ Rules:
 - Be specific. "Improve burpee broad jumps" is too generic — say WHAT to work on (e.g. "explosive hip drive on the broad jump" or "smoother burpee → jump transition").
 - Sessions per week: 1–3. Duration weeks: 2–8. Be realistic.`;
 
+      const customRaceNote =
+        race.template === "custom"
+          ? "\n- Note: this is a CUSTOM-format race. Station distances, reps, and/or weights may differ from the canonical HYROX Full/Half — percentile-based time-loss comparisons do not apply here. Focus your analysis on pacing and within-race execution."
+          : "";
+
       const userPrompt = `## Race Summary
 - Division: ${divisionKey}
-- Template: ${race.template}
+- Template: ${race.template}${customRaceNote}
 - Finish: ${formatLongTime(numerics.totalFinishSeconds)}
 - Goal: ${goalLine}
 - Race type: ${race.raceType}
