@@ -1,10 +1,11 @@
 import SwiftUI
 import WatchKit
 
-// TimerView — the headline (and only) screen on the Watch.
+// TimerView — the headline screen on the Watch.
 //
-// Three states drive the body:
+// Four states drive the body:
 //   - idle      → setupScreen (compact, single-tap START)
+//   - countdown → countdownScreen (big number, Cancel button)
 //   - running / paused → activeScreen (live race readout)
 //   - complete  → completeScreen
 //
@@ -24,6 +25,8 @@ import WatchKit
 //   - Avg run pace (16pt persistent reference)
 //   - Total elapsed (caption)
 //   - Current segment label
+//   - Visible SPLIT + Pause buttons (long-press is gone — it was a
+//     hidden affordance no one knew about)
 
 private enum TimerDefaultsKey {
     static let divisionKey = "watch.timer.divisionKey"
@@ -31,8 +34,12 @@ private enum TimerDefaultsKey {
     static let simulateRoxzone = "watch.timer.simulateRoxzone"
 }
 
+/// Always 10s when started on the watch. The phone has a configurable
+/// preference, but the wrist UX favors a single sensible default.
+private let watchCountdownSeconds = 10
+
 struct TimerView: View {
-    @StateObject private var vm = RaceTimerViewModel()
+    @EnvironmentObject private var vm: RaceTimerViewModel
     @StateObject private var hk = HealthKitWorkoutService.shared
 
     // These were previously `@AppStorage`. On a fresh install the first
@@ -74,6 +81,8 @@ struct TimerView: View {
         switch vm.state.status {
         case .idle:
             setupScreen
+        case .countdown:
+            countdownScreen
         case .running, .paused:
             activeScreen
         case .complete:
@@ -174,18 +183,8 @@ struct TimerView: View {
     private func templateChip(_ value: RaceTemplate, label: String) -> some View {
         let selected = template == value
         Button(label) {
-            let t0 = Date()
-            print(String(
-                format: "[TemplateChip] tap=%@ start @%.3fs",
-                value.rawValue, LaunchClock.sinceLaunch()
-            ))
             templateRaw = value.rawValue
             persistSetting(TimerDefaultsKey.template, value.rawValue)
-            let elapsed = Date().timeIntervalSince(t0)
-            print(String(
-                format: "[TemplateChip] tap=%@ updated state in %.4fs",
-                value.rawValue, elapsed
-            ))
         }
         .font(.caption)
         .frame(maxWidth: .infinity)
@@ -210,7 +209,7 @@ struct TimerView: View {
                 template: template,
                 simulateRoxzone: simulateRoxzone
             )
-            await vm.start()
+            await vm.start(countdownSeconds: watchCountdownSeconds)
             isStarting = false
         }
     }
@@ -223,6 +222,31 @@ struct TimerView: View {
         case "men_pro": return "Men Pro"
         default: return key
         }
+    }
+
+    // MARK: - Countdown
+
+    private var countdownScreen: some View {
+        VStack(spacing: 6) {
+            Text("Get ready")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+            Text("\(vm.countdownRemainingSec)")
+                .font(.system(size: 72, weight: .bold, design: .monospaced))
+                .foregroundStyle(.green)
+                .contentTransition(.numericText(countsDown: true))
+                .animation(.snappy, value: vm.countdownRemainingSec)
+            Button(role: .cancel) {
+                vm.cancelCountdown()
+            } label: {
+                Label("Cancel", systemImage: "xmark")
+                    .font(.caption)
+            }
+            .controlSize(.small)
+            .padding(.top, 4)
+        }
+        .padding(.horizontal, 6)
     }
 
     // MARK: - Active
@@ -268,8 +292,8 @@ struct TimerView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
-            // Action button
-            actionButton
+            // Action buttons
+            actionButtons
                 .padding(.top, 4)
         }
         .padding(.horizontal, 6)
@@ -286,20 +310,28 @@ struct TimerView: View {
     }
 
     @ViewBuilder
-    private var actionButton: some View {
+    private var actionButtons: some View {
         switch vm.state.status {
         case .running:
-            Button(action: { vm.split() }) {
-                Text(isLastSegment ? "FINISH" : "SPLIT")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-            }
-            .tint(isLastSegment ? .red : .green)
-            .simultaneousGesture(
-                LongPressGesture(minimumDuration: 0.6).onEnded { _ in
-                    vm.pause()
+            VStack(spacing: 4) {
+                // Primary tap target — large and obvious.
+                Button(action: { vm.split() }) {
+                    Text(isLastSegment ? "FINISH" : "SPLIT")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
                 }
-            )
+                .tint(isLastSegment ? .red : .green)
+
+                // Secondary: visible Pause button. Replaces the
+                // long-press-on-SPLIT gesture that nobody knew about.
+                Button(action: { vm.pause() }) {
+                    Label("Pause", systemImage: "pause.circle")
+                        .font(.caption2)
+                        .frame(maxWidth: .infinity)
+                }
+                .controlSize(.mini)
+                .tint(.orange)
+            }
         case .paused:
             HStack {
                 Button("Resume") { vm.resume() }
@@ -327,8 +359,19 @@ struct TimerView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if vm.savedThisRace {
-                    // Post-save: show sync status + Done.
+                // Phone-origin races: the phone owns the save. Show a
+                // passive notice and a Done button to clear the watch
+                // back to setup.
+                if vm.state.source == .phone {
+                    Label("Saving on iPhone", systemImage: "iphone")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Button("Done") {
+                        vm.dismissCompleteScreen()
+                    }
+                    .padding(.top, 4)
+                } else if vm.savedThisRace {
+                    // Post-save (watch-origin): show sync status + Done.
                     if vm.state.pendingSync {
                         Label("Syncing…", systemImage: "arrow.triangle.2.circlepath")
                             .font(.caption2)
@@ -343,7 +386,7 @@ struct TimerView: View {
                     }
                     .padding(.top, 4)
                 } else {
-                    // Pre-save: explicit Save / Discard.
+                    // Pre-save (watch-origin): explicit Save / Discard.
                     Button {
                         vm.saveRace()
                     } label: {

@@ -25,6 +25,12 @@ import SwiftUI
 // crown-driven scrolling — the result was an app that appeared frozen
 // on Today (can't scroll the card list, can't swipe to Timer).
 // Horizontal page swipes leave the Crown free for in-page scrolling.
+//
+// The `RaceTimerViewModel` is hoisted to the App scope so it survives
+// tab switches and can adopt a race started on the paired iPhone even
+// when the user isn't currently looking at the Timer tab. On adoption
+// we auto-switch to the Timer tab so the countdown is the first thing
+// the user sees when they glance at their wrist.
 
 @main
 struct ShredTrackWatchApp: App {
@@ -32,6 +38,7 @@ struct ShredTrackWatchApp: App {
     @StateObject private var session = AuthSession.shared
     @StateObject private var watchConn = WatchConnectivityManager.shared
     @StateObject private var today = TodaySnapshotStore.shared
+    @StateObject private var raceTimer = RaceTimerViewModel()
 
     @AppStorage("watch.lastTab") private var lastTab: Int = 0
 
@@ -49,6 +56,21 @@ struct ShredTrackWatchApp: App {
             .environmentObject(session)
             .environmentObject(watchConn)
             .environmentObject(today)
+            .environmentObject(raceTimer)
+            .onAppear {
+                // Hand the connectivity manager the app-scope view-model
+                // so phone-initiated race events can drive it directly,
+                // even when the Timer tab isn't on screen.
+                watchConn.raceTimer = raceTimer
+            }
+            .onChange(of: raceTimer.state.status) { _, newStatus in
+                // Auto-route the user to the Timer tab the moment a
+                // race starts — whether it kicked off locally or was
+                // adopted from the phone.
+                if newStatus == .countdown || newStatus == .running {
+                    if lastTab != 1 { lastTab = 1 }
+                }
+            }
         }
     }
 }

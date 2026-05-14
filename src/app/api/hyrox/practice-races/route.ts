@@ -279,10 +279,15 @@ export async function POST(request: Request) {
       .limit(1);
 
     const priorBestFinishSeconds = profile?.bestFinishTimeSeconds ?? null;
-    // Tied times do NOT count as a PR.
+    // Tied times do NOT count as a PR. Only canonical Full-format races
+    // are eligible — Half is too short and Custom may have dropped
+    // stations or shortened distances, so neither should displace a
+    // real HYROX best.
+    const finishTemplate = body.template ?? "full";
     const isFinishPR =
-      priorBestFinishSeconds == null ||
-      totalTimeSecondsRounded < priorBestFinishSeconds;
+      finishTemplate === "full" &&
+      (priorBestFinishSeconds == null ||
+        totalTimeSecondsRounded < priorBestFinishSeconds);
 
     // 5. Pre-create a pending race report row so the GET endpoint can poll.
     await tx

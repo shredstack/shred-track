@@ -10,7 +10,9 @@ import WatchKit
 // integration baked in (the web has no distance signal). State
 // transitions:
 //
-//   idle → running  (start)
+//   idle → countdown (start with countdownSeconds > 0)
+//   countdown → running (auto-fire at countdownEndsAt)
+//   idle → running  (start with countdownSeconds == 0)
 //   running → paused (pause)         pause HKWorkoutSession too
 //   paused → running (resume)        resume HKWorkoutSession too
 //   running → running (split)        snapshot distance for the segment
@@ -19,12 +21,18 @@ import WatchKit
 // Per native-app spec §5.1, every method here must work with no phone
 // and no network — the only place we hit the network is at finish-time
 // via `WCSession.transferUserInfo` (which itself queues offline).
+//
+// Bidirectional sync: every local tap (start, split, pause, resume,
+// finish) broadcasts an event over WCSession so the phone can mirror
+// it. Incoming events from the phone are applied via the
+// `applyRemote*` methods, which do NOT re-broadcast.
 
 @MainActor
 final class RaceTimerViewModel: ObservableObject {
     @Published var state: RaceState
     @Published var segmentElapsedMs: Double = 0
     @Published var totalElapsedMs: Double = 0
+    @Published var countdownRemainingSec: Int = 0
     @Published var liveSegmentDistanceMeters: Double = 0
     /// Set true after the user taps Save on the complete screen. Drives
     /// the post-save layout (Syncing/Synced + Done) vs the pre-save
@@ -72,6 +80,9 @@ final class RaceTimerViewModel: ObservableObject {
     /// workout session is live (the cause of the wrist-side "timer
     /// doesn't tick" bug we hit when HK init was made parallel).
     private var distanceTask: Task<Void, Never>?
+    /// One-shot countdown auto-fire. Cancelled if the user taps Cancel
+    /// or if the phone sends `race.cancel`.
+    private var countdownTask: Task<Void, Never>?
     private var segmentStartedAt: Date?
     private let hk = HealthKitWorkoutService.shared
 
@@ -101,6 +112,8 @@ final class RaceTimerViewModel: ObservableObject {
             )
         }
         state = RaceState(
+            raceId: nil,
+            source: nil,
             divisionKey: divisionKey,
             template: template.rawValue,
             planSessionId: planSessionId,
@@ -109,6 +122,7 @@ final class RaceTimerViewModel: ObservableObject {
         )
         segmentElapsedMs = 0
         totalElapsedMs = 0
+        countdownRemainingSec = 0
         liveSegmentDistanceMeters = 0
         cleanupAfterRace()
     }
@@ -122,21 +136,104 @@ final class RaceTimerViewModel: ObservableObject {
         queueObserver = nil
         savedThisRace = false
         state.pendingSync = false
+        countdownTask?.cancel()
+        countdownTask = nil
     }
 
     // MARK: - Lifecycle
 
-    /// Begin the race. Flips status to `.running` and starts the timer
-    /// tick *before* awaiting HealthKit so the UI never appears
-    /// unresponsive if HealthKit permission prompts or the workout
-    /// session takes a moment to spin up. The timer is the source of
-    /// truth — pace just degrades to em-dash if HealthKit is unavailable.
-    func start() async {
+    /// Begin the race from this device. With `countdownSeconds > 0` the
+    /// timer enters `.countdown` first and auto-transitions to
+    /// `.running` when the deadline passes; the same `startAt` is
+    /// pushed to the phone so both clocks tick from the same instant.
+    func start(countdownSeconds: Int = 10) async {
         let now = Date()
-        state.raceStartedAt = now
-        segmentStartedAt = now
+        let startAt = now.addingTimeInterval(TimeInterval(countdownSeconds))
+        let raceId = state.raceId ?? UUID().uuidString
+        state.raceId = raceId
+        state.source = .watch
+        state.completedSegments = []
+        state.currentSegmentIndex = 0
+        state.totalPausedMs = 0
+        state.pausedAt = nil
         liveSegmentDistanceMeters = 0
+        segmentStartedAt = nil
+
+        // Broadcast the start to the phone so it can adopt + show the
+        // same countdown. Always uses a 10s countdown when initiated on
+        // the watch (per product spec — the user has no time to fiddle
+        // with a setting on their wrist).
+        WatchConnectivityManager.shared.sendRaceStart(
+            raceId: raceId,
+            divisionKey: state.divisionKey,
+            template: state.template,
+            simulateRoxzone: state.segments.contains { $0.segmentSubtype == .roxzone },
+            startAt: startAt,
+            segments: state.segments
+        )
+
+        if countdownSeconds > 0 {
+            state.status = .countdown
+            state.countdownEndsAt = startAt
+            countdownRemainingSec = countdownSeconds
+            scheduleCountdownFire(at: startAt)
+        } else {
+            await beginRunning(at: now)
+        }
+    }
+
+    /// Cancel a pre-race countdown. No-op outside `.countdown`. Notifies
+    /// the phone so it can return its UI to setup too.
+    func cancelCountdown() {
+        guard state.status == .countdown else { return }
+        let raceId = state.raceId
+        countdownTask?.cancel()
+        countdownTask = nil
+        state.countdownEndsAt = nil
+        state.status = .idle
+        state.raceId = nil
+        state.source = nil
+        countdownRemainingSec = 0
+        if let raceId {
+            WatchConnectivityManager.shared.sendRaceEvent(
+                kind: "race.cancel",
+                raceId: raceId,
+                payload: [:]
+            )
+        }
+    }
+
+    /// Schedules the one-shot transition from `.countdown` to `.running`
+    /// at the given wall-clock instant. Uses `Task.sleep` rather than a
+    /// Timer because Tasks survive suspended `await` points and play
+    /// nicely with cancellation when the user taps Cancel.
+    private func scheduleCountdownFire(at fireDate: Date) {
+        countdownTask?.cancel()
+        countdownTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let remaining = fireDate.timeIntervalSince(Date())
+                if remaining <= 0 { break }
+                // Update the on-screen number; tick every ~250ms so the
+                // last second feels responsive without burning battery.
+                self.countdownRemainingSec = max(0, Int(ceil(remaining)))
+                let sleepNs = min(UInt64(remaining * 1_000_000_000), 250_000_000)
+                try? await Task.sleep(nanoseconds: sleepNs)
+            }
+            if Task.isCancelled { return }
+            guard let self else { return }
+            if self.state.status == .countdown {
+                await self.beginRunning(at: fireDate)
+            }
+        }
+    }
+
+    private func beginRunning(at startedAt: Date) async {
         state.status = .running
+        state.raceStartedAt = startedAt
+        state.countdownEndsAt = nil
+        segmentStartedAt = startedAt
+        liveSegmentDistanceMeters = 0
         startTick()
         startDistanceTick()
 
@@ -160,6 +257,8 @@ final class RaceTimerViewModel: ObservableObject {
         guard state.status == .running else { return }
         guard state.currentSegmentIndex < state.segments.count else { return }
         let now = Date()
+        let raceId = state.raceId
+        let segmentOrder = state.currentSegmentIndex + 1
         let segStart = segmentStartedAt ?? now
         let elapsed = now.timeIntervalSince(segStart)
         let current = state.segments[state.currentSegmentIndex]
@@ -184,6 +283,22 @@ final class RaceTimerViewModel: ObservableObject {
         )
         state.completedSegments.append(completed)
 
+        // Broadcast outward so the phone can mirror. Local-origin event
+        // — the receiving side will not echo back.
+        if let raceId {
+            var payload: [String: Any] = [
+                "segmentOrder": segmentOrder,
+                "completedAt": now.timeIntervalSince1970 * 1000,
+                "originDevice": "watch",
+            ]
+            if let dist = runDistanceMeters { payload["distanceMeters"] = dist }
+            WatchConnectivityManager.shared.sendRaceEvent(
+                kind: "race.split",
+                raceId: raceId,
+                payload: payload
+            )
+        }
+
         let nextIdx = state.currentSegmentIndex + 1
         WKInterfaceDevice.current().play(.success)
         if nextIdx >= state.segments.count {
@@ -197,22 +312,42 @@ final class RaceTimerViewModel: ObservableObject {
 
     func pause() {
         guard state.status == .running else { return }
+        let now = Date()
         state.status = .paused
-        state.pausedAt = Date()
+        state.pausedAt = now
         hk.pause()
         stopTick()
         stopDistanceTick()
+        if let raceId = state.raceId {
+            WatchConnectivityManager.shared.sendRaceEvent(
+                kind: "race.pause",
+                raceId: raceId,
+                payload: ["at": now.timeIntervalSince1970 * 1000]
+            )
+        }
     }
 
     func resume() {
         guard state.status == .paused, let pausedAt = state.pausedAt else { return }
-        let pauseDuration = Date().timeIntervalSince(pausedAt) * 1000
+        let now = Date()
+        let pauseDuration = now.timeIntervalSince(pausedAt) * 1000
         state.totalPausedMs += pauseDuration
         state.pausedAt = nil
         state.status = .running
+        // Shift segment start by the pause so segment time excludes it.
+        if let segStart = segmentStartedAt {
+            segmentStartedAt = segStart.addingTimeInterval(now.timeIntervalSince(pausedAt))
+        }
         hk.resume()
         startTick()
         startDistanceTick()
+        if let raceId = state.raceId {
+            WatchConnectivityManager.shared.sendRaceEvent(
+                kind: "race.resume",
+                raceId: raceId,
+                payload: ["at": now.timeIntervalSince1970 * 1000]
+            )
+        }
     }
 
     /// End the race timer. Stops ticks, closes the HealthKit session,
@@ -226,6 +361,7 @@ final class RaceTimerViewModel: ObservableObject {
     /// `.running` during the outer awaits), and end HealthKit twice.
     func finish() async {
         guard state.status != .complete else { return }
+        let finishAt = Date()
         // Implicit final split if the user taps Finish mid-segment. Skip
         // when every segment is already completed: the common case is
         // split() on the last segment queued this finish task *and*
@@ -243,6 +379,13 @@ final class RaceTimerViewModel: ObservableObject {
         pendingPayload = buildSavePayload()
         savedThisRace = false
         state.pendingSync = false
+        if let raceId = state.raceId {
+            WatchConnectivityManager.shared.sendRaceEvent(
+                kind: "race.finish",
+                raceId: raceId,
+                payload: ["at": finishAt.timeIntervalSince1970 * 1000]
+            )
+        }
     }
 
     /// Enqueue the finished race for sync to the phone, and start
@@ -270,8 +413,11 @@ final class RaceTimerViewModel: ObservableObject {
     func discardRace() {
         cleanupAfterRace()
         state.status = .idle
+        state.raceId = nil
+        state.source = nil
         segmentElapsedMs = 0
         totalElapsedMs = 0
+        countdownRemainingSec = 0
         liveSegmentDistanceMeters = 0
     }
 
@@ -279,6 +425,215 @@ final class RaceTimerViewModel: ObservableObject {
     /// but the saved race remains in the pending queue until acked.
     func dismissCompleteScreen() {
         discardRace()
+    }
+
+    // MARK: - Remote (phone-originated) event ingress
+
+    /// Adopt an in-progress race that originated on the phone. The watch
+    /// shows the same countdown and clock; the phone retains save
+    /// authority at finish-time.
+    func adoptFromPhone(
+        raceId: String,
+        divisionKey: String,
+        template: RaceTemplate,
+        simulateRoxzone: Bool,
+        startAt: Date,
+        segments: [RaceSegment]
+    ) async {
+        // Don't clobber a race already in-flight with the same id
+        // (could happen if the watch already started locally and the
+        // phone is now reflecting it back).
+        if state.raceId == raceId && state.status != .idle && state.status != .complete {
+            return
+        }
+        state = RaceState(
+            raceId: raceId,
+            source: .phone,
+            divisionKey: divisionKey,
+            template: template.rawValue,
+            planSessionId: nil,
+            segments: segments,
+            status: .idle
+        )
+        countdownRemainingSec = 0
+        liveSegmentDistanceMeters = 0
+        segmentElapsedMs = 0
+        totalElapsedMs = 0
+
+        let now = Date()
+        if startAt > now {
+            // Countdown still pending — show the same number on both
+            // devices and auto-fire at the shared instant.
+            state.status = .countdown
+            state.countdownEndsAt = startAt
+            countdownRemainingSec = Int(ceil(startAt.timeIntervalSince(now)))
+            scheduleCountdownFire(at: startAt)
+        } else {
+            // Joined late — start the running clock with the original
+            // startAt so elapsed time matches the phone's reading.
+            await beginRunning(at: startAt)
+        }
+    }
+
+    /// Apply a remote split. First-write-wins per `segmentOrder`: if the
+    /// next-expected segment matches the incoming one, advance; otherwise
+    /// drop the event (the local tap already moved us past it, or this
+    /// is a duplicate).
+    func applyRemoteSplit(
+        raceId: String,
+        segmentOrder: Int,
+        completedAt: Date,
+        originDevice: RaceSource,
+        distanceMeters: Int?
+    ) {
+        guard state.raceId == raceId else { return }
+        guard state.status == .running else { return }
+        guard segmentOrder == state.currentSegmentIndex + 1 else { return }
+        let segStart = segmentStartedAt ?? completedAt
+        let elapsed = completedAt.timeIntervalSince(segStart)
+        guard elapsed >= 0 else { return }
+        let current = state.segments[state.currentSegmentIndex]
+
+        // Run distance: prefer the value attached to the incoming
+        // event; if the phone tapped this and didn't have a distance,
+        // we'll backfill via HealthKit below and emit an enrichment.
+        let runDistance: Int?
+        if current.segmentType == .run {
+            if let d = distanceMeters { runDistance = d }
+            else { runDistance = Int(liveSegmentDistanceMeters.rounded()) }
+        } else {
+            runDistance = nil
+        }
+
+        let completed = CompletedSegment(
+            segmentOrder: state.currentSegmentIndex,
+            segmentType: current.segmentType,
+            segmentSubtype: current.segmentSubtype,
+            label: current.label,
+            timeSeconds: elapsed,
+            distanceMeters: runDistance,
+            reps: current.reps
+        )
+        state.completedSegments.append(completed)
+
+        // Pace backfill: phone-originated run splits arrive with no
+        // distance because the phone has no wrist sensor. Use the
+        // HealthKit reading the watch has and ship it back so the
+        // phone's CompletedSegment gets pace data too.
+        if current.segmentType == .run,
+           originDevice == .phone,
+           let raceId = state.raceId,
+           let dist = runDistance,
+           dist > 0 {
+            WatchConnectivityManager.shared.sendRaceEvent(
+                kind: "race.split.enrich",
+                raceId: raceId,
+                payload: [
+                    "segmentOrder": segmentOrder,
+                    "distanceMeters": dist,
+                ]
+            )
+        }
+
+        let nextIdx = state.currentSegmentIndex + 1
+        if nextIdx >= state.segments.count {
+            Task { await finishFromRemote(at: completedAt) }
+        } else {
+            state.currentSegmentIndex = nextIdx
+            segmentStartedAt = completedAt
+            liveSegmentDistanceMeters = 0
+        }
+    }
+
+    func applyRemotePause(raceId: String, at: Date) {
+        guard state.raceId == raceId, state.status == .running else { return }
+        state.status = .paused
+        state.pausedAt = at
+        hk.pause()
+        stopTick()
+        stopDistanceTick()
+    }
+
+    func applyRemoteResume(raceId: String, at: Date) {
+        guard state.raceId == raceId, state.status == .paused,
+              let pausedAt = state.pausedAt else { return }
+        let pauseDuration = at.timeIntervalSince(pausedAt) * 1000
+        state.totalPausedMs += pauseDuration
+        state.pausedAt = nil
+        state.status = .running
+        if let segStart = segmentStartedAt {
+            segmentStartedAt = segStart.addingTimeInterval(at.timeIntervalSince(pausedAt))
+        }
+        hk.resume()
+        startTick()
+        startDistanceTick()
+    }
+
+    func applyRemoteFinish(raceId: String, at: Date) {
+        guard state.raceId == raceId, state.status != .complete else { return }
+        Task { await finishFromRemote(at: at) }
+    }
+
+    func applyRemoteCancel(raceId: String) {
+        guard state.raceId == raceId else { return }
+        countdownTask?.cancel()
+        countdownTask = nil
+        state = RaceState(
+            divisionKey: state.divisionKey,
+            template: state.template,
+            segments: state.segments,
+            status: .idle
+        )
+        countdownRemainingSec = 0
+        liveSegmentDistanceMeters = 0
+        segmentElapsedMs = 0
+        totalElapsedMs = 0
+    }
+
+    /// Internal: closes out the race in response to a remote finish.
+    /// Does NOT re-broadcast a finish event — that would echo back to
+    /// the phone and double-fire.
+    private func finishFromRemote(at: Date) async {
+        guard state.status != .complete else { return }
+        // Close the in-progress segment using the remote timestamp so
+        // the timing reading matches the originating device.
+        if state.status == .running,
+           let segStart = segmentStartedAt,
+           state.currentSegmentIndex < state.segments.count {
+            let current = state.segments[state.currentSegmentIndex]
+            let elapsed = max(0, at.timeIntervalSince(segStart))
+            let runDistance: Int?
+            if current.segmentType == .run {
+                runDistance = Int(liveSegmentDistanceMeters.rounded())
+            } else {
+                runDistance = nil
+            }
+            state.completedSegments.append(
+                CompletedSegment(
+                    segmentOrder: state.currentSegmentIndex,
+                    segmentType: current.segmentType,
+                    segmentSubtype: current.segmentSubtype,
+                    label: current.label,
+                    timeSeconds: elapsed,
+                    distanceMeters: runDistance,
+                    reps: current.reps
+                )
+            )
+        }
+        state.status = .complete
+        stopTick()
+        stopDistanceTick()
+        await hk.end()
+        // Only the origin device persists. If the watch is the origin,
+        // stash a payload so the user can tap Save on the complete
+        // screen; otherwise leave it nil — the phone owns the save.
+        if state.source == .watch {
+            pendingPayload = buildSavePayload()
+        } else {
+            pendingPayload = nil
+        }
+        savedThisRace = false
+        state.pendingSync = false
     }
 
     // MARK: - Tick

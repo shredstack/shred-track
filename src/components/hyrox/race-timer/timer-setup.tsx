@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
+import { toast } from "sonner";
 import {
   Plus,
   Footprints,
@@ -8,10 +9,23 @@ import {
   RotateCcw,
   Timer,
   Info,
+  Bookmark,
+  Save,
+  X,
+  Hourglass,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { DivisionPicker } from "@/components/shared/division-picker";
 import {
   DIVISIONS,
@@ -27,6 +41,17 @@ import {
   createStationSegment,
 } from "./race-segments";
 import type { RaceSegment, RaceTemplate } from "./types";
+import type { RaceTemplateSegment } from "@/db/schema";
+import {
+  useRaceTemplates,
+  useCreateRaceTemplate,
+  useDeleteRaceTemplate,
+  type RaceTemplate as SavedRaceTemplate,
+} from "@/hooks/useRaceTemplates";
+import {
+  useCountdownPreference,
+  type CountdownSeconds,
+} from "@/hooks/useCountdownPreference";
 
 // ---------------------------------------------------------------------------
 // Roxzone toggle persistence
@@ -66,6 +91,15 @@ interface TimerSetupProps {
 // Component
 // ---------------------------------------------------------------------------
 
+// Cheap monotonically-increasing ID generator for segments loaded from
+// a saved template. Mirrors race-segments.ts's `uid()` so React keys
+// stay stable across re-renders even after loading the same template
+// twice in a row.
+let nextLoadedSegmentId = 1;
+function loadedSegmentId(): string {
+  return `seg-loaded-${nextLoadedSegmentId++}-${Date.now()}`;
+}
+
 export function TimerSetup({ onStart }: TimerSetupProps) {
   const [divisionKey, setDivisionKey] = useState<DivisionKey>("women_open");
   const [template, setTemplate] = useState<RaceTemplate>("full");
@@ -76,6 +110,18 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
     buildFullRaceSegments("women_open"),
   );
   const [showAddMenu, setShowAddMenu] = useState(false);
+
+  // Pre-race countdown preference (shared via localStorage with the
+  // active screen and the watch-bridge relay).
+  const { seconds: countdownSeconds, setSeconds: setCountdownSeconds, options: countdownOptions } =
+    useCountdownPreference();
+
+  // Saved-template UI state.
+  const templatesQuery = useRaceTemplates();
+  const createTemplate = useCreateRaceTemplate();
+  const deleteTemplate = useDeleteRaceTemplate();
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [templateName, setTemplateName] = useState("");
 
   // Hydrate persisted Roxzone preference on mount and rebuild segments
   // for the current preset. The deps are intentionally empty — we only
@@ -174,6 +220,77 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
     applyTemplate("full", divisionKey);
   }, [divisionKey, applyTemplate]);
 
+  const handleLoadTemplate = useCallback(
+    (saved: SavedRaceTemplate) => {
+      if (saved.divisionKey) {
+        setDivisionKey(saved.divisionKey as DivisionKey);
+      }
+      setSimulateRoxzone(saved.simulateRoxzone);
+      // Regenerate IDs so React keys stay stable across loads.
+      setSegments(
+        saved.segments.map((s) => ({ ...s, id: loadedSegmentId() })),
+      );
+      setTemplate("custom");
+      setShowAddMenu(false);
+      toast.success(`Loaded "${saved.name}"`);
+    },
+    [],
+  );
+
+  const handleOpenSaveDialog = useCallback(() => {
+    setTemplateName("");
+    setSaveDialogOpen(true);
+  }, []);
+
+  const handleSaveTemplate = useCallback(async () => {
+    const name = templateName.trim();
+    if (!name) {
+      toast.error("Give your template a name first");
+      return;
+    }
+    try {
+      // Strip the volatile `id` field — the server side does this too,
+      // but stripping client-side keeps the payload tight.
+      const stored: RaceTemplateSegment[] = segments.map((s) => ({
+        segmentType: s.segmentType,
+        label: s.label,
+        ...(s.segmentSubtype ? { segmentSubtype: s.segmentSubtype } : {}),
+        ...(s.distance ? { distance: s.distance } : {}),
+        ...(typeof s.distanceMeters === "number"
+          ? { distanceMeters: s.distanceMeters }
+          : {}),
+        ...(typeof s.reps === "number" ? { reps: s.reps } : {}),
+        ...(typeof s.weightKg === "number" ? { weightKg: s.weightKg } : {}),
+        ...(s.weightLabel ? { weightLabel: s.weightLabel } : {}),
+      }));
+      await createTemplate.mutateAsync({
+        name,
+        divisionKey,
+        simulateRoxzone,
+        segments: stored,
+      });
+      setSaveDialogOpen(false);
+      toast.success(`Saved "${name}"`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Couldn't save template";
+      toast.error(message);
+    }
+  }, [templateName, segments, divisionKey, simulateRoxzone, createTemplate]);
+
+  const handleDeleteTemplate = useCallback(
+    async (id: string, name: string) => {
+      try {
+        await deleteTemplate.mutateAsync(id);
+        toast.success(`Deleted "${name}"`);
+      } catch {
+        toast.error("Couldn't delete template");
+      }
+    },
+    [deleteTemplate],
+  );
+
+  const savedTemplates = templatesQuery.data ?? [];
+
   const totalSegments = segments.length;
   const runCount = segments.filter((s) => s.segmentType === "run").length;
   const stationCount = segments.filter((s) => s.segmentType === "station").length;
@@ -229,6 +346,62 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
         ))}
       </div>
 
+      {/* Saved templates — only render the row when there's something
+          to show or when the user is on Custom and could save one. */}
+      {(savedTemplates.length > 0 || template === "custom") && (
+        <Card>
+          <CardContent className="py-3 flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <Bookmark className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-xs font-medium">My templates</span>
+              </div>
+              {template === "custom" && segments.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1 h-7 text-[11px]"
+                  onClick={handleOpenSaveDialog}
+                >
+                  <Save className="h-3 w-3" />
+                  Save current
+                </Button>
+              )}
+            </div>
+
+            {savedTemplates.length === 0 ? (
+              <p className="text-[10px] text-muted-foreground">
+                Customize the segments below, then tap Save current to reuse
+                this layout later.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {savedTemplates.map((tpl) => (
+                  <div
+                    key={tpl.id}
+                    className="group inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.03] pl-3 pr-1 py-1 text-[11px] gap-1 hover:bg-white/[0.06] transition-colors"
+                  >
+                    <button
+                      onClick={() => handleLoadTemplate(tpl)}
+                      className="font-medium hover:text-primary transition-colors"
+                    >
+                      {tpl.name}
+                    </button>
+                    <button
+                      onClick={() => handleDeleteTemplate(tpl.id, tpl.name)}
+                      aria-label={`Delete template ${tpl.name}`}
+                      className="ml-0.5 inline-flex items-center justify-center h-5 w-5 rounded-full text-muted-foreground hover:bg-red-500/15 hover:text-red-300 transition-colors"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Roxzone toggle */}
       <Card>
         <CardContent className="py-3">
@@ -268,6 +441,40 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
               transition.
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Pre-race countdown */}
+      <Card>
+        <CardContent className="py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+              <Hourglass className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <div className="min-w-0">
+                <p className="text-xs font-medium">Pre-race countdown</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  Time to stash your phone and get on the line
+                </p>
+              </div>
+            </div>
+            <div className="flex rounded-md bg-white/[0.03] p-0.5 gap-0.5">
+              {countdownOptions.map((opt) => (
+                <button
+                  key={opt}
+                  onClick={() => setCountdownSeconds(opt as CountdownSeconds)}
+                  className={`min-w-[34px] rounded px-2 py-1 text-[11px] font-medium transition-all duration-150 ${
+                    countdownSeconds === opt
+                      ? "bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:bg-white/[0.06]"
+                  }`}
+                  aria-pressed={countdownSeconds === opt}
+                  aria-label={opt === 0 ? "No countdown" : `${opt} second countdown`}
+                >
+                  {opt === 0 ? "Off" : `${opt}s`}
+                </button>
+              ))}
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -365,6 +572,53 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
       >
         START RACE
       </button>
+
+      {/* Save-template dialog */}
+      <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Save race template</DialogTitle>
+            <DialogDescription>
+              Saves the current segments, division, and Roxzone setting so
+              you can reuse this layout with one tap.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-2">
+            <label htmlFor="template-name" className="text-xs font-medium">
+              Name
+            </label>
+            <Input
+              id="template-name"
+              value={templateName}
+              onChange={(e) => setTemplateName(e.target.value)}
+              placeholder="e.g. 200m runs, no sled"
+              maxLength={60}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleSaveTemplate();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setSaveDialogOpen(false)}
+              disabled={createTemplate.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveTemplate}
+              disabled={createTemplate.isPending || !templateName.trim()}
+            >
+              {createTemplate.isPending ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
