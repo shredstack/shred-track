@@ -25,11 +25,13 @@ import {
 } from "@/lib/native/watch-race-sync";
 import { onWatchRaceSaved } from "@/lib/native/watch-race-relay";
 
-/// How long the phone waits for the watch's `race.saved` event after
-/// the watch taps Finish before falling back to letting the user save
-/// the race from the phone. The watch is the canonical saver under
-/// watch_finish_owns_save_spec.md §6.2, but if the watch app dies
-/// before sync completes the phone needs to be a safety net.
+/**
+ * How long the phone waits for the watch's `race.saved` event after
+ * the watch taps Finish before falling back to letting the user save
+ * the race from the phone. The watch is the canonical saver under
+ * watch_finish_owns_save_spec.md §6.2, but if the watch app dies
+ * before sync completes the phone needs to be a safety net.
+ */
 const WATCH_SAVE_FALLBACK_MS = 5 * 60 * 1000;
 
 // ---------------------------------------------------------------------------

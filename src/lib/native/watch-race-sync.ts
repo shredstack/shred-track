@@ -198,11 +198,13 @@ export function sendCancelToWatch(args: { raceId: string }): Promise<void> {
   return sendEvent(args.raceId, "race.cancel", {});
 }
 
-/// Phone → Watch: a race we know the phone POSTed to the server (with
-/// the shared `raceId` as its idempotency key) is now saved. The watch
-/// uses this to dismiss its complete-screen "Save?" prompt — server-
-/// side idempotency makes it safe either way, this just keeps the UI
-/// from prompting for a save that's already happened.
+/**
+ * Phone → Watch: a race we know the phone POSTed to the server (with
+ * the shared `raceId` as its idempotency key) is now saved. The watch
+ * uses this to dismiss its complete-screen "Save?" prompt — server-
+ * side idempotency makes it safe either way, this just keeps the UI
+ * from prompting for a save that's already happened.
+ */
 export function sendRaceSavedToWatch(args: {
   raceId: string;
   serverRaceId: string;

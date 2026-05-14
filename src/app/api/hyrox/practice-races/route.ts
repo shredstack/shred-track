@@ -130,10 +130,20 @@ export async function POST(request: Request) {
       ? body.raceId
       : null;
 
-  let result;
+  type TxResult = {
+    // Only `id` is read downstream; title etc come back on the full row
+    // in the non-dedup path but aren't part of the response shape.
+    race: { id: string };
+    personalBests: string[];
+    isFinishPR: boolean;
+    priorBestFinishSeconds: number | null;
+    dedupHit?: boolean;
+  };
+
+  let result: TxResult;
   try {
   // Use a transaction for atomicity
-  result = await db.transaction(async (tx) => {
+  result = await db.transaction(async (tx): Promise<TxResult> => {
     // Idempotency check: if the client supplied a raceId and a row
     // already exists for (userId, clientRaceId), return it without
     // re-inserting splits or recomputing benchmarks. The partial
@@ -160,10 +170,10 @@ export async function POST(request: Request) {
           existingRaceId: existing.id,
         });
         return {
-          race: { id: existing.id, title: body.title || "Practice Race" },
-          personalBests: [] as string[],
+          race: { id: existing.id },
+          personalBests: [],
           isFinishPR: false,
-          priorBestFinishSeconds: null as number | null,
+          priorBestFinishSeconds: null,
           dedupHit: true,
         };
       }

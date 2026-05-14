@@ -91,6 +91,24 @@ final class RaceTimerViewModel: ObservableObject {
     private var segmentStartedAt: Date?
     private let hk = HealthKitWorkoutService.shared
 
+    /// `DateFormatter` is expensive to allocate; reuse one instance for
+    /// the locale-stamped race title built on every finish.
+    private static let titleFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.dateStyle = .short
+        df.timeStyle = .short
+        return df
+    }()
+
+    /// ISO 8601 timestamp formatter for `startedAt` / `completedAt`. Also
+    /// expensive to allocate; lifted to a static so `buildSavePayload`
+    /// doesn't churn one per race.
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
     init(state: RaceState = RaceState()) {
         self.state = state
     }
@@ -599,6 +617,13 @@ final class RaceTimerViewModel: ObservableObject {
     /// its own save, leave the queue entry alone: the phone's ack
     /// path will clear it via `race.ack`, and server idempotency
     /// makes a duplicate POST a no-op either way.
+    ///
+    /// Note: queue-file cleanup runs through
+    /// `WatchConnectivityManager.handleUserInfo` → `PendingRaceQueue.clear`,
+    /// which is independent of the in-memory `queueObserver` sink. So
+    /// even if the user taps Done and `cleanupAfterRace` cancels the
+    /// observer before `race.ack` arrives, the file still gets removed
+    /// when the ack lands.
     func applyRemoteSaved(raceId: String) {
         guard state.raceId == raceId else { return }
         savedRemotely = true
@@ -733,18 +758,13 @@ final class RaceTimerViewModel: ObservableObject {
     // MARK: - Payload
 
     private func buildSavePayload() -> RaceSavePayload {
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let totalMs = state.completedSegments.reduce(0.0) { $0 + ($1.timeSeconds * 1000) }
         let started = state.raceStartedAt ?? Date()
         let completed = Date()
         // Locale-formatted timestamp so the user has multiple watch
         // races in their history without collisions. The user can
         // rename later from the race detail page on web/phone.
-        let titleFormatter = DateFormatter()
-        titleFormatter.dateStyle = .short
-        titleFormatter.timeStyle = .short
-        let title = "Watch Race · \(titleFormatter.string(from: started))"
+        let title = "Watch Race · \(Self.titleFormatter.string(from: started))"
         return RaceSavePayload(
             raceId: state.raceId,
             title: title,
@@ -755,8 +775,8 @@ final class RaceTimerViewModel: ObservableObject {
             source: "watch",
             planSessionId: state.planSessionId,
             totalTimeSeconds: totalMs / 1000.0,
-            startedAt: iso.string(from: started),
-            completedAt: iso.string(from: completed),
+            startedAt: Self.isoFormatter.string(from: started),
+            completedAt: Self.isoFormatter.string(from: completed),
             splits: state.completedSegments.map {
                 SplitPayload(
                     segmentOrder: $0.segmentOrder,
