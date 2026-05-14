@@ -7,13 +7,21 @@ import {
   hyroxRaceReports,
   hyroxProfiles,
   hyroxTrainingPlans,
+  hyroxStationBenchmarks,
 } from "@/db/schema";
 import { and, asc, desc, eq } from "drizzle-orm";
 import {
+  DIVISIONS,
   DIVISION_REF_DATA,
+  STATION_PACE_TYPE,
+  computeAvgRunPaceSecPerKm,
   estimatePercentile,
   formatLongTime,
+  formatRunPace,
+  formatStationPace,
   formatTime,
+  isCanonicalAttempt,
+  parseDistanceToMeters,
   type DivisionKey,
   type StationName,
 } from "@/lib/hyrox-data";
@@ -53,6 +61,207 @@ function parseAIJson<T>(raw: string): T {
     .replace(/\n?```$/g, "")
     .trim();
   return JSON.parse(cleaned) as T;
+}
+
+// ---------------------------------------------------------------------------
+// Custom-race extrapolation
+// ---------------------------------------------------------------------------
+//
+// For canonical (Full/Half) races the "Projected finish" is interpretive —
+// "what would you finish in if you fixed your top time-loss segments". That
+// number is computed against the division percentile distributions in
+// DIVISION_REF_DATA.
+//
+// For custom races those distributions don't apply (the athlete may have
+// dropped stations, shortened distances, or scaled weights), so we
+// instead extrapolate what a CANONICAL full HYROX would look like if the
+// athlete held their observed pace:
+//
+//   1. Average run pace (sec/km) → scale to runSegments × runDistanceM.
+//   2. For each canonical station, estimate a time:
+//      a. If the athlete attempted it in the custom race, scale the
+//         actual time linearly by distance (per500m / "total" stations)
+//         or by reps (perRep stations).
+//      b. Else use the athlete's prior canonical PR for that station.
+//      c. Else fall back to the division's P50.
+//
+// The result powers both the persisted `projected_finish_seconds` and the
+// deterministic facts passed to Claude for qualitative analysis.
+
+interface SplitLike {
+  segmentType: string;
+  segmentSubtype: string | null;
+  segmentLabel: string;
+  timeSeconds: string;
+  distanceMeters: number | null;
+  reps: number | null;
+  weightKg: string | null;
+}
+
+interface BenchmarkLike {
+  station: string;
+  timeSeconds: number;
+  distanceMeters: number | null;
+  reps: number | null;
+  weightKg: string | null;
+}
+
+interface StationEstimate {
+  station: string;
+  estimatedSeconds: number;
+  source: "scaled" | "prior_pr" | "p50";
+  actualSeconds?: number;
+  actualDistanceMeters?: number;
+  actualReps?: number;
+  canonicalDistanceMeters: number | null;
+  canonicalReps: number | null;
+}
+
+export interface ExtrapolationResult {
+  totalSeconds: number;
+  runSeconds: number;
+  stationSeconds: number;
+  /** sec/km, rounded — null when neither measured pace nor a P50 fallback exists. */
+  avgRunPaceSecPerKm: number | null;
+  paceSource: "measured" | "fallback_p50";
+  canonicalRunSegments: number;
+  canonicalRunDistanceM: number;
+  stations: StationEstimate[];
+  droppedStations: string[];
+}
+
+function extrapolateFullRace(
+  divisionKey: DivisionKey | null,
+  splits: SplitLike[],
+  benchmarks: BenchmarkLike[],
+): ExtrapolationResult | null {
+  if (!divisionKey) return null;
+  const div = DIVISIONS[divisionKey];
+  if (!div) return null;
+  const refData = DIVISION_REF_DATA[divisionKey] ?? null;
+
+  // Average run pace — weighted by measured distance, falling back to the
+  // division's nominal run distance per spec.
+  const runSplitsForPace = splits.map((s) => ({
+    segmentType: s.segmentType as "run" | "station",
+    segmentSubtype: (s.segmentSubtype as "prescribed_run" | "roxzone" | null) ?? null,
+    timeSeconds: s.timeSeconds,
+    distanceMeters: s.distanceMeters,
+  }));
+  let avgPace = computeAvgRunPaceSecPerKm(runSplitsForPace, div.runDistanceM);
+  let paceSource: "measured" | "fallback_p50" = "measured";
+  if (avgPace == null) {
+    const run1P50 = refData?.runs["Run 1"]?.[2];
+    if (run1P50 && div.runDistanceM > 0) {
+      avgPace = (run1P50 / div.runDistanceM) * 1000;
+      paceSource = "fallback_p50";
+    } else {
+      return null;
+    }
+  }
+  const runSeconds = Math.round(
+    (avgPace * div.runSegments * div.runDistanceM) / 1000,
+  );
+
+  const stations: StationEstimate[] = [];
+  const droppedStations: string[] = [];
+
+  for (const spec of div.stations) {
+    const station = spec.name;
+    const canonicalDist = spec.distance
+      ? parseDistanceToMeters(spec.distance)
+      : null;
+    const canonicalReps = spec.reps ?? null;
+    const paceType = STATION_PACE_TYPE[station] ?? "total";
+
+    const split = splits.find(
+      (s) => s.segmentType === "station" && s.segmentLabel === station,
+    );
+
+    let scaled: number | null = null;
+    if (split) {
+      const actualTime = parseFloat(split.timeSeconds);
+      if (paceType === "perRep") {
+        if (split.reps && split.reps > 0 && canonicalReps) {
+          scaled = (actualTime * canonicalReps) / split.reps;
+        }
+      } else if (
+        split.distanceMeters &&
+        split.distanceMeters > 0 &&
+        canonicalDist
+      ) {
+        // per500m + "total" stations are distance-keyed.
+        scaled = (actualTime * canonicalDist) / split.distanceMeters;
+      }
+      if (scaled != null && isFinite(scaled) && scaled > 0) {
+        stations.push({
+          station,
+          estimatedSeconds: Math.round(scaled),
+          source: "scaled",
+          actualSeconds: Math.round(actualTime),
+          actualDistanceMeters: split.distanceMeters ?? undefined,
+          actualReps: split.reps ?? undefined,
+          canonicalDistanceMeters: canonicalDist,
+          canonicalReps,
+        });
+        continue;
+      }
+      // Attempted but missing the metadata we'd need to scale — treat
+      // like a dropped station and fall through to PR / P50.
+    } else {
+      droppedStations.push(station);
+    }
+
+    const priorCanonical = benchmarks.filter(
+      (b) =>
+        b.station === station &&
+        isCanonicalAttempt(
+          station,
+          divisionKey,
+          b.distanceMeters,
+          b.reps,
+          b.weightKg != null ? Number(b.weightKg) : null,
+        ),
+    );
+    if (priorCanonical.length > 0) {
+      const best = Math.min(...priorCanonical.map((b) => b.timeSeconds));
+      stations.push({
+        station,
+        estimatedSeconds: best,
+        source: "prior_pr",
+        canonicalDistanceMeters: canonicalDist,
+        canonicalReps,
+      });
+      continue;
+    }
+
+    const p50 = refData?.stations[station as StationName]?.[2];
+    if (p50) {
+      stations.push({
+        station,
+        estimatedSeconds: Math.round(p50),
+        source: "p50",
+        canonicalDistanceMeters: canonicalDist,
+        canonicalReps,
+      });
+    }
+    // No data at all (rare; ref data missing for this division) — leave
+    // the station out of the total. The dropped list still flags it.
+  }
+
+  const stationSeconds = stations.reduce((sum, e) => sum + e.estimatedSeconds, 0);
+
+  return {
+    totalSeconds: runSeconds + stationSeconds,
+    runSeconds,
+    stationSeconds,
+    avgRunPaceSecPerKm: Math.round(avgPace),
+    paceSource,
+    canonicalRunSegments: div.runSegments,
+    canonicalRunDistanceM: div.runDistanceM,
+    stations,
+    droppedStations,
+  };
 }
 
 function gapPctTone(gapPct: number): string {
@@ -137,7 +346,23 @@ export const generateRaceReport = inngest.createFunction(
         )
         .limit(1);
 
-      return { race, splits, profile, priorRaces, activePlan };
+      // Pull recent station benchmarks for prior-PR fallback during
+      // custom-race extrapolation. The list is small (one row per
+      // station attempt), so the limit is generous.
+      const benchmarks = await db
+        .select({
+          station: hyroxStationBenchmarks.station,
+          timeSeconds: hyroxStationBenchmarks.timeSeconds,
+          distanceMeters: hyroxStationBenchmarks.distanceMeters,
+          reps: hyroxStationBenchmarks.reps,
+          weightKg: hyroxStationBenchmarks.weightKg,
+        })
+        .from(hyroxStationBenchmarks)
+        .where(eq(hyroxStationBenchmarks.userId, userId))
+        .orderBy(desc(hyroxStationBenchmarks.loggedAt))
+        .limit(200);
+
+      return { race, splits, profile, priorRaces, activePlan, benchmarks };
     });
 
     // ----- Step 2: mark generating ----------------------------------------
@@ -171,7 +396,7 @@ export const generateRaceReport = inngest.createFunction(
 
     // ----- Step 3: deterministic numerics ---------------------------------
     const numerics = await step.run("compute-numerics", async () => {
-      const { race, splits, profile } = inputs;
+      const { race, splits, profile, benchmarks } = inputs;
       const divisionKey =
         (race.divisionKey as DivisionKey | null) ?? null;
       // DIVISION_REF_DATA distributions are calibrated to the canonical
@@ -218,10 +443,36 @@ export const generateRaceReport = inngest.createFunction(
 
       const top3Sum = top3.reduce((sum, l) => sum + l.secondsLost, 0);
       const totalFinishSeconds = Math.round(parseFloat(race.totalTimeSeconds));
-      const projectedFinishSeconds = Math.max(
-        0,
-        totalFinishSeconds - top3Sum,
-      );
+
+      // Projected finish: branches by template.
+      //  - canonical races: current finish minus the top time-loss segments
+      //    ("if you fix these, you finish here").
+      //  - custom races: extrapolated full-HYROX finish at the athlete's
+      //    observed pace, filling dropped stations from prior PR / P50.
+      let projectedFinishSeconds: number;
+      let projectionType: "improvement" | "extrapolation";
+      let extrapolation: ExtrapolationResult | null = null;
+
+      if (isCustom) {
+        extrapolation = extrapolateFullRace(
+          divisionKey,
+          splits as SplitLike[],
+          benchmarks as BenchmarkLike[],
+        );
+        if (extrapolation) {
+          projectedFinishSeconds = extrapolation.totalSeconds;
+          projectionType = "extrapolation";
+        } else {
+          // Couldn't extrapolate (no runs and no ref data for division).
+          // Fall back to echoing the custom finish — the UI will still
+          // render but the assumptions text will explain.
+          projectedFinishSeconds = totalFinishSeconds;
+          projectionType = "extrapolation";
+        }
+      } else {
+        projectedFinishSeconds = Math.max(0, totalFinishSeconds - top3Sum);
+        projectionType = "improvement";
+      }
 
       // Pacing snapshot — Run 1 vs avg of Run 2..N
       const runs = (splits as Array<{ segmentType: string; timeSeconds: string }>).filter(
@@ -247,6 +498,8 @@ export const generateRaceReport = inngest.createFunction(
       return {
         timeLossRanking: top3,
         projectedFinishSeconds,
+        projectionType,
+        extrapolation,
         run1Seconds,
         avgRestRunsSeconds,
         gapToGoalSeconds,
@@ -257,16 +510,10 @@ export const generateRaceReport = inngest.createFunction(
 
     // ----- Step 4: call Claude for qualitative text -----------------------
     const aiOutput = await step.run("call-ai", async () => {
-      const { race, profile, priorRaces, activePlan } = inputs;
+      const { race, profile, priorRaces, activePlan, splits } = inputs;
 
       const divisionKey = race.divisionKey ?? "unknown";
-      const losses: TimeLossEntry[] = numerics.timeLossRanking;
-      const lossRows = losses
-        .map(
-          (l: TimeLossEntry) =>
-            `- ${l.station}: lost ${l.secondsLost}s vs P25 (currently P${l.percentile})`,
-        )
-        .join("\n") || "- (no segments below P25 — athlete already strong across the board)";
+      const isCustom = race.template === "custom";
 
       const priors: Array<{
         id: string;
@@ -297,32 +544,128 @@ export const generateRaceReport = inngest.createFunction(
         ? `Run 1 = ${formatTime(Math.round(numerics.run1Seconds))}, avg of Runs 2+ = ${formatTime(Math.round(numerics.avgRestRunsSeconds))} (Run 1 is ${numerics.run1Seconds < numerics.avgRestRunsSeconds ? "FASTER" : "slower"} by ${formatTime(Math.round(Math.abs(numerics.run1Seconds - numerics.avgRestRunsSeconds)))})`
         : "Pacing data unavailable (insufficient run splits).";
 
-      const systemPrompt = `You are an elite HYROX coach analyzing a single race result. The numbers are PRE-COMPUTED and provided. Your job is qualitative analysis only — DO NOT recompute or restate numbers in the headline (the UI shows them). Output JSON only — no markdown, no explanation.
+      // -- Branched analysis sections ----------------------------------
+      // Canonical (Full/Half) races: percentile-based time-loss ranking
+      // drives the analysis. Custom races: per-segment paces and a
+      // full-HYROX extrapolation drive it, because percentile comparisons
+      // against canonical distributions are misleading when the athlete
+      // ran shortened distances or dropped stations entirely.
 
-Rules:
-- The "projectedFinishSeconds" is fixed; you do not produce that field. You only produce the qualitative *assumptions* string explaining what improvements are baked into it.
-- "prioritizedFocus" should reflect the top time-loss segments above, but you may bundle related stations (e.g. Sled Push + Sled Pull) into one focus if it makes coaching sense.
-- Tone guidance: ${toneGuidance}
-- Be specific. "Improve burpee broad jumps" is too generic — say WHAT to work on (e.g. "explosive hip drive on the broad jump" or "smoother burpee → jump transition").
-- Sessions per week: 1–3. Duration weeks: 2–8. Be realistic.`;
+      let analysisSection: string;
+      let projectionInstructions: string;
 
-      const customRaceNote =
-        race.template === "custom"
-          ? "\n- Note: this is a CUSTOM-format race. Station distances, reps, and/or weights may differ from the canonical HYROX Full/Half — percentile-based time-loss comparisons do not apply here. Focus your analysis on pacing and within-race execution."
-          : "";
+      if (isCustom) {
+        const ex: ExtrapolationResult | null = numerics.extrapolation;
+        const customSplits: SplitLike[] = splits;
+        const segmentRows = customSplits
+          .filter((s) => s.segmentSubtype !== "roxzone")
+          .map((s) => {
+            const time = Math.round(parseFloat(s.timeSeconds));
+            if (s.segmentType === "run") {
+              const meters = s.distanceMeters ?? null;
+              if (meters && meters > 0) {
+                const pacePerKm = (time / meters) * 1000;
+                return `- ${s.segmentLabel} (${meters}m): ${formatTime(time)} → ${formatRunPace(pacePerKm)}`;
+              }
+              return `- ${s.segmentLabel}: ${formatTime(time)} (no distance recorded)`;
+            }
+            // station
+            const pace = formatStationPace(
+              s.segmentLabel,
+              time,
+              s.distanceMeters ?? undefined,
+              s.reps ?? undefined,
+            );
+            const specBits: string[] = [];
+            if (s.distanceMeters) specBits.push(`${s.distanceMeters}m`);
+            if (s.reps) specBits.push(`${s.reps} reps`);
+            if (s.weightKg) specBits.push(`${parseFloat(s.weightKg)} kg`);
+            const spec = specBits.length ? ` (${specBits.join(", ")})` : "";
+            return `- ${s.segmentLabel}${spec}: ${formatTime(time)}${pace ? ` → ${pace}` : ""}`;
+          })
+          .join("\n");
 
-      const userPrompt = `## Race Summary
-- Division: ${divisionKey}
-- Template: ${race.template}${customRaceNote}
-- Finish: ${formatLongTime(numerics.totalFinishSeconds)}
-- Goal: ${goalLine}
-- Race type: ${race.raceType}
+        const extrapBlock = ex
+          ? (() => {
+              const stationLines = ex.stations
+                .map((est) => {
+                  const sourceLabel =
+                    est.source === "scaled"
+                      ? `scaled from ${est.actualSeconds}s @ ${
+                          est.actualDistanceMeters ?? est.actualReps ?? "?"
+                        }${est.actualReps ? " reps" : "m"} → canonical ${
+                          est.canonicalDistanceMeters ?? est.canonicalReps ?? "?"
+                        }${est.canonicalReps ? " reps" : "m"}`
+                      : est.source === "prior_pr"
+                        ? "from athlete's prior canonical PR"
+                        : "from division P50";
+                  return `  - ${est.station}: ${formatTime(est.estimatedSeconds)} (${sourceLabel})`;
+                })
+                .join("\n");
+              const dropped =
+                ex.droppedStations.length > 0
+                  ? `- Stations NOT performed in this race (filled from prior PR or P50): ${ex.droppedStations.join(", ")}`
+                  : "- No stations were skipped — every canonical station was performed (possibly at scaled distance/reps).";
+              const paceNote =
+                ex.paceSource === "measured"
+                  ? `measured from this race's runs`
+                  : `fallback (division Run-1 P50 — no runs recorded in this race)`;
+              return `## Full-HYROX extrapolation (deterministic, NOT a prediction of fitness gain)
+- Avg run pace used: ${formatRunPace(ex.avgRunPaceSecPerKm ?? 0)} (${paceNote})
+- Canonical run total: ${formatTime(ex.runSeconds)} (${ex.canonicalRunSegments} × ${ex.canonicalRunDistanceM}m)
+- Canonical station total: ${formatTime(ex.stationSeconds)}
+- EXTRAPOLATED FULL-HYROX FINISH: ${formatLongTime(ex.totalSeconds)}
+- Per-station estimate sources:
+${stationLines}
+${dropped}`;
+            })()
+          : "## Full-HYROX extrapolation\n- Not available (insufficient run/station data and no reference distribution for this division).";
 
-## Top time-loss segments (deterministic, vs P25)
-${lossRows}
+        analysisSection = `## Custom race breakdown
+${segmentRows}
 
 ## Pacing
 ${pacingLine}
+
+${extrapBlock}`;
+
+        projectionInstructions = `The "Projected finish" shown to the athlete is an EXTRAPOLATION — what a CANONICAL FULL HYROX would take at the pace they held in this custom race. It is NOT a prediction of improvement and is NOT a PR-eligible result. Your "projectedFinishAssumptions" text should explain (in 2-3 sentences) that the number assumes the athlete holds the observed pace across all 8×${numerics.extrapolation?.canonicalRunDistanceM ?? 1000}m runs and the canonical station distances/reps, and (if applicable) that skipped stations were filled from prior PRs or division P50. Do NOT call it a PR. Do NOT promise it as a goal time — frame it as "if you held this pace at full distance".`;
+      } else {
+        const losses: TimeLossEntry[] = numerics.timeLossRanking;
+        const lossRows = losses
+          .map(
+            (l: TimeLossEntry) =>
+              `- ${l.station}: lost ${l.secondsLost}s vs P25 (currently P${l.percentile})`,
+          )
+          .join("\n") || "- (no segments below P25 — athlete already strong across the board)";
+
+        analysisSection = `## Top time-loss segments (deterministic, vs P25)
+${lossRows}
+
+## Pacing
+${pacingLine}`;
+
+        projectionInstructions = `The "Projected finish" shown to the athlete is current finish MINUS the top time-loss segments — i.e. "if you fix these, you finish here". Your "projectedFinishAssumptions" text should describe (in 2-3 sentences) WHAT improvements on which segments produce that number.`;
+      }
+
+      const systemPrompt = `You are an elite HYROX coach analyzing a single race result. The numbers are PRE-COMPUTED and provided. Your job is qualitative analysis only — DO NOT recompute or restate numbers in the headline (the UI shows them). Output JSON only — no markdown, no explanation.
+
+Rules:
+- ${projectionInstructions}
+- For custom races, "prioritizedFocus" should target weak per-segment paces or stations the athlete skipped (suggest building exposure to them). For canonical races, reflect the top time-loss segments above (you may bundle related stations e.g. Sled Push + Sled Pull into one focus).
+- Tone guidance: ${toneGuidance}
+- Be specific. "Improve burpee broad jumps" is too generic — say WHAT to work on (e.g. "explosive hip drive on the broad jump" or "smoother burpee → jump transition").
+- Sessions per week: 1–3. Duration weeks: 2–8. Be realistic.
+- The race format is ${race.template}. Do not refer to "additional stations" or "more stations" beyond what is listed above.`;
+
+      const userPrompt = `## Race Summary
+- Division: ${divisionKey}
+- Template: ${race.template}
+- Finish (as raced): ${formatLongTime(numerics.totalFinishSeconds)}
+- Goal: ${goalLine}
+- Race type: ${race.raceType}
+
+${analysisSection}
 
 ## Prior race trajectory (most recent 4)
 ${trajectory}
@@ -337,7 +680,7 @@ ${planLine}
   "prioritizedFocus": [
     { "focus": "string", "rationale": "string", "sessionsPerWeek": 1, "durationWeeks": 4 }
   ],
-  "projectedFinishAssumptions": "string — what improvements were assumed to reach the projected finish time"
+  "projectedFinishAssumptions": "string — explanation per the rules above"
 }`;
 
       const client = new Anthropic({ maxRetries: 0 });
@@ -376,6 +719,7 @@ ${planLine}
           prioritizedFocus: aiOutput.prioritizedFocus,
           projectedFinishSeconds: numerics.projectedFinishSeconds,
           projectedFinishAssumptions: aiOutput.projectedFinishAssumptions,
+          projectionType: numerics.projectionType,
           aiModel: AI_MODEL,
           generationCompletedAt: new Date(),
           generationError: null,

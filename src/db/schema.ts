@@ -1047,6 +1047,39 @@ export const hyroxPracticeRaceSplits = pgTable(
 );
 
 // ============================================
+// HYROX: Saved Race Timer Templates
+// ============================================
+
+// Stored shape of a saved-template race segment. Mirrors the runtime
+// RaceSegment type from src/components/hyrox/race-timer/types.ts, minus
+// the volatile `id` (regenerated on load so React keys stay stable).
+export interface RaceTemplateSegment {
+  segmentType: "run" | "station";
+  segmentSubtype?: "prescribed_run" | "roxzone" | null;
+  label: string;
+  distance?: string;
+  distanceMeters?: number;
+  reps?: number;
+  weightKg?: number;
+  weightLabel?: string;
+}
+
+export const hyroxRaceTemplates = pgTable(
+  "hyrox_race_templates",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    divisionKey: text("division_key"),
+    simulateRoxzone: boolean("simulate_roxzone").notNull().default(false),
+    segments: jsonb("segments").$type<RaceTemplateSegment[]>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("race_templates_user").on(table.userId, table.createdAt)],
+);
+
+// ============================================
 // HYROX: AI Race Reports
 // ============================================
 
@@ -1067,6 +1100,11 @@ export const hyroxRaceReports = pgTable(
     prioritizedFocus: jsonb("prioritized_focus").$type<FocusEntry[]>(),
     projectedFinishSeconds: integer("projected_finish_seconds"),
     projectedFinishAssumptions: text("projected_finish_assumptions"),
+    // 'improvement' for canonical Full/Half races (current finish minus
+    // top time-loss segments); 'extrapolation' for custom races
+    // (full-HYROX estimate at the athlete's observed pace). NULL on
+    // legacy rows pre-dating the column.
+    projectionType: text("projection_type"),
 
     aiModel: text("ai_model"),
     generationStartedAt: timestamp("generation_started_at", { withTimezone: true }),

@@ -22,6 +22,12 @@ export interface RaceReport {
   prioritizedFocus: FocusEntry[] | null;
   projectedFinishSeconds: number | null;
   projectedFinishAssumptions: string | null;
+  /**
+   * 'improvement' for canonical races (projected = current minus top time-loss segments).
+   * 'extrapolation' for custom races (projected = full-HYROX estimate at observed pace).
+   * NULL on legacy rows pre-dating the column — UI treats those as 'improvement'.
+   */
+  projectionType: "improvement" | "extrapolation" | null;
   aiModel: string | null;
   generationStartedAt: string | null;
   generationCompletedAt: string | null;
@@ -101,6 +107,13 @@ export function RaceReportCard({ raceId, currentFinishSeconds }: Props) {
     report?.projectedFinishSeconds != null
       ? Math.round(currentFinishSeconds - report.projectedFinishSeconds)
       : null;
+  // For extrapolation the projected time is bigger than the as-raced
+  // custom finish (full HYROX > shortened custom), so the "−Xs" pill
+  // would be meaningless. Keep the delta display for improvement only.
+  const isExtrapolation = report?.projectionType === "extrapolation";
+  const projectedLabel = isExtrapolation
+    ? "Full-race estimate"
+    : "Projected finish";
 
   return (
     <Card>
@@ -230,22 +243,24 @@ export function RaceReportCard({ raceId, currentFinishSeconds }: Props) {
               </div>
             )}
 
-            {/* Projected finish */}
+            {/* Projected finish (or full-race extrapolation for custom races) */}
             {report.projectedFinishSeconds != null && (
               <div className="rounded-lg bg-emerald-500/[0.08] border border-emerald-500/20 p-3">
                 <div className="flex items-center gap-2 mb-1">
                   <Target className="h-3.5 w-3.5 text-emerald-400" />
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-300">
-                    Projected finish
+                    {projectedLabel}
                   </p>
                 </div>
                 <p className="text-lg font-mono font-bold tabular-nums">
                   {formatLongTime(report.projectedFinishSeconds)}
-                  {projectedDelta != null && projectedDelta > 0 && (
-                    <span className="ml-2 text-sm font-mono text-emerald-400">
-                      −{formatTime(projectedDelta)}
-                    </span>
-                  )}
+                  {!isExtrapolation &&
+                    projectedDelta != null &&
+                    projectedDelta > 0 && (
+                      <span className="ml-2 text-sm font-mono text-emerald-400">
+                        −{formatTime(projectedDelta)}
+                      </span>
+                    )}
                 </p>
                 {report.projectedFinishAssumptions && (
                   <p className="text-[11px] mt-1 text-muted-foreground leading-relaxed">
