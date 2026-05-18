@@ -26,6 +26,10 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>ShredTrack uses the camera so you can take a photo for your profile picture.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>ShredTrack accesses your photo library so you can choose a profile picture.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>ShredTrack reads your distance and workout data to show live and average pace during a HYROX race.</string>
 	<key>NSHealthUpdateUsageDescription</key>
