@@ -30,7 +30,10 @@ import {
   formatSecondsAsClock,
   parseDurationToSeconds,
 } from "@/lib/crossfit/duration-parser";
-import { resolveRxWeightLb } from "@/lib/crossfit/prescription";
+import {
+  resolveRxWeightLb,
+  formatGenderedHeight,
+} from "@/lib/crossfit/prescription";
 import { useUserProfile } from "@/hooks/useProfile";
 import { useMovements } from "@/hooks/useMovements";
 import type {
@@ -303,18 +306,12 @@ function outlinePrescription(m: WorkoutMovementDisplay): string {
   if (dur != null) {
     segments.push(formatSecondsAsClock(dur));
   }
-  const heightMale = m.prescribedHeightInchesMale;
-  const heightFemale = m.prescribedHeightInchesFemale;
-  const heightLegacy = m.prescribedHeightInches;
-  if (heightMale != null || heightFemale != null) {
-    if (heightMale != null && heightFemale != null && heightMale !== heightFemale) {
-      segments.push(`${heightMale}/${heightFemale} in`);
-    } else {
-      segments.push(`${heightMale ?? heightFemale} in`);
-    }
-  } else if (heightLegacy != null) {
-    segments.push(`${heightLegacy} in`);
-  }
+  const heightSegment = formatGenderedHeight(
+    m.prescribedHeightInchesMale ?? null,
+    m.prescribedHeightInchesFemale ?? null,
+    m.prescribedHeightInches ?? null
+  );
+  if (heightSegment) segments.push(heightSegment);
   return segments.join(" · ");
 }
 

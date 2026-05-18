@@ -38,6 +38,8 @@ interface PrescriptionLikeMovement {
   prescribedDurationSecondsMale?: number | null;
   prescribedDurationSecondsFemale?: number | null;
   prescribedHeightInches?: number | string | null;
+  prescribedHeightInchesMale?: number | string | null;
+  prescribedHeightInchesFemale?: number | string | null;
   prescribedWeightMaleBwMultiplier?: number | string | null;
   prescribedWeightFemaleBwMultiplier?: number | string | null;
   tempo?: string | null;
@@ -226,11 +228,15 @@ export function formatMovementPrescription(
     segments.push(formatGenderedNumberOrScheme(dMale, dFemale, "m"));
   }
 
-  // Height (in)
-  const heightIn = num(mov.prescribedHeightInches);
-  if (heightIn != null) {
-    segments.push(`${formatInches(heightIn)} in`);
-  }
+  // Height — prefer gendered (Wall Ball is 10/9 ft, Box Jump is 24/20 in)
+  // and fall back to the legacy ungendered field. Whole-foot values >12 in
+  // render as "N ft" so 120 in shows as "10 ft" instead of "120 in".
+  const heightSegment = formatGenderedHeight(
+    num(mov.prescribedHeightInchesMale),
+    num(mov.prescribedHeightInchesFemale),
+    num(mov.prescribedHeightInches)
+  );
+  if (heightSegment) segments.push(heightSegment);
 
   // Tempo
   if (mov.tempo && mov.tempo.trim()) {
@@ -250,6 +256,47 @@ function formatInches(n: number): string {
   // Allow fractional values (3.5") but strip trailing zeros.
   const fixed = n.toFixed(2);
   return fixed.replace(/\.?0+$/, "");
+}
+
+// Render a height value in the friendliest unit: feet when the value is
+// strictly more than 30 inches and a whole multiple of 12 (Wall Ball at
+// 120/108 in → "10 ft" / "9 ft"), otherwise inches. The 30-in floor keeps
+// Box Jump 24/20 and deficit-pushup 4 in inches, where the inch reading
+// is the way athletes actually talk about the standard.
+export function formatHeightDisplay(inches: number): string {
+  if (inches > 30 && inches % 12 === 0) {
+    return `${inches / 12} ft`;
+  }
+  return `${formatInches(inches)} in`;
+}
+
+// Combine gendered + legacy heights into a single human-readable segment.
+// Mirrors the weight formatter's M/F slash pattern but collapses to one
+// value when both sides match, and keeps the unit shared when both render
+// in the same unit (e.g. "10/9 ft"). Mixed units fall back to two
+// fully-suffixed strings.
+export function formatGenderedHeight(
+  male: number | null,
+  female: number | null,
+  legacy: number | null
+): string | null {
+  if (male == null && female == null) {
+    return legacy != null ? formatHeightDisplay(legacy) : null;
+  }
+  if (male != null && female != null) {
+    if (male === female) return formatHeightDisplay(male);
+    const m = formatHeightDisplay(male);
+    const f = formatHeightDisplay(female);
+    const mUnit = m.endsWith(" ft") ? "ft" : "in";
+    const fUnit = f.endsWith(" ft") ? "ft" : "in";
+    if (mUnit === fUnit) {
+      const mVal = m.slice(0, -(mUnit.length + 1));
+      const fVal = f.slice(0, -(fUnit.length + 1));
+      return `${mVal}/${fVal} ${mUnit}`;
+    }
+    return `${m}/${f}`;
+  }
+  return formatHeightDisplay((male ?? female) as number);
 }
 
 // ============================================

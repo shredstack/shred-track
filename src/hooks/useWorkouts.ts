@@ -37,6 +37,16 @@ interface WireMovement {
   prescribedCaloriesFemale: string | null;
   prescribedDistanceMale: string | null;
   prescribedDistanceFemale: string | null;
+  prescribedDurationSecondsMale: number | null;
+  prescribedDurationSecondsFemale: number | null;
+  prescribedHeightInches: number | null;
+  prescribedHeightInchesMale: number | null;
+  prescribedHeightInchesFemale: number | null;
+  prescribedWeightMaleBwMultiplier: number | null;
+  prescribedWeightFemaleBwMultiplier: number | null;
+  tempo: string | null;
+  isMaxReps: boolean;
+  isSideCadence: boolean;
   repSchemeParsed: RepSchemeParsed | null;
   equipmentCount: number | null;
   rxStandard: string | null;
@@ -131,6 +141,19 @@ function wireMovementToDisplay(m: WireMovement): WorkoutMovementDisplay {
     prescribedCaloriesFemale: m.prescribedCaloriesFemale ?? undefined,
     prescribedDistanceMale: m.prescribedDistanceMale ?? undefined,
     prescribedDistanceFemale: m.prescribedDistanceFemale ?? undefined,
+    prescribedDurationSecondsMale: m.prescribedDurationSecondsMale ?? undefined,
+    prescribedDurationSecondsFemale:
+      m.prescribedDurationSecondsFemale ?? undefined,
+    prescribedHeightInches: m.prescribedHeightInches ?? undefined,
+    prescribedHeightInchesMale: m.prescribedHeightInchesMale ?? undefined,
+    prescribedHeightInchesFemale: m.prescribedHeightInchesFemale ?? undefined,
+    prescribedWeightMaleBwMultiplier:
+      m.prescribedWeightMaleBwMultiplier ?? undefined,
+    prescribedWeightFemaleBwMultiplier:
+      m.prescribedWeightFemaleBwMultiplier ?? undefined,
+    tempo: m.tempo ?? undefined,
+    isMaxReps: m.isMaxReps,
+    isSideCadence: m.isSideCadence,
     repSchemeParsed: m.repSchemeParsed,
     equipmentCount: m.equipmentCount ?? undefined,
     rxStandard: m.rxStandard ?? undefined,
