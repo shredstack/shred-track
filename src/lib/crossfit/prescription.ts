@@ -259,11 +259,12 @@ function formatInches(n: number): string {
 }
 
 // Render a height value in the friendliest unit: feet when the value is
-// strictly more than 12 inches and a whole multiple of 12 (Wall Ball at
-// 120/108 in → "10 ft" / "9 ft"), otherwise inches (Box Jump at 24 in,
-// 4 in deficit, 26.4 in oddities all stay inches).
+// strictly more than 30 inches and a whole multiple of 12 (Wall Ball at
+// 120/108 in → "10 ft" / "9 ft"), otherwise inches. The 30-in floor keeps
+// Box Jump 24/20 and deficit-pushup 4 in inches, where the inch reading
+// is the way athletes actually talk about the standard.
 export function formatHeightDisplay(inches: number): string {
-  if (inches > 12 && inches % 12 === 0) {
+  if (inches > 30 && inches % 12 === 0) {
     return `${inches / 12} ft`;
   }
   return `${formatInches(inches)} in`;
