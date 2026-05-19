@@ -13,6 +13,7 @@ import {
   fetchCommittedClub,
   fetchGymHeaderStrip,
   fetchMurphPrep,
+  fetchPendingDocuments,
   fetchQuickStats,
   fetchSocialFeedTeaser,
   fetchTodaysClass,
@@ -26,6 +27,7 @@ import { CommittedClubWidget } from "@/components/home/CommittedClubWidget";
 import { SocialFeedTeaser } from "@/components/home/SocialFeedTeaser";
 import { QuickStatsStrip } from "@/components/home/QuickStatsStrip";
 import { GymHeaderStrip } from "@/components/home/GymHeaderStrip";
+import { PendingDocumentsBanner } from "@/components/home/PendingDocumentsBanner";
 
 export const dynamic = "force-dynamic";
 
@@ -74,6 +76,7 @@ export default async function HomePage() {
 
   const [
     header,
+    pendingDocs,
     todaysClass,
     todaysWorkout,
     challenge,
@@ -83,6 +86,7 @@ export default async function HomePage() {
     quickStats,
   ] = await Promise.all([
     fetchGymHeaderStrip(activeCommunityId),
+    fetchPendingDocuments(user.id, activeCommunityId),
     fetchTodaysClass(user.id, activeCommunityId, gymTimezone),
     fetchTodaysWorkout(activeCommunityId, gymTimezone),
     fetchActiveChallenge(user.id, activeCommunityId, gymTimezone),
@@ -99,6 +103,7 @@ export default async function HomePage() {
         <p className="text-sm text-muted-foreground">Your day at a glance.</p>
       </div>
       <GymHeaderStrip data={header} />
+      <PendingDocumentsBanner data={pendingDocs} />
       <TodaysClassCard data={todaysClass} />
       <TodaysWorkoutCard data={todaysWorkout} />
       <ChallengeCard data={challenge} />

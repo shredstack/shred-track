@@ -21,6 +21,7 @@ import {
   formatOklch,
   hexToOklch,
 } from "@/lib/color";
+import { hasRequiredOnJoinDocs } from "@/lib/documents";
 
 interface GymLanding {
   id: string;
@@ -88,6 +89,7 @@ export default async function GymInviteLandingPage({
   // Logged-in path: auto-join if allowed, else surface the join code CTA.
   if (sessionUser) {
     if (gym.autoJoinViaLink) {
+      const requiresDocs = await hasRequiredOnJoinDocs(gym.id);
       const [existing] = await db
         .select({ id: communityMemberships.id, isActive: communityMemberships.isActive })
         .from(communityMemberships)
@@ -103,8 +105,10 @@ export default async function GymInviteLandingPage({
         .limit(1);
 
       if (existing && memberRow) {
-        // already a member; reactivate if needed
-        if (!existing.isActive) {
+        // already a member; only reactivate when no doc gate stands in
+        // the way. If doc gate is on, leave isActive as-is — the sign
+        // flow will flip it after signatures land.
+        if (!existing.isActive && !requiresDocs) {
           await db
             .update(communityMemberships)
             .set({ isActive: true, deactivatedAt: null })
@@ -118,7 +122,7 @@ export default async function GymInviteLandingPage({
             userId: sessionUser.id,
             isAdmin: false,
             isCoach: false,
-            isActive: true,
+            isActive: !requiresDocs,
           })
           .onConflictDoNothing();
       }
@@ -128,7 +132,7 @@ export default async function GymInviteLandingPage({
         .set({ activeCommunityId: gym.id, updatedAt: new Date() })
         .where(eq(users.id, sessionUser.id));
 
-      redirect("/crossfit");
+      redirect(requiresDocs ? `/g/${slug}/sign-documents` : "/crossfit");
     }
   }
 

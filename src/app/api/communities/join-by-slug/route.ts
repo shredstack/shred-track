@@ -11,6 +11,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, communityMemberships, users } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
+import { hasRequiredOnJoinDocs } from "@/lib/documents";
 
 export async function POST(req: NextRequest) {
   const user = await getSessionUser();
@@ -56,8 +57,10 @@ export async function POST(req: NextRequest) {
     )
     .limit(1);
 
+  const requiresDocs = await hasRequiredOnJoinDocs(community.id);
+
   if (existing) {
-    if (!existing.isActive) {
+    if (!existing.isActive && !requiresDocs) {
       await db
         .update(communityMemberships)
         .set({ isActive: true, deactivatedAt: null })
@@ -69,7 +72,7 @@ export async function POST(req: NextRequest) {
       userId: user.id,
       isAdmin: false,
       isCoach: false,
-      isActive: true,
+      isActive: !requiresDocs,
     });
   }
 
@@ -81,5 +84,6 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     communityId: community.id,
     name: community.name,
+    requiresDocuments: requiresDocs,
   });
 }

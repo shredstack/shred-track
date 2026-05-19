@@ -1938,3 +1938,105 @@ export const userStreakCache = pgTable(
 
 export type CommittedClubSnapshot = typeof committedClubSnapshots.$inferSelect;
 export type UserStreakCache = typeof userStreakCache.$inferSelect;
+
+// ============================================
+// Documents (PR 3 §3.2)
+// ============================================
+//
+// Versioned waivers / policies. A new document_versions row invalidates
+// every prior signature for that document — staleness is computed on
+// read (no cascade). For v1 the `pdf_url` is left null on signatures;
+// the row itself is the audit artifact per spec D8.
+
+export const DOCUMENT_KINDS = [
+  "waiver",
+  "membership_agreement",
+  "policy",
+  "custom",
+] as const;
+export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
+
+export const DOCUMENT_KIND_LABELS: Record<DocumentKind, string> = {
+  waiver: "Waiver",
+  membership_agreement: "Membership Agreement",
+  policy: "Policy",
+  custom: "Custom",
+};
+
+export const documents = pgTable(
+  "documents",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    // Null = system-scoped (e.g. ShredTrack ToS). Per-gym docs reference
+    // the gym.
+    communityId: uuid("community_id").references(() => communities.id, {
+      onDelete: "cascade",
+    }),
+    kind: text("kind").notNull(),
+    title: text("title").notNull(),
+    isRequiredOnJoin: boolean("is_required_on_join").default(false).notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    createdBy: uuid("created_by").references(() => users.id),
+  },
+  (table) => [index("documents_community_id_idx").on(table.communityId)]
+);
+
+export const documentVersions = pgTable(
+  "document_versions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    bodyMarkdown: text("body_markdown").notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    publishedBy: uuid("published_by").references(() => users.id),
+  },
+  (table) => [
+    uniqueIndex("document_versions_document_version_unique").on(
+      table.documentId,
+      table.version
+    ),
+  ]
+);
+
+export const documentSignatures = pgTable(
+  "document_signatures",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    documentVersionId: uuid("document_version_id")
+      .notNull()
+      .references(() => documentVersions.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    typedName: text("typed_name").notNull(),
+    signedAt: timestamp("signed_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    // `inet` is stored as text in Drizzle (no native pg-core helper).
+    // Drizzle round-trips the IP string verbatim.
+    signedIp: text("signed_ip"),
+    pdfUrl: text("pdf_url"),
+  },
+  (table) => [
+    uniqueIndex("document_signatures_version_user_unique").on(
+      table.documentVersionId,
+      table.userId
+    ),
+    index("document_signatures_user_id_idx").on(table.userId),
+  ]
+);
+
+export type Document = typeof documents.$inferSelect;
+export type NewDocument = typeof documents.$inferInsert;
+export type DocumentVersion = typeof documentVersions.$inferSelect;
+export type NewDocumentVersion = typeof documentVersions.$inferInsert;
+export type DocumentSignature = typeof documentSignatures.$inferSelect;
+export type NewDocumentSignature = typeof documentSignatures.$inferInsert;

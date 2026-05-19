@@ -36,6 +36,8 @@ import type { CommittedClubWidgetData } from "@/components/home/CommittedClubWid
 import type { SocialFeedTeaserPost } from "@/components/home/SocialFeedTeaser";
 import type { QuickStatsStripData } from "@/components/home/QuickStatsStrip";
 import type { GymHeaderStripData } from "@/components/home/GymHeaderStrip";
+import type { PendingDocumentsBannerData } from "@/components/home/PendingDocumentsBanner";
+import { getPendingDocuments } from "@/lib/documents";
 
 function todayInTz(tz: string): string {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -85,6 +87,26 @@ function tzOffsetMs(tz: string, at: Date): number {
     get("second"),
   );
   return localUtc - at.getTime();
+}
+
+export async function fetchPendingDocuments(
+  userId: string,
+  communityId: string
+): Promise<PendingDocumentsBannerData | null> {
+  const pending = await getPendingDocuments(userId, communityId);
+  if (pending.length === 0) return null;
+  const [c] = await db
+    .select({ name: communities.name, slug: communities.inviteUrlSlug })
+    .from(communities)
+    .where(eq(communities.id, communityId))
+    .limit(1);
+  if (!c?.slug) return null;
+  return {
+    slug: c.slug,
+    gymName: c.name,
+    pendingCount: pending.length,
+    anyResign: pending.some((d) => d.isResign),
+  };
 }
 
 export async function fetchGymHeaderStrip(

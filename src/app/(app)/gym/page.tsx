@@ -2,7 +2,14 @@
 // links to member management, join-code rotation, and gym settings.
 
 import Link from "next/link";
-import { ChevronRight, Heart, KeyRound, Settings, Users } from "lucide-react";
+import {
+  ChevronRight,
+  FileText,
+  Heart,
+  KeyRound,
+  Settings,
+  Users,
+} from "lucide-react";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users, communities } from "@/db/schema";
@@ -38,6 +45,13 @@ const TOOLS: Tool[] = [
     label: "Join code",
     description: "View, rotate, or set a custom code",
     icon: KeyRound,
+    adminOnly: true,
+  },
+  {
+    href: "/gym/documents",
+    label: "Documents",
+    description: "Waivers, policies, and member signatures",
+    icon: FileText,
     adminOnly: true,
   },
   {
