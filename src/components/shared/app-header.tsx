@@ -47,18 +47,18 @@ export function AppHeader() {
     <header className="sticky top-0 z-40 glass border-b border-white/[0.06]">
       {/* Safe area spacer for iOS */}
       <div className="h-[env(safe-area-inset-top)]" />
-      <div className="mx-auto flex h-14 max-w-lg items-center justify-between px-4">
+      <div className="flex h-14 items-center justify-between px-4 sm:px-6">
         {/* Logo / brand */}
         <Link href="/crossfit" className="flex items-center gap-2.5">
           <Image
             src="/shredtrack_logo.png"
             alt="ShredTrack"
-            width={64}
-            height={64}
-            className="h-16 w-16 rounded-lg"
+            width={32}
+            height={32}
+            className="h-8 w-8 rounded-lg"
             priority
           />
-          <span className="font-heading text-lg font-bold uppercase tracking-wide text-gradient-primary">
+          <span className="hidden font-heading text-lg font-bold uppercase tracking-wide text-gradient-primary sm:inline-block">
             ShredTrack
           </span>
         </Link>

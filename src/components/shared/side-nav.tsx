@@ -38,7 +38,7 @@ const coachTabs: NavTab[] = [
   { href: "/profile", label: "Profile", icon: User },
 ];
 
-export function BottomNav() {
+export function SideNav() {
   const pathname = usePathname();
   const isRacing = useIsRacing();
   const isCoachMode = useIsCoachMode();
@@ -47,8 +47,8 @@ export function BottomNav() {
   if (isRacing) return null;
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 glass border-t border-white/[0.06] md:hidden">
-      <div className="mx-auto flex max-w-lg items-center justify-around py-1">
+    <aside className="hidden md:flex md:w-60 md:shrink-0">
+      <nav className="sticky top-14 flex h-[calc(100vh-3.5rem)] w-full flex-col gap-1 border-r border-white/[0.06] glass px-3 py-6">
         {tabs.map(({ href, label, icon: Icon }) => {
           const isActive = pathname.startsWith(href);
           return (
@@ -56,35 +56,27 @@ export function BottomNav() {
               key={href}
               href={href}
               className={cn(
-                "relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] font-medium transition-all duration-200",
+                "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
                 isActive
-                  ? "text-primary"
-                  : "text-muted-foreground/70 hover:text-muted-foreground"
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground/80 hover:bg-white/[0.04] hover:text-foreground"
               )}
             >
               {isActive && (
-                <span className="absolute -top-1 left-1/2 h-[3px] w-8 -translate-x-1/2 rounded-full bg-primary glow-primary-sm" />
+                <span className="absolute left-0 top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-r-full bg-primary glow-primary-sm" />
               )}
-              <div
+              <Icon
                 className={cn(
-                  "flex h-8 w-8 items-center justify-center rounded-xl transition-all duration-200",
-                  isActive && "bg-primary/10"
+                  "h-[18px] w-[18px] transition-all duration-200",
+                  isActive &&
+                    "stroke-[2.5] drop-shadow-[0_0_8px_oklch(0.85_0.20_130_/_40%)]"
                 )}
-              >
-                <Icon
-                  className={cn(
-                    "h-[18px] w-[18px] transition-all duration-200",
-                    isActive && "stroke-[2.5] drop-shadow-[0_0_8px_oklch(0.85_0.20_130_/_40%)]"
-                  )}
-                />
-              </div>
-              <span className={cn(isActive && "font-semibold")}>{label}</span>
+              />
+              <span>{label}</span>
             </Link>
           );
         })}
-      </div>
-      {/* Safe area spacer for iOS */}
-      <div className="h-[env(safe-area-inset-bottom)]" />
-    </nav>
+      </nav>
+    </aside>
   );
 }
