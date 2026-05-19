@@ -208,7 +208,12 @@ export default function NotificationsPage() {
       router.push(`/classes`);
       return;
     }
-    if (item.communityId && item.kind.startsWith("committed_club")) {
+    if (
+      item.communityId &&
+      (item.kind === "committed_club_progress" ||
+        item.kind === "committed_club_earned" ||
+        item.kind === "committed_club_streak")
+    ) {
       await ensureActiveCommunity(item.communityId);
       router.push(`/gym/committed-club`);
       return;

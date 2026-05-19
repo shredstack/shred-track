@@ -71,7 +71,7 @@ export default function GymPostPage() {
           />
           <Button
             size="sm"
-            disabled={create.isPending || !body.trim()}
+            disabled={create.isPending || !body.trim() || !post.data}
             onClick={() =>
               create.mutate(body.trim(), {
                 onSuccess: () => setBody(""),

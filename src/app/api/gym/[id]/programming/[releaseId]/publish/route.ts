@@ -105,13 +105,15 @@ export async function POST(
         where: sql`kind = 'workout_published' AND programming_release_id IS NOT NULL`,
       })
       .returning({ id: notifications.id });
-    for (const n of inserted) {
+    if (inserted.length) {
       try {
-        await inngest.send({
-          id: `dispatch:${n.id}`,
-          name: "notifications/created",
-          data: { notificationId: n.id },
-        });
+        await inngest.send(
+          inserted.map((n) => ({
+            id: `dispatch:${n.id}`,
+            name: "notifications/created",
+            data: { notificationId: n.id },
+          }))
+        );
       } catch (err) {
         console.error("[publish] dispatch failed", err);
       }
