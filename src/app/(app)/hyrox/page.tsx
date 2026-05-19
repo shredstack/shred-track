@@ -11,6 +11,7 @@ import { useActivePlan, usePlanStatus, usePlanHistory } from "@/hooks/useHyroxPl
 import { PlanChooser } from "@/components/hyrox/plan-chooser";
 import { UpgradeCard } from "@/components/hyrox/upgrade-card";
 import { RecalibrationBanner } from "@/components/hyrox/race-history/recalibration-banner";
+import { GymHyroxWeekCard } from "@/components/hyrox/gym-hyrox-week-card";
 import { usePlanCredits } from "@/hooks/usePlanCredits";
 import { useIsNative } from "@/hooks/useIsNative";
 import {
@@ -67,9 +68,16 @@ export default function HyroxPage() {
     );
   }
 
-  // No plan — show the free/personalized chooser
+  // No plan — show the free/personalized chooser. Gym Hyrox card mounts
+  // above so members at gyms with hyrox_programming on still see the
+  // week's gym WODs even before they pick a personal plan.
   if (!plan) {
-    return <PlanChooser />;
+    return (
+      <div className="flex flex-col gap-6">
+        <GymHyroxWeekCard />
+        <PlanChooser />
+      </div>
+    );
   }
 
   // Plan completed — show dashboard summary
@@ -120,6 +128,10 @@ export default function HyroxPage() {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Gym Hyrox programming (PR 3 §3.7) — only renders when active
+          gym has hyrox_programming on and has programmed workouts. */}
+      <GymHyroxWeekCard />
+
       {/* Recalibration suggestion (Phase 3) */}
       <RecalibrationBanner />
 
