@@ -36,6 +36,8 @@ export async function GET(
     joinCode: isAdmin ? community.joinCode : null,
     createdBy: community.createdBy,
     createdAt: community.createdAt,
+    websiteUrl: community.websiteUrl,
+    adminEmail: isAdmin ? community.adminEmail : null,
     role: role
       ? { isAdmin: role.isAdmin, isCoach: role.isCoach, isActive: role.isActive }
       : null,
@@ -62,6 +64,36 @@ export async function PATCH(
 
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   if (name !== undefined) updates.name = name;
+  if ("websiteUrl" in body) {
+    const raw = body.websiteUrl;
+    if (raw === null || raw === "") {
+      updates.websiteUrl = null;
+    } else if (typeof raw === "string") {
+      const trimmed = raw.trim();
+      if (trimmed && !/^https?:\/\//i.test(trimmed)) {
+        return NextResponse.json(
+          { error: "websiteUrl must start with http:// or https://" },
+          { status: 400 }
+        );
+      }
+      updates.websiteUrl = trimmed || null;
+    }
+  }
+  if ("adminEmail" in body) {
+    const raw = body.adminEmail;
+    if (raw === null || raw === "") {
+      updates.adminEmail = null;
+    } else if (typeof raw === "string") {
+      const trimmed = raw.trim();
+      if (trimmed && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+        return NextResponse.json(
+          { error: "adminEmail is not a valid email" },
+          { status: 400 }
+        );
+      }
+      updates.adminEmail = trimmed || null;
+    }
+  }
 
   const [updated] = await db
     .update(communities)
@@ -74,5 +106,7 @@ export async function PATCH(
   return NextResponse.json({
     id: updated.id,
     name: updated.name,
+    websiteUrl: updated.websiteUrl,
+    adminEmail: updated.adminEmail,
   });
 }

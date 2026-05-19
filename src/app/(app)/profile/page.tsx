@@ -27,6 +27,9 @@ import {
   Eye,
   EyeOff,
   Camera,
+  Bell,
+  Smartphone,
+  LifeBuoy,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -1506,6 +1509,15 @@ export default function ProfilePage() {
         </Card>
       )}
 
+      {/* Settings shortcuts */}
+      <Card>
+        <CardContent className="pt-2 pb-2">
+          <SettingsLink href="/settings/notifications" icon={Bell} label="Notifications" />
+          <SettingsLink href="/settings/support" icon={LifeBuoy} label="Help & support" />
+          <SettingsLink href="/settings/native" icon={Smartphone} label="Native app" />
+        </CardContent>
+      </Card>
+
       {/* Admin (only visible to admins) */}
       {user?.isAdmin && (
         <Card>
@@ -1547,6 +1559,34 @@ export default function ProfilePage() {
 
       <p className="text-center text-[11px] text-muted-foreground/40">ShredTrack v0.1.0</p>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Settings shortcut row — keeps the orphan /settings/* routes
+// discoverable from the profile page.
+// ---------------------------------------------------------------------------
+
+function SettingsLink({
+  href,
+  icon: Icon,
+  label,
+}: {
+  href: string;
+  icon: typeof Bell;
+  label: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="flex w-full items-center gap-3 rounded-lg px-2 py-3 text-sm transition-colors hover:bg-muted/40"
+    >
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+        <Icon className="h-4 w-4 text-primary" />
+      </div>
+      <span className="flex-1 text-left font-medium">{label}</span>
+      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+    </Link>
   );
 }
 

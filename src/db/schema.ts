@@ -119,6 +119,9 @@ export const communities = pgTable("communities", {
   // Committed Club threshold (spec §2.5). Number of attended classes a
   // member needs in a month to qualify. Per-gym configurable; default 15.
   committedClubThreshold: integer("committed_club_threshold").default(15).notNull(),
+  // PR 3 §3.5 — destination for "Ask the gym owner" support form.
+  // Falls back to admin user emails when null.
+  adminEmail: text("admin_email"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
