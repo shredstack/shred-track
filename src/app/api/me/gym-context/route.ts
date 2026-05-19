@@ -41,12 +41,15 @@ export async function GET() {
   const isSuperAdmin = !!userRow.isAdmin || isAdminEmail(userRow.email);
 
   // Memberships joined with the community for name + join code (admins see
-  // their gym's join code from the dropdown context).
+  // their gym's join code from the dropdown context). logoUrl + primaryColor
+  // are included so the header can render branding without a second query.
   const memberships = await db
     .select({
       communityId: communities.id,
       communityName: communities.name,
       joinCode: communities.joinCode,
+      logoUrl: communities.logoUrl,
+      primaryColor: communities.primaryColor,
       isAdmin: communityMemberships.isAdmin,
       isCoach: communityMemberships.isCoach,
       isActive: communityMemberships.isActive,
@@ -93,6 +96,8 @@ export async function GET() {
       // Members shouldn't have to be careful about screen-shotting the
       // dropdown.
       joinCode: m.isAdmin || isSuperAdmin ? m.joinCode : null,
+      logoUrl: m.logoUrl,
+      primaryColor: m.primaryColor,
       isAdmin: m.isAdmin,
       isCoach: m.isCoach,
       isActive: m.isActive,

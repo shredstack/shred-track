@@ -47,6 +47,7 @@ import { AmrapScoreBreakdown } from "@/components/crossfit/amrap-score-breakdown
 import { formatSecondsAsClock } from "@/lib/crossfit/duration-parser";
 import { formatMovementPrescription } from "@/lib/crossfit/prescription";
 import { DeleteWorkoutDialog } from "@/components/crossfit/delete-workout-dialog";
+import { WorkoutSectionBlock } from "@/components/crossfit/workout-section-block";
 
 // Programmed Rest is identified by name + duration metric, mirroring the
 // builder's `isLegacyRestMovement` check. For a Rest the duration is the
@@ -486,6 +487,8 @@ export function WorkoutCard({
   const parts = workout.parts ?? [];
   const hasAnyScore = parts.some((p) => p.score);
   const multiPart = parts.length > 1;
+  const sections = workout.sections ?? [];
+  const hasSections = sections.length > 0;
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -524,15 +527,25 @@ export function WorkoutCard({
     <Card className="gradient-border overflow-visible">
       <CardHeader>
         <div className="flex items-start gap-2">
-          <div className="flex-1 space-y-0.5">
+          <div className="flex-1 space-y-1">
             <CardTitle className="text-base font-bold tracking-tight">
               {workout.title || "Workout"}
             </CardTitle>
-            {workout.communityId && workout.createdByName && (
-              <p className="text-[11px] text-muted-foreground">
-                Programmed by {workout.createdByName}
-              </p>
-            )}
+            {workout.communityId && workout.communityName ? (
+              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                {workout.communityLogoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={workout.communityLogoUrl}
+                    alt=""
+                    className="h-3.5 w-3.5 rounded object-contain"
+                  />
+                ) : (
+                  <Building2 className="h-3.5 w-3.5" />
+                )}
+                <span>{workout.communityName}</span>
+              </div>
+            ) : null}
           </div>
         </div>
       </CardHeader>
@@ -567,12 +580,72 @@ export function WorkoutCard({
           </div>
         )}
 
-        {parts.map((part, idx) => (
-          <div key={part.id} className="space-y-4">
-            {idx > 0 && <Separator />}
-            <PartSection part={part} index={idx} showLabel={multiPart} />
-          </div>
-        ))}
+        {hasSections ? (
+          // Section layout: one card per typed section. Parts without a
+          // section (legacy or freshly-added without grouping) trail at
+          // the bottom under "Other".
+          <>
+            {sections
+              .slice()
+              .sort((a, b) => a.position - b.position)
+              .map((section) => {
+                const sectionParts = section.partIds
+                  .map((pid) => parts.find((p) => p.id === pid))
+                  .filter((p): p is (typeof parts)[number] => !!p);
+                if (sectionParts.length === 0) {
+                  return (
+                    <WorkoutSectionBlock key={section.id} section={section}>
+                      <p className="text-xs text-muted-foreground/70 italic">
+                        No movements yet.
+                      </p>
+                    </WorkoutSectionBlock>
+                  );
+                }
+                return (
+                  <WorkoutSectionBlock key={section.id} section={section}>
+                    {sectionParts.map((part, idx) => (
+                      <div key={part.id} className="space-y-3">
+                        {idx > 0 && <Separator />}
+                        <PartSection
+                          part={part}
+                          index={idx}
+                          showLabel={sectionParts.length > 1}
+                        />
+                      </div>
+                    ))}
+                  </WorkoutSectionBlock>
+                );
+              })}
+            {(() => {
+              const usedPartIds = new Set(
+                sections.flatMap((s) => s.partIds)
+              );
+              const orphanParts = parts.filter((p) => !usedPartIds.has(p.id));
+              if (orphanParts.length === 0) return null;
+              return (
+                <div className="space-y-4">
+                  {orphanParts.map((part, idx) => (
+                    <div key={part.id} className="space-y-4">
+                      {idx > 0 && <Separator />}
+                      <PartSection
+                        part={part}
+                        index={idx}
+                        showLabel={orphanParts.length > 1}
+                      />
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </>
+        ) : (
+          parts.map((part, idx) => (
+            <div key={part.id} className="space-y-4">
+              {idx > 0 && <Separator />}
+              <PartSection part={part} index={idx} showLabel={multiPart} />
+            </div>
+          ))
+        )}
       </CardContent>
 
       <CardFooter className="gap-2">

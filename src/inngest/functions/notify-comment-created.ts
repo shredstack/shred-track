@@ -137,20 +137,31 @@ export const notifyCommentCreated = inngest.createFunction(
 
     if (inserts.length === 0) return { delivered: 0 };
 
-    await step.run("insert-notifications", async () => {
-      await db.insert(notifications).values(
-        inserts.map((i) => ({
-          recipientId: i.recipientId,
-          actorId,
-          kind: i.kind,
-          scoreId,
-          commentId,
-          workoutId: ctx.workoutId,
-          workoutPartId: ctx.workoutPartId,
-          communityId: ctx.communityId,
-        }))
-      );
+    const insertedIds = await step.run("insert-notifications", async () => {
+      const rows = await db
+        .insert(notifications)
+        .values(
+          inserts.map((i) => ({
+            recipientId: i.recipientId,
+            actorId,
+            kind: i.kind,
+            scoreId,
+            commentId,
+            workoutId: ctx.workoutId,
+            workoutPartId: ctx.workoutPartId,
+            communityId: ctx.communityId,
+          }))
+        )
+        .returning({ id: notifications.id });
+      return rows.map((r) => r.id);
     });
+
+    for (const id of insertedIds) {
+      await step.sendEvent("dispatch-push", {
+        name: "notifications/created",
+        data: { notificationId: id },
+      });
+    }
 
     return { delivered: inserts.length };
   }
@@ -216,20 +227,31 @@ export const notifyCommentMentioned = inngest.createFunction(
     const inserts = recipients.filter((id) => enabledMap[id]);
     if (inserts.length === 0) return { delivered: 0 };
 
-    await step.run("insert-notifications", async () => {
-      await db.insert(notifications).values(
-        inserts.map((id) => ({
-          recipientId: id,
-          actorId,
-          kind: "score_mention" as const,
-          scoreId,
-          commentId,
-          workoutId: ctx.workoutId,
-          workoutPartId: ctx.workoutPartId,
-          communityId: ctx.communityId,
-        }))
-      );
+    const insertedIds = await step.run("insert-notifications", async () => {
+      const rows = await db
+        .insert(notifications)
+        .values(
+          inserts.map((id) => ({
+            recipientId: id,
+            actorId,
+            kind: "score_mention" as const,
+            scoreId,
+            commentId,
+            workoutId: ctx.workoutId,
+            workoutPartId: ctx.workoutPartId,
+            communityId: ctx.communityId,
+          }))
+        )
+        .returning({ id: notifications.id });
+      return rows.map((r) => r.id);
     });
+
+    for (const id of insertedIds) {
+      await step.sendEvent("dispatch-push", {
+        name: "notifications/created",
+        data: { notificationId: id },
+      });
+    }
 
     return { delivered: inserts.length };
   }

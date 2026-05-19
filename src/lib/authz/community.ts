@@ -60,6 +60,14 @@ export async function canProgramForGym(
   return !!role && role.isActive && (role.isAdmin || role.isCoach);
 }
 
+/**
+ * True if the user can manage a gym — coach or admin (or super admin).
+ * Alias of canProgramForGym. The CFD readiness spec consistently calls this
+ * `canManageGym`; keeping both names so callers can use whichever reads
+ * better at the call site.
+ */
+export const canManageGym = canProgramForGym;
+
 /** True if the user is an active gym admin (or super admin). */
 export async function canAdminGym(
   userId: string,

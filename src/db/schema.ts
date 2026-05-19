@@ -91,6 +91,18 @@ export const communities = pgTable("communities", {
   name: text("name").notNull(),
   joinCode: text("join_code").unique().notNull(),
   createdBy: uuid("created_by").notNull().references(() => users.id),
+  // Per-gym branding. Drives the in-app theme color, the gym header
+  // logo, and the /g/<slug> invite landing. Unique slugs are enforced
+  // at the SQL level (partial index) — see migration 20260518100100.
+  logoUrl: text("logo_url"),
+  primaryColor: text("primary_color"),
+  brandAssets: jsonb("brand_assets"),
+  websiteUrl: text("website_url"),
+  inviteUrlSlug: text("invite_url_slug"),
+  autoJoinViaLink: boolean("auto_join_via_link").default(false).notNull(),
+  // IANA tz string — used by every gym-local scheduled job (notifications,
+  // end-of-month rollups, etc.). Default is CFD's timezone.
+  gymTimezone: text("gym_timezone").default("America/Denver").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -113,6 +125,64 @@ export const communityMemberships = pgTable(
   },
   (table) => [uniqueIndex("community_memberships_unique").on(table.communityId, table.userId)]
 );
+
+// ============================================
+// Feature flags
+// ============================================
+
+// Registry of all known flags. Seeded by the migration so the admin UI
+// always has a canonical list of toggles to render.
+export const featureFlags = pgTable("feature_flags", {
+  key: text("key").primaryKey(),
+  description: text("description"),
+  defaultValue: jsonb("default_value").notNull(),
+  isPerGym: boolean("is_per_gym").default(false).notNull(),
+  isPerUser: boolean("is_per_user").default(false).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Per-gym overrides. A row here means "for this gym, this flag is set to
+// `value` regardless of the registry default."
+export const communityFeatureOverrides = pgTable(
+  "community_feature_overrides",
+  {
+    communityId: uuid("community_id")
+      .notNull()
+      .references(() => communities.id, { onDelete: "cascade" }),
+    flagKey: text("flag_key")
+      .notNull()
+      .references(() => featureFlags.key, { onDelete: "cascade" }),
+    value: jsonb("value").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.communityId, table.flagKey] }),
+  })
+);
+
+// Per-user overrides. Used for developer/early-access flags that gate on
+// a single user rather than a gym (e.g. the legacy `move_to_gym` tool).
+export const userFeatureOverrides = pgTable(
+  "user_feature_overrides",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    flagKey: text("flag_key")
+      .notNull()
+      .references(() => featureFlags.key, { onDelete: "cascade" }),
+    value: jsonb("value").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.flagKey] }),
+  })
+);
+
+export type FeatureFlag = typeof featureFlags.$inferSelect;
+export type NewFeatureFlag = typeof featureFlags.$inferInsert;
+export type CommunityFeatureOverride = typeof communityFeatureOverrides.$inferSelect;
+export type UserFeatureOverride = typeof userFeatureOverrides.$inferSelect;
 
 // ============================================
 // CrossFit: Movements
@@ -177,6 +247,14 @@ export const workouts = pgTable("workouts", {
   // Partner / team workouts. Description carries the split strategy.
   isPartner: boolean("is_partner").default(false).notNull(),
   partnerCount: integer("partner_count"),
+  // When a workout was generated from a programming release (spec §1.6),
+  // this points back to the release so re-publishing can re-find it.
+  // FK declared in the SQL migration (not here) to avoid a circular type
+  // dependency between `workouts` and `programmingReleases`.
+  programmingReleaseId: uuid("programming_release_id"),
+  // When the coach last saved changes to this workout (CAP-import overwrite
+  // guard).
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -213,6 +291,11 @@ export const workoutParts = pgTable(
     sideCadenceIntervalSeconds: integer("side_cadence_interval_seconds"),
     sideCadenceOpenEnded: boolean("side_cadence_open_ended").default(false).notNull(),
     notes: text("notes"),
+    // Group this part under a typed section (spec §1.6). Null = no section
+    // (personal workouts and any pre-PR1 gym workout). FK declared in the
+    // SQL migration to keep the circular type dependency at the schema
+    // level instead of the TS level.
+    workoutSectionId: uuid("workout_section_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -1344,6 +1427,33 @@ export const notifications = pgTable("notifications", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+// Push notification token registry (spec §1.10). The dispatcher Inngest
+// function fans notifications out to all tokens registered for the
+// recipient. Tokens are de-duped per (user, token); a token rotation
+// replaces the row via the unique constraint.
+export const pushTokens = pgTable(
+  "push_tokens",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    platform: text("platform").notNull(), // 'ios' | 'android'
+    token: text("token").notNull(),
+    deviceId: text("device_id"),
+    appVersion: text("app_version"),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("push_tokens_user_token_unique").on(table.userId, table.token),
+    index("push_tokens_user_id_idx").on(table.userId),
+  ]
+);
+
+export type PushToken = typeof pushTokens.$inferSelect;
+export type NewPushToken = typeof pushTokens.$inferInsert;
+
 export const notificationPreferences = pgTable("notification_preferences", {
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   kind: text("kind").notNull(),
@@ -1353,3 +1463,130 @@ export const notificationPreferences = pgTable("notification_preferences", {
 }, (table) => ({
   pk: primaryKey({ columns: [table.userId, table.kind] }),
 }));
+
+// ============================================
+// Programming (spec §1.6)
+// ============================================
+
+// A coach's 7-day programming bundle for a gym, week-keyed on the gym-local
+// Monday. status='draft' until the coach hits Publish, at which point we
+// stamp published_at + published_by and notify members.
+export const programmingReleases = pgTable(
+  "programming_releases",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    communityId: uuid("community_id")
+      .notNull()
+      .references(() => communities.id, { onDelete: "cascade" }),
+    weekStart: date("week_start").notNull(),
+    status: text("status").notNull(), // 'draft' | 'published'
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    publishedBy: uuid("published_by").references(() => users.id),
+    source: text("source").notNull(), // 'cap_import' | 'cap_paste' | 'manual'
+    sourceMeta: jsonb("source_meta"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("programming_releases_community_week_unique").on(
+      table.communityId,
+      table.weekStart
+    ),
+  ]
+);
+
+// Programming tracks (CAP, monthly challenges, event prep). Schema lives
+// here so workoutSections.sourceTrackId has a valid FK target; admin UI
+// ships in PR 2 (§2.4).
+export const programmingTracks = pgTable("programming_tracks", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  communityId: uuid("community_id")
+    .notNull()
+    .references(() => communities.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(), // 'cap' | 'monthly_challenge' | 'event_prep' | 'custom'
+  name: text("name").notNull(),
+  description: text("description"),
+  startsOn: date("starts_on").notNull(),
+  endsOn: date("ends_on").notNull(),
+  displayMode: text("display_mode").notNull(), // 'inline' | 'standalone' | 'inline_and_standalone'
+  inlinePosition: text("inline_position"), // 'top' | 'after_wod' | 'end_of_day'
+  optInRequired: boolean("opt_in_required").default(false).notNull(),
+  scoringConfig: jsonb("scoring_config"),
+  status: text("status").default("draft").notNull(), // 'draft' | 'active' | 'archived'
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Typed section grouping for workout_parts. A workout with no sections
+// continues to render as a flat body. A workout with sections renders one
+// card per section in the CrossFit tab and one full-screen slide per
+// section in the TV display.
+export const workoutSections = pgTable(
+  "workout_sections",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workoutId: uuid("workout_id")
+      .notNull()
+      .references(() => workouts.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // warm_up | pre_skill | wod | post_skill | stretching | at_home | monthly_challenge | custom
+    subKind: text("sub_kind"), // 'skill' | 'strength' | 'accessory'
+    position: integer("position").notNull(),
+    title: text("title"),
+    isScored: boolean("is_scored").default(false).notNull(),
+    scoreType: text("score_type"), // 'time' | 'rounds' | 'reps' | 'weight' | 'no_score'
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    sourceTrackId: uuid("source_track_id").references(
+      () => programmingTracks.id
+    ),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("workout_sections_workout_id_position_idx").on(
+      table.workoutId,
+      table.position
+    ),
+  ]
+);
+
+export type ProgrammingRelease = typeof programmingReleases.$inferSelect;
+export type NewProgrammingRelease = typeof programmingReleases.$inferInsert;
+export type ProgrammingTrack = typeof programmingTracks.$inferSelect;
+export type NewProgrammingTrack = typeof programmingTracks.$inferInsert;
+export type WorkoutSection = typeof workoutSections.$inferSelect;
+export type NewWorkoutSection = typeof workoutSections.$inferInsert;
+
+// Valid kinds for workout_sections.kind. Mirrors the CHECK constraint in
+// the migration so the API layer can validate before the DB does.
+export const WORKOUT_SECTION_KINDS = [
+  "warm_up",
+  "pre_skill",
+  "wod",
+  "post_skill",
+  "stretching",
+  "at_home",
+  "monthly_challenge",
+  "custom",
+] as const;
+export type WorkoutSectionKind = (typeof WORKOUT_SECTION_KINDS)[number];
+
+export const WORKOUT_SECTION_SCORE_TYPES = [
+  "time",
+  "rounds",
+  "reps",
+  "weight",
+  "no_score",
+] as const;
+export type WorkoutSectionScoreType = (typeof WORKOUT_SECTION_SCORE_TYPES)[number];
+
+// Default human label per kind. The coach can override via section.title.
+export const WORKOUT_SECTION_KIND_LABELS: Record<WorkoutSectionKind, string> = {
+  warm_up: "Warm-up",
+  pre_skill: "Pre-skill",
+  wod: "WOD",
+  post_skill: "Post-skill",
+  stretching: "Stretching",
+  at_home: "At-home",
+  monthly_challenge: "Monthly challenge",
+  custom: "Custom",
+};

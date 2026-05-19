@@ -9,6 +9,8 @@ import {
   scores,
   scoreMovementDetails,
   users,
+  communities,
+  workoutSections,
 } from "@/db/schema";
 import { eq, and, inArray, notInArray } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
@@ -312,6 +314,39 @@ export async function GET(
     .where(eq(users.id, workout.createdBy))
     .limit(1);
 
+  const [communityRow] = workout.communityId
+    ? await db
+        .select({
+          name: communities.name,
+          logoUrl: communities.logoUrl,
+        })
+        .from(communities)
+        .where(eq(communities.id, workout.communityId))
+        .limit(1)
+    : [undefined as { name: string; logoUrl: string | null } | undefined];
+
+  // Sections (spec §1.6) — same shape the list endpoint returns.
+  const sectionRows = await db
+    .select({
+      id: workoutSections.id,
+      kind: workoutSections.kind,
+      position: workoutSections.position,
+      title: workoutSections.title,
+      isScored: workoutSections.isScored,
+      scoreType: workoutSections.scoreType,
+    })
+    .from(workoutSections)
+    .where(eq(workoutSections.workoutId, workout.id))
+    .orderBy(workoutSections.position);
+  const partIdsBySection = new Map<string, string[]>();
+  for (const p of parts) {
+    if (p.workoutSectionId) {
+      const list = partIdsBySection.get(p.workoutSectionId) ?? [];
+      list.push(p.id);
+      partIdsBySection.set(p.workoutSectionId, list);
+    }
+  }
+
   return NextResponse.json({
     ...workout,
     requiresVest: workout.requiresVest,
@@ -326,6 +361,17 @@ export async function GET(
     isPartner: workout.isPartner,
     partnerCount: workout.partnerCount,
     creatorName: creatorRow?.name ?? null,
+    communityName: communityRow?.name ?? null,
+    communityLogoUrl: communityRow?.logoUrl ?? null,
+    sections: sectionRows.map((s) => ({
+      id: s.id,
+      kind: s.kind,
+      position: s.position,
+      title: s.title,
+      isScored: s.isScored,
+      scoreType: s.scoreType,
+      partIds: partIdsBySection.get(s.id) ?? [],
+    })),
     parts: partsPayload,
   });
 }

@@ -18,6 +18,7 @@ import {
   Building,
   Crown,
   Dumbbell,
+  Flag,
   HeartPulse,
   Sparkles,
   Trophy,
@@ -26,7 +27,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-export type AdminGroup = "crossfit" | "hyrox" | "recovery" | "users";
+export type AdminGroup = "platform" | "crossfit" | "hyrox" | "recovery" | "users";
 
 export interface AdminGroupMeta {
   label: string;
@@ -35,6 +36,11 @@ export interface AdminGroupMeta {
 }
 
 export const ADMIN_GROUPS: Record<AdminGroup, AdminGroupMeta> = {
+  platform: {
+    label: "Platform",
+    description: "Feature flags and platform-wide controls",
+    icon: Flag,
+  },
   crossfit: {
     label: "CrossFit",
     description: "Movement library and benchmark workouts",
@@ -66,6 +72,13 @@ export interface AdminTool {
 }
 
 export const ADMIN_TOOLS: AdminTool[] = [
+  {
+    slug: "feature-flags",
+    label: "Feature flags",
+    description: "Toggle features per gym (gym_programming, classes, etc.)",
+    icon: Flag,
+    group: "platform",
+  },
   {
     slug: "movements",
     label: "Movements",
@@ -115,10 +128,13 @@ export function getAdminTool(slug: string): AdminTool | undefined {
 }
 
 export function groupAdminTools(): Record<AdminGroup, AdminTool[]> {
-  const grouped = { crossfit: [], hyrox: [], recovery: [], users: [] } as Record<
-    AdminGroup,
-    AdminTool[]
-  >;
+  const grouped = {
+    platform: [],
+    crossfit: [],
+    hyrox: [],
+    recovery: [],
+    users: [],
+  } as Record<AdminGroup, AdminTool[]>;
   for (const tool of ADMIN_TOOLS) grouped[tool.group].push(tool);
   return grouped;
 }

@@ -22,6 +22,7 @@ import { installWatchRaceSyncListener } from "./watch-race-sync";
 import { installWatchOpenItemListener } from "./watch-open-item";
 import { installNativeGoogleAuth } from "./google-auth";
 import { installRescheduleOnForeground } from "./notifications/install-reschedule-on-foreground";
+import { installPushRegistration } from "./push-registration";
 
 export function NativeBootstrap() {
   useEffect(() => {
@@ -33,6 +34,7 @@ export function NativeBootstrap() {
     installWatchOpenItemListener();
     installRescheduleOnForeground();
     void installNativeGoogleAuth();
+    void installPushRegistration();
   }, []);
 
   return null;

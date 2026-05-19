@@ -18,6 +18,8 @@ export interface GymMembership {
   communityName: string;
   /** Admins (and super admins) see the join code; members see null. */
   joinCode: string | null;
+  logoUrl: string | null;
+  primaryColor: string | null;
   isAdmin: boolean;
   isCoach: boolean;
   isActive: boolean;

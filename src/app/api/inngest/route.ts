@@ -10,6 +10,7 @@ import {
   notifyCommentCreated,
   notifyCommentMentioned,
 } from "@/inngest/functions/notify-comment-created";
+import { dispatchNotification } from "@/inngest/functions/dispatch-notification";
 
 // Each Inngest step runs as a separate Vercel function invocation.
 // Vercel Pro allows up to 300s per invocation. Each step makes one Claude
@@ -27,5 +28,6 @@ export const { GET, POST, PUT } = serve({
     notifyReactionCreated,
     notifyCommentCreated,
     notifyCommentMentioned,
+    dispatchNotification,
   ],
 });

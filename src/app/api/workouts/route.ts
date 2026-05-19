@@ -13,6 +13,8 @@ import {
   scores,
   scoreMovementDetails,
   communityMemberships,
+  communities,
+  workoutSections,
   users,
 } from "@/db/schema";
 import { eq, desc, and, inArray, gte, lte, or, ilike, isNull } from "drizzle-orm";
@@ -285,6 +287,58 @@ export async function GET(req: NextRequest) {
       : [];
   const creatorNameById = new Map(creatorRows.map((r) => [r.id, r.name]));
 
+  // Resolve gym name + logo for each gym-scoped workout. Replaces the
+  // "Programmed by" attribution on member-facing cards (spec §1.3).
+  const communityIds = Array.from(
+    new Set(
+      workoutRows
+        .map((w) => w.communityId)
+        .filter((id): id is string => !!id)
+    )
+  );
+  const communityRows =
+    communityIds.length > 0
+      ? await db
+          .select({
+            id: communities.id,
+            name: communities.name,
+            logoUrl: communities.logoUrl,
+          })
+          .from(communities)
+          .where(inArray(communities.id, communityIds))
+      : [];
+  const communityById = new Map(communityRows.map((r) => [r.id, r]));
+
+  // Typed sections (spec §1.6). When a workout has sections, the CrossFit
+  // tab renders one card per section; otherwise the legacy flat body.
+  const sectionRows = await db
+    .select({
+      id: workoutSections.id,
+      workoutId: workoutSections.workoutId,
+      kind: workoutSections.kind,
+      position: workoutSections.position,
+      title: workoutSections.title,
+      isScored: workoutSections.isScored,
+      scoreType: workoutSections.scoreType,
+    })
+    .from(workoutSections)
+    .where(inArray(workoutSections.workoutId, workoutIds))
+    .orderBy(workoutSections.position);
+  const sectionsByWorkout = new Map<string, typeof sectionRows>();
+  for (const s of sectionRows) {
+    const list = sectionsByWorkout.get(s.workoutId) ?? [];
+    list.push(s);
+    sectionsByWorkout.set(s.workoutId, list);
+  }
+  const partIdsBySection = new Map<string, string[]>();
+  for (const p of partRows) {
+    if (p.workoutSectionId) {
+      const list = partIdsBySection.get(p.workoutSectionId) ?? [];
+      list.push(p.id);
+      partIdsBySection.set(p.workoutSectionId, list);
+    }
+  }
+
   const scoreIds = scoreRows.map((s) => s.id);
   const detailRows =
     scoreIds.length > 0
@@ -331,6 +385,21 @@ export async function GET(req: NextRequest) {
     isPartner: w.isPartner,
     partnerCount: w.partnerCount,
     creatorName: creatorNameById.get(w.createdBy) ?? null,
+    communityName: w.communityId
+      ? communityById.get(w.communityId)?.name ?? null
+      : null,
+    communityLogoUrl: w.communityId
+      ? communityById.get(w.communityId)?.logoUrl ?? null
+      : null,
+    sections: (sectionsByWorkout.get(w.id) ?? []).map((s) => ({
+      id: s.id,
+      kind: s.kind,
+      position: s.position,
+      title: s.title,
+      isScored: s.isScored,
+      scoreType: s.scoreType,
+      partIds: partIdsBySection.get(s.id) ?? [],
+    })),
     parts: (partsByWorkout.get(w.id) ?? []).map((p) => {
       const score = scoreByPart.get(p.id);
       return {

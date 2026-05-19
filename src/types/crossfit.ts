@@ -466,6 +466,35 @@ export interface WorkoutBlockDisplay {
   title: string;
 }
 
+export type WorkoutSectionKindDisplay =
+  | "warm_up"
+  | "pre_skill"
+  | "wod"
+  | "post_skill"
+  | "stretching"
+  | "at_home"
+  | "monthly_challenge"
+  | "custom";
+
+export type WorkoutSectionScoreTypeDisplay =
+  | "time"
+  | "rounds"
+  | "reps"
+  | "weight"
+  | "no_score";
+
+export interface WorkoutSectionDisplay {
+  id: string;
+  kind: WorkoutSectionKindDisplay;
+  position: number;
+  title: string | null;
+  isScored: boolean;
+  scoreType: WorkoutSectionScoreTypeDisplay | null;
+  /** Ordered list of workout_part IDs that belong to this section.
+   *  The CrossFit tab renders these parts inline under the section card. */
+  partIds: string[];
+}
+
 export interface WorkoutDisplay {
   id: string;
   title?: string;
@@ -476,6 +505,15 @@ export interface WorkoutDisplay {
   createdByName?: string;
   /** Null = personal workout. Non-null = gym workout, scoped to that gym. */
   communityId?: string | null;
+  /** Gym name, only set when communityId is set. Replaces "Programmed by"
+   *  attribution on member-facing cards (spec §1.3). */
+  communityName?: string | null;
+  /** Gym logo URL, only set when communityId is set. */
+  communityLogoUrl?: string | null;
+  /** Typed sections (spec §1.6). When present, the CrossFit tab renders one
+   *  card per section instead of a flat body. When empty, falls back to
+   *  the legacy single-body layout. */
+  sections?: WorkoutSectionDisplay[];
   benchmarkWorkoutId?: string | null;
   requiresVest?: boolean;
   vestWeightMaleLb?: number;

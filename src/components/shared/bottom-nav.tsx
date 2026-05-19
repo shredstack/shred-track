@@ -2,21 +2,47 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Dumbbell, Trophy, Clock, User, Heart } from "lucide-react";
+import {
+  CalendarDays,
+  ClipboardList,
+  Dumbbell,
+  Heart,
+  Home,
+  Trophy,
+  User,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsRacing } from "@/hooks/useRaceMode";
+import { useIsCoachMode } from "@/hooks/useCoachMode";
 
-const tabs = [
+interface NavTab {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+}
+
+const memberTabs: NavTab[] = [
+  { href: "/home", label: "Home", icon: Home },
   { href: "/crossfit", label: "CrossFit", icon: Dumbbell },
   { href: "/hyrox", label: "HYROX", icon: Trophy },
   { href: "/recovery", label: "Recovery", icon: Heart },
-  { href: "/history", label: "History", icon: Clock },
   { href: "/profile", label: "Profile", icon: User },
-] as const;
+];
+
+const coachTabs: NavTab[] = [
+  { href: "/gym/programming", label: "Programming", icon: ClipboardList },
+  { href: "/gym/classes", label: "Classes", icon: CalendarDays },
+  { href: "/gym/members", label: "Roster", icon: Users },
+  { href: "/profile", label: "Profile", icon: User },
+];
 
 export function BottomNav() {
   const pathname = usePathname();
   const isRacing = useIsRacing();
+  const isCoachMode = useIsCoachMode();
+  const tabs = isCoachMode ? coachTabs : memberTabs;
 
   if (isRacing) return null;
 

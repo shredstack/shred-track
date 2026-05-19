@@ -109,15 +109,42 @@ interface WirePart {
   score: WireScore | null;
 }
 
+interface WireSection {
+  id: string;
+  kind:
+    | "warm_up"
+    | "pre_skill"
+    | "wod"
+    | "post_skill"
+    | "stretching"
+    | "at_home"
+    | "monthly_challenge"
+    | "custom";
+  position: number;
+  title: string | null;
+  isScored: boolean;
+  scoreType:
+    | "time"
+    | "rounds"
+    | "reps"
+    | "weight"
+    | "no_score"
+    | null;
+  partIds: string[];
+}
+
 interface WireWorkout {
   id: string;
   createdBy: string;
   creatorName: string | null;
   communityId: string | null;
+  communityName: string | null;
+  communityLogoUrl: string | null;
   title: string | null;
   description: string | null;
   workoutDate: string;
   benchmarkWorkoutId: string | null;
+  sections?: WireSection[];
   parts: WirePart[];
 }
 
@@ -217,6 +244,9 @@ function wireWorkoutToDisplay(w: WireWorkout): WorkoutDisplay {
     createdBy: w.createdBy,
     createdByName: w.creatorName ?? undefined,
     communityId: w.communityId,
+    communityName: w.communityName,
+    communityLogoUrl: w.communityLogoUrl,
+    sections: w.sections ?? [],
     benchmarkWorkoutId: w.benchmarkWorkoutId,
     parts: w.parts.map(wirePartToDisplay),
   };
