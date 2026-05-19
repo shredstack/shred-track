@@ -103,6 +103,9 @@ export const communities = pgTable("communities", {
   // IANA tz string — used by every gym-local scheduled job (notifications,
   // end-of-month rollups, etc.). Default is CFD's timezone.
   gymTimezone: text("gym_timezone").default("America/Denver").notNull(),
+  // Committed Club threshold (spec §2.5). Number of attended classes a
+  // member needs in a month to qualify. Per-gym configurable; default 15.
+  committedClubThreshold: integer("committed_club_threshold").default(15).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -122,6 +125,9 @@ export const communityMemberships = pgTable(
     isActive: boolean("is_active").default(true).notNull(),
     deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
     joinedAt: timestamp("joined_at", { withTimezone: true }).defaultNow().notNull(),
+    // Source for the anniversary auto-post job (spec §2.3). Defaults to
+    // joined_at::date in the migration; member/admin can override later.
+    gymAnniversaryDate: date("gym_anniversary_date"),
   },
   (table) => [uniqueIndex("community_memberships_unique").on(table.communityId, table.userId)]
 );
@@ -1413,12 +1419,17 @@ export const notifications = pgTable("notifications", {
   recipientId: uuid("recipient_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   // Nullable so deleting an actor doesn't blow away notifications.
   actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
-  // 'score_reaction' | 'score_comment' | 'score_mention' in v1.
+  // See NOTIFICATION_KINDS below for the canonical list.
   kind: text("kind").notNull(),
   // Polymorphic target — exactly one is non-null per row.
   scoreId: uuid("score_id").references(() => scores.id, { onDelete: "cascade" }),
   commentId: uuid("comment_id").references(() => scoreComments.id, { onDelete: "cascade" }),
   reactionId: uuid("reaction_id").references(() => scoreReactions.id, { onDelete: "cascade" }),
+  // PR 2 polymorphic targets. FKs declared in the SQL migration so the
+  // circular type-level dependency stays at the schema level only.
+  gymPostId: uuid("gym_post_id"),
+  gymPostCommentId: uuid("gym_post_comment_id"),
+  classInstanceId: uuid("class_instance_id"),
   // Denormalized routing context (avoids 3 joins on every render).
   workoutId: uuid("workout_id").references(() => workouts.id, { onDelete: "cascade" }),
   workoutPartId: uuid("workout_part_id").references(() => workoutParts.id, { onDelete: "cascade" }),
@@ -1426,6 +1437,26 @@ export const notifications = pgTable("notifications", {
   readAt: timestamp("read_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+// Canonical list of notification kinds (mirrors the CHECK constraint added
+// in migration 20260518100600). New kinds need to be added in three places:
+// here, the migration, and src/lib/notifications/copy.ts.
+export const NOTIFICATION_KINDS = [
+  "score_reaction",
+  "score_comment",
+  "score_mention",
+  "workout_published",
+  "social_post_published",
+  "social_post_reaction",
+  "social_post_comment",
+  "social_post_mention",
+  "committed_club_progress",
+  "committed_club_earned",
+  "committed_club_streak",
+  "class_cancelled",
+  "class_reservation_reminder",
+] as const;
+export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
 // Push notification token registry (spec §1.10). The dispatcher Inngest
 // function fans notifications out to all tokens registered for the
@@ -1590,3 +1621,307 @@ export const WORKOUT_SECTION_KIND_LABELS: Record<WorkoutSectionKind, string> = {
   monthly_challenge: "Monthly challenge",
   custom: "Custom",
 };
+
+// ============================================
+// Programming tracks: per-day prescription + participations (spec §2.4)
+// ============================================
+
+export const programmingTrackDays = pgTable(
+  "programming_track_days",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    trackId: uuid("track_id")
+      .notNull()
+      .references(() => programmingTracks.id, { onDelete: "cascade" }),
+    date: date("date").notNull(),
+    // Filled at publish time when an inline track is injected into a workout
+    // section. Standalone tracks may leave this null and surface their own
+    // log-result CTA.
+    workoutId: uuid("workout_id").references(() => workouts.id, { onDelete: "set null" }),
+    body: text("body"),
+    isScored: boolean("is_scored").default(true).notNull(),
+    scoreType: text("score_type"),
+  },
+  (table) => [
+    uniqueIndex("programming_track_days_unique").on(table.trackId, table.date),
+  ]
+);
+
+export const programmingTrackParticipations = pgTable(
+  "programming_track_participations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    trackId: uuid("track_id")
+      .notNull()
+      .references(() => programmingTracks.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    joinedAt: timestamp("joined_at", { withTimezone: true }).defaultNow().notNull(),
+    leftAt: timestamp("left_at", { withTimezone: true }),
+  }
+);
+
+export type ProgrammingTrackDay = typeof programmingTrackDays.$inferSelect;
+export type NewProgrammingTrackDay = typeof programmingTrackDays.$inferInsert;
+export type ProgrammingTrackParticipation = typeof programmingTrackParticipations.$inferSelect;
+export type NewProgrammingTrackParticipation = typeof programmingTrackParticipations.$inferInsert;
+
+// ============================================
+// Classes (spec §2.2)
+// ============================================
+
+export const classSchedules = pgTable("class_schedules", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  communityId: uuid("community_id")
+    .notNull()
+    .references(() => communities.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  defaultCapacity: integer("default_capacity").default(20).notNull(),
+  defaultCoachId: uuid("default_coach_id").references(() => users.id),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const classScheduleSlots = pgTable("class_schedule_slots", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  scheduleId: uuid("schedule_id")
+    .notNull()
+    .references(() => classSchedules.id, { onDelete: "cascade" }),
+  // RRULE string (e.g. 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR').
+  rrule: text("rrule").notNull(),
+  // Time of day stored as `time` (HH:MM:SS local-to-gym). The materializer
+  // pairs it with the gym timezone to produce an absolute start_at.
+  startTime: text("start_time").notNull(),
+  durationMin: integer("duration_min").notNull(),
+  capacity: integer("capacity"),
+  coachId: uuid("coach_id").references(() => users.id),
+  activeFrom: date("active_from").notNull(),
+  activeTo: date("active_to"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const classInstances = pgTable("class_instances", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  scheduleId: uuid("schedule_id").references(() => classSchedules.id, { onDelete: "set null" }),
+  slotId: uuid("slot_id").references(() => classScheduleSlots.id, { onDelete: "set null" }),
+  communityId: uuid("community_id")
+    .notNull()
+    .references(() => communities.id, { onDelete: "cascade" }),
+  startAt: timestamp("start_at", { withTimezone: true }).notNull(),
+  endAt: timestamp("end_at", { withTimezone: true }).notNull(),
+  coachId: uuid("coach_id").references(() => users.id),
+  capacity: integer("capacity").notNull(),
+  status: text("status").default("scheduled").notNull(), // 'scheduled' | 'cancelled' | 'completed'
+  cancellationReason: text("cancellation_reason"),
+  workoutId: uuid("workout_id").references(() => workouts.id),
+  kind: text("kind").default("class").notNull(), // 'class' | 'event'
+  eventTitle: text("event_title"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const classRegistrations = pgTable(
+  "class_registrations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    classInstanceId: uuid("class_instance_id")
+      .notNull()
+      .references(() => classInstances.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: text("status").notNull(), // 'registered' | 'cancelled' | 'no_show' | 'attended'
+    registeredAt: timestamp("registered_at", { withTimezone: true }).defaultNow().notNull(),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    attendedAt: timestamp("attended_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("class_registrations_unique").on(table.classInstanceId, table.userId),
+  ]
+);
+
+export type ClassSchedule = typeof classSchedules.$inferSelect;
+export type NewClassSchedule = typeof classSchedules.$inferInsert;
+export type ClassScheduleSlot = typeof classScheduleSlots.$inferSelect;
+export type NewClassScheduleSlot = typeof classScheduleSlots.$inferInsert;
+export type ClassInstance = typeof classInstances.$inferSelect;
+export type NewClassInstance = typeof classInstances.$inferInsert;
+export type ClassRegistration = typeof classRegistrations.$inferSelect;
+export type NewClassRegistration = typeof classRegistrations.$inferInsert;
+
+export const CLASS_REGISTRATION_STATUSES = [
+  "registered",
+  "cancelled",
+  "no_show",
+  "attended",
+] as const;
+export type ClassRegistrationStatus = (typeof CLASS_REGISTRATION_STATUSES)[number];
+
+// ============================================
+// Gym social feed (spec §2.3)
+// ============================================
+
+export const gymPosts = pgTable(
+  "gym_posts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    communityId: uuid("community_id")
+      .notNull()
+      .references(() => communities.id, { onDelete: "cascade" }),
+    authorId: uuid("author_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    // 'draft' | 'pending_review' | 'published' | 'deleted'.
+    // Auto-anniversary/birthday posts insert as 'pending_review'; coach
+    // approves → 'published'. Unreviewed posts auto-publish after 24h via
+    // an Inngest delayed step.
+    status: text("status").default("published").notNull(),
+    body: text("body"),
+    workoutId: uuid("workout_id").references(() => workouts.id),
+    workoutDate: date("workout_date"),
+    mentionedUserIds: uuid("mentioned_user_ids")
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::uuid[]`),
+    isPinned: boolean("is_pinned").default(false).notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("gym_posts_community_published_idx").on(table.communityId, table.publishedAt),
+  ]
+);
+
+export const gymPostAttachments = pgTable(
+  "gym_post_attachments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => gymPosts.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // 'image' | 'gif' | 'video'
+    url: text("url").notNull(),
+    thumbnailUrl: text("thumbnail_url"),
+    width: integer("width"),
+    height: integer("height"),
+    position: integer("position").default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  }
+);
+
+export const gymPostReactions = pgTable(
+  "gym_post_reactions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => gymPosts.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reaction: text("reaction").default("fire").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("gym_post_reactions_unique").on(
+      table.postId,
+      table.userId,
+      table.reaction
+    ),
+  ]
+);
+
+export const gymPostComments = pgTable("gym_post_comments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  postId: uuid("post_id")
+    .notNull()
+    .references(() => gymPosts.id, { onDelete: "cascade" }),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  body: text("body").notNull(),
+  mentionedUserIds: uuid("mentioned_user_ids")
+    .array()
+    .notNull()
+    .default(sql`ARRAY[]::uuid[]`),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export type GymPost = typeof gymPosts.$inferSelect;
+export type NewGymPost = typeof gymPosts.$inferInsert;
+export type GymPostAttachment = typeof gymPostAttachments.$inferSelect;
+export type NewGymPostAttachment = typeof gymPostAttachments.$inferInsert;
+export type GymPostReaction = typeof gymPostReactions.$inferSelect;
+export type GymPostComment = typeof gymPostComments.$inferSelect;
+export type NewGymPostComment = typeof gymPostComments.$inferInsert;
+
+export const GYM_POST_KINDS = [
+  "announcement",
+  "whiteboard",
+  "auto_anniversary",
+  "auto_birthday",
+  "meme",
+  "pinned",
+] as const;
+export type GymPostKind = (typeof GYM_POST_KINDS)[number];
+
+export const GYM_POST_STATUSES = [
+  "draft",
+  "pending_review",
+  "published",
+  "deleted",
+] as const;
+export type GymPostStatus = (typeof GYM_POST_STATUSES)[number];
+
+// ============================================
+// Committed Club (spec §2.5)
+// ============================================
+
+export const committedClubSnapshots = pgTable(
+  "committed_club_snapshots",
+  {
+    communityId: uuid("community_id")
+      .notNull()
+      .references(() => communities.id, { onDelete: "cascade" }),
+    yearMonth: text("year_month").notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    rank: integer("rank").notNull(),
+    classesAttended: integer("classes_attended").notNull(),
+    firstInAt: timestamp("first_in_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({
+      columns: [table.communityId, table.yearMonth, table.userId],
+    }),
+  })
+);
+
+export const userStreakCache = pgTable(
+  "user_streak_cache",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    communityId: uuid("community_id")
+      .notNull()
+      .references(() => communities.id, { onDelete: "cascade" }),
+    currentStreak: integer("current_streak").default(0).notNull(),
+    longestStreak: integer("longest_streak").default(0).notNull(),
+    lastQualifiedMonth: text("last_qualified_month"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.communityId] }),
+  })
+);
+
+export type CommittedClubSnapshot = typeof committedClubSnapshots.$inferSelect;
+export type UserStreakCache = typeof userStreakCache.$inferSelect;

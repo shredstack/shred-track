@@ -1,23 +1,39 @@
 // ---------------------------------------------------------------------------
-// Notification copy module (spec §1.10 / brainstorm §5.8).
+// Notification copy module (spec §1.10 / brainstorm §5.8, expanded in PR 2 §2.6).
 //
 // Each notification kind has a small corpus of title/body variants.
 // renderNotificationCopy picks one deterministically per notification id so
 // the same notification stays stable on re-fetch but the corpus rotates.
-//
-// New kinds are added in PR 2/3 — this module is the single place to grow.
 // ---------------------------------------------------------------------------
 
 export type NotifKind =
   | "score_reaction"
   | "score_comment"
-  | "score_mention";
+  | "score_mention"
+  | "workout_published"
+  | "social_post_published"
+  | "social_post_reaction"
+  | "social_post_comment"
+  | "social_post_mention"
+  | "committed_club_progress"
+  | "committed_club_earned"
+  | "committed_club_streak"
+  | "class_cancelled"
+  | "class_reservation_reminder";
 
 export interface CopyContext {
   actorName?: string;
   workoutTitle?: string;
   gymName?: string;
   excerpt?: string;
+  // Committed Club + class context.
+  classesAttended?: number;
+  threshold?: number;
+  rank?: number;
+  streakMonths?: number;
+  yearMonth?: string;
+  classStartAt?: string; // ISO
+  className?: string;
 }
 
 interface Variant {
@@ -76,6 +92,178 @@ const VARIANTS: Record<NotifKind, VariantFactory[]> = {
         : "Open to read the thread.",
     }),
   ],
+
+  workout_published: [
+    (ctx) => ({
+      title: "📋 Today's WOD is up",
+      body: ctx.gymName
+        ? `${ctx.gymName} posted today's workout.`
+        : "Your gym posted today's workout.",
+    }),
+    (ctx) => ({
+      title: "🏋️ New workout posted",
+      body: ctx.workoutTitle
+        ? `Today: ${ctx.workoutTitle}.`
+        : "Open the CrossFit tab to see today's programming.",
+    }),
+    () => ({
+      title: "🔔 Programming dropped",
+      body: "Tap to see what's on deck.",
+    }),
+  ],
+
+  social_post_published: [
+    (ctx) => ({
+      title: "📣 New post in your gym",
+      body: ctx.actorName
+        ? `${ctx.actorName} just posted.`
+        : "Open the feed to read it.",
+    }),
+    (ctx) => ({
+      title: "📰 Gym update",
+      body: ctx.excerpt ? truncate(ctx.excerpt, 90) : "Something new in the feed.",
+    }),
+    (ctx) => ({
+      title: "📌 From the whiteboard",
+      body: ctx.actorName
+        ? `${ctx.actorName} shared a post.`
+        : "Check the gym feed for the latest.",
+    }),
+  ],
+
+  social_post_reaction: [
+    (ctx) => ({
+      title: "🔥 Someone reacted to your post",
+      body: ctx.actorName
+        ? `${ctx.actorName} hit fire on your post.`
+        : "Your post is getting reactions.",
+    }),
+    (ctx) => ({
+      title: "👏 Reaction landed",
+      body: ctx.actorName
+        ? `${ctx.actorName} cheered your post.`
+        : "Open the feed to see who reacted.",
+    }),
+    () => ({
+      title: "🎉 Your post is on fire",
+      body: "Tap to see who reacted.",
+    }),
+  ],
+
+  social_post_comment: [
+    (ctx) => ({
+      title: "💬 Comment on your post",
+      body: ctx.actorName
+        ? `${ctx.actorName}: ${truncate(ctx.excerpt ?? "", 80)}`
+        : truncate(ctx.excerpt ?? "Someone replied to your post.", 90),
+    }),
+    (ctx) => ({
+      title: "📝 New reply",
+      body: ctx.actorName
+        ? `${ctx.actorName} commented on your post.`
+        : "Open to read the thread.",
+    }),
+  ],
+
+  social_post_mention: [
+    (ctx) => ({
+      title: "@you in the feed",
+      body: ctx.actorName
+        ? `${ctx.actorName} mentioned you in a post.`
+        : "Someone tagged you in the feed.",
+    }),
+    (ctx) => ({
+      title: "👀 You were tagged in a post",
+      body: ctx.actorName ? `${ctx.actorName} mentioned you.` : "Tap to read.",
+    }),
+  ],
+
+  committed_club_progress: [
+    (ctx) => ({
+      title: "🔥 On pace for Committed Club",
+      body:
+        ctx.classesAttended != null && ctx.threshold != null
+          ? `${ctx.classesAttended}/${ctx.threshold} classes this month. Keep going.`
+          : "You're closing in on Committed Club.",
+    }),
+    (ctx) => ({
+      title: "💪 Halfway there",
+      body:
+        ctx.classesAttended != null && ctx.threshold != null
+          ? `${ctx.threshold - ctx.classesAttended} classes to Committed Club.`
+          : "A few more classes to lock it in.",
+    }),
+    (ctx) => ({
+      title: "🎯 One more to go",
+      body:
+        ctx.classesAttended != null && ctx.threshold != null
+          ? `Class #${ctx.threshold} earns Committed Club.`
+          : "One more class earns Committed Club.",
+    }),
+  ],
+
+  committed_club_earned: [
+    (ctx) => ({
+      title: "🏆 You're in",
+      body: ctx.gymName
+        ? `Welcome to ${ctx.gymName}'s Committed Club for the month.`
+        : "Welcome to Committed Club for the month.",
+    }),
+    (ctx) => ({
+      title: "👑 First into the club",
+      body:
+        ctx.rank === 1
+          ? "You're rank #1 in Committed Club this month."
+          : "Committed Club: locked in.",
+    }),
+    () => ({
+      title: "🔥 Committed Club earned",
+      body: "15 classes done. You showed up.",
+    }),
+  ],
+
+  committed_club_streak: [
+    (ctx) => ({
+      title: "🔥 Streak alive",
+      body: ctx.streakMonths
+        ? `${ctx.streakMonths} months in Committed Club.`
+        : "You extended your Committed Club streak.",
+    }),
+    (ctx) => ({
+      title: "📅 Another month",
+      body: ctx.streakMonths
+        ? `Committed Club streak: ${ctx.streakMonths} months.`
+        : "Committed Club streak extended.",
+    }),
+  ],
+
+  class_cancelled: [
+    (ctx) => ({
+      title: "⚠️ Class cancelled",
+      body: ctx.className
+        ? `${ctx.className} was cancelled.`
+        : "A class you registered for was cancelled.",
+    }),
+    (ctx) => ({
+      title: "❌ Heads up",
+      body: ctx.className
+        ? `${ctx.className} won't happen as scheduled.`
+        : "One of your registered classes was cancelled.",
+    }),
+  ],
+
+  class_reservation_reminder: [
+    (ctx) => ({
+      title: "⏰ Class soon",
+      body: ctx.className
+        ? `${ctx.className} starts in about an hour.`
+        : "You're on the list — class starts soon.",
+    }),
+    () => ({
+      title: "📍 Heads up",
+      body: "Your class is about an hour out.",
+    }),
+  ],
 };
 
 function truncate(s: string, n: number): string {
@@ -84,8 +272,6 @@ function truncate(s: string, n: number): string {
 }
 
 function stableIndex(id: string, modulo: number): number {
-  // Cheap deterministic hash so the same notification id picks the same
-  // variant across fetches. Don't need cryptographic strength.
   let h = 0;
   for (let i = 0; i < id.length; i++) {
     h = (h * 31 + id.charCodeAt(i)) | 0;
