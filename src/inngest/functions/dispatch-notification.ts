@@ -46,6 +46,13 @@ const KNOWN_KINDS: ReadonlySet<NotifKind> = new Set<NotifKind>([
   "class_reservation_reminder",
 ]);
 
+// Kinds that default OFF when no preference row exists for the user.
+// Class reservation reminders are explicit opt-in per spec §3.4 to
+// avoid notification fatigue.
+const DEFAULT_OFF_KINDS: ReadonlySet<NotifKind> = new Set<NotifKind>([
+  "class_reservation_reminder",
+]);
+
 export const dispatchNotification = inngest.createFunction(
   {
     id: "notifications-dispatch",
@@ -104,7 +111,8 @@ export const dispatchNotification = inngest.createFunction(
           )
         )
         .limit(1);
-      return row ?? { pushEnabled: true };
+      if (row) return row;
+      return { pushEnabled: !DEFAULT_OFF_KINDS.has(kind) };
     });
     if (!pref.pushEnabled) return { skipped: "pref-disabled" };
 

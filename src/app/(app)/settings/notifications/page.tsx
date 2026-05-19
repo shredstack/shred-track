@@ -20,6 +20,10 @@ interface KindMeta {
   kind: string;
   label: string;
   description?: string;
+  // Default state when the user has never touched this kind. Most kinds
+  // default ON; class_reservation_reminder defaults OFF per spec §3.4
+  // (explicit opt-in to avoid fatigue).
+  defaultOff?: boolean;
 }
 
 interface Group {
@@ -65,12 +69,23 @@ const GROUPS: Group[] = [
     flag: "classes",
     kinds: [
       { kind: "class_cancelled", label: "Class cancellations" },
+      {
+        kind: "class_reservation_reminder",
+        label: "1-hour class reminder",
+        description:
+          "Push reminder ~60 minutes before a class you've registered for. Off by default.",
+        defaultOff: true,
+      },
     ],
   },
 ];
 
-function valueOr(map: Map, kind: string): PrefValue {
-  return map[kind] ?? { inAppEnabled: true, pushEnabled: true };
+function valueOr(map: Map, meta: KindMeta): PrefValue {
+  if (map[meta.kind]) return map[meta.kind];
+  // No saved preference yet — fall back to per-kind default.
+  return meta.defaultOff
+    ? { inAppEnabled: false, pushEnabled: false }
+    : { inAppEnabled: true, pushEnabled: true };
 }
 
 export default function NotificationsPage() {
@@ -109,11 +124,11 @@ export default function NotificationsPage() {
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
   const prefs = data?.preferences ?? {};
 
-  function update(kind: string, patch: Partial<PrefValue>) {
-    const current = valueOr(prefs, kind);
+  function update(meta: KindMeta, patch: Partial<PrefValue>) {
+    const current = valueOr(prefs, meta);
     save.mutate({
       ...prefs,
-      [kind]: { ...current, ...patch },
+      [meta.kind]: { ...current, ...patch },
     });
   }
 
@@ -136,13 +151,14 @@ export default function NotificationsPage() {
                 <div className="w-12 text-center">In-app</div>
                 <div className="w-12 text-center">Push</div>
                 {g.kinds.map((k) => {
-                  const v = valueOr(prefs, k.kind);
+                  const v = valueOr(prefs, k);
                   return (
                     <PrefRow
                       key={k.kind}
                       label={k.label}
+                      description={k.description}
                       value={v}
-                      onChange={(patch) => update(k.kind, patch)}
+                      onChange={(patch) => update(k, patch)}
                     />
                   );
                 })}
@@ -157,16 +173,23 @@ export default function NotificationsPage() {
 
 function PrefRow({
   label,
+  description,
   value,
   onChange,
 }: {
   label: string;
+  description?: string;
   value: PrefValue;
   onChange: (patch: Partial<PrefValue>) => void;
 }) {
   return (
     <>
-      <div className="text-sm">{label}</div>
+      <div className="text-sm">
+        {label}
+        {description ? (
+          <p className="text-[11px] text-muted-foreground">{description}</p>
+        ) : null}
+      </div>
       <div className="flex justify-center">
         <Switch
           checked={value.inAppEnabled}
