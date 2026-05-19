@@ -1,10 +1,12 @@
 "use client";
 
 import { ReactNode } from "react";
+import { Trophy } from "lucide-react";
 import type {
   WorkoutSectionDisplay,
   WorkoutSectionKindDisplay,
 } from "@/types/crossfit";
+import { Button } from "@/components/ui/button";
 import { TrackDayScoreInput } from "@/components/crossfit/track-day-score-input";
 import type { TrackScoringConfig } from "@/types/programming-tracks";
 
@@ -33,9 +35,14 @@ const LABELS: Record<WorkoutSectionKindDisplay, string> = {
 export function WorkoutSectionBlock({
   section,
   children,
+  onViewTrackDayLeaderboard,
 }: {
   section: WorkoutSectionDisplay;
   children: ReactNode;
+  /** Optional handler for free-form track-day sections — opens a
+   *  community leaderboard for that day's scores. Hidden in personal
+   *  view (where the parent doesn't pass the handler). */
+  onViewTrackDayLeaderboard?: (trackDayId: string, title: string) => void;
 }) {
   const kindLabel = LABELS[section.kind];
   const customTitle = section.title?.trim();
@@ -62,13 +69,33 @@ export function WorkoutSectionBlock({
       ) : null}
       <div className="space-y-3">{children}</div>
       {isFreeFormTrackDay && section.isScored && (
-        <TrackDayScoreInput
-          trackDayId={section.trackDayId!}
-          scoringConfig={
-            (section.trackScoringConfig as TrackScoringConfig | null) ?? null
-          }
-          prescribedValue={section.trackPrescribedValue ?? null}
-        />
+        <>
+          <TrackDayScoreInput
+            trackDayId={section.trackDayId!}
+            scoringConfig={
+              (section.trackScoringConfig as TrackScoringConfig | null) ?? null
+            }
+            prescribedValue={section.trackPrescribedValue ?? null}
+          />
+          {onViewTrackDayLeaderboard && (
+            <div className="pt-0.5">
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-white/[0.08]"
+                onClick={() =>
+                  onViewTrackDayLeaderboard(
+                    section.trackDayId!,
+                    customTitle || kindLabel
+                  )
+                }
+              >
+                <Trophy className="size-3.5" />
+                Leaderboard
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </section>
   );

@@ -15,6 +15,7 @@ import { db } from "@/db";
 import {
   notifications,
   notificationPreferences,
+  programmingReleases,
   pushTokens,
   users,
   workouts,
@@ -72,6 +73,7 @@ export const dispatchNotification = inngest.createFunction(
           actorId: notifications.actorId,
           kind: notifications.kind,
           workoutId: notifications.workoutId,
+          programmingReleaseId: notifications.programmingReleaseId,
           gymPostId: notifications.gymPostId,
           classInstanceId: notifications.classInstanceId,
           communityId: notifications.communityId,
@@ -86,6 +88,7 @@ export const dispatchNotification = inngest.createFunction(
       actorId: string | null;
       kind: string;
       workoutId: string | null;
+      programmingReleaseId: string | null;
       gymPostId: string | null;
       classInstanceId: string | null;
       communityId: string | null;
@@ -146,6 +149,14 @@ export const dispatchNotification = inngest.createFunction(
           .limit(1);
         out.workoutTitle = w?.title ?? undefined;
       }
+      if (notif.programmingReleaseId) {
+        const [r] = await db
+          .select({ weekStart: programmingReleases.weekStart })
+          .from(programmingReleases)
+          .where(eq(programmingReleases.id, notif.programmingReleaseId))
+          .limit(1);
+        out.releaseWeekStart = r?.weekStart ?? undefined;
+      }
       if (notif.communityId) {
         const [c] = await db
           .select({ name: communities.name })
@@ -190,13 +201,24 @@ export const dispatchNotification = inngest.createFunction(
     })) as CopyContext;
 
     const copy = renderNotificationCopy(kind, notif.id, ctx);
+    // Mirror the in-app routing in src/app/(app)/notifications/page.tsx so
+    // a push tap lands in the same place as an inbox tap. Gym-scoped
+    // destinations carry ?community=<id> so the deep-link handler can flip
+    // the active gym before navigating.
+    const communityParam = notif.communityId
+      ? `?community=${notif.communityId}`
+      : "";
     const targetUrl = notif.gymPostId
-      ? `/gym/social#post-${notif.gymPostId}`
+      ? `/gym/social/${notif.gymPostId}${communityParam}`
       : notif.classInstanceId
-        ? `/classes#class-${notif.classInstanceId}`
-        : notif.workoutId
-          ? `/crossfit?date=&workout=${notif.workoutId}`
-          : undefined;
+        ? `/classes${communityParam}`
+        : notif.communityId && kind.startsWith("committed_club")
+          ? `/gym/committed-club${communityParam}`
+          : kind === "workout_published"
+            ? `/crossfit${communityParam}`
+            : notif.workoutId
+              ? `/crossfit?date=&workout=${notif.workoutId}`
+              : undefined;
 
     type SendResult = { tokenId: string; ok: boolean; invalid: boolean };
     const results = (await step.run("send-pushes", async () => {

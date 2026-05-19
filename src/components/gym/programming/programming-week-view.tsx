@@ -214,14 +214,25 @@ export function ProgrammingWeekView({
             <Button
               size="sm"
               onClick={publish}
-              disabled={publishing || !data?.release}
+              disabled={
+                publishing ||
+                !data?.release ||
+                data.release.status === "published"
+              }
+              title={
+                data?.release?.status === "published"
+                  ? "Already published — edits to sections publish automatically."
+                  : undefined
+              }
             >
               {publishing ? (
                 <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
               ) : (
                 <Sparkles className="mr-1.5 h-3.5 w-3.5" />
               )}
-              Publish week
+              {data?.release?.status === "published"
+                ? "Published"
+                : "Publish week"}
             </Button>
           </div>
         </CardContent>

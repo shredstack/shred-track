@@ -425,6 +425,10 @@ export interface TrackDayRollup {
   daysLogged: number;
   daysAvailable: number;
   aggregation: "sum" | "last" | "per_day_independent";
+  /** True when scores roll up across the whole track (monthly_challenge
+   *  or aggregation === "sum"). Use this — not `aggregation` — to decide
+   *  whether to surface cumulative totals in the UI. */
+  isCumulative: boolean;
   dailyTarget: number | null;
   unit: string | null;
   unitLabel: string | null;
@@ -439,5 +443,56 @@ export function useTrackDayRollup(trackDayId: string | null) {
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
+  });
+}
+
+// ============================================
+// Track day leaderboard (gym-scoped ranking)
+// ============================================
+
+export interface TrackDayLeaderboardEntry {
+  scoreId: string;
+  userId: string;
+  userName: string;
+  userUsername: string | null;
+  userImage: string | null;
+  numericValue: number | null;
+  unit: string | null;
+  isComplete: boolean;
+  notes: string | null;
+  createdAt: string;
+  displayScore: string;
+  sortValue: number;
+  /** For cumulative leaderboards, number of days the athlete has logged. */
+  daysLogged?: number;
+}
+
+export interface TrackDayLeaderboardResponse {
+  trackName: string;
+  trackKind: string;
+  dayDate: string;
+  unitLabel: string | null;
+  /** True when the response sums each athlete's scores across the whole track. */
+  isCumulative: boolean;
+  entries: TrackDayLeaderboardEntry[];
+}
+
+export function useTrackDayLeaderboard(
+  trackDayId: string | null,
+  options?: { enabled?: boolean }
+) {
+  return useQuery<TrackDayLeaderboardResponse>({
+    queryKey: ["track-day-leaderboard", trackDayId],
+    enabled: !!trackDayId && (options?.enabled ?? true),
+    queryFn: async () => {
+      const res = await fetch(`/api/track-days/${trackDayId}/leaderboard`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "Failed to load leaderboard");
+      }
+      return res.json();
+    },
+    // Same cadence as the workout leaderboard for a real-time-ish feel.
+    refetchInterval: 30_000,
   });
 }

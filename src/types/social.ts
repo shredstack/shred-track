@@ -39,10 +39,10 @@ export interface ReactionSummary {
   viewerReacted: boolean;
 }
 
-export type NotificationKind =
-  | "score_reaction"
-  | "score_comment"
-  | "score_mention";
+// Re-exported from the schema so the inbox, push dispatcher, and DB CHECK
+// constraint share one source of truth for the kind list.
+export type { NotificationKind } from "@/db/schema";
+import type { NotificationKind } from "@/db/schema";
 
 export interface NotificationDisplay {
   id: string;
@@ -52,10 +52,23 @@ export interface NotificationDisplay {
   workoutTitle: string;
   /** Date (YYYY-MM-DD) so the deep link can navigate to the right day. */
   workoutDate: string | null;
-  workoutId: string;
+  workoutId: string | null;
   workoutPartId: string | null;
+  programmingReleaseId: string | null;
+  /** Monday-anchored start date (YYYY-MM-DD) for workout_published kind. */
+  releaseWeekStart: string | null;
   scoreId: string | null;
   commentId: string | null;
+  gymPostId: string | null;
+  classInstanceId: string | null;
+  communityId: string | null;
+  /** Gym/community display name (for "from your gym" framing). */
+  gymName: string | null;
+  /** Class title for class_* kinds. */
+  className: string | null;
+  /** Class start ISO for class_reservation_reminder. */
+  classStartAt: string | null;
+  /** Excerpt source for social_post_* kinds (post body) or score comments. */
   bodyPreview?: string;
   hasAttachment?: boolean;
   readAt: string | null;

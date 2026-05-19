@@ -9,7 +9,7 @@
 // per-day workout_sections.
 
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   programmingReleases,
@@ -67,16 +67,13 @@ export async function POST(
     injected = r.inserted;
   }
 
-  // Fire workout_published notifications for each day. Per spec §2.6,
-  // dispatch is per-day at 6am gym-local via Inngest delay. We insert the
-  // in-app notification rows now (so the inbox shows them) and the
-  // dispatcher fans out push when each delivery fires; the dispatcher
-  // itself respects pushEnabled per kind. For v1 we send all events
-  // immediately and let the dispatcher pick from preferences.
-  const published = await db
-    .select({ id: workouts.id })
-    .from(workouts)
-    .where(eq(workouts.programmingReleaseId, releaseId));
+  // Fire one workout_published notification per (release × member). The
+  // inbox row renders "Programming dropped — week of <Monday>" from the
+  // release; tapping drops the athlete on today's CrossFit tab so they
+  // can navigate the week themselves. The dispatcher fans push out and
+  // respects pushEnabled per kind. A partial unique index on
+  // (recipient_id, programming_release_id) WHERE kind='workout_published'
+  // makes republish / retry idempotent via ON CONFLICT DO NOTHING.
   const members = await db
     .select({ userId: communityMemberships.userId })
     .from(communityMemberships)
@@ -86,47 +83,37 @@ export async function POST(
         eq(communityMemberships.isActive, true)
       )
     );
-  if (published.length && members.length) {
-    // One notification per (member × workout-day). Heavy with many days,
-    // but a week × 100 members = 700 rows — fine.
-    const recipients = members
-      .map((m) => m.userId)
-      .filter((id) => id !== user.id);
-    if (recipients.length) {
-      const rows: Array<{
-        recipientId: string;
-        actorId: string;
-        kind: "workout_published";
-        communityId: string;
-        workoutId: string;
-      }> = [];
-      for (const w of published) {
-        for (const rid of recipients) {
-          rows.push({
-            recipientId: rid,
-            actorId: user.id,
-            kind: "workout_published",
-            communityId,
-            workoutId: w.id,
-          });
-        }
-      }
-      if (rows.length) {
-        const inserted = await db
-          .insert(notifications)
-          .values(rows)
-          .returning({ id: notifications.id });
-        for (const n of inserted) {
-          try {
-            await inngest.send({
-              id: `dispatch:${n.id}`,
-              name: "notifications/created",
-              data: { notificationId: n.id },
-            });
-          } catch (err) {
-            console.error("[publish] dispatch failed", err);
-          }
-        }
+  const recipients = members
+    .map((m) => m.userId)
+    .filter((id) => id !== user.id);
+  if (recipients.length) {
+    const rows = recipients.map((rid) => ({
+      recipientId: rid,
+      actorId: user.id,
+      kind: "workout_published" as const,
+      communityId,
+      programmingReleaseId: releaseId,
+    }));
+    // Match the partial unique index from
+    // 20260519204534_add_programming_release_id_to_notifications.sql —
+    // Postgres needs the index predicate after the conflict target.
+    const inserted = await db
+      .insert(notifications)
+      .values(rows)
+      .onConflictDoNothing({
+        target: [notifications.recipientId, notifications.programmingReleaseId],
+        where: sql`kind = 'workout_published' AND programming_release_id IS NOT NULL`,
+      })
+      .returning({ id: notifications.id });
+    for (const n of inserted) {
+      try {
+        await inngest.send({
+          id: `dispatch:${n.id}`,
+          name: "notifications/created",
+          data: { notificationId: n.id },
+        });
+      } catch (err) {
+        console.error("[publish] dispatch failed", err);
       }
     }
   }

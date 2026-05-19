@@ -18,7 +18,7 @@ interface WelcomeEmailProps {
 
 export function WelcomeEmail({
   name,
-  appUrl = "https://shredtrack.app/crossfit",
+  appUrl = "https://shredtrack.shredstack.net/home",
 }: WelcomeEmailProps) {
   return (
     <Html>

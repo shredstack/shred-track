@@ -24,6 +24,28 @@ export interface GymPostListItem {
   viewerReacted: boolean;
 }
 
+/** Same shape as feed items, plus the post's community so the detail page
+ *  can wire the reaction toggle (and comment composer's cache key)
+ *  without a separate gym-context lookup. */
+export interface GymPostDetail extends GymPostListItem {
+  communityId: string;
+}
+
+export function useGymPost(postId: string | null) {
+  return useQuery<GymPostDetail>({
+    queryKey: ["gym-post", postId, "detail"],
+    enabled: !!postId,
+    queryFn: async () => {
+      const res = await fetch(`/api/gym-posts/${postId}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "Failed to load post");
+      }
+      return res.json();
+    },
+  });
+}
+
 export function useGymPosts(communityId: string | null) {
   return useQuery<{ posts: GymPostListItem[] }>({
     queryKey: ["gym", communityId, "social", "feed"],

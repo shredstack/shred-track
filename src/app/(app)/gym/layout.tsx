@@ -1,18 +1,20 @@
 // ---------------------------------------------------------------------------
-// /gym section layout — for gym coaches and admins (NOT super admins).
+// /gym section layout.
 //
-// Server component: pulls the user's active gym from `users.active_community_id`
-// and verifies coach-or-admin access. Members of a gym (no role) get
-// redirected to /. Each child page repeats the role check (defense in
-// depth) so a direct API hit can't bypass.
+// Gates the entire /gym subtree on "active member of the currently active
+// gym". Admin-only pages (programming, members, settings, join-code,
+// documents, events, classes, recovery, social/review) each have their
+// own nested layout that re-checks coach/admin role via
+// requireGymAdminOrRedirect. Member-facing pages (social feed, post
+// detail, committed-club, member-facing tracks view) get through this
+// layout without elevation.
 // ---------------------------------------------------------------------------
 
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { users } from "@/db/schema";
+import { communityMemberships, users } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
-import { canProgramForGym } from "@/lib/authz/community";
 
 export default async function GymLayout({
   children,
@@ -31,8 +33,17 @@ export default async function GymLayout({
   const activeId = row?.activeCommunityId ?? null;
   if (!activeId) redirect("/");
 
-  const ok = await canProgramForGym(user.id, activeId);
-  if (!ok) redirect("/");
+  const [membership] = await db
+    .select({ isActive: communityMemberships.isActive })
+    .from(communityMemberships)
+    .where(
+      and(
+        eq(communityMemberships.userId, user.id),
+        eq(communityMemberships.communityId, activeId)
+      )
+    )
+    .limit(1);
+  if (!membership?.isActive) redirect("/");
 
   return <div className="space-y-4">{children}</div>;
 }

@@ -18,6 +18,7 @@ import { LeaderboardSheet } from "@/components/crossfit/leaderboard-sheet";
 import { DateNavigator } from "@/components/shared/date-navigator";
 import { AvailableTracksSheet } from "@/components/crossfit/available-tracks-sheet";
 import { TrackDayScoreInput } from "@/components/crossfit/track-day-score-input";
+import { TrackDayLeaderboardSheet } from "@/components/crossfit/track-day-leaderboard-sheet";
 import { useMyTrackDays } from "@/hooks/useTracks";
 import { useIsFeatureOn } from "@/hooks/useFeatureFlag";
 import {
@@ -248,6 +249,14 @@ function CrossfitPageBody() {
   const [editingWorkoutId, setEditingWorkoutId] = useState<string | null>(null);
   const [scoringWorkoutId, setScoringWorkoutId] = useState<string | null>(null);
   const [leaderboardWorkoutId, setLeaderboardWorkoutId] = useState<string | null>(null);
+  // Standalone track-day cards (monthly challenges / custom tracks) open a
+  // separate leaderboard sheet — their scoring lives in track_day_scores
+  // rather than the `scores` table the workout leaderboard reads.
+  const [trackLeaderboard, setTrackLeaderboard] = useState<{
+    trackDayId: string;
+    title: string;
+    subtitle: string | null;
+  } | null>(null);
   // Pre-opens the comments drawer when the leaderboard sheet opens via a
   // notification deep-link (?scoreComment=<id>).
   const [deepLinkScoreCommentId, setDeepLinkScoreCommentId] = useState<
@@ -698,6 +707,16 @@ function CrossfitPageBody() {
                     ? (id) => setLeaderboardWorkoutId(id)
                     : undefined
                 }
+                onViewTrackDayLeaderboard={
+                  inGymMode && workout.communityId
+                    ? (trackDayId, title) =>
+                        setTrackLeaderboard({
+                          trackDayId,
+                          title,
+                          subtitle: null,
+                        })
+                    : undefined
+                }
               />
             );
           })}
@@ -727,6 +746,25 @@ function CrossfitPageBody() {
                         scoringConfig={td.scoringConfig}
                         prescribedValue={td.prescribedValue ?? null}
                       />
+                    )}
+                    {td.isScored && (
+                      <div className="pt-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="border-white/[0.08]"
+                          onClick={() =>
+                            setTrackLeaderboard({
+                              trackDayId: td.trackDayId,
+                              title: `${td.trackName} — Day ${td.dayNumber}`,
+                              subtitle: null,
+                            })
+                          }
+                        >
+                          <Trophy className="size-3.5" />
+                          Leaderboard
+                        </Button>
+                      </div>
                     )}
                   </CardContent>
                 </Card>
@@ -842,6 +880,15 @@ function CrossfitPageBody() {
             setLeaderboardWorkoutId(null);
             setDeepLinkScoreCommentId(null);
           }
+        }}
+      />
+
+      <TrackDayLeaderboardSheet
+        trackDayId={trackLeaderboard?.trackDayId ?? null}
+        title={trackLeaderboard?.title ?? ""}
+        subtitle={trackLeaderboard?.subtitle ?? null}
+        onOpenChange={(open) => {
+          if (!open) setTrackLeaderboard(null);
         }}
       />
 

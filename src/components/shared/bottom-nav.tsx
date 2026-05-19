@@ -36,6 +36,7 @@ const baseMemberTabs: NavTab[] = [
 ];
 
 const baseCoachTabs: NavTab[] = [
+  { href: "/home", label: "Home", icon: Home },
   { href: "/gym/programming", label: "Programming", icon: ClipboardList },
   { href: "/gym/classes", label: "Classes", icon: CalendarDays },
   { href: "/gym", label: "Gym Tools", icon: LayoutGrid },

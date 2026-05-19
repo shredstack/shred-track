@@ -3,13 +3,18 @@
 import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
+  AtSign,
   Bell,
+  CalendarX,
   CheckCheck,
+  Clock,
+  Dumbbell,
   Flame,
   Image as ImageIcon,
   Loader2,
   MessageCircle,
-  AtSign,
+  Megaphone,
+  Trophy,
   User,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,6 +23,8 @@ import {
   useMarkNotificationRead,
   useNotifications,
 } from "@/hooks/useNotifications";
+import { useGymContext, useSetActiveCommunity } from "@/hooks/useGymContext";
+import { renderNotificationCopy } from "@/lib/notifications/copy";
 import type { NotificationDisplay, NotificationKind } from "@/types/social";
 
 function relativeTime(iso: string): string {
@@ -41,53 +48,56 @@ function relativeTime(iso: string): string {
 function KindIcon({ kind }: { kind: NotificationKind }) {
   switch (kind) {
     case "score_reaction":
+    case "social_post_reaction":
       return <Flame className="size-4 text-orange-400" />;
     case "score_comment":
+    case "social_post_comment":
       return <MessageCircle className="size-4 text-blue-400" />;
     case "score_mention":
+    case "social_post_mention":
       return <AtSign className="size-4 text-purple-400" />;
+    case "workout_published":
+      return <Dumbbell className="size-4 text-emerald-400" />;
+    case "social_post_published":
+      return <Megaphone className="size-4 text-sky-400" />;
+    case "committed_club_progress":
+    case "committed_club_earned":
+    case "committed_club_streak":
+      return <Trophy className="size-4 text-amber-400" />;
+    case "class_cancelled":
+      return <CalendarX className="size-4 text-rose-400" />;
+    case "class_reservation_reminder":
+      return <Clock className="size-4 text-cyan-400" />;
+    default:
+      return <Bell className="size-4 text-muted-foreground" />;
   }
 }
 
 function NotificationText({ item }: { item: NotificationDisplay }) {
-  const actor = item.actorName ?? "Someone";
-  const workout = item.workoutTitle || "your workout";
-  const preview =
+  // Share the same copy module the push dispatcher uses so push and inbox
+  // text never drift apart. The notification id seeds variant selection so
+  // a row's text stays stable across re-fetches.
+  const excerpt =
     item.bodyPreview && item.bodyPreview.trim().length > 0
       ? item.bodyPreview
       : item.hasAttachment
-      ? "sent a GIF"
-      : undefined;
-
-  switch (item.kind) {
-    case "score_reaction":
-      return (
-        <span>
-          <strong>{actor}</strong> reacted 🔥 to your score on{" "}
-          <em>{workout}</em>
-        </span>
-      );
-    case "score_comment":
-      return (
-        <span>
-          <strong>{actor}</strong> commented on your score on{" "}
-          <em>{workout}</em>
-          {preview && (
-            <span className="text-muted-foreground">: {preview}</span>
-          )}
-        </span>
-      );
-    case "score_mention":
-      return (
-        <span>
-          <strong>{actor}</strong> mentioned you in a comment on{" "}
-          <em>{workout}</em>
-          {preview && (
-            <span className="text-muted-foreground">: {preview}</span>
-          )}
-        </span>
-      );
-  }
+        ? "sent a GIF"
+        : undefined;
+  const copy = renderNotificationCopy(item.kind, item.id, {
+    actorName: item.actorName ?? undefined,
+    workoutTitle: item.workoutTitle || undefined,
+    gymName: item.gymName ?? undefined,
+    className: item.className ?? undefined,
+    classStartAt: item.classStartAt ?? undefined,
+    releaseWeekStart: item.releaseWeekStart ?? undefined,
+    excerpt,
+  });
+  return (
+    <span>
+      <span className="font-medium">{copy.title}</span>
+      <span className="text-muted-foreground"> — {copy.body}</span>
+    </span>
+  );
 }
 
 function NotificationRow({
@@ -152,14 +162,65 @@ export default function NotificationsPage() {
   } = useNotifications();
   const markRead = useMarkNotificationRead();
   const markAllRead = useMarkAllNotificationsRead();
+  const { data: gymCtx } = useGymContext();
+  const setActiveCommunity = useSetActiveCommunity();
 
   const items = useMemo(
     () => data?.pages.flatMap((p) => p.items) ?? [],
     [data]
   );
 
-  function handleOpen(item: NotificationDisplay) {
+  // Gym-scoped pages (social feed, classes, committed-club) read from
+  // activeCommunityId. If the user is currently active on a different gym
+  // than the notification's, switch first so the destination renders the
+  // right community.
+  async function ensureActiveCommunity(communityId: string | null) {
+    if (!communityId) return;
+    if (gymCtx?.activeCommunityId === communityId) return;
+    const isMember = gymCtx?.memberships.some(
+      (m) => m.communityId === communityId && m.isActive
+    );
+    if (!isMember) return;
+    try {
+      await setActiveCommunity.mutateAsync(communityId);
+    } catch {
+      // If the switch fails (server rejected, network), fall through and
+      // still attempt navigation — the destination may still load by id.
+    }
+  }
+
+  async function handleOpen(item: NotificationDisplay) {
     if (!item.readAt) markRead.mutate(item.id);
+    // Routing fallback chain mirrors the push dispatcher's targetUrl
+    // (src/inngest/functions/dispatch-notification.ts) so an in-app tap
+    // and a push tap go to the same place.
+    if (item.gymPostId) {
+      await ensureActiveCommunity(item.communityId);
+      router.push(`/gym/social/${item.gymPostId}`);
+      return;
+    }
+    if (item.classInstanceId) {
+      // Member-facing class notifications (cancelled, reminder) land on the
+      // top-level /classes list. There's no member-facing class detail
+      // route yet; the admin /gym/classes/[id] view wouldn't be right here
+      // since recipients receive these as registered members.
+      await ensureActiveCommunity(item.communityId);
+      router.push(`/classes`);
+      return;
+    }
+    if (item.communityId && item.kind.startsWith("committed_club")) {
+      await ensureActiveCommunity(item.communityId);
+      router.push(`/gym/committed-club`);
+      return;
+    }
+    if (item.kind === "workout_published") {
+      // Programming-drop notifications drop the athlete on today's CrossFit
+      // tab — no specific workout date, no leaderboard. They can navigate
+      // the week or open a leaderboard themselves from there.
+      await ensureActiveCommunity(item.communityId);
+      router.push("/crossfit");
+      return;
+    }
     if (item.workoutId) {
       const params = new URLSearchParams();
       if (item.workoutDate) params.set("date", item.workoutDate);
@@ -171,6 +232,8 @@ export default function NotificationsPage() {
       }
       router.push(`/crossfit?${params.toString()}`);
     }
+    // No deep-link target: tap only marks read (no navigation) instead of
+    // dumping the user onto a random tab.
   }
 
   return (

@@ -39,6 +39,7 @@ export async function GET(
   const [track] = await db
     .select({
       id: programmingTracks.id,
+      kind: programmingTracks.kind,
       communityId: programmingTracks.communityId,
       scoringConfig: programmingTracks.scoringConfig,
     })
@@ -91,6 +92,12 @@ export async function GET(
     .from(programmingTrackDays)
     .where(eq(programmingTrackDays.trackId, track.id));
 
+  // Monthly challenges are cumulative by definition; other kinds opt in
+  // via aggregation === "sum". Mirrors the leaderboard route so the
+  // athlete's per-day UI and the gym-wide ranking agree.
+  const isCumulative =
+    track.kind === "monthly_challenge" || config?.aggregation === "sum";
+
   return NextResponse.json({
     today: {
       numericValue:
@@ -101,6 +108,7 @@ export async function GET(
     daysLogged: agg?.daysLogged ?? 0,
     daysAvailable: available?.daysAvailable ?? 0,
     aggregation: config?.aggregation ?? "per_day_independent",
+    isCumulative,
     dailyTarget: config?.dailyTarget ?? null,
     unit: config?.unit ?? null,
     unitLabel: config?.unitLabel ?? null,

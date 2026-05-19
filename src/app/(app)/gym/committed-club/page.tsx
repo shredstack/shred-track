@@ -12,7 +12,6 @@ import { useGymContext } from "@/hooks/useGymContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { GymToolHeader } from "@/components/gym/gym-tool-header";
 import { Trophy } from "lucide-react";
 
 interface LeaderboardRow {
@@ -64,11 +63,17 @@ export default function CommittedClubPage() {
 
   return (
     <div className="space-y-4">
-      <GymToolHeader
-        icon={Trophy}
-        label="Committed Club"
-        description="Monthly leaderboard for class attendance"
-      />
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted/40">
+          <Trophy className="size-4" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-xl font-bold leading-tight">Committed Club</h1>
+          <p className="text-xs text-muted-foreground">
+            Monthly leaderboard for class attendance
+          </p>
+        </div>
+      </div>
       <div className="flex items-center justify-center gap-2">
         <Button
           size="sm"

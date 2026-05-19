@@ -22,7 +22,7 @@ export function CommunityInviteEmail({
   communityName,
   joinCode,
   inviterName,
-  appUrl = "https://shredtrack.app/crossfit",
+  appUrl = "https://shredtrack.shredstack.net/home",
 }: CommunityInviteEmailProps) {
   return (
     <Html>

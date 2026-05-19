@@ -1,17 +1,23 @@
 "use client";
 
-// Gym post detail with comments thread.
+// Gym post detail. Renders the post itself at the top so the reader has
+// context, then the existing comments thread (read + composer) below.
 
 /* eslint-disable @next/next/no-img-element */
 
 import { useState } from "react";
 import { useParams } from "next/navigation";
-import { useCreatePostComment, usePostComments } from "@/hooks/useGymPosts";
+import {
+  useCreatePostComment,
+  useGymPost,
+  usePostComments,
+} from "@/hooks/useGymPosts";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { GymToolHeader } from "@/components/gym/gym-tool-header";
-import { MessageSquare } from "lucide-react";
+import { PostCard } from "@/components/gym/post-card";
+import { Loader2, MessageSquare } from "lucide-react";
 
 interface Comment {
   id: string;
@@ -25,18 +31,36 @@ interface Comment {
 export default function GymPostPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
-  const { data, isLoading } = usePostComments(id);
-  const create = useCreatePostComment(id, null);
+  const post = useGymPost(id);
+  const comments = usePostComments(id);
+  const create = useCreatePostComment(id, post.data?.communityId ?? null);
   const [body, setBody] = useState("");
 
   return (
     <div className="space-y-4">
       <GymToolHeader
         icon={MessageSquare}
-        label="Comments"
+        label="Post"
         backHref="/gym/social"
         backLabel="Feed"
       />
+
+      {post.isLoading ? (
+        <div className="flex justify-center py-6">
+          <Loader2 className="size-5 animate-spin text-muted-foreground" />
+        </div>
+      ) : post.error ? (
+        <p className="py-6 text-center text-sm text-destructive">
+          {(post.error as Error).message}
+        </p>
+      ) : post.data ? (
+        <PostCard
+          post={post.data}
+          communityId={post.data.communityId}
+          mode="detail"
+        />
+      ) : null}
+
       <Card>
         <CardContent className="space-y-2 py-3">
           <Textarea
@@ -58,12 +82,12 @@ export default function GymPostPage() {
           </Button>
         </CardContent>
       </Card>
-      {isLoading ? (
+      {comments.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
-      ) : !data?.comments?.length ? (
+      ) : !comments.data?.comments?.length ? (
         <p className="text-sm text-muted-foreground">No comments yet.</p>
       ) : (
-        (data.comments as Comment[]).map((c) => (
+        (comments.data.comments as Comment[]).map((c) => (
           <Card key={c.id}>
             <CardContent className="flex items-start gap-3 py-3">
               {c.userImage ? (

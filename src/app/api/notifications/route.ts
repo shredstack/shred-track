@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { aliasedTable, and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  classInstances,
+  classSchedules,
+  communities,
+  gymPosts,
   notifications,
+  programmingReleases,
   scoreComments,
   users,
   workouts,
@@ -45,18 +50,39 @@ export async function GET(req: NextRequest) {
       commentId: notifications.commentId,
       workoutId: notifications.workoutId,
       workoutPartId: notifications.workoutPartId,
+      programmingReleaseId: notifications.programmingReleaseId,
+      gymPostId: notifications.gymPostId,
+      classInstanceId: notifications.classInstanceId,
+      communityId: notifications.communityId,
       actorId: notifications.actorId,
       actorName: actor.name,
       actorImage: actor.image,
       workoutTitle: workouts.title,
       workoutDate: workouts.workoutDate,
+      releaseWeekStart: programmingReleases.weekStart,
       commentBody: scoreComments.body,
       commentHasAttachment: sql<boolean>`${scoreComments.attachmentProvider} IS NOT NULL`,
+      gymPostBody: gymPosts.body,
+      gymName: communities.name,
+      classStartAt: classInstances.startAt,
+      classEventTitle: classInstances.eventTitle,
+      classScheduleName: classSchedules.name,
     })
     .from(notifications)
     .leftJoin(actor, eq(actor.id, notifications.actorId))
     .leftJoin(workouts, eq(workouts.id, notifications.workoutId))
+    .leftJoin(
+      programmingReleases,
+      eq(programmingReleases.id, notifications.programmingReleaseId)
+    )
     .leftJoin(scoreComments, eq(scoreComments.id, notifications.commentId))
+    .leftJoin(gymPosts, eq(gymPosts.id, notifications.gymPostId))
+    .leftJoin(communities, eq(communities.id, notifications.communityId))
+    .leftJoin(
+      classInstances,
+      eq(classInstances.id, notifications.classInstanceId)
+    )
+    .leftJoin(classSchedules, eq(classSchedules.id, classInstances.scheduleId))
     .where(
       and(
         eq(notifications.recipientId, user.id),
@@ -104,22 +130,39 @@ export async function GET(req: NextRequest) {
       })
       .slice(0, 80);
 
-  const items: NotificationDisplay[] = rows.map((r) => ({
-    id: r.id,
-    kind: r.kind as NotificationKind,
-    actorName: r.actorName ?? null,
-    actorImage: r.actorImage ?? null,
-    workoutTitle: r.workoutTitle ?? "",
-    workoutDate: r.workoutDate ?? null,
-    workoutId: r.workoutId ?? "",
-    workoutPartId: r.workoutPartId ?? null,
-    scoreId: r.scoreId ?? null,
-    commentId: r.commentId ?? null,
-    bodyPreview: r.commentBody ? renderPreview(r.commentBody) : undefined,
-    hasAttachment: r.commentHasAttachment ?? undefined,
-    readAt: r.readAt ? r.readAt.toISOString() : null,
-    createdAt: r.createdAt.toISOString(),
-  }));
+  const items: NotificationDisplay[] = rows.map((r) => {
+    // Score-comment kinds use the comment body; social-post kinds fall back
+    // to the post body so the inbox shows a useful preview.
+    const preview = r.commentBody
+      ? renderPreview(r.commentBody)
+      : r.gymPostBody
+        ? r.gymPostBody.slice(0, 80)
+        : undefined;
+    return {
+      id: r.id,
+      kind: r.kind as NotificationKind,
+      actorName: r.actorName ?? null,
+      actorImage: r.actorImage ?? null,
+      workoutTitle: r.workoutTitle ?? "",
+      workoutDate: r.workoutDate ?? null,
+      workoutId: r.workoutId ?? null,
+      workoutPartId: r.workoutPartId ?? null,
+      programmingReleaseId: r.programmingReleaseId ?? null,
+      releaseWeekStart: r.releaseWeekStart ?? null,
+      scoreId: r.scoreId ?? null,
+      commentId: r.commentId ?? null,
+      gymPostId: r.gymPostId ?? null,
+      classInstanceId: r.classInstanceId ?? null,
+      communityId: r.communityId ?? null,
+      gymName: r.gymName ?? null,
+      className: r.classEventTitle ?? r.classScheduleName ?? null,
+      classStartAt: r.classStartAt ? r.classStartAt.toISOString() : null,
+      bodyPreview: preview,
+      hasAttachment: r.commentHasAttachment ?? undefined,
+      readAt: r.readAt ? r.readAt.toISOString() : null,
+      createdAt: r.createdAt.toISOString(),
+    };
+  });
 
   const nextCursor =
     items.length === limit && rows.length > 0

@@ -159,6 +159,7 @@ export async function PUT(
   const body = (await req.json().catch(() => null)) as {
     body?: string | null;
     parts?: PartInput[];
+    title?: string | null;
   } | null;
   if (!body) {
     return NextResponse.json({ error: "Body required" }, { status: 400 });
@@ -170,6 +171,21 @@ export async function PUT(
         .update(workoutSections)
         .set({
           body: body.body,
+          reviewedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(workoutSections.id, sectionId));
+    }
+
+    if (body.title !== undefined) {
+      const nextTitle =
+        typeof body.title === "string" && body.title.trim()
+          ? body.title.trim()
+          : null;
+      await tx
+        .update(workoutSections)
+        .set({
+          title: nextTitle,
           reviewedAt: new Date(),
           updatedAt: new Date(),
         })

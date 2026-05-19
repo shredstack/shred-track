@@ -66,6 +66,10 @@ interface WorkoutCardProps {
   onDelete?: (workoutId: string) => Promise<void> | void;
   onEdit?: (workoutId: string) => void;
   onViewLeaderboard?: (workoutId: string) => void;
+  /** Opens the leaderboard for a free-form track-day section embedded in
+   *  the workout (monthly challenge / custom track with no workoutPart).
+   *  Threaded through to `WorkoutSectionBlock`. */
+  onViewTrackDayLeaderboard?: (trackDayId: string, title: string) => void;
   // When set, renders a "Move to gym" button. Parent decides eligibility
   // (creator + admin of target gym + email allowlist). The handler receives
   // the workout id; the gym name is shown in the confirm dialog only.
@@ -432,7 +436,7 @@ function PartSection({
       </div>
 
       {signature !== null && (
-        <div className="font-mono font-bold text-2xl sm:text-3xl tracking-tight leading-none text-foreground">
+        <div className="font-mono font-bold text-base sm:text-lg tracking-tight leading-none text-foreground">
           {signature}
         </div>
       )}
@@ -507,6 +511,7 @@ export function WorkoutCard({
   onDelete,
   onEdit,
   onViewLeaderboard,
+  onViewTrackDayLeaderboard,
   onMoveToGym,
   moveToGymName,
 }: WorkoutCardProps) {
@@ -620,7 +625,11 @@ export function WorkoutCard({
                   .filter((p): p is (typeof parts)[number] => !!p);
                 if (sectionParts.length === 0) {
                   return (
-                    <WorkoutSectionBlock key={section.id} section={section}>
+                    <WorkoutSectionBlock
+                      key={section.id}
+                      section={section}
+                      onViewTrackDayLeaderboard={onViewTrackDayLeaderboard}
+                    >
                       <p className="text-xs text-muted-foreground/70 italic">
                         No movements yet.
                       </p>
@@ -628,7 +637,11 @@ export function WorkoutCard({
                   );
                 }
                 return (
-                  <WorkoutSectionBlock key={section.id} section={section}>
+                  <WorkoutSectionBlock
+                    key={section.id}
+                    section={section}
+                    onViewTrackDayLeaderboard={onViewTrackDayLeaderboard}
+                  >
                     {sectionParts.map((part, idx) => (
                       <div key={part.id} className="space-y-3">
                         {idx > 0 && <Separator />}

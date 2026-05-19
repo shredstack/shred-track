@@ -1,18 +1,121 @@
-// PATCH /api/gym-posts/[id]
-//
-// Update an existing gym post. Used by the coach review queue to approve
-// (status='pending_review' → 'published') or edit-and-approve
-// (body + status) anniversary/birthday auto-posts.
-// DELETE soft-deletes (status='deleted'). Author or gym manager only.
+// GET    /api/gym-posts/[id] — single-post detail (used by the post detail
+//                              page after a notification tap).
+// PATCH  /api/gym-posts/[id] — update an existing gym post. Used by the
+//                              coach review queue to approve
+//                              (status='pending_review' → 'published') or
+//                              edit-and-approve (body + status)
+//                              anniversary/birthday auto-posts.
+// DELETE /api/gym-posts/[id] — soft-delete (status='deleted'). Author or
+//                              gym manager only.
 
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { gymPosts, notifications, communityMemberships } from "@/db/schema";
+import {
+  gymPostAttachments,
+  gymPostComments,
+  gymPostReactions,
+  gymPosts,
+  notifications,
+  communityMemberships,
+  users,
+} from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
-import { canManageGym } from "@/lib/authz/community";
+import { canManageGym, canViewGym } from "@/lib/authz/community";
 import { inngest } from "@/inngest/client";
-import { and } from "drizzle-orm";
+import { and, sql } from "drizzle-orm";
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const user = await getSessionUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { id } = await params;
+
+  const [row] = await db
+    .select({
+      id: gymPosts.id,
+      kind: gymPosts.kind,
+      status: gymPosts.status,
+      body: gymPosts.body,
+      workoutId: gymPosts.workoutId,
+      workoutDate: gymPosts.workoutDate,
+      isPinned: gymPosts.isPinned,
+      publishedAt: gymPosts.publishedAt,
+      communityId: gymPosts.communityId,
+      authorId: gymPosts.authorId,
+      authorName: users.name,
+      authorImage: users.image,
+    })
+    .from(gymPosts)
+    .innerJoin(users, eq(users.id, gymPosts.authorId))
+    .where(eq(gymPosts.id, id))
+    .limit(1);
+
+  if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!(await canViewGym(user.id, row.communityId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  // Hide non-published posts from non-managers (drafts, pending review,
+  // deleted). Managers and the author can still see them.
+  if (row.status !== "published") {
+    const isManager = await canManageGym(user.id, row.communityId);
+    if (!isManager && row.authorId !== user.id) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+  }
+
+  const [attachments, reactionCountRow, commentCountRow, myReactionRow] =
+    await Promise.all([
+      db
+        .select()
+        .from(gymPostAttachments)
+        .where(eq(gymPostAttachments.postId, id)),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(gymPostReactions)
+        .where(eq(gymPostReactions.postId, id)),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(gymPostComments)
+        .where(
+          and(
+            eq(gymPostComments.postId, id),
+            sql`${gymPostComments.deletedAt} is null`
+          )
+        ),
+      db
+        .select({ id: gymPostReactions.id })
+        .from(gymPostReactions)
+        .where(
+          and(
+            eq(gymPostReactions.postId, id),
+            eq(gymPostReactions.userId, user.id)
+          )
+        )
+        .limit(1),
+    ]);
+  return NextResponse.json({
+    id: row.id,
+    kind: row.kind,
+    body: row.body,
+    workoutId: row.workoutId,
+    workoutDate: row.workoutDate,
+    isPinned: row.isPinned,
+    publishedAt: row.publishedAt?.toISOString() ?? new Date(0).toISOString(),
+    communityId: row.communityId,
+    author: {
+      id: row.authorId,
+      name: row.authorName,
+      image: row.authorImage,
+    },
+    attachments: attachments.sort((a, b) => a.position - b.position),
+    reactionCount: reactionCountRow[0]?.count ?? 0,
+    commentCount: commentCountRow[0]?.count ?? 0,
+    viewerReacted: myReactionRow.length > 0,
+  });
+}
 
 export async function PATCH(
   req: NextRequest,
