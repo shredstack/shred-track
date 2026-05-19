@@ -1,7 +1,7 @@
 import { Resend } from "resend";
 
 export const EMAIL_FROM =
-  process.env.EMAIL_FROM || "ShredTrack <noreply@shredtrack.app>";
+  process.env.EMAIL_FROM || "ShredTrack <noreply-shredtrack@shredstack.net>";
 
 let _resend: Resend | null = null;
 

@@ -236,12 +236,19 @@ function SectionRow({ communityId, section, onMutated }: SectionRowProps) {
       }
       setBuilderSaving(true);
       try {
+        // Forward the Smart Builder title onto the section so members see
+        // the WOD name (e.g. "Cindy") next to the WOD pill. Only send
+        // when non-empty so we don't clobber a title typed in the inline
+        // section editor.
+        const trimmedTitle = form.title?.trim() ?? "";
+        const payload: { parts: typeof parts; title?: string } = { parts };
+        if (trimmedTitle) payload.title = trimmedTitle;
         const res = await fetch(
           `/api/gym/${communityId}/programming/sections/${section.id}/content`,
           {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ parts }),
+            body: JSON.stringify(payload),
           }
         );
         if (!res.ok) {

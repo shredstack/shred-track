@@ -1449,6 +1449,10 @@ export const notifications = pgTable("notifications", {
   // Denormalized routing context (avoids 3 joins on every render).
   workoutId: uuid("workout_id").references(() => workouts.id, { onDelete: "cascade" }),
   workoutPartId: uuid("workout_part_id").references(() => workoutParts.id, { onDelete: "cascade" }),
+  // For workout_published kind: one row per (release × recipient) instead
+  // of one per (workout × recipient). Lets the inbox render
+  // "Programming dropped — week of <Monday>" from the release row.
+  programmingReleaseId: uuid("programming_release_id"),
   communityId: uuid("community_id").references(() => communities.id, { onDelete: "cascade" }),
   readAt: timestamp("read_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

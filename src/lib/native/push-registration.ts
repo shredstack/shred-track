@@ -50,19 +50,39 @@ export async function installPushRegistration() {
   });
 
   // 3. Deep linking — on tap, the payload's targetUrl drives navigation.
-  PushNotifications.addListener("pushNotificationActionPerformed", (event) => {
-    const targetUrl =
-      typeof event.notification.data?.targetUrl === "string"
-        ? event.notification.data.targetUrl
-        : null;
-    if (targetUrl) {
+  //    Gym-scoped targets carry ?community=<id> so we can flip the active
+  //    gym before navigating; otherwise the destination page (which keys
+  //    off activeCommunityId) would render the wrong gym.
+  PushNotifications.addListener(
+    "pushNotificationActionPerformed",
+    async (event) => {
+      const targetUrl =
+        typeof event.notification.data?.targetUrl === "string"
+          ? event.notification.data.targetUrl
+          : null;
+      if (!targetUrl) return;
+      try {
+        const community = new URL(
+          targetUrl,
+          window.location.origin
+        ).searchParams.get("community");
+        if (community) {
+          await fetch("/api/me/active-community", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ communityId: community }),
+          });
+        }
+      } catch {
+        // Best-effort — fall through and navigate either way.
+      }
       try {
         window.location.href = targetUrl;
       } catch {
         // ignore
       }
     }
-  });
+  );
 
   // Foreground notifications: by default iOS shows nothing in-app. The
   // recipient app re-fetches the in-app notifications list via React Query

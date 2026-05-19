@@ -21,6 +21,7 @@ import { db } from "@/db";
 import { users, communities } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canAdminGym, getGymRole } from "@/lib/authz/community";
+import { requireGymAdminOrRedirect } from "@/lib/authz/require-gym-admin";
 import { Card, CardContent } from "@/components/ui/card";
 
 interface Tool {
@@ -141,9 +142,11 @@ const GROUP_LABELS: Record<Tool["group"], string> = {
 };
 
 export default async function GymHubPage() {
+  // The hub itself is admin/coach-only — the parent layout now only
+  // enforces membership so the social feed and committed-club work for
+  // regular members. Re-gate the hub here.
+  await requireGymAdminOrRedirect();
   const user = await getSessionUser();
-  // Layout already ensured user + active gym + program access. We re-fetch
-  // here so the page can show the gym name.
   const [row] = await db
     .select({ activeCommunityId: users.activeCommunityId })
     .from(users)

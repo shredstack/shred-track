@@ -34,6 +34,9 @@ export interface CopyContext {
   yearMonth?: string;
   classStartAt?: string; // ISO
   className?: string;
+  // workout_published: Monday-anchored ISO date (YYYY-MM-DD) for the
+  // release's week. Used to render "week of <Mon>" in the title/body.
+  releaseWeekStart?: string;
 }
 
 interface Variant {
@@ -95,20 +98,12 @@ const VARIANTS: Record<NotifKind, VariantFactory[]> = {
 
   workout_published: [
     (ctx) => ({
-      title: "📋 Today's WOD is up",
-      body: ctx.gymName
-        ? `${ctx.gymName} posted today's workout.`
-        : "Your gym posted today's workout.",
+      title: "🔔 Programming dropped",
+      body: programmingDroppedBody(ctx),
     }),
     (ctx) => ({
-      title: "🏋️ New workout posted",
-      body: ctx.workoutTitle
-        ? `Today: ${ctx.workoutTitle}.`
-        : "Open the CrossFit tab to see today's programming.",
-    }),
-    () => ({
-      title: "🔔 Programming dropped",
-      body: "Tap to see what's on deck.",
+      title: "📋 New programming up",
+      body: programmingDroppedBody(ctx),
     }),
   ],
 
@@ -269,6 +264,30 @@ const VARIANTS: Record<NotifKind, VariantFactory[]> = {
 function truncate(s: string, n: number): string {
   if (s.length <= n) return s;
   return s.slice(0, n - 1).trimEnd() + "…";
+}
+
+function programmingDroppedBody(ctx: CopyContext): string {
+  const weekPart = ctx.releaseWeekStart
+    ? `week of ${formatWeekOf(ctx.releaseWeekStart)}`
+    : null;
+  if (ctx.gymName && weekPart) return `${ctx.gymName} — ${weekPart}.`;
+  if (weekPart) return `New programming for the ${weekPart}.`;
+  if (ctx.gymName) return `${ctx.gymName} posted new programming.`;
+  return "Tap to see what's on deck.";
+}
+
+// Renders a Monday ISO date (YYYY-MM-DD) as "Mon, May 18". The release's
+// weekStart is stored as a plain date (no timezone) — parse component-wise
+// to avoid the UTC-shift gotcha that drops dates by one day in negative
+// offsets.
+function formatWeekOf(weekStartIso: string): string {
+  const [y, m, d] = weekStartIso.split("-").map((n) => parseInt(n, 10));
+  if (!y || !m || !d) return weekStartIso;
+  const date = new Date(y, m - 1, d);
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
 }
 
 function stableIndex(id: string, modulo: number): number {

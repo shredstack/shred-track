@@ -7,30 +7,15 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import {
-  Flame,
-  MessageSquare,
-  Settings,
-  ImagePlus,
-  ClipboardList,
-  Megaphone,
-  Send,
-} from "lucide-react";
-import { GymToolHeader } from "@/components/gym/gym-tool-header";
+import { Settings, ImagePlus, ClipboardList, Megaphone } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useGymContext } from "@/hooks/useGymContext";
 import { useActiveMembership } from "@/hooks/useGymContext";
 import { useIsFeatureOn } from "@/hooks/useFeatureFlag";
-import {
-  useCreateGymPost,
-  useCreatePostComment,
-  useGymPosts,
-  usePostComments,
-  useTogglePostReaction,
-  type GymPostListItem,
-} from "@/hooks/useGymPosts";
+import { useCreateGymPost, useGymPosts } from "@/hooks/useGymPosts";
+import { PostCard } from "@/components/gym/post-card";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -111,21 +96,25 @@ export default function GymSocialPage() {
 
   return (
     <div className="space-y-4">
-      <GymToolHeader
-        icon={Megaphone}
-        label="Feed"
-        description="Announcements, whiteboard photos, and gym-wide posts"
-      />
-      {membership?.isAdmin || membership?.isCoach ? (
-        <div className="flex items-center justify-end">
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted/40">
+          <Megaphone className="size-4" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-xl font-bold leading-tight">Feed</h1>
+          <p className="text-xs text-muted-foreground">
+            Announcements, whiteboard photos, and gym-wide posts
+          </p>
+        </div>
+        {membership?.isAdmin || membership?.isCoach ? (
           <Link href="/gym/social/review">
             <Button size="sm" variant="outline">
               <Settings className="mr-1 size-4" />
-              Review queue
+              Review
             </Button>
           </Link>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
 
       <Card>
         <CardContent className="space-y-2 py-3">
@@ -218,171 +207,9 @@ export default function GymSocialPage() {
         <p className="text-sm text-muted-foreground">No posts yet.</p>
       ) : (
         data.posts.map((p) => (
-          <PostCard key={p.id} post={p} communityId={activeId} />
+          <PostCard key={p.id} post={p} communityId={activeId} mode="feed" />
         ))
       )}
-    </div>
-  );
-}
-
-function PostCard({
-  post,
-  communityId,
-}: {
-  post: GymPostListItem;
-  communityId: string;
-}) {
-  const toggle = useTogglePostReaction(communityId);
-  const [commentsOpen, setCommentsOpen] = useState(false);
-  return (
-    <Card id={`post-${post.id}`}>
-      <CardContent className="space-y-3 py-4">
-        <div className="flex items-center gap-2">
-          {post.author.image ? (
-            <img
-              src={post.author.image}
-              alt=""
-              className="size-9 rounded-full object-cover"
-            />
-          ) : (
-            <div className="flex size-9 items-center justify-center rounded-full bg-muted text-xs">
-              {post.author.name.slice(0, 1)}
-            </div>
-          )}
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold truncate">
-              {post.author.name}
-              {post.isPinned ? " · 📌" : ""}
-            </p>
-            <p className="text-[10px] text-muted-foreground">
-              {new Date(post.publishedAt).toLocaleString("en-US", {
-                month: "short",
-                day: "numeric",
-                hour: "numeric",
-                minute: "2-digit",
-              })}
-              {post.workoutId ? " · whiteboard" : null}
-            </p>
-          </div>
-        </div>
-        {post.body && (
-          <p className="whitespace-pre-wrap text-sm leading-relaxed">
-            {post.body}
-          </p>
-        )}
-        {post.attachments.map((a) => (
-          <img
-            key={a.id}
-            src={a.url}
-            alt="attachment"
-            className="w-full rounded-md object-contain"
-          />
-        ))}
-        <div className="flex items-center gap-4 text-xs">
-          <button
-            type="button"
-            onClick={() =>
-              toggle.mutate({ postId: post.id, isOn: post.viewerReacted })
-            }
-            className={`inline-flex items-center gap-1 ${
-              post.viewerReacted
-                ? "text-orange-500"
-                : "text-muted-foreground"
-            }`}
-          >
-            <Flame className="size-4" /> {post.reactionCount}
-          </button>
-          <button
-            type="button"
-            onClick={() => setCommentsOpen((v) => !v)}
-            className="inline-flex items-center gap-1 text-muted-foreground"
-          >
-            <MessageSquare className="size-4" /> {post.commentCount}
-          </button>
-        </div>
-        {commentsOpen ? (
-          <InlineComments postId={post.id} communityId={communityId} />
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
-
-interface CommentItem {
-  id: string;
-  body: string;
-  createdAt: string;
-  userId: string;
-  userName: string;
-  userImage: string | null;
-}
-
-function InlineComments({
-  postId,
-  communityId,
-}: {
-  postId: string;
-  communityId: string;
-}) {
-  const { data, isLoading } = usePostComments(postId);
-  const create = useCreatePostComment(postId, communityId);
-  const [body, setBody] = useState("");
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  return (
-    <div className="space-y-2 border-t border-border/40 pt-3">
-      {isLoading ? (
-        <p className="text-[11px] text-muted-foreground">Loading comments…</p>
-      ) : !data?.comments?.length ? (
-        <p className="text-[11px] text-muted-foreground">
-          No comments yet — be the first.
-        </p>
-      ) : (
-        <div className="space-y-2">
-          {(data.comments as CommentItem[]).map((c) => (
-            <div key={c.id} className="flex items-start gap-2">
-              {c.userImage ? (
-                <img
-                  src={c.userImage}
-                  alt=""
-                  className="size-7 rounded-full object-cover"
-                />
-              ) : (
-                <div className="flex size-7 items-center justify-center rounded-full bg-muted text-[10px]">
-                  {c.userName.slice(0, 1)}
-                </div>
-              )}
-              <div className="flex-1 min-w-0 rounded-md bg-muted/30 px-3 py-2">
-                <p className="text-[11px] font-medium">{c.userName}</p>
-                <p className="whitespace-pre-wrap text-sm">{c.body}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="flex items-start gap-2 pt-1">
-        <Textarea
-          ref={textareaRef}
-          placeholder="Write a comment…"
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          rows={1}
-          className="min-h-9 resize-none text-sm"
-        />
-        <Button
-          size="sm"
-          disabled={create.isPending || !body.trim()}
-          onClick={() =>
-            create.mutate(body.trim(), {
-              onSuccess: () => {
-                setBody("");
-                textareaRef.current?.focus();
-              },
-            })
-          }
-        >
-          <Send className="size-3.5" />
-        </Button>
-      </div>
     </div>
   );
 }

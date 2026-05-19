@@ -195,7 +195,7 @@ export function GymBrandingForm({ communityId }: { communityId: string }) {
 
         <div className="space-y-1.5">
           <Label htmlFor="invite-slug" className="text-xs">
-            Invite URL slug (shredtrack.app/g/&lt;slug&gt;)
+            Invite URL slug (shredtrack.shredstack.net/g/&lt;slug&gt;)
           </Label>
           <Input
             id="invite-slug"
