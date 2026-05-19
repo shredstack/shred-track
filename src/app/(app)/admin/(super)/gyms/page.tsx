@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  Building2,
   Loader2,
   Plus,
   ShieldCheck,
@@ -17,7 +18,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { AdminToolHeader } from "@/components/admin/admin-tool-header";
-import { Building2 } from "lucide-react";
 
 interface Gym {
   id: string;
@@ -158,20 +158,9 @@ export default function AdminGymsPage() {
     )
       return;
     try {
-      // Strip roles first so the last-admin guard still allows the
-      // deactivation when the only remaining admin is someone else.
-      await fetch(`/api/communities/${gymId}/members/${userId}/role`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isAdmin: false, isCoach: false }),
-      });
       const res = await fetch(
-        `/api/communities/${gymId}/members/${userId}/active`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ isActive: false }),
-        }
+        `/api/communities/${gymId}/members/${userId}/remove`,
+        { method: "POST" }
       );
       if (!res.ok) {
         const body = await res.json().catch(() => null);

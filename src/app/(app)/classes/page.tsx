@@ -6,7 +6,7 @@
 
 import { useMemo, useState } from "react";
 import { useGymContext } from "@/hooks/useGymContext";
-import { useIsFeatureOn } from "@/hooks/useFeatureFlag";
+import { useIsFeatureOn, useFeatureFlagsLoading } from "@/hooks/useFeatureFlag";
 import {
   useGymClasses,
   useRegisterForClass,
@@ -35,6 +35,7 @@ function weekBounds(offsetWeeks: number): { fromIso: string; toIso: string } {
 export default function ClassesPage() {
   const { data: ctx } = useGymContext();
   const classesOn = useIsFeatureOn("classes");
+  const flagsLoading = useFeatureFlagsLoading();
   const [weekOffset, setWeekOffset] = useState(0);
   const { fromIso, toIso } = useMemo(() => weekBounds(weekOffset), [weekOffset]);
   const activeId = ctx?.activeCommunityId ?? null;
@@ -51,6 +52,14 @@ export default function ClassesPage() {
         <p className="text-sm text-muted-foreground">
           Join a gym to see its class schedule.
         </p>
+      </div>
+    );
+  }
+  if (flagsLoading) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold">Classes</h1>
+        <p className="text-sm text-muted-foreground">Loading…</p>
       </div>
     );
   }

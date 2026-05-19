@@ -67,3 +67,10 @@ export function useIsFeatureOn(key: string): boolean {
   const v = getFlag(key);
   return v === true || v === "true" || v === 1;
 }
+
+/** True while the flag map is still loading on the client. Use this to
+ *  avoid a flash of "feature off" UI before flags resolve. */
+export function useFeatureFlagsLoading(): boolean {
+  const { isLoading } = useFlagMap();
+  return isLoading;
+}

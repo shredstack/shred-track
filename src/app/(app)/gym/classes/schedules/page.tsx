@@ -163,11 +163,11 @@ function NewScheduleForm({
   function submit() {
     const byday = RRULE_DAYS.filter((d) => days[d]).join(",");
     if (!byday) {
-      alert("Pick at least one day");
+      toast.error("Pick at least one day");
       return;
     }
     if (!name.trim()) {
-      alert("Schedule needs a name");
+      toast.error("Schedule needs a name");
       return;
     }
     onSubmit({
