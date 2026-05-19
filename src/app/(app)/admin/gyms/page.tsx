@@ -3,11 +3,21 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Loader2, Plus, UserPlus } from "lucide-react";
+import {
+  Loader2,
+  Plus,
+  ShieldCheck,
+  Star,
+  UserMinus,
+  UserPlus,
+} from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { AdminToolHeader } from "@/components/admin/admin-tool-header";
+import { Building2 } from "lucide-react";
 
 interface Gym {
   id: string;
@@ -19,6 +29,16 @@ interface Gym {
   adminCount: number;
 }
 
+interface GymMember {
+  membershipId: string;
+  userId: string;
+  isAdmin: boolean;
+  isCoach: boolean;
+  isActive: boolean;
+  name: string;
+  email: string;
+}
+
 function useGyms() {
   return useQuery<Gym[]>({
     queryKey: ["admin", "gyms"],
@@ -26,6 +46,19 @@ function useGyms() {
       const res = await fetch("/api/admin/gyms");
       if (!res.ok) throw new Error("Failed to fetch gyms");
       return res.json();
+    },
+  });
+}
+
+function useGymStaff(gymId: string | null) {
+  return useQuery<GymMember[]>({
+    queryKey: ["admin", "gym-staff", gymId],
+    enabled: !!gymId,
+    queryFn: async () => {
+      const res = await fetch(`/api/communities/${gymId}/members`);
+      if (!res.ok) throw new Error("Failed to load members");
+      const rows = (await res.json()) as GymMember[];
+      return rows.filter((r) => r.isAdmin || r.isCoach);
     },
   });
 }
@@ -86,6 +119,66 @@ export default function AdminGymsPage() {
       toast.success(`${email} is now an admin`);
       setAdminEmailByGym((prev) => ({ ...prev, [gymId]: "" }));
       qc.invalidateQueries({ queryKey: ["admin", "gyms"] });
+      qc.invalidateQueries({ queryKey: ["admin", "gym-staff", gymId] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    }
+  }
+
+  async function setRole(
+    gymId: string,
+    userId: string,
+    updates: { isAdmin?: boolean; isCoach?: boolean }
+  ) {
+    try {
+      const res = await fetch(
+        `/api/communities/${gymId}/members/${userId}/role`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updates),
+        }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "Failed to update");
+      }
+      qc.invalidateQueries({ queryKey: ["admin", "gyms"] });
+      qc.invalidateQueries({ queryKey: ["admin", "gym-staff", gymId] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    }
+  }
+
+  async function removeStaff(gymId: string, userId: string) {
+    if (
+      !confirm(
+        "Deactivate this person? Their roles will be cleared and they'll be marked inactive."
+      )
+    )
+      return;
+    try {
+      // Strip roles first so the last-admin guard still allows the
+      // deactivation when the only remaining admin is someone else.
+      await fetch(`/api/communities/${gymId}/members/${userId}/role`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isAdmin: false, isCoach: false }),
+      });
+      const res = await fetch(
+        `/api/communities/${gymId}/members/${userId}/active`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isActive: false }),
+        }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "Failed to remove");
+      }
+      qc.invalidateQueries({ queryKey: ["admin", "gyms"] });
+      qc.invalidateQueries({ queryKey: ["admin", "gym-staff", gymId] });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
     }
@@ -93,12 +186,11 @@ export default function AdminGymsPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">Gyms</h1>
-        <p className="text-sm text-muted-foreground">
-          Create gyms, view membership counts, assign gym admins.
-        </p>
-      </div>
+      <AdminToolHeader
+        icon={Building2}
+        label="Gyms"
+        description="Create gyms, view membership counts, assign and remove gym admins or coaches."
+      />
 
       <Card>
         <CardHeader>
@@ -197,38 +289,167 @@ export default function AdminGymsPage() {
                       setExpandedId(expandedId === g.id ? null : g.id)
                     }
                   >
-                    {expandedId === g.id ? "Close" : "Manage admins"}
+                    {expandedId === g.id ? "Close" : "Manage staff"}
                   </Button>
                 </div>
                 {expandedId === g.id && (
-                  <div className="mt-3 flex items-center gap-2">
-                    <Input
-                      placeholder="email@gym.com"
-                      value={adminEmailByGym[g.id] ?? ""}
-                      onChange={(e) =>
-                        setAdminEmailByGym((prev) => ({
-                          ...prev,
-                          [g.id]: e.target.value,
-                        }))
-                      }
-                      className="flex-1"
-                    />
-                    <Button
-                      size="sm"
-                      onClick={() => addAdminToGym(g.id)}
-                      disabled={!(adminEmailByGym[g.id] ?? "").trim()}
-                      className="gap-1.5"
-                    >
-                      <UserPlus className="h-3.5 w-3.5" />
-                      Add admin
-                    </Button>
-                  </div>
+                  <GymStaffPanel
+                    gymId={g.id}
+                    addEmail={adminEmailByGym[g.id] ?? ""}
+                    onChangeAddEmail={(v) =>
+                      setAdminEmailByGym((prev) => ({ ...prev, [g.id]: v }))
+                    }
+                    onAdd={() => addAdminToGym(g.id)}
+                    onToggleRole={(userId, updates) =>
+                      setRole(g.id, userId, updates)
+                    }
+                    onRemove={(userId) => removeStaff(g.id, userId)}
+                  />
                 )}
               </div>
             ))
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function GymStaffPanel({
+  gymId,
+  addEmail,
+  onChangeAddEmail,
+  onAdd,
+  onToggleRole,
+  onRemove,
+}: {
+  gymId: string;
+  addEmail: string;
+  onChangeAddEmail: (v: string) => void;
+  onAdd: () => void;
+  onToggleRole: (
+    userId: string,
+    updates: { isAdmin?: boolean; isCoach?: boolean }
+  ) => void;
+  onRemove: (userId: string) => void;
+}) {
+  const { data: staff = [], isLoading } = useGymStaff(gymId);
+  return (
+    <div className="mt-3 space-y-3">
+      <div className="rounded-md border border-white/[0.04] bg-white/[0.02] p-2 text-[11px] text-muted-foreground">
+        <p>
+          <span className="font-semibold text-foreground">Admins</span> manage
+          members, schedules, settings, and documents.{" "}
+          <span className="font-semibold text-foreground">Coaches</span> can
+          program workouts but not manage the gym. A person can be either,
+          both, or neither.
+        </p>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-3">
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        </div>
+      ) : staff.length === 0 ? (
+        <p className="text-[11px] text-muted-foreground">
+          No admins or coaches yet.
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          {staff.map((m) => (
+            <div
+              key={m.membershipId}
+              className="flex flex-col gap-1.5 rounded-md border border-white/[0.04] bg-white/[0.01] p-2"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1">
+                    <p className="truncate text-xs font-medium">{m.name}</p>
+                    {m.isAdmin && (
+                      <Badge variant="secondary" className="gap-1 text-[10px]">
+                        <ShieldCheck className="h-3 w-3" />
+                        Admin
+                      </Badge>
+                    )}
+                    {m.isCoach && (
+                      <Badge variant="secondary" className="gap-1 text-[10px]">
+                        <Star className="h-3 w-3" />
+                        Coach
+                      </Badge>
+                    )}
+                    {!m.isActive && (
+                      <Badge variant="destructive" className="text-[10px]">
+                        Inactive
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="truncate text-[10px] text-muted-foreground">
+                    {m.email}
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                <Button
+                  size="sm"
+                  variant={m.isAdmin ? "secondary" : "outline"}
+                  className="h-7 text-[11px]"
+                  onClick={() =>
+                    onToggleRole(m.userId, { isAdmin: !m.isAdmin })
+                  }
+                >
+                  {m.isAdmin ? "Remove admin" : "Make admin"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant={m.isCoach ? "secondary" : "outline"}
+                  className="h-7 text-[11px]"
+                  onClick={() =>
+                    onToggleRole(m.userId, { isCoach: !m.isCoach })
+                  }
+                >
+                  {m.isCoach ? "Remove coach" : "Make coach"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-[11px] text-destructive hover:text-destructive"
+                  onClick={() => onRemove(m.userId)}
+                >
+                  <UserMinus className="mr-1 h-3 w-3" />
+                  Remove from gym
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="space-y-1.5">
+        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          Add admin
+        </p>
+        <div className="flex items-center gap-2">
+          <Input
+            placeholder="email@gym.com"
+            value={addEmail}
+            onChange={(e) => onChangeAddEmail(e.target.value)}
+            className="flex-1"
+          />
+          <Button
+            size="sm"
+            onClick={onAdd}
+            disabled={!addEmail.trim()}
+            className="gap-1.5"
+          >
+            <UserPlus className="h-3.5 w-3.5" />
+            Add
+          </Button>
+        </div>
+        <p className="text-[10px] text-muted-foreground">
+          Adds the user as both admin and coach. Use the toggles above to
+          adjust afterwards.
+        </p>
+      </div>
     </div>
   );
 }

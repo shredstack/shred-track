@@ -9,7 +9,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Flame, MessageSquare, Settings, ImagePlus, ClipboardList } from "lucide-react";
+import { Flame, MessageSquare, Settings, ImagePlus, ClipboardList, Megaphone } from "lucide-react";
+import { GymToolHeader } from "@/components/gym/gym-tool-header";
 import { useQuery } from "@tanstack/react-query";
 import { useGymContext } from "@/hooks/useGymContext";
 import { useActiveMembership } from "@/hooks/useGymContext";
@@ -100,17 +101,21 @@ export default function GymSocialPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Feed</h1>
-        {membership?.isAdmin || membership?.isCoach ? (
+      <GymToolHeader
+        icon={Megaphone}
+        label="Feed"
+        description="Announcements, whiteboard photos, and gym-wide posts"
+      />
+      {membership?.isAdmin || membership?.isCoach ? (
+        <div className="flex items-center justify-end">
           <Link href="/gym/social/review">
             <Button size="sm" variant="outline">
               <Settings className="mr-1 size-4" />
               Review queue
             </Button>
           </Link>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       <Card>
         <CardContent className="space-y-2 py-3">

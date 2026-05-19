@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button";
 /* eslint-disable @next/next/no-img-element */
 import { Badge } from "@/components/ui/badge";
 import { useParams } from "next/navigation";
+import { GymToolHeader } from "@/components/gym/gym-tool-header";
+import { Users } from "lucide-react";
 
 interface InstanceDetail {
   instance: {
@@ -77,10 +79,14 @@ export default function ClassInstancePage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">Class roster</h1>
-        <p className="text-sm text-muted-foreground">{time}</p>
-      </div>
+      <GymToolHeader
+        icon={Users}
+        label="Class roster"
+        description={time}
+        backHref="/gym/classes"
+        backLabel="Classes"
+      />
+
       <div className="flex justify-between">
         <Button
           size="sm"

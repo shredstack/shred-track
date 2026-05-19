@@ -318,6 +318,7 @@ export async function GET(req: NextRequest) {
       kind: workoutSections.kind,
       position: workoutSections.position,
       title: workoutSections.title,
+      body: workoutSections.body,
       isScored: workoutSections.isScored,
       scoreType: workoutSections.scoreType,
     })
@@ -396,6 +397,7 @@ export async function GET(req: NextRequest) {
       kind: s.kind,
       position: s.position,
       title: s.title,
+      body: s.body,
       isScored: s.isScored,
       scoreType: s.scoreType,
       partIds: partIdsBySection.get(s.id) ?? [],

@@ -1,13 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { toast } from "sonner";
-import { ChevronDown, ChevronUp, Loader2, Plus, Trash2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  Plus,
+  Trash2,
+  Wrench,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -21,12 +35,16 @@ import {
   WORKOUT_SECTION_SCORE_TYPES,
   type WorkoutSectionKind,
 } from "@/db/schema";
+import { SmartBuilder } from "@/components/crossfit/smart-builder";
+import { builderPartToPayload } from "@/lib/crossfit/builder-payload";
+import type { WorkoutBuilderForm } from "@/types/crossfit";
 
 interface SectionWire {
   id: string;
   kind: WorkoutSectionKind;
   position: number;
   title: string | null;
+  body?: string | null;
   isScored: boolean;
   scoreType: string | null;
   reviewedAt: string | null;
@@ -69,12 +87,6 @@ export function ProgrammingDayCard({
   const [newKind, setNewKind] = useState<WorkoutSectionKind>("wod");
 
   async function addSection() {
-    if (!workout) {
-      toast.error(
-        "No workout exists for this day yet. Paste a CAP week to seed days."
-      );
-      return;
-    }
     setAdding(true);
     try {
       const res = await fetch(
@@ -82,7 +94,11 @@ export function ProgrammingDayCard({
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ workoutId: workout.id, kind: newKind }),
+          body: JSON.stringify(
+            workout
+              ? { workoutId: workout.id, kind: newKind }
+              : { workoutDate: date, kind: newKind }
+          ),
         }
       );
       if (!res.ok) {
@@ -183,11 +199,53 @@ function SectionRow({ communityId, section, onMutated }: SectionRowProps) {
   const [editing, setEditing] = useState(false);
   const [kind, setKind] = useState<WorkoutSectionKind>(section.kind);
   const [title, setTitle] = useState(section.title ?? "");
+  const [bodyText, setBodyText] = useState(section.body ?? "");
   const [isScored, setIsScored] = useState(section.isScored);
   const [scoreType, setScoreType] = useState<string>(
     section.scoreType ?? "no_score"
   );
   const [saving, setSaving] = useState(false);
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [builderSaving, setBuilderSaving] = useState(false);
+  const [builderError, setBuilderError] = useState<string | null>(null);
+
+  const handleBuilderSave = useCallback(
+    async (form: WorkoutBuilderForm) => {
+      setBuilderError(null);
+      const parts = form.parts
+        .map(builderPartToPayload)
+        .filter((p): p is NonNullable<ReturnType<typeof builderPartToPayload>> => p !== null);
+      if (parts.length === 0) {
+        setBuilderError("Add at least one part with movements.");
+        return;
+      }
+      setBuilderSaving(true);
+      try {
+        const res = await fetch(
+          `/api/gym/${communityId}/programming/sections/${section.id}/content`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ parts }),
+          }
+        );
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          throw new Error(data?.error ?? "Failed to save");
+        }
+        toast.success("Content saved");
+        setBuilderOpen(false);
+        onMutated();
+      } catch (err) {
+        setBuilderError(
+          err instanceof Error ? err.message : "Failed to save content"
+        );
+      } finally {
+        setBuilderSaving(false);
+      }
+    },
+    [communityId, section.id, onMutated]
+  );
 
   async function save() {
     setSaving(true);
@@ -201,6 +259,7 @@ function SectionRow({ communityId, section, onMutated }: SectionRowProps) {
             id: section.id,
             kind,
             title: title || null,
+            body: bodyText || null,
             isScored,
             scoreType: isScored ? scoreType : null,
           }),
@@ -239,42 +298,93 @@ function SectionRow({ communityId, section, onMutated }: SectionRowProps) {
   }
 
   if (!editing) {
+    const hasContent =
+      section.parts.length > 0 || !!section.body?.trim();
     return (
-      <div className="flex items-start justify-between gap-2 rounded-md border border-border/60 bg-muted/10 px-2.5 py-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 text-xs">
-            <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-primary">
-              {WORKOUT_SECTION_KIND_LABELS[section.kind]}
-            </span>
-            {section.isScored ? (
-              <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-400">
-                {section.scoreType?.toUpperCase() ?? "SCORED"}
+      <>
+        <div className="flex items-start justify-between gap-2 rounded-md border border-border/60 bg-muted/10 px-2.5 py-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-primary">
+                {WORKOUT_SECTION_KIND_LABELS[section.kind]}
               </span>
-            ) : (
-              <span className="rounded bg-muted/30 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground">
-                NO SCORE
-              </span>
-            )}
-            {section.title ? (
-              <span className="ml-1 truncate text-xs text-muted-foreground">
-                {section.title}
-              </span>
+              {section.isScored ? (
+                <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-400">
+                  {section.scoreType?.toUpperCase() ?? "SCORED"}
+                </span>
+              ) : (
+                <span className="rounded bg-muted/30 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground">
+                  NO SCORE
+                </span>
+              )}
+              {section.title ? (
+                <span className="ml-1 truncate text-xs text-muted-foreground">
+                  {section.title}
+                </span>
+              ) : null}
+            </div>
+            {section.body?.trim() ? (
+              <p className="mt-1.5 whitespace-pre-wrap text-[11px] text-muted-foreground line-clamp-3">
+                {section.body}
+              </p>
             ) : null}
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              {section.parts.length === 0 && !section.body?.trim()
+                ? "Empty — add content"
+                : `${section.parts.length} ${
+                    section.parts.length === 1 ? "part" : "parts"
+                  }${section.reviewedAt ? " · reviewed" : ""}`}
+            </div>
           </div>
-          <div className="mt-1 text-[11px] text-muted-foreground">
-            {section.parts.length} {section.parts.length === 1 ? "part" : "parts"}
-            {section.reviewedAt ? " · reviewed" : ""}
+          <div className="flex flex-col gap-1">
+            <Button
+              size="sm"
+              variant={hasContent ? "ghost" : "default"}
+              onClick={() => {
+                setBuilderError(null);
+                setBuilderOpen(true);
+              }}
+              className="gap-1.5"
+              title="Compose movements with the Smart Builder"
+            >
+              <Wrench className="h-3.5 w-3.5" />
+              Build
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
+              Edit
+            </Button>
+            <Button size="sm" variant="ghost" onClick={remove}>
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
           </div>
         </div>
-        <div className="flex flex-col gap-1">
-          <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
-            Edit
-          </Button>
-          <Button size="sm" variant="ghost" onClick={remove}>
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      </div>
+
+        <Dialog open={builderOpen} onOpenChange={setBuilderOpen}>
+          <DialogContent className="max-h-[90vh] w-[min(96vw,42rem)] max-w-none overflow-x-hidden overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>
+                Build {WORKOUT_SECTION_KIND_LABELS[section.kind]} content
+              </DialogTitle>
+            </DialogHeader>
+            {builderError ? (
+              <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                {builderError}
+              </p>
+            ) : null}
+            {builderSaving ? (
+              <div className="flex items-center justify-center py-4 text-xs text-muted-foreground">
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                Saving…
+              </div>
+            ) : null}
+            <SmartBuilder
+              onSave={handleBuilderSave}
+              onCancel={() => setBuilderOpen(false)}
+              saveLabel="Save content"
+            />
+          </DialogContent>
+        </Dialog>
+      </>
     );
   }
 
@@ -308,6 +418,23 @@ function SectionRow({ communityId, section, onMutated }: SectionRowProps) {
             placeholder="Snatch Skill"
           />
         </div>
+      </div>
+      <div className="space-y-1">
+        <Label className="text-[10px] text-muted-foreground">
+          Prescription (freeform — for warm-ups, stretching, etc.)
+        </Label>
+        <Textarea
+          rows={3}
+          value={bodyText}
+          onChange={(e) => setBodyText(e.target.value)}
+          placeholder="3 rounds: 10 air squats, 10 push-ups, 200m row"
+          className="text-xs"
+        />
+        <p className="text-[10px] text-muted-foreground">
+          Use this for sections that don&apos;t need movement-level scoring.
+          For scored WODs and skill work, click <strong>Build</strong> to
+          open the Smart Builder.
+        </p>
       </div>
       <div className="flex items-center justify-between gap-2 rounded-md bg-background/40 px-2 py-1.5">
         <div>

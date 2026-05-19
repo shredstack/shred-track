@@ -434,46 +434,27 @@ export async function fetchQuickStats(
   const weekStartUtc = new Date(todayStartUtc.getTime() - dow * 86_400_000);
 
   if (communityId) {
-    const counts = await db
-      .select({
-        n: sql<number>`count(*)::int`,
-      })
-      .from(classRegistrations)
-      .innerJoin(
-        classInstances,
-        eq(classInstances.id, classRegistrations.classInstanceId)
-      )
-      .where(
-        and(
-          eq(classRegistrations.userId, userId),
-          eq(classRegistrations.status, "attended"),
-          eq(classInstances.communityId, communityId),
-          gte(classInstances.startAt, yearStartUtc)
-        )
-      );
-    if (counts[0]?.n === 0) {
-      return { week: 0, month: 0, year: 0 };
-    }
-    // Run three queries (cheap on indexed timestamp range).
-    const [w, m, y] = await Promise.all([
+    const [allTime, w, m, y] = await Promise.all([
+      countAttended(userId, communityId, null),
       countAttended(userId, communityId, weekStartUtc),
       countAttended(userId, communityId, monthStart),
       countAttended(userId, communityId, yearStartUtc),
     ]);
-    return { week: w, month: m, year: y };
+    return { week: w, month: m, year: y, allTime };
   }
-  const [w, m, y] = await Promise.all([
+  const [allTime, w, m, y] = await Promise.all([
+    countScores(userId, null),
     countScores(userId, weekStartUtc),
     countScores(userId, monthStart),
     countScores(userId, yearStartUtc),
   ]);
-  return { week: w, month: m, year: y };
+  return { week: w, month: m, year: y, allTime };
 }
 
 async function countAttended(
   userId: string,
   communityId: string,
-  startUtc: Date
+  startUtc: Date | null
 ): Promise<number> {
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
@@ -487,16 +468,21 @@ async function countAttended(
         eq(classRegistrations.userId, userId),
         eq(classRegistrations.status, "attended"),
         eq(classInstances.communityId, communityId),
-        gte(classInstances.startAt, startUtc)
+        ...(startUtc ? [gte(classInstances.startAt, startUtc)] : [])
       )
     );
   return row?.n ?? 0;
 }
 
-async function countScores(userId: string, startUtc: Date): Promise<number> {
+async function countScores(userId: string, startUtc: Date | null): Promise<number> {
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(scores)
-    .where(and(eq(scores.userId, userId), gte(scores.createdAt, startUtc)));
+    .where(
+      and(
+        eq(scores.userId, userId),
+        ...(startUtc ? [gte(scores.createdAt, startUtc)] : [])
+      )
+    );
   return row?.n ?? 0;
 }

@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { GymToolHeader } from "@/components/gym/gym-tool-header";
+import { Sparkles } from "lucide-react";
 
 interface TrackRow {
   id: string;
@@ -60,8 +62,12 @@ export default function TracksAdminPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Programming tracks</h1>
+      <GymToolHeader
+        icon={Sparkles}
+        label="Programming tracks"
+        description="Monthly challenges and event-prep arcs. Inline tracks attach to every published day; standalone tracks appear on the Home card."
+      />
+      <div className="flex items-center justify-end">
         <Button size="sm" onClick={() => setShowForm((s) => !s)}>
           {showForm ? "Cancel" : "New track"}
         </Button>

@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
   ClipboardPaste,
   FileText,
   Loader2,
@@ -19,6 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { WORKOUT_SECTION_KIND_LABELS, type WorkoutSectionKind } from "@/db/schema";
 import { ProgrammingDayCard } from "./programming-day-card";
 import { CapPasteDialog } from "./cap-paste-dialog";
+import { GymToolHeader } from "@/components/gym/gym-tool-header";
 
 interface SectionWire {
   id: string;
@@ -26,6 +28,7 @@ interface SectionWire {
   subKind: string | null;
   position: number;
   title: string | null;
+  body: string | null;
   isScored: boolean;
   scoreType: string | null;
   reviewedAt: string | null;
@@ -145,29 +148,26 @@ export function ProgrammingWeekView({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Programming</h1>
-          <p className="text-xs text-muted-foreground">
-            {gymName} — week of {formatDayLabel(weekStart)}
-          </p>
-        </div>
-        <div className="flex items-center gap-1">
-          <Link
-            href={`/gym/programming/${prevWeek}`}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border hover:bg-muted/30"
-            aria-label="Previous week"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Link>
-          <Link
-            href={`/gym/programming/${nextWeek}`}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border hover:bg-muted/30"
-            aria-label="Next week"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Link>
-        </div>
+      <GymToolHeader
+        icon={ClipboardList}
+        label="Programming"
+        description={`${gymName} — week of ${formatDayLabel(weekStart)}`}
+      />
+      <div className="flex items-center justify-end gap-1">
+        <Link
+          href={`/gym/programming/${prevWeek}`}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border hover:bg-muted/30"
+          aria-label="Previous week"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </Link>
+        <Link
+          href={`/gym/programming/${nextWeek}`}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border hover:bg-muted/30"
+          aria-label="Next week"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Link>
       </div>
 
       <Card>

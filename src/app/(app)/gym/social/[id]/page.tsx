@@ -10,6 +10,8 @@ import { useCreatePostComment, usePostComments } from "@/hooks/useGymPosts";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { GymToolHeader } from "@/components/gym/gym-tool-header";
+import { MessageSquare } from "lucide-react";
 
 interface Comment {
   id: string;
@@ -29,7 +31,12 @@ export default function GymPostPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold">Comments</h1>
+      <GymToolHeader
+        icon={MessageSquare}
+        label="Comments"
+        backHref="/gym/social"
+        backLabel="Feed"
+      />
       <Card>
         <CardContent className="space-y-2 py-3">
           <Textarea

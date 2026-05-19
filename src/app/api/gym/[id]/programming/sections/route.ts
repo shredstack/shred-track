@@ -11,6 +11,7 @@ import { db } from "@/db";
 import {
   WORKOUT_SECTION_KINDS,
   WORKOUT_SECTION_SCORE_TYPES,
+  programmingReleases,
   workoutParts,
   workoutSections,
   workouts,
@@ -53,6 +54,10 @@ export async function POST(
 
   const body = (await req.json().catch(() => null)) as {
     workoutId?: string;
+    // When workoutId is omitted, callers can pass workoutDate to have the
+    // route create the day's workout on demand. Lets coaches add sections
+    // to an otherwise-empty day without first running a CAP paste.
+    workoutDate?: string;
     kind?: string;
     title?: string | null;
     position?: number;
@@ -60,44 +65,121 @@ export async function POST(
     scoreType?: string | null;
     subKind?: string | null;
   } | null;
-  if (!body?.workoutId || !isValidKind(body.kind)) {
+  if (!isValidKind(body?.kind)) {
     return NextResponse.json(
-      { error: "workoutId and a valid kind are required" },
+      { error: "A valid kind is required" },
       { status: 400 }
     );
   }
-  if (!(await workoutBelongsToGym(body.workoutId, communityId))) {
-    return NextResponse.json({ error: "Workout not in this gym" }, { status: 404 });
-  }
-  if (!isValidScoreType(body.scoreType ?? null)) {
+  if (!isValidScoreType(body?.scoreType ?? null)) {
     return NextResponse.json({ error: "Invalid scoreType" }, { status: 400 });
   }
 
+  // Resolve or create the parent workout for this section.
+  let workoutId = body?.workoutId ?? null;
+  if (workoutId) {
+    if (!(await workoutBelongsToGym(workoutId, communityId))) {
+      return NextResponse.json(
+        { error: "Workout not in this gym" },
+        { status: 404 }
+      );
+    }
+  } else {
+    const workoutDate = body?.workoutDate;
+    if (!workoutDate || !/^\d{4}-\d{2}-\d{2}$/.test(workoutDate)) {
+      return NextResponse.json(
+        { error: "workoutId or a valid workoutDate (YYYY-MM-DD) is required" },
+        { status: 400 }
+      );
+    }
+    workoutId = await db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select({ id: workouts.id })
+        .from(workouts)
+        .where(
+          and(
+            eq(workouts.communityId, communityId),
+            eq(workouts.workoutDate, workoutDate)
+          )
+        )
+        .limit(1);
+      if (existing) return existing.id;
+      // Find or create the draft release covering this date (week-start =
+      // Monday of the date's week). Sections always live inside a release.
+      const monday = mondayOf(workoutDate);
+      let releaseId: string;
+      const [release] = await tx
+        .select({ id: programmingReleases.id })
+        .from(programmingReleases)
+        .where(
+          and(
+            eq(programmingReleases.communityId, communityId),
+            eq(programmingReleases.weekStart, monday)
+          )
+        )
+        .limit(1);
+      if (release) {
+        releaseId = release.id;
+      } else {
+        const [r] = await tx
+          .insert(programmingReleases)
+          .values({
+            communityId,
+            weekStart: monday,
+            status: "draft",
+            source: "manual",
+          })
+          .returning({ id: programmingReleases.id });
+        releaseId = r.id;
+      }
+      const [w] = await tx
+        .insert(workouts)
+        .values({
+          createdBy: user.id,
+          communityId,
+          workoutDate,
+          workoutType: "other",
+          programmingReleaseId: releaseId,
+          published: false,
+          source: "manual",
+        })
+        .returning({ id: workouts.id });
+      return w.id;
+    });
+  }
+
   // Compute the next position if none provided.
-  let position = body.position;
+  let position = body!.position;
   if (position === undefined) {
     const existing = await db
       .select({ position: workoutSections.position })
       .from(workoutSections)
-      .where(eq(workoutSections.workoutId, body.workoutId));
+      .where(eq(workoutSections.workoutId, workoutId!));
     position = existing.reduce((max, s) => Math.max(max, s.position + 1), 0);
   }
 
   const [created] = await db
     .insert(workoutSections)
     .values({
-      workoutId: body.workoutId,
-      kind: body.kind,
-      subKind: body.subKind ?? null,
+      workoutId: workoutId!,
+      kind: body!.kind!,
+      subKind: body!.subKind ?? null,
       position,
-      title: body.title ?? null,
-      isScored: !!body.isScored,
-      scoreType: (body.scoreType as WorkoutSectionScoreType | null) ?? null,
+      title: body!.title ?? null,
+      isScored: !!body!.isScored,
+      scoreType: (body!.scoreType as WorkoutSectionScoreType | null) ?? null,
       reviewedAt: new Date(),
     })
     .returning();
 
   return NextResponse.json(created);
+}
+
+function mondayOf(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  const dow = (d.getUTCDay() + 6) % 7; // Mon=0
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d.toISOString().slice(0, 10);
 }
 
 export async function PATCH(
@@ -115,6 +197,7 @@ export async function PATCH(
     id?: string;
     kind?: string;
     title?: string | null;
+    body?: string | null;
     position?: number;
     isScored?: boolean;
     scoreType?: string | null;
@@ -151,6 +234,7 @@ export async function PATCH(
     updates.kind = body.kind;
   }
   if (body.title !== undefined) updates.title = body.title;
+  if (body.body !== undefined) updates.body = body.body;
   if (body.position !== undefined) updates.position = body.position;
   if (body.isScored !== undefined) updates.isScored = body.isScored;
   if (body.subKind !== undefined) updates.subKind = body.subKind;

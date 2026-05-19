@@ -1,6 +1,14 @@
 // Class schedule helpers (spec §2.2).
 
 import { RRule } from "rrule";
+import { and, eq, inArray } from "drizzle-orm";
+import { db } from "@/db";
+import {
+  classInstances,
+  classScheduleSlots,
+  classSchedules,
+  communities,
+} from "@/db/schema";
 
 function addMinutes(d: Date, n: number): Date {
   return new Date(d.getTime() + n * 60_000);
@@ -102,6 +110,85 @@ export function gymLocalToUtc(localIso: string, tz: string): Date {
   // Compute what that wall clock would render as if interpreted in tz.
   const offset = tzOffsetAt(tz, fake);
   return new Date(fake.getTime() - offset);
+}
+
+/**
+ * Materialize `class_instances` rows for one community's active schedule
+ * slots over the next `windowDays` days. Shared by the daily Inngest cron
+ * and the schedule-creation API so coaches see classes immediately after
+ * saving a schedule. Idempotent via the `(slot_id, start_at)` unique index.
+ */
+export async function materializeScheduleSlotsForCommunity(opts: {
+  communityId: string;
+  windowDays?: number;
+  scheduleIds?: string[];
+}): Promise<{ slots: number; inserted: number }> {
+  const windowDays = opts.windowDays ?? 28;
+  const today = new Date();
+  const windowEnd = new Date(today.getTime() + windowDays * 86_400_000);
+
+  const whereClauses = [
+    eq(classSchedules.isActive, true),
+    eq(classSchedules.communityId, opts.communityId),
+  ];
+  if (opts.scheduleIds && opts.scheduleIds.length) {
+    whereClauses.push(inArray(classScheduleSlots.scheduleId, opts.scheduleIds));
+  }
+  const slots = await db
+    .select({
+      slotId: classScheduleSlots.id,
+      scheduleId: classScheduleSlots.scheduleId,
+      rrule: classScheduleSlots.rrule,
+      startTime: classScheduleSlots.startTime,
+      durationMin: classScheduleSlots.durationMin,
+      capacity: classScheduleSlots.capacity,
+      coachId: classScheduleSlots.coachId,
+      activeFrom: classScheduleSlots.activeFrom,
+      activeTo: classScheduleSlots.activeTo,
+      defaultCapacity: classSchedules.defaultCapacity,
+      defaultCoachId: classSchedules.defaultCoachId,
+      communityId: classSchedules.communityId,
+      gymTimezone: communities.gymTimezone,
+    })
+    .from(classScheduleSlots)
+    .innerJoin(
+      classSchedules,
+      eq(classSchedules.id, classScheduleSlots.scheduleId)
+    )
+    .innerJoin(communities, eq(communities.id, classSchedules.communityId))
+    .where(and(...whereClauses));
+
+  let inserted = 0;
+  for (const s of slots) {
+    const expansions = expandSlotOccurrences({
+      rrule: s.rrule,
+      startTime: s.startTime,
+      durationMin: s.durationMin,
+      activeFrom: new Date(`${s.activeFrom}T00:00:00Z`),
+      activeTo: s.activeTo ? new Date(`${s.activeTo}T00:00:00Z`) : null,
+      gymTimezone: s.gymTimezone,
+      windowStart: today,
+      windowEnd,
+    });
+    if (!expansions.length) continue;
+    const rows = await db
+      .insert(classInstances)
+      .values(
+        expansions.map((e) => ({
+          slotId: s.slotId,
+          scheduleId: s.scheduleId,
+          communityId: s.communityId,
+          startAt: e.startAt,
+          endAt: e.endAt,
+          coachId: s.coachId ?? s.defaultCoachId ?? null,
+          capacity: s.capacity ?? s.defaultCapacity,
+        }))
+      )
+      .onConflictDoNothing()
+      .returning({ id: classInstances.id });
+    inserted += rows.length;
+  }
+  return { slots: slots.length, inserted };
 }
 
 function tzOffsetAt(tz: string, at: Date): number {

@@ -24,6 +24,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { FileText, Plus, ChevronRight, Loader2 } from "lucide-react";
 import { DOCUMENT_KINDS, DOCUMENT_KIND_LABELS } from "@/db/schema";
+import { GymToolHeader } from "@/components/gym/gym-tool-header";
 
 interface DocRow {
   id: string;
@@ -93,19 +94,17 @@ export default function GymDocumentsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-bold">Documents</h1>
+      <GymToolHeader
+        icon={FileText}
+        label="Documents"
+        description="Waivers and policies. New members sign on join; publishing a new version prompts existing members to re-sign."
+      />
+      <div className="flex items-center justify-end">
         <Button size="sm" onClick={() => setOpen(true)}>
           <Plus className="mr-1 h-3.5 w-3.5" />
           New document
         </Button>
       </div>
-
-      <p className="text-xs text-muted-foreground">
-        Waivers and policies new members must sign before they can fully
-        participate. Publishing a new version asks every existing member to
-        review and re-sign.
-      </p>
 
       {isLoading ? (
         <div className="flex justify-center py-12">

@@ -1579,6 +1579,10 @@ export const workoutSections = pgTable(
     subKind: text("sub_kind"), // 'skill' | 'strength' | 'accessory'
     position: integer("position").notNull(),
     title: text("title"),
+    // Freeform prescription text — used for warm-ups, stretching, or any
+    // section the coach wants to write longhand instead of composing via
+    // Smart Builder. Smart Builder output still lands in workoutParts.
+    body: text("body"),
     isScored: boolean("is_scored").default(false).notNull(),
     scoreType: text("score_type"), // 'time' | 'rounds' | 'reps' | 'weight' | 'no_score'
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),

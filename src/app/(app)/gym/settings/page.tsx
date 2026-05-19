@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useGymContext } from "@/hooks/useGymContext";
 import { GymBrandingForm } from "@/components/gym/gym-branding-form";
+import { GymToolHeader } from "@/components/gym/gym-tool-header";
+import { Settings } from "lucide-react";
 
 interface GymDetail {
   id: string;
@@ -78,6 +80,11 @@ export default function GymSettingsPage() {
 
   return (
     <div className="space-y-4">
+      <GymToolHeader
+        icon={Settings}
+        label="Gym settings"
+        description="Name, website, admin email, and branding"
+      />
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">

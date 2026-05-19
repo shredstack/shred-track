@@ -12,7 +12,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Settings } from "lucide-react";
+import { CalendarDays, Settings } from "lucide-react";
+import { GymToolHeader } from "@/components/gym/gym-tool-header";
 
 function weekBounds(offsetWeeks: number): { fromIso: string; toIso: string } {
   const now = new Date();
@@ -39,8 +40,12 @@ export default function GymClassesAdminPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Classes</h1>
+      <GymToolHeader
+        icon={CalendarDays}
+        label="Classes"
+        description="Today's roster, attendance, and per-class actions"
+      />
+      <div className="flex items-center justify-end">
         <Link href="/gym/classes/schedules">
           <Button size="sm" variant="outline">
             <Settings className="mr-1 size-4" />

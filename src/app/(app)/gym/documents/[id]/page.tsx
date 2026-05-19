@@ -10,7 +10,6 @@
 // agreement, not formatting fidelity).
 
 import { use, useState } from "react";
-import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useGymContext } from "@/hooks/useGymContext";
@@ -20,8 +19,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { ChevronLeft, Loader2, Save, UploadCloud } from "lucide-react";
+import { FileText, Loader2, Save, UploadCloud } from "lucide-react";
 import { DOCUMENT_KIND_LABELS } from "@/db/schema";
+import { GymToolHeader } from "@/components/gym/gym-tool-header";
 
 interface DocumentRow {
   id: string;
@@ -159,13 +159,15 @@ function DocumentEditor({
 
   return (
     <div className="space-y-4">
-      <Link
-        href="/gym/documents"
-        className="inline-flex items-center text-xs text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeft className="mr-1 h-3.5 w-3.5" />
-        Back to documents
-      </Link>
+      <GymToolHeader
+        icon={FileText}
+        label={document.title}
+        description={
+          latest ? `Version ${latest.version} published` : "Draft (no published version yet)"
+        }
+        backHref="/gym/documents"
+        backLabel="Documents"
+      />
 
       <Card>
         <CardContent className="space-y-3 py-4">

@@ -42,6 +42,7 @@ export function WorkoutSectionBlock({
   children: ReactNode;
 }) {
   const label = section.title?.trim() || LABELS[section.kind];
+  const body = section.body?.trim();
   return (
     <section className="space-y-3 rounded-lg border border-white/[0.05] bg-white/[0.02] p-3">
       <header className="flex items-center justify-between gap-2">
@@ -57,6 +58,11 @@ export function WorkoutSectionBlock({
           {scoreBadgeText(section)}
         </span>
       </header>
+      {body ? (
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
+          {body}
+        </p>
+      ) : null}
       <div className="space-y-3">{children}</div>
     </section>
   );

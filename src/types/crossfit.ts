@@ -488,6 +488,9 @@ export interface WorkoutSectionDisplay {
   kind: WorkoutSectionKindDisplay;
   position: number;
   title: string | null;
+  /** Freeform prescription text — used for sections without Smart Builder
+   *  parts (warm-ups, stretching, etc.). Rendered above the parts list. */
+  body?: string | null;
   isScored: boolean;
   scoreType: WorkoutSectionScoreTypeDisplay | null;
   /** Ordered list of workout_part IDs that belong to this section.

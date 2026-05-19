@@ -16,6 +16,8 @@ import {
 import { cn } from "@/lib/utils";
 import { useIsRacing } from "@/hooks/useRaceMode";
 import { useIsCoachMode } from "@/hooks/useCoachMode";
+import { useIsFeatureOn } from "@/hooks/useFeatureFlag";
+import { useActiveMembership } from "@/hooks/useGymContext";
 
 interface NavTab {
   href: string;
@@ -23,7 +25,7 @@ interface NavTab {
   icon: LucideIcon;
 }
 
-const memberTabs: NavTab[] = [
+const baseMemberTabs: NavTab[] = [
   { href: "/home", label: "Home", icon: Home },
   { href: "/crossfit", label: "CrossFit", icon: Dumbbell },
   { href: "/hyrox", label: "HYROX", icon: Trophy },
@@ -42,6 +44,16 @@ export function BottomNav() {
   const pathname = usePathname();
   const isRacing = useIsRacing();
   const isCoachMode = useIsCoachMode();
+  const classesOn = useIsFeatureOn("classes");
+  const activeMembership = useActiveMembership();
+  const memberTabs: NavTab[] =
+    classesOn && activeMembership
+      ? [
+          baseMemberTabs[0],
+          { href: "/classes", label: "Classes", icon: CalendarDays },
+          ...baseMemberTabs.slice(1),
+        ]
+      : baseMemberTabs;
   const tabs = isCoachMode ? coachTabs : memberTabs;
 
   if (isRacing) return null;

@@ -11,6 +11,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { GymToolHeader } from "@/components/gym/gym-tool-header";
+import { CalendarRange } from "lucide-react";
 
 const RRULE_DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
 const DAY_LABELS: Record<(typeof RRULE_DAYS)[number], string> = {
@@ -73,8 +75,14 @@ export default function SchedulesPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Class schedules</h1>
+      <GymToolHeader
+        icon={CalendarRange}
+        label="Class schedules"
+        description="Weekly recurring slots. Classes appear on the schedule immediately after saving."
+        backHref="/gym/classes"
+        backLabel="Classes"
+      />
+      <div className="flex items-center justify-end">
         <Button size="sm" onClick={() => setShowForm((s) => !s)}>
           {showForm ? "Cancel" : "New schedule"}
         </Button>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -38,6 +38,24 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  US_STATES,
+  COUNTRY_OPTIONS,
+  formatPhoneInput,
+  normalizePhone,
+  personalInfoSchema,
+  emergencyContactSchema,
+  fieldErrors,
+  type PersonalInfoFields,
+  type EmergencyContactFields,
+} from "@/lib/profile-validation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -296,56 +314,84 @@ function PersonalInfoSection() {
   const { data: user, isLoading } = useUserProfile();
   const updateUser = useUpdateUserProfile();
   const [editing, setEditing] = useState(false);
-  const [dateOfBirth, setDateOfBirth] = useState("");
-  const [phone, setPhone] = useState("");
-  const [addressLine1, setAddressLine1] = useState("");
-  const [addressLine2, setAddressLine2] = useState("");
-  const [city, setCity] = useState("");
-  const [stateField, setStateField] = useState("");
-  const [postalCode, setPostalCode] = useState("");
-  const [country, setCountry] = useState("");
+  const [fields, setFields] = useState<PersonalInfoFields>({
+    dateOfBirth: "",
+    phone: "",
+    addressLine1: "",
+    addressLine2: "",
+    city: "",
+    state: "",
+    postalCode: "",
+    country: "",
+  });
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  const setField = useCallback(
+    <K extends keyof PersonalInfoFields>(key: K, value: PersonalInfoFields[K]) => {
+      setFields((prev) => ({ ...prev, [key]: value }));
+    },
+    []
+  );
+
+  const markTouched = useCallback((key: keyof PersonalInfoFields) => {
+    setTouched((prev) => ({ ...prev, [key]: true }));
+  }, []);
+
+  // Derived per-field errors. Recomputed each render so the UI stays in
+  // sync with `fields` without an extra effect+setState hop.
+  const errors = useMemo(
+    () => (editing ? fieldErrors(personalInfoSchema.safeParse(fields)) : {}),
+    [fields, editing]
+  );
 
   const startEditing = useCallback(() => {
     if (!user) return;
-    setDateOfBirth(user.dateOfBirth ?? "");
-    setPhone(user.phone ?? "");
-    setAddressLine1(user.addressLine1 ?? "");
-    setAddressLine2(user.addressLine2 ?? "");
-    setCity(user.city ?? "");
-    setStateField(user.state ?? "");
-    setPostalCode(user.postalCode ?? "");
-    setCountry(user.country ?? "");
+    setFields({
+      dateOfBirth: user.dateOfBirth ?? "",
+      phone: user.phone ? formatPhoneInput(user.phone) : "",
+      addressLine1: user.addressLine1 ?? "",
+      addressLine2: user.addressLine2 ?? "",
+      city: user.city ?? "",
+      state: user.state ?? "",
+      postalCode: user.postalCode ?? "",
+      country: user.country ?? "",
+    });
+    setTouched({});
     setEditing(true);
   }, [user]);
 
   const save = useCallback(() => {
+    const result = personalInfoSchema.safeParse(fields);
+    if (!result.success) {
+      const errs = fieldErrors(result);
+      // Touch every field so all errors become visible.
+      setTouched(
+        Object.fromEntries(Object.keys(errs).map((k) => [k, true]))
+      );
+      toast.error("Fix the highlighted fields first.");
+      return;
+    }
+    const v = result.data;
     updateUser.mutate(
       {
-        dateOfBirth: dateOfBirth || null,
-        phone: phone || null,
-        addressLine1: addressLine1 || null,
-        addressLine2: addressLine2 || null,
-        city: city || null,
-        state: stateField || null,
-        postalCode: postalCode || null,
-        country: country || null,
+        dateOfBirth: v.dateOfBirth || null,
+        phone: v.phone ? normalizePhone(v.phone) : null,
+        addressLine1: v.addressLine1 || null,
+        addressLine2: v.addressLine2 || null,
+        city: v.city || null,
+        state: v.state || null,
+        postalCode: v.postalCode || null,
+        country: v.country || null,
       },
       {
         onSuccess: () => setEditing(false),
         onError: (e: Error) => toast.error(e.message),
       }
     );
-  }, [
-    dateOfBirth,
-    phone,
-    addressLine1,
-    addressLine2,
-    city,
-    stateField,
-    postalCode,
-    country,
-    updateUser,
-  ]);
+  }, [fields, updateUser]);
+
+  const showErr = (key: keyof PersonalInfoFields) =>
+    touched[key] ? errors[key] : undefined;
 
   if (isLoading || !user) return null;
 
@@ -368,66 +414,175 @@ function PersonalInfoSection() {
       <CardContent className="space-y-4">
         {editing ? (
           <>
-            <div className="space-y-2">
-              <Label>Date of birth</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="profile-dob">Date of birth</Label>
               <Input
+                id="profile-dob"
                 type="date"
-                value={dateOfBirth}
-                onChange={(e) => setDateOfBirth(e.target.value)}
+                value={fields.dateOfBirth}
+                max={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => setField("dateOfBirth", e.target.value)}
+                onBlur={() => markTouched("dateOfBirth")}
+                aria-invalid={!!showErr("dateOfBirth") || undefined}
               />
-              <p className="text-[11px] text-muted-foreground">
-                Used for age-graded leaderboards and birthday shoutouts in
-                your gym&apos;s feed.
-              </p>
+              {showErr("dateOfBirth") ? (
+                <p className="text-[11px] text-destructive">
+                  {showErr("dateOfBirth")}
+                </p>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  Used for age-graded leaderboards and birthday shoutouts in
+                  your gym&apos;s feed.
+                </p>
+              )}
             </div>
-            <div className="space-y-2">
-              <Label>Phone</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="profile-phone">Phone</Label>
               <Input
+                id="profile-phone"
                 type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="e.g. +1 555 123 4567"
+                inputMode="tel"
+                autoComplete="tel"
+                value={fields.phone}
+                onChange={(e) =>
+                  setField("phone", formatPhoneInput(e.target.value))
+                }
+                onBlur={() => markTouched("phone")}
+                placeholder="(555) 123-4567"
+                aria-invalid={!!showErr("phone") || undefined}
+              />
+              {showErr("phone") && (
+                <p className="text-[11px] text-destructive">
+                  {showErr("phone")}
+                </p>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="profile-country">Country</Label>
+              <Select
+                value={fields.country || undefined}
+                onValueChange={(value) => {
+                  const v = value ?? "";
+                  setField("country", v);
+                  if (v !== "US") setField("state", fields.state);
+                  markTouched("country");
+                }}
+              >
+                <SelectTrigger id="profile-country">
+                  <SelectValue placeholder="Select a country" />
+                </SelectTrigger>
+                <SelectContent>
+                  {COUNTRY_OPTIONS.map((c) => (
+                    <SelectItem key={c.code} value={c.code}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="profile-address1">Address line 1</Label>
+              <Input
+                id="profile-address1"
+                autoComplete="address-line1"
+                value={fields.addressLine1}
+                onChange={(e) => setField("addressLine1", e.target.value)}
+                onBlur={() => markTouched("addressLine1")}
+                placeholder="Street address"
               />
             </div>
-            <div className="space-y-2">
-              <Label>Address line 1</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="profile-address2">Address line 2</Label>
               <Input
-                value={addressLine1}
-                onChange={(e) => setAddressLine1(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Address line 2</Label>
-              <Input
-                value={addressLine2}
-                onChange={(e) => setAddressLine2(e.target.value)}
+                id="profile-address2"
+                autoComplete="address-line2"
+                value={fields.addressLine2}
+                onChange={(e) => setField("addressLine2", e.target.value)}
+                placeholder="Apt, suite, etc. (optional)"
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>City</Label>
-                <Input value={city} onChange={(e) => setCity(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label>State / region</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="profile-city">City</Label>
                 <Input
-                  value={stateField}
-                  onChange={(e) => setStateField(e.target.value)}
+                  id="profile-city"
+                  autoComplete="address-level2"
+                  value={fields.city}
+                  onChange={(e) => setField("city", e.target.value)}
+                  onBlur={() => markTouched("city")}
                 />
               </div>
-              <div className="space-y-2">
-                <Label>Postal code</Label>
-                <Input
-                  value={postalCode}
-                  onChange={(e) => setPostalCode(e.target.value)}
-                />
+              <div className="space-y-1.5">
+                <Label htmlFor="profile-state">
+                  {fields.country === "US" ? "State" : "State / region"}
+                </Label>
+                {fields.country === "US" ? (
+                  <Select
+                    value={fields.state || undefined}
+                    onValueChange={(value) => {
+                      setField("state", value ?? "");
+                      markTouched("state");
+                    }}
+                  >
+                    <SelectTrigger
+                      id="profile-state"
+                      aria-invalid={!!showErr("state") || undefined}
+                    >
+                      <SelectValue placeholder="Select" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {US_STATES.map((s) => (
+                        <SelectItem key={s.code} value={s.code}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    id="profile-state"
+                    autoComplete="address-level1"
+                    value={fields.state}
+                    onChange={(e) => setField("state", e.target.value)}
+                    onBlur={() => markTouched("state")}
+                  />
+                )}
+                {showErr("state") && (
+                  <p className="text-[11px] text-destructive">
+                    {showErr("state")}
+                  </p>
+                )}
               </div>
-              <div className="space-y-2">
-                <Label>Country</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="profile-postal">Postal code</Label>
                 <Input
-                  value={country}
-                  onChange={(e) => setCountry(e.target.value)}
+                  id="profile-postal"
+                  inputMode={fields.country === "US" ? "numeric" : "text"}
+                  autoComplete="postal-code"
+                  value={fields.postalCode}
+                  onChange={(e) =>
+                    setField(
+                      "postalCode",
+                      fields.country === "US"
+                        ? e.target.value.replace(/[^\d-]/g, "")
+                        : e.target.value
+                    )
+                  }
+                  onBlur={() => markTouched("postalCode")}
+                  placeholder={
+                    fields.country === "US"
+                      ? "12345"
+                      : fields.country === "CA"
+                        ? "K1A 0B1"
+                        : ""
+                  }
+                  aria-invalid={!!showErr("postalCode") || undefined}
                 />
+                {showErr("postalCode") && (
+                  <p className="text-[11px] text-destructive">
+                    {showErr("postalCode")}
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex gap-2">
@@ -457,7 +612,9 @@ function PersonalInfoSection() {
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Phone</p>
-              <p className="text-sm font-medium">{user.phone ?? "—"}</p>
+              <p className="text-sm font-medium">
+                {user.phone ? formatPhoneInput(user.phone) : "—"}
+              </p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Address</p>
@@ -469,7 +626,8 @@ function PersonalInfoSection() {
                       [user.city, user.state, user.postalCode]
                         .filter(Boolean)
                         .join(", "),
-                      user.country,
+                      COUNTRY_OPTIONS.find((c) => c.code === user.country)
+                        ?.name ?? user.country,
                     ]
                       .filter(Boolean)
                       .join("\n")
@@ -487,31 +645,71 @@ function EmergencyContactSection() {
   const { data: user, isLoading } = useUserProfile();
   const updateUser = useUpdateUserProfile();
   const [editing, setEditing] = useState(false);
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [relation, setRelation] = useState("");
+  const [fields, setFields] = useState<EmergencyContactFields>({
+    name: "",
+    phone: "",
+    relation: "",
+  });
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  const setField = useCallback(
+    <K extends keyof EmergencyContactFields>(
+      key: K,
+      value: EmergencyContactFields[K]
+    ) => {
+      setFields((prev) => ({ ...prev, [key]: value }));
+    },
+    []
+  );
+
+  const markTouched = useCallback((key: keyof EmergencyContactFields) => {
+    setTouched((prev) => ({ ...prev, [key]: true }));
+  }, []);
+
+  const errors = useMemo(
+    () => (editing ? fieldErrors(emergencyContactSchema.safeParse(fields)) : {}),
+    [fields, editing]
+  );
 
   const startEditing = useCallback(() => {
     if (!user) return;
-    setName(user.emergencyContactName ?? "");
-    setPhone(user.emergencyContactPhone ?? "");
-    setRelation(user.emergencyContactRelation ?? "");
+    setFields({
+      name: user.emergencyContactName ?? "",
+      phone: user.emergencyContactPhone
+        ? formatPhoneInput(user.emergencyContactPhone)
+        : "",
+      relation: user.emergencyContactRelation ?? "",
+    });
+    setTouched({});
     setEditing(true);
   }, [user]);
 
   const save = useCallback(() => {
+    const result = emergencyContactSchema.safeParse(fields);
+    if (!result.success) {
+      const errs = fieldErrors(result);
+      setTouched(
+        Object.fromEntries(Object.keys(errs).map((k) => [k, true]))
+      );
+      toast.error("Fix the highlighted fields first.");
+      return;
+    }
+    const v = result.data;
     updateUser.mutate(
       {
-        emergencyContactName: name || null,
-        emergencyContactPhone: phone || null,
-        emergencyContactRelation: relation || null,
+        emergencyContactName: v.name || null,
+        emergencyContactPhone: v.phone ? normalizePhone(v.phone) : null,
+        emergencyContactRelation: v.relation || null,
       },
       {
         onSuccess: () => setEditing(false),
         onError: (e: Error) => toast.error(e.message),
       }
     );
-  }, [name, phone, relation, updateUser]);
+  }, [fields, updateUser]);
+
+  const showErr = (key: keyof EmergencyContactFields) =>
+    touched[key] ? errors[key] : undefined;
 
   if (isLoading || !user) return null;
 
@@ -531,25 +729,66 @@ function EmergencyContactSection() {
       <CardContent className="space-y-4">
         {editing ? (
           <>
-            <div className="space-y-2">
-              <Label>Name</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>Phone</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="emc-name">Name</Label>
               <Input
+                id="emc-name"
+                autoComplete="name"
+                value={fields.name}
+                onChange={(e) => setField("name", e.target.value)}
+                onBlur={() => markTouched("name")}
+                placeholder="Full name"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="emc-phone">Phone</Label>
+              <Input
+                id="emc-phone"
                 type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                inputMode="tel"
+                autoComplete="tel"
+                value={fields.phone}
+                onChange={(e) =>
+                  setField("phone", formatPhoneInput(e.target.value))
+                }
+                onBlur={() => markTouched("phone")}
+                placeholder="(555) 123-4567"
+                aria-invalid={!!showErr("phone") || undefined}
               />
+              {showErr("phone") && (
+                <p className="text-[11px] text-destructive">
+                  {showErr("phone")}
+                </p>
+              )}
             </div>
-            <div className="space-y-2">
-              <Label>Relationship</Label>
-              <Input
-                value={relation}
-                onChange={(e) => setRelation(e.target.value)}
-                placeholder="e.g. spouse, parent, sibling"
-              />
+            <div className="space-y-1.5">
+              <Label htmlFor="emc-relation">Relationship</Label>
+              <Select
+                value={fields.relation || undefined}
+                onValueChange={(value) => {
+                  setField("relation", value ?? "");
+                  markTouched("relation");
+                }}
+              >
+                <SelectTrigger id="emc-relation">
+                  <SelectValue placeholder="Select relationship" />
+                </SelectTrigger>
+                <SelectContent>
+                  {[
+                    "Spouse",
+                    "Partner",
+                    "Parent",
+                    "Sibling",
+                    "Child",
+                    "Friend",
+                    "Other",
+                  ].map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {r}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex gap-2">
               <Button size="sm" onClick={save} disabled={updateUser.isPending}>
@@ -581,7 +820,9 @@ function EmergencyContactSection() {
             <div>
               <p className="text-xs text-muted-foreground">Phone</p>
               <p className="text-sm font-medium">
-                {user.emergencyContactPhone ?? "—"}
+                {user.emergencyContactPhone
+                  ? formatPhoneInput(user.emergencyContactPhone)
+                  : "—"}
               </p>
             </div>
             <div>

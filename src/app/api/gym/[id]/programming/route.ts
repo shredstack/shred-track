@@ -143,6 +143,7 @@ export async function GET(
         subKind: s.subKind,
         position: s.position,
         title: s.title,
+        body: s.body,
         isScored: s.isScored,
         scoreType: s.scoreType,
         reviewedAt: s.reviewedAt,

@@ -9,6 +9,8 @@ import { useGymContext } from "@/hooks/useGymContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { GymToolHeader } from "@/components/gym/gym-tool-header";
+import { Inbox } from "lucide-react";
 
 interface PendingPost {
   id: string;
@@ -67,16 +69,26 @@ export default function ReviewQueuePage() {
   if (!data?.posts.length) {
     return (
       <div className="space-y-3">
-        <h1 className="text-2xl font-bold">Review queue</h1>
+        <GymToolHeader
+          icon={Inbox}
+          label="Review queue"
+          description="Auto-generated posts waiting for a coach to approve or discard"
+          backHref="/gym/social"
+          backLabel="Feed"
+        />
         <p className="text-sm text-muted-foreground">Nothing to review.</p>
       </div>
     );
   }
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">
-        Review queue ({data.posts.length})
-      </h1>
+      <GymToolHeader
+        icon={Inbox}
+        label={`Review queue (${data.posts.length})`}
+        description="Auto-generated posts waiting for a coach to approve or discard"
+        backHref="/gym/social"
+        backLabel="Feed"
+      />
       {data.posts.map((p) => (
         <ReviewItem key={p.id} post={p} onSubmit={update.mutate} />
       ))}

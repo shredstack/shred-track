@@ -23,7 +23,8 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { CalendarPlus, ChevronRight, Loader2, Sparkles } from "lucide-react";
+import { CalendarDays, CalendarPlus, ChevronRight, Loader2, Sparkles } from "lucide-react";
+import { GymToolHeader } from "@/components/gym/gym-tool-header";
 
 interface InstanceRow {
   id: string;
@@ -86,18 +87,17 @@ export default function GymEventsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-bold">Events</h1>
+      <GymToolHeader
+        icon={CalendarDays}
+        label="Events"
+        description="One-off class instances — Murph, partner WODs, fundraisers. Members register through the regular /classes flow."
+      />
+      <div className="flex items-center justify-end">
         <Button size="sm" onClick={() => setOpen(true)}>
           <CalendarPlus className="mr-1 h-3.5 w-3.5" />
           New event
         </Button>
       </div>
-
-      <p className="text-xs text-muted-foreground">
-        Events are one-off class instances — Murph, partner WODs, fundraisers.
-        Members register through the same flow as regular classes.
-      </p>
 
       {isLoading ? (
         <div className="flex justify-center py-12">

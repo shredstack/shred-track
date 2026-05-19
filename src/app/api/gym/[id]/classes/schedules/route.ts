@@ -9,6 +9,7 @@ import { db } from "@/db";
 import { classScheduleSlots, classSchedules } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canManageGym } from "@/lib/authz/community";
+import { materializeScheduleSlotsForCommunity } from "@/lib/classes";
 
 interface SlotPayload {
   rrule: string;
@@ -99,6 +100,17 @@ export async function POST(
     }
     return sched;
   });
+
+  // Materialize class_instances right away so athletes see them on the
+  // schedule without waiting for the next daily cron.
+  try {
+    await materializeScheduleSlotsForCommunity({
+      communityId,
+      scheduleIds: [inserted.id],
+    });
+  } catch (err) {
+    console.error("materialize-after-schedule-create failed", err);
+  }
 
   return NextResponse.json(inserted, { status: 201 });
 }

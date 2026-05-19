@@ -1,11 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Heart, Loader2 } from "lucide-react";
+import { Heart, Loader2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useGymContext } from "@/hooks/useGymContext";
+import { GymToolHeader } from "@/components/gym/gym-tool-header";
 
 interface AdherenceAthlete {
   userId: string;
@@ -47,24 +47,13 @@ export default function GymRecoveryPage() {
 
   return (
     <div className="space-y-4">
-      <Link
-        href="/gym"
-        className="inline-flex items-center text-xs text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="h-3.5 w-3.5 mr-1" />
-        Gym tools
-      </Link>
-
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Heart className="h-5 w-5 text-rose-400" />
-          Recovery adherence
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Per-athlete recovery completion over the last{" "}
-          {data?.weeks ?? 4} weeks.
-        </p>
-      </div>
+      <GymToolHeader
+        icon={Heart}
+        label="Recovery adherence"
+        description={`Per-athlete recovery completion over the last ${
+          data?.weeks ?? 4
+        } weeks.`}
+      />
 
       {isLoading ? (
         <div className="flex justify-center py-10">
