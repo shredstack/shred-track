@@ -1337,6 +1337,16 @@ function GymsSection() {
                       Code: {m.joinCode}
                     </p>
                   )}
+                  {m.websiteUrl && (
+                    <a
+                      href={m.websiteUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="truncate text-[11px] text-primary underline underline-offset-2"
+                    >
+                      {m.websiteUrl.replace(/^https?:\/\//, "")}
+                    </a>
+                  )}
                 </div>
                 <div className="flex items-center gap-1">
                   {m.isAdmin && (

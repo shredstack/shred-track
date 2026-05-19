@@ -1,9 +1,12 @@
 /* eslint-disable @next/next/no-img-element */
 
+import { Globe } from "lucide-react";
+
 export interface GymHeaderStripData {
   name: string;
   logoUrl: string | null;
   pinnedAnnouncement: string | null;
+  websiteUrl: string | null;
 }
 
 export function GymHeaderStrip({
@@ -33,6 +36,17 @@ export function GymHeaderStrip({
           </p>
         ) : null}
       </div>
+      {data.websiteUrl ? (
+        <a
+          href={data.websiteUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-white/[0.05] hover:text-foreground"
+          aria-label={`Visit ${data.name} website`}
+        >
+          <Globe className="h-4 w-4" />
+        </a>
+      ) : null}
     </div>
   );
 }

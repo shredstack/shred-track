@@ -113,7 +113,11 @@ export async function fetchGymHeaderStrip(
   communityId: string
 ): Promise<GymHeaderStripData | null> {
   const [c] = await db
-    .select({ name: communities.name, logoUrl: communities.logoUrl })
+    .select({
+      name: communities.name,
+      logoUrl: communities.logoUrl,
+      websiteUrl: communities.websiteUrl,
+    })
     .from(communities)
     .where(eq(communities.id, communityId))
     .limit(1);
@@ -135,6 +139,7 @@ export async function fetchGymHeaderStrip(
     name: c.name,
     logoUrl: c.logoUrl ?? null,
     pinnedAnnouncement: pinned?.body ?? null,
+    websiteUrl: c.websiteUrl ?? null,
   };
 }
 

@@ -20,6 +20,7 @@ export interface GymMembership {
   joinCode: string | null;
   logoUrl: string | null;
   primaryColor: string | null;
+  websiteUrl: string | null;
   isAdmin: boolean;
   isCoach: boolean;
   isActive: boolean;
