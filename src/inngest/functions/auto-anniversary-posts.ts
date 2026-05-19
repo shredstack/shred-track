@@ -1,10 +1,13 @@
-// auto-anniversary-posts (spec §2.3)
+// auto-anniversary-posts (spec §2.3 + §3.8)
 //
 // Runs once an hour. For each gym, if the *current local time* is in the
-// 6am hour, find members whose gym_anniversary_date.month_day matches
-// today's gym-local month-day. Generate a short anniversary post via
-// Claude Haiku with the system prompt cached, insert as
-// status='pending_review', and schedule auto-publish at 24h.
+// 6am hour, find:
+//   (a) members whose gym_anniversary_date.month_day matches today
+//       (anniversary post)
+//   (b) members whose users.date_of_birth.month_day matches today
+//       (birthday post — PR 3 §3.8 extension)
+// Generate a short post via Claude Haiku with the system prompt cached,
+// insert as status='pending_review' for coach review.
 //
 // Hourly rather than daily so we hit each gym's 6am-local window without
 // having to know per-gym timezones ahead of cron firing.
@@ -20,7 +23,7 @@ import {
   users,
 } from "@/db/schema";
 
-const SYSTEM_PROMPT = `You are a CrossFit gym's encouragement writer.
+const ANNIVERSARY_PROMPT = `You are a CrossFit gym's encouragement writer.
 You produce ONE short, warm anniversary post (1-2 sentences, max 200 chars)
 celebrating a member's anniversary at their gym.
 
@@ -37,10 +40,36 @@ Examples of tone:
 
 Output only the post body. No preamble, no quotes.`;
 
-const SYSTEM_BLOCK = [
+const BIRTHDAY_PROMPT = `You are a CrossFit gym's encouragement writer.
+You produce ONE short, warm birthday post (1-2 sentences, max 200 chars)
+celebrating a member's birthday for the gym community to see.
+
+Style guide:
+- Speak to the gym community, not to the member directly (third person).
+- Mention the member by first name. Do NOT include their age unless
+  explicitly provided.
+- Include one celebratory emoji at the start. No hashtags.
+- Match the energy of a community whiteboard: warm but not saccharine,
+  short, scannable.
+
+Examples of tone:
+🎂 Wish Sarah a happy birthday today at CrossFit Draper. Big year ahead.
+🎉 Birthday shout-out for Mike — gym fam, send the love.
+
+Output only the post body. No preamble, no quotes.`;
+
+const ANNIVERSARY_SYSTEM_BLOCK = [
   {
     type: "text" as const,
-    text: SYSTEM_PROMPT,
+    text: ANNIVERSARY_PROMPT,
+    cache_control: { type: "ephemeral" as const },
+  },
+];
+
+const BIRTHDAY_SYSTEM_BLOCK = [
+  {
+    type: "text" as const,
+    text: BIRTHDAY_PROMPT,
     cache_control: { type: "ephemeral" as const },
   },
 ];
@@ -71,7 +100,11 @@ export const autoAnniversaryPosts = inngest.createFunction(
     )) as Array<{ id: string; name: string; timezone: string }>;
 
     const client = new Anthropic({ apiKey });
-    const summaries: Array<{ communityId: string; created: number }> = [];
+    const summaries: Array<{
+      communityId: string;
+      created: number;
+      birthdays: number;
+    }> = [];
 
     for (const gym of gyms) {
       const gymLocalHour = hourInTz(now, gym.timezone);
@@ -110,7 +143,7 @@ export const autoAnniversaryPosts = inngest.createFunction(
         // Compute years since anniversary date.
         const yrs = yearsSince(c.anniversaryDate, now);
         if (yrs < 1) continue;
-        // Skip if a post already exists for this member today.
+        // Skip if an anniversary post already exists for this member today.
         const existing = (await step.run(
           `check-existing-${gym.id}-${c.userId}`,
           async () => {
@@ -141,7 +174,7 @@ Gym name: ${gym.name}`;
             const resp = await client.messages.create({
               model: "claude-haiku-4-5-20251001",
               max_tokens: 200,
-              system: SYSTEM_BLOCK,
+              system: ANNIVERSARY_SYSTEM_BLOCK,
               messages: [{ role: "user", content: userPrompt }],
             });
             const block = resp.content.find((b) => b.type === "text");
@@ -166,7 +199,94 @@ Gym name: ${gym.name}`;
         );
         created++;
       }
-      summaries.push({ communityId: gym.id, created });
+
+      // Birthday auto-posts (PR 3 §3.8). Same gym 6am window. Match on
+      // users.date_of_birth.month_day. The DOB column is optional — solo
+      // users and members who haven't filled it in are simply skipped.
+      const birthdayCandidates = (await step.run(
+        `find-birthdays-${gym.id}`,
+        async () =>
+          db
+            .select({
+              userId: users.id,
+              userName: users.name,
+              dateOfBirth: users.dateOfBirth,
+            })
+            .from(communityMemberships)
+            .innerJoin(users, eq(users.id, communityMemberships.userId))
+            .where(
+              and(
+                eq(communityMemberships.communityId, gym.id),
+                eq(communityMemberships.isActive, true),
+                sql`${users.dateOfBirth} IS NOT NULL`,
+                sql`to_char(${users.dateOfBirth}, 'MM-DD') = ${monthDay}`
+              )
+            )
+      )) as Array<{
+        userId: string;
+        userName: string;
+        dateOfBirth: string | null;
+      }>;
+
+      let birthdays = 0;
+      for (const b of birthdayCandidates) {
+        const existing = (await step.run(
+          `check-bday-${gym.id}-${b.userId}`,
+          async () => {
+            const rows = await db
+              .select({ id: gymPosts.id })
+              .from(gymPosts)
+              .where(
+                and(
+                  eq(gymPosts.communityId, gym.id),
+                  eq(gymPosts.authorId, b.userId),
+                  eq(gymPosts.kind, "auto_birthday"),
+                  sql`${gymPosts.createdAt} > now() - interval '20 hours'`
+                )
+              )
+              .limit(1);
+            return rows[0] ?? null;
+          }
+        )) as { id: string } | null;
+        if (existing) continue;
+
+        const body = (await step.run(
+          `generate-bday-${gym.id}-${b.userId}`,
+          async () => {
+            const firstName = b.userName.split(/\s+/)[0];
+            const userPrompt = `Member first name: ${firstName}
+Gym name: ${gym.name}`;
+            const resp = await client.messages.create({
+              model: "claude-haiku-4-5-20251001",
+              max_tokens: 200,
+              system: BIRTHDAY_SYSTEM_BLOCK,
+              messages: [{ role: "user", content: userPrompt }],
+            });
+            const block = resp.content.find((b) => b.type === "text");
+            if (!block || block.type !== "text") return null;
+            return block.text.trim();
+          }
+        )) as string | null;
+        if (!body) continue;
+
+        await step.run(`insert-bday-${gym.id}-${b.userId}`, async () => {
+          await db.insert(gymPosts).values({
+            communityId: gym.id,
+            authorId: b.userId,
+            kind: "auto_birthday",
+            status: "pending_review",
+            body,
+            mentionedUserIds: [b.userId],
+          });
+        });
+        birthdays++;
+      }
+
+      summaries.push({
+        communityId: gym.id,
+        created,
+        birthdays,
+      });
     }
 
     return { gyms: gyms.length, summaries };
