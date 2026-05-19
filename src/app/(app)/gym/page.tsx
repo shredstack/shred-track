@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import {
+  CalendarDays,
   ChevronRight,
   FileText,
   Heart,
@@ -53,6 +54,13 @@ const TOOLS: Tool[] = [
     description: "Waivers, policies, and member signatures",
     icon: FileText,
     adminOnly: true,
+  },
+  {
+    href: "/gym/events",
+    label: "Events",
+    description: "Murph, partner WODs, fundraisers",
+    icon: CalendarDays,
+    adminOnly: false,
   },
   {
     href: "/gym/settings",

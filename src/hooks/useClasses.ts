@@ -13,6 +13,11 @@ export interface ClassInstanceListItem {
   capacity: number;
   status: "scheduled" | "cancelled" | "completed";
   kind: "class" | "event";
+  // Event metadata (null for regular classes). Surfaced when the row
+  // renders as a banner card on the member schedule.
+  eventTitle: string | null;
+  eventImageUrl: string | null;
+  eventDescription: string | null;
   workoutId: string | null;
   registeredCount: number;
   myStatus: "registered" | "cancelled" | "no_show" | "attended" | null;

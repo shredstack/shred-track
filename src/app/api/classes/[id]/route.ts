@@ -86,6 +86,31 @@ export async function PATCH(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  if (body.action === "edit-event") {
+    // Admin edits event-only metadata. Reject when applied to a
+    // schedule-derived class so the materializer doesn't have its
+    // values overwritten.
+    const updates: Record<string, unknown> = {};
+    if (typeof body.eventTitle === "string")
+      updates.eventTitle = body.eventTitle.trim() || null;
+    if (typeof body.eventDescription === "string")
+      updates.eventDescription = body.eventDescription.trim() || null;
+    if (typeof body.eventImageUrl === "string")
+      updates.eventImageUrl = body.eventImageUrl.trim() || null;
+    if (typeof body.capacity === "number" && body.capacity > 0)
+      updates.capacity = body.capacity;
+    if (typeof body.startAt === "string")
+      updates.startAt = new Date(body.startAt);
+    if (typeof body.endAt === "string") updates.endAt = new Date(body.endAt);
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: "No updates" }, { status: 400 });
+    }
+    await db
+      .update(classInstances)
+      .set(updates)
+      .where(eq(classInstances.id, id));
+    return NextResponse.json({ ok: true });
+  }
   if (body.action === "cancel") {
     await db
       .update(classInstances)

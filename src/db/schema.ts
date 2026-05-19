@@ -1732,6 +1732,9 @@ export const classInstances = pgTable("class_instances", {
   workoutId: uuid("workout_id").references(() => workouts.id),
   kind: text("kind").default("class").notNull(), // 'class' | 'event'
   eventTitle: text("event_title"),
+  // PR 3 §3.3 — event creator surfaces these on the schedule card.
+  eventImageUrl: text("event_image_url"),
+  eventDescription: text("event_description"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

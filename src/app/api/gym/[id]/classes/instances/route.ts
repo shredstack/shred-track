@@ -55,6 +55,8 @@ export async function GET(
       status: classInstances.status,
       kind: classInstances.kind,
       eventTitle: classInstances.eventTitle,
+      eventImageUrl: classInstances.eventImageUrl,
+      eventDescription: classInstances.eventDescription,
       workoutId: classInstances.workoutId,
     })
     .from(classInstances)
@@ -132,6 +134,9 @@ export async function GET(
       capacity: r.capacity,
       status: r.status,
       kind: r.kind,
+      eventTitle: r.eventTitle ?? null,
+      eventImageUrl: r.eventImageUrl ?? null,
+      eventDescription: r.eventDescription ?? null,
       workoutId: r.workoutId,
       registeredCount: registeredCount.get(r.id) ?? 0,
       myStatus: myReg.get(r.id) ?? null,
@@ -172,6 +177,8 @@ export async function POST(
           : 20,
       kind: body.kind === "event" ? "event" : "class",
       eventTitle: body.eventTitle ?? null,
+      eventImageUrl: body.eventImageUrl ?? null,
+      eventDescription: body.eventDescription ?? null,
       workoutId: body.workoutId ?? null,
     })
     .returning();
