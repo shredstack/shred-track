@@ -12,6 +12,7 @@ import {
 } from "@/inngest/functions/notify-comment-created";
 import { dispatchNotification } from "@/inngest/functions/dispatch-notification";
 import { materializeClassInstances } from "@/inngest/functions/materialize-class-instances";
+import { autoAnniversaryPosts } from "@/inngest/functions/auto-anniversary-posts";
 
 // Each Inngest step runs as a separate Vercel function invocation.
 // Vercel Pro allows up to 300s per invocation. Each step makes one Claude
@@ -31,5 +32,6 @@ export const { GET, POST, PUT } = serve({
     notifyCommentMentioned,
     dispatchNotification,
     materializeClassInstances,
+    autoAnniversaryPosts,
   ],
 });
