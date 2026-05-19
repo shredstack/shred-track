@@ -18,7 +18,33 @@ export interface UserProfile {
   isAdmin: boolean;
   isVip: boolean;
   createdAt: string;
+  // PR 3 §3.1 personal info / emergency contact. All optional.
+  dateOfBirth: string | null;
+  phone: string | null;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  postalCode: string | null;
+  country: string | null;
+  emergencyContactName: string | null;
+  emergencyContactPhone: string | null;
+  emergencyContactRelation: string | null;
 }
+
+export type PersonalInfoFields = {
+  dateOfBirth?: string | null;
+  phone?: string | null;
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+  emergencyContactName?: string | null;
+  emergencyContactPhone?: string | null;
+  emergencyContactRelation?: string | null;
+};
 
 export function useUserProfile() {
   return useQuery({
@@ -34,12 +60,14 @@ export function useUserProfile() {
 export function useUpdateUserProfile() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: {
-      name?: string;
-      username?: string | null;
-      gender?: "male" | "female" | "other" | null;
-      bodyWeightLb?: number | null;
-    }) => {
+    mutationFn: async (
+      data: {
+        name?: string;
+        username?: string | null;
+        gender?: "male" | "female" | "other" | null;
+        bodyWeightLb?: number | null;
+      } & PersonalInfoFields
+    ) => {
       const res = await fetch("/api/user/profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },

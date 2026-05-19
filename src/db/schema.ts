@@ -46,6 +46,19 @@ export const users = pgTable("users", {
   // mode (no gym selected). FK declared in the SQL migration (not here)
   // to avoid a circular type dependency between `users` and `communities`.
   activeCommunityId: uuid("active_community_id"),
+  // PR 3 §3.1 — extended profile fields. All optional. `dateOfBirth`
+  // unlocks the birthday auto-post path (§3.8) once populated.
+  dateOfBirth: date("date_of_birth"),
+  phone: text("phone"),
+  addressLine1: text("address_line1"),
+  addressLine2: text("address_line2"),
+  city: text("city"),
+  state: text("state"),
+  postalCode: text("postal_code"),
+  country: text("country"),
+  emergencyContactName: text("emergency_contact_name"),
+  emergencyContactPhone: text("emergency_contact_phone"),
+  emergencyContactRelation: text("emergency_contact_relation"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });

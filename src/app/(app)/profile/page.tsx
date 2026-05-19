@@ -283,6 +283,318 @@ function GeneralSection() {
 }
 
 // ---------------------------------------------------------------------------
+// Personal info + emergency contact (PR 3 §3.1)
+//
+// Optional everywhere except when a gym requires sign-on-join documents
+// (§3.2). Stored on `users` so a single account carries them across gyms.
+// ---------------------------------------------------------------------------
+
+function PersonalInfoSection() {
+  const { data: user, isLoading } = useUserProfile();
+  const updateUser = useUpdateUserProfile();
+  const [editing, setEditing] = useState(false);
+  const [dateOfBirth, setDateOfBirth] = useState("");
+  const [phone, setPhone] = useState("");
+  const [addressLine1, setAddressLine1] = useState("");
+  const [addressLine2, setAddressLine2] = useState("");
+  const [city, setCity] = useState("");
+  const [stateField, setStateField] = useState("");
+  const [postalCode, setPostalCode] = useState("");
+  const [country, setCountry] = useState("");
+
+  const startEditing = useCallback(() => {
+    if (!user) return;
+    setDateOfBirth(user.dateOfBirth ?? "");
+    setPhone(user.phone ?? "");
+    setAddressLine1(user.addressLine1 ?? "");
+    setAddressLine2(user.addressLine2 ?? "");
+    setCity(user.city ?? "");
+    setStateField(user.state ?? "");
+    setPostalCode(user.postalCode ?? "");
+    setCountry(user.country ?? "");
+    setEditing(true);
+  }, [user]);
+
+  const save = useCallback(() => {
+    updateUser.mutate(
+      {
+        dateOfBirth: dateOfBirth || null,
+        phone: phone || null,
+        addressLine1: addressLine1 || null,
+        addressLine2: addressLine2 || null,
+        city: city || null,
+        state: stateField || null,
+        postalCode: postalCode || null,
+        country: country || null,
+      },
+      {
+        onSuccess: () => setEditing(false),
+        onError: (e: Error) => toast.error(e.message),
+      }
+    );
+  }, [
+    dateOfBirth,
+    phone,
+    addressLine1,
+    addressLine2,
+    city,
+    stateField,
+    postalCode,
+    country,
+    updateUser,
+  ]);
+
+  if (isLoading || !user) return null;
+
+  const hasAddress =
+    user.addressLine1 || user.city || user.state || user.postalCode;
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+          Personal info
+        </CardTitle>
+        {!editing && (
+          <Button variant="ghost" size="sm" onClick={startEditing}>
+            <Pencil className="mr-1 h-3.5 w-3.5" />
+            Edit
+          </Button>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {editing ? (
+          <>
+            <div className="space-y-2">
+              <Label>Date of birth</Label>
+              <Input
+                type="date"
+                value={dateOfBirth}
+                onChange={(e) => setDateOfBirth(e.target.value)}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Used for age-graded leaderboards and birthday shoutouts in
+                your gym&apos;s feed.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label>Phone</Label>
+              <Input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="e.g. +1 555 123 4567"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Address line 1</Label>
+              <Input
+                value={addressLine1}
+                onChange={(e) => setAddressLine1(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Address line 2</Label>
+              <Input
+                value={addressLine2}
+                onChange={(e) => setAddressLine2(e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>City</Label>
+                <Input value={city} onChange={(e) => setCity(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>State / region</Label>
+                <Input
+                  value={stateField}
+                  onChange={(e) => setStateField(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Postal code</Label>
+                <Input
+                  value={postalCode}
+                  onChange={(e) => setPostalCode(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Country</Label>
+                <Input
+                  value={country}
+                  onChange={(e) => setCountry(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={save} disabled={updateUser.isPending}>
+                {updateUser.isPending ? (
+                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Save className="mr-1 h-3.5 w-3.5" />
+                )}
+                Save
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setEditing(false)}
+              >
+                <X className="mr-1 h-3.5 w-3.5" />
+                Cancel
+              </Button>
+            </div>
+          </>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <p className="text-xs text-muted-foreground">Date of birth</p>
+              <p className="text-sm font-medium">{user.dateOfBirth ?? "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Phone</p>
+              <p className="text-sm font-medium">{user.phone ?? "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Address</p>
+              <p className="text-sm font-medium whitespace-pre-line">
+                {hasAddress
+                  ? [
+                      user.addressLine1,
+                      user.addressLine2,
+                      [user.city, user.state, user.postalCode]
+                        .filter(Boolean)
+                        .join(", "),
+                      user.country,
+                    ]
+                      .filter(Boolean)
+                      .join("\n")
+                  : "—"}
+              </p>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function EmergencyContactSection() {
+  const { data: user, isLoading } = useUserProfile();
+  const updateUser = useUpdateUserProfile();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [relation, setRelation] = useState("");
+
+  const startEditing = useCallback(() => {
+    if (!user) return;
+    setName(user.emergencyContactName ?? "");
+    setPhone(user.emergencyContactPhone ?? "");
+    setRelation(user.emergencyContactRelation ?? "");
+    setEditing(true);
+  }, [user]);
+
+  const save = useCallback(() => {
+    updateUser.mutate(
+      {
+        emergencyContactName: name || null,
+        emergencyContactPhone: phone || null,
+        emergencyContactRelation: relation || null,
+      },
+      {
+        onSuccess: () => setEditing(false),
+        onError: (e: Error) => toast.error(e.message),
+      }
+    );
+  }, [name, phone, relation, updateUser]);
+
+  if (isLoading || !user) return null;
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+          Emergency contact
+        </CardTitle>
+        {!editing && (
+          <Button variant="ghost" size="sm" onClick={startEditing}>
+            <Pencil className="mr-1 h-3.5 w-3.5" />
+            Edit
+          </Button>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {editing ? (
+          <>
+            <div className="space-y-2">
+              <Label>Name</Label>
+              <Input value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Phone</Label>
+              <Input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Relationship</Label>
+              <Input
+                value={relation}
+                onChange={(e) => setRelation(e.target.value)}
+                placeholder="e.g. spouse, parent, sibling"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={save} disabled={updateUser.isPending}>
+                {updateUser.isPending ? (
+                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Save className="mr-1 h-3.5 w-3.5" />
+                )}
+                Save
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setEditing(false)}
+              >
+                <X className="mr-1 h-3.5 w-3.5" />
+                Cancel
+              </Button>
+            </div>
+          </>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <p className="text-xs text-muted-foreground">Name</p>
+              <p className="text-sm font-medium">
+                {user.emergencyContactName ?? "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Phone</p>
+              <p className="text-sm font-medium">
+                {user.emergencyContactPhone ?? "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Relationship</p>
+              <p className="text-sm font-medium">
+                {user.emergencyContactRelation ?? "—"}
+              </p>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // CrossFit Section (placeholder)
 // ---------------------------------------------------------------------------
 
@@ -1135,8 +1447,10 @@ export default function ProfilePage() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="general" className="mt-4">
+        <TabsContent value="general" className="mt-4 space-y-4">
           <GeneralSection />
+          <PersonalInfoSection />
+          <EmergencyContactSection />
         </TabsContent>
 
         <TabsContent value="crossfit" className="mt-4">

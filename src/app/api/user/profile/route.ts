@@ -26,6 +26,17 @@ export async function GET() {
       isAdmin: users.isAdmin,
       isVip: users.isVip,
       createdAt: users.createdAt,
+      dateOfBirth: users.dateOfBirth,
+      phone: users.phone,
+      addressLine1: users.addressLine1,
+      addressLine2: users.addressLine2,
+      city: users.city,
+      state: users.state,
+      postalCode: users.postalCode,
+      country: users.country,
+      emergencyContactName: users.emergencyContactName,
+      emergencyContactPhone: users.emergencyContactPhone,
+      emergencyContactRelation: users.emergencyContactRelation,
     })
     .from(users)
     .where(eq(users.id, session.id))
@@ -39,6 +50,22 @@ export async function GET() {
     isAdmin: user.isAdmin || isAdminEmail(user.email),
   });
 }
+
+// Whitelist of optional profile fields PUT can write directly. Each
+// allows null or a trimmed string; empty string normalizes to null so
+// the DB doesn't end up with "" rows the UI then has to treat as set.
+const STRING_FIELDS = [
+  "phone",
+  "addressLine1",
+  "addressLine2",
+  "city",
+  "state",
+  "postalCode",
+  "country",
+  "emergencyContactName",
+  "emergencyContactPhone",
+  "emergencyContactRelation",
+] as const;
 
 // PUT /api/user/profile — update basic user info
 export async function PUT(req: Request) {
@@ -102,6 +129,34 @@ export async function PUT(req: Request) {
       updates.username = candidate;
     }
   }
+  for (const key of STRING_FIELDS) {
+    if (key in body) {
+      const raw = body[key];
+      if (raw === null || raw === "") {
+        updates[key] = null;
+      } else if (typeof raw !== "string") {
+        return NextResponse.json({ error: `Invalid ${key}` }, { status: 400 });
+      } else {
+        const trimmed = raw.trim();
+        updates[key] = trimmed === "" ? null : trimmed;
+      }
+    }
+  }
+  if ("dateOfBirth" in body) {
+    if (body.dateOfBirth === null || body.dateOfBirth === "") {
+      updates.dateOfBirth = null;
+    } else if (
+      typeof body.dateOfBirth === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(body.dateOfBirth)
+    ) {
+      updates.dateOfBirth = body.dateOfBirth;
+    } else {
+      return NextResponse.json(
+        { error: "Invalid dateOfBirth (expect YYYY-MM-DD)" },
+        { status: 400 }
+      );
+    }
+  }
   if ("bodyWeightLb" in body) {
     if (body.bodyWeightLb === null || body.bodyWeightLb === "") {
       updates.bodyWeightLb = null;
@@ -133,6 +188,17 @@ export async function PUT(req: Request) {
       unitPreference: users.unitPreference,
       bodyWeightLb: users.bodyWeightLb,
       createdAt: users.createdAt,
+      dateOfBirth: users.dateOfBirth,
+      phone: users.phone,
+      addressLine1: users.addressLine1,
+      addressLine2: users.addressLine2,
+      city: users.city,
+      state: users.state,
+      postalCode: users.postalCode,
+      country: users.country,
+      emergencyContactName: users.emergencyContactName,
+      emergencyContactPhone: users.emergencyContactPhone,
+      emergencyContactRelation: users.emergencyContactRelation,
     });
 
   return NextResponse.json({
