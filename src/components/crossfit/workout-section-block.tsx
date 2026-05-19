@@ -5,6 +5,8 @@ import type {
   WorkoutSectionDisplay,
   WorkoutSectionKindDisplay,
 } from "@/types/crossfit";
+import { TrackDayScoreInput } from "@/components/crossfit/track-day-score-input";
+import type { TrackScoringConfig } from "@/types/programming-tracks";
 
 const LABELS: Record<WorkoutSectionKindDisplay, string> = {
   warm_up: "Warm-up",
@@ -17,22 +19,16 @@ const LABELS: Record<WorkoutSectionKindDisplay, string> = {
   custom: "Custom",
 };
 
-function scoreBadgeText(section: WorkoutSectionDisplay): string {
-  if (!section.isScored) return "NO SCORE";
-  return (section.scoreType ?? "scored").toUpperCase();
-}
-
-function scoreBadgeClass(section: WorkoutSectionDisplay): string {
-  if (!section.isScored) {
-    return "bg-muted/30 text-muted-foreground";
-  }
-  return "bg-amber-500/15 text-amber-400";
-}
-
 /**
- * Renders a single section heading + scoring badge, with the children
- * (parts) tucked below. The CrossFit tab uses this to break a multi-section
- * workout into visually distinct cards instead of one flat list.
+ * Renders a single section heading with the children (parts) tucked below.
+ * The CrossFit tab uses this to break a multi-section workout into visually
+ * distinct cards instead of one flat list. Per-part scoring (AMRAP, time,
+ * weight) lives inside the part cards themselves.
+ *
+ * Track-injected sections (spec §3.5): when the section has a
+ * `sourceTrackId` + `trackDayId` but no workoutPart children, render a
+ * `TrackDayScoreInput` below the body. Rest days (`isScored=false`) skip
+ * the input — body text only.
  */
 export function WorkoutSectionBlock({
   section,
@@ -41,22 +37,23 @@ export function WorkoutSectionBlock({
   section: WorkoutSectionDisplay;
   children: ReactNode;
 }) {
-  const label = section.title?.trim() || LABELS[section.kind];
+  const kindLabel = LABELS[section.kind];
+  const customTitle = section.title?.trim();
   const body = section.body?.trim();
+  const hasParts = (section.partIds?.length ?? 0) > 0;
+  const isFreeFormTrackDay =
+    !!section.sourceTrackId && !!section.trackDayId && !hasParts;
   return (
     <section className="space-y-3 rounded-lg border border-white/[0.05] bg-white/[0.02] p-3">
-      <header className="flex items-center justify-between gap-2">
+      <header className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <h3 className="text-xs font-bold uppercase tracking-wider text-primary">
-          {label}
+          {kindLabel}
         </h3>
-        <span
-          className={
-            "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase " +
-            scoreBadgeClass(section)
-          }
-        >
-          {scoreBadgeText(section)}
-        </span>
+        {customTitle ? (
+          <span className="text-sm font-semibold text-foreground/90">
+            {customTitle}
+          </span>
+        ) : null}
       </header>
       {body ? (
         <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
@@ -64,6 +61,15 @@ export function WorkoutSectionBlock({
         </p>
       ) : null}
       <div className="space-y-3">{children}</div>
+      {isFreeFormTrackDay && section.isScored && (
+        <TrackDayScoreInput
+          trackDayId={section.trackDayId!}
+          scoringConfig={
+            (section.trackScoringConfig as TrackScoringConfig | null) ?? null
+          }
+          prescribedValue={section.trackPrescribedValue ?? null}
+        />
+      )}
     </section>
   );
 }

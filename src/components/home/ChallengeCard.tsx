@@ -8,6 +8,13 @@ export interface ChallengeCardData {
   dayNumber: number;
   totalDays: number;
   todayBody: string | null;
+  /** Cumulative log (Custom Tracks v2 §3.6). Null when the track has no
+   *  per-day scoring or the athlete hasn't logged anything yet. */
+  rollup?: {
+    sum: number;
+    unitLabel: string;
+    daysLogged: number;
+  } | null;
 }
 
 export function ChallengeCard({ data }: { data: ChallengeCardData | null }) {
@@ -26,6 +33,13 @@ export function ChallengeCard({ data }: { data: ChallengeCardData | null }) {
             {data.todayBody ? (
               <p className="text-xs text-muted-foreground line-clamp-1">
                 Today: {data.todayBody}
+              </p>
+            ) : null}
+            {data.rollup && data.rollup.sum > 0 ? (
+              <p className="text-[11px] text-emerald-300/90">
+                Total: {data.rollup.sum} {data.rollup.unitLabel} (
+                {data.rollup.daysLogged} day
+                {data.rollup.daysLogged === 1 ? "" : "s"})
               </p>
             ) : null}
           </div>

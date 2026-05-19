@@ -33,15 +33,31 @@ export async function GET(
   const url = new URL(req.url);
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
+  const kindParam = url.searchParams.get("kind");
   if (!from || !to || !isIsoDate(from) || !isIsoDate(to)) {
     return NextResponse.json(
       { error: "from and to are required YYYY-MM-DD" },
       { status: 400 }
     );
   }
+  if (kindParam && kindParam !== "class" && kindParam !== "event") {
+    return NextResponse.json(
+      { error: "kind must be 'class' or 'event'" },
+      { status: 400 }
+    );
+  }
   const fromUtc = new Date(`${from}T00:00:00Z`);
   const toUtc = new Date(`${to}T00:00:00Z`);
   toUtc.setUTCDate(toUtc.getUTCDate() + 1); // inclusive end
+
+  const whereClauses = [
+    eq(classInstances.communityId, communityId),
+    gte(classInstances.startAt, fromUtc),
+    lt(classInstances.startAt, toUtc),
+  ];
+  if (kindParam) {
+    whereClauses.push(eq(classInstances.kind, kindParam));
+  }
 
   const rows = await db
     .select({
@@ -61,13 +77,7 @@ export async function GET(
     })
     .from(classInstances)
     .leftJoin(classSchedules, eq(classSchedules.id, classInstances.scheduleId))
-    .where(
-      and(
-        eq(classInstances.communityId, communityId),
-        gte(classInstances.startAt, fromUtc),
-        lt(classInstances.startAt, toUtc)
-      )
-    )
+    .where(and(...whereClauses))
     .orderBy(asc(classInstances.startAt));
 
   const instanceIds = rows.map((r) => r.id);

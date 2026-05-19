@@ -8,9 +8,10 @@ import {
   Dumbbell,
   Heart,
   Home,
+  LayoutGrid,
+  Shield,
   Trophy,
   User,
-  Users,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -18,6 +19,7 @@ import { useIsRacing } from "@/hooks/useRaceMode";
 import { useIsCoachMode } from "@/hooks/useCoachMode";
 import { useIsFeatureOn } from "@/hooks/useFeatureFlag";
 import { useActiveMembership } from "@/hooks/useGymContext";
+import { useAdminAccess } from "@/hooks/useAdminAccess";
 
 interface NavTab {
   href: string;
@@ -33,12 +35,14 @@ const baseMemberTabs: NavTab[] = [
   { href: "/profile", label: "Profile", icon: User },
 ];
 
-const coachTabs: NavTab[] = [
+const baseCoachTabs: NavTab[] = [
   { href: "/gym/programming", label: "Programming", icon: ClipboardList },
   { href: "/gym/classes", label: "Classes", icon: CalendarDays },
-  { href: "/gym/members", label: "Roster", icon: Users },
+  { href: "/gym", label: "Gym Tools", icon: LayoutGrid },
   { href: "/profile", label: "Profile", icon: User },
 ];
+
+const ADMIN_TAB: NavTab = { href: "/admin", label: "Admin", icon: Shield };
 
 export function SideNav() {
   const pathname = usePathname();
@@ -46,6 +50,7 @@ export function SideNav() {
   const isCoachMode = useIsCoachMode();
   const classesOn = useIsFeatureOn("classes");
   const activeMembership = useActiveMembership();
+  const { canAccessAdmin } = useAdminAccess();
   const memberTabs: NavTab[] =
     classesOn && activeMembership
       ? [
@@ -54,6 +59,10 @@ export function SideNav() {
           ...baseMemberTabs.slice(1),
         ]
       : baseMemberTabs;
+  // Admin sits before Profile so Profile stays the last tab.
+  const coachTabs: NavTab[] = canAccessAdmin
+    ? [...baseCoachTabs.slice(0, -1), ADMIN_TAB, baseCoachTabs[baseCoachTabs.length - 1]]
+    : baseCoachTabs;
   const tabs = isCoachMode ? coachTabs : memberTabs;
 
   if (isRacing) return null;
@@ -62,7 +71,8 @@ export function SideNav() {
     <aside className="hidden md:flex md:w-60 md:shrink-0">
       <nav className="sticky top-14 flex h-[calc(100vh-3.5rem)] w-full flex-col gap-1 border-r border-white/[0.06] glass px-3 py-6">
         {tabs.map(({ href, label, icon: Icon }) => {
-          const isActive = pathname.startsWith(href);
+          const isActive =
+            href === "/gym" ? pathname === "/gym" : pathname.startsWith(href);
           return (
             <Link
               key={href}

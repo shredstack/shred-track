@@ -113,7 +113,10 @@ export function usePostComments(postId: string | null) {
   });
 }
 
-export function useCreatePostComment(postId: string | null) {
+export function useCreatePostComment(
+  postId: string | null,
+  communityId: string | null
+) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (body: string) => {
@@ -127,6 +130,11 @@ export function useCreatePostComment(postId: string | null) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["gym-post", postId, "comments"] });
+      // Bump the cached commentCount on the feed item so the inline counter
+      // updates without a hard reload.
+      qc.invalidateQueries({
+        queryKey: ["gym", communityId, "social", "feed"],
+      });
     },
   });
 }

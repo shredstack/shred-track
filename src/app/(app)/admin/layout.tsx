@@ -1,22 +1,22 @@
 // ---------------------------------------------------------------------------
 // Admin section layout.
 //
-// Server component — gates every page under /admin behind the admin role.
-// Non-admins are redirected away before the route renders, so admin tools
-// don't need to repeat the check on the client. Tool-specific API routes
-// still re-check (defense in depth).
+// Server component — gates every page under /admin. Super admins see all
+// tools; active gym admins/coaches see the subset marked non-super-only
+// (movements, benchmarks, recovery movements). Anyone else is redirected.
+// Super-only sub-routes have their own layout gate under /admin/(super)/.
 // ---------------------------------------------------------------------------
 
 import { redirect } from "next/navigation";
-import { getAdminUser } from "@/lib/admin";
+import { getAdminAccess } from "@/lib/admin/access";
 
 export default async function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const admin = await getAdminUser();
-  if (!admin) redirect("/");
+  const access = await getAdminAccess();
+  if (!access) redirect("/");
 
   return <div className="space-y-4">{children}</div>;
 }

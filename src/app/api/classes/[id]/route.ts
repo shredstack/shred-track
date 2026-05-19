@@ -7,6 +7,7 @@ import { db } from "@/db";
 import {
   classInstances,
   classRegistrations,
+  communityMemberships,
   notifications,
   users,
 } from "@/db/schema";
@@ -86,6 +87,42 @@ export async function PATCH(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  if (body.action === "edit-coach") {
+    // Assign or clear the coach for a single class instance. Overrides the
+    // schedule's default coach for this date only; the unique slot/start_at
+    // index ensures the next materialize run preserves the override.
+    const rawCoach = body.coachId;
+    if (rawCoach !== null && typeof rawCoach !== "string") {
+      return NextResponse.json(
+        { error: "coachId must be a string or null" },
+        { status: 400 }
+      );
+    }
+    if (rawCoach) {
+      const [member] = await db
+        .select({ isCoach: communityMemberships.isCoach, isAdmin: communityMemberships.isAdmin })
+        .from(communityMemberships)
+        .where(
+          and(
+            eq(communityMemberships.communityId, instance.communityId),
+            eq(communityMemberships.userId, rawCoach),
+            eq(communityMemberships.isActive, true)
+          )
+        )
+        .limit(1);
+      if (!member || (!member.isCoach && !member.isAdmin)) {
+        return NextResponse.json(
+          { error: "Coach not in this gym" },
+          { status: 400 }
+        );
+      }
+    }
+    await db
+      .update(classInstances)
+      .set({ coachId: rawCoach })
+      .where(eq(classInstances.id, id));
+    return NextResponse.json({ ok: true });
+  }
   if (body.action === "edit-event") {
     // Admin edits event-only metadata. Reject when applied to a
     // schedule-derived class so the materializer doesn't have its

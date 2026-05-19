@@ -9,7 +9,7 @@
 // without sections are left alone.
 
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   programmingReleases,
@@ -118,13 +118,17 @@ export async function POST(
     const workoutIdByDayIndex = new Map<number, string>();
     for (const day of parsed.days) {
       const workoutDate = addDays(body.weekStart!, day.dayIndex);
+      // Only reuse a workout if it already belongs to a programmed release.
+      // Legacy single WODs (no programmingReleaseId) stay independent so a
+      // CAP paste never absorbs a coach's ad-hoc workout.
       const existing = await tx
         .select({ id: workouts.id, reviewedAt: workouts.reviewedAt })
         .from(workouts)
         .where(
           and(
             eq(workouts.communityId, communityId),
-            eq(workouts.workoutDate, workoutDate)
+            eq(workouts.workoutDate, workoutDate),
+            isNotNull(workouts.programmingReleaseId)
           )
         )
         .limit(1);

@@ -25,7 +25,12 @@ const VALID_DISPLAY = new Set([
   "standalone",
   "inline_and_standalone",
 ]);
-const VALID_INLINE_POS = new Set(["top", "after_wod", "end_of_day"]);
+const VALID_INLINE_POS = new Set([
+  "top",
+  "after_wod",
+  "before_at_home",
+  "end_of_day",
+]);
 
 export async function GET(
   _req: NextRequest,

@@ -1556,7 +1556,7 @@ export const programmingTracks = pgTable("programming_tracks", {
   startsOn: date("starts_on").notNull(),
   endsOn: date("ends_on").notNull(),
   displayMode: text("display_mode").notNull(), // 'inline' | 'standalone' | 'inline_and_standalone'
-  inlinePosition: text("inline_position"), // 'top' | 'after_wod' | 'end_of_day'
+  inlinePosition: text("inline_position"), // 'top' | 'after_wod' | 'before_at_home' | 'end_of_day'
   optInRequired: boolean("opt_in_required").default(false).notNull(),
   scoringConfig: jsonb("scoring_config"),
   status: text("status").default("draft").notNull(), // 'draft' | 'active' | 'archived'
@@ -1661,6 +1661,10 @@ export const programmingTrackDays = pgTable(
     body: text("body"),
     isScored: boolean("is_scored").default(true).notNull(),
     scoreType: text("score_type"),
+    // Structured prescribed amount (e.g. 40 sit-ups). Populated by the
+    // progression generator. Drives the "Mark done" auto-fill on non-WOD
+    // track days so a Done tap counts toward the monthly rollup.
+    prescribedValue: numeric("prescribed_value"),
   },
   (table) => [
     uniqueIndex("programming_track_days_unique").on(table.trackId, table.date),
@@ -1686,6 +1690,39 @@ export type ProgrammingTrackDay = typeof programmingTrackDays.$inferSelect;
 export type NewProgrammingTrackDay = typeof programmingTrackDays.$inferInsert;
 export type ProgrammingTrackParticipation = typeof programmingTrackParticipations.$inferSelect;
 export type NewProgrammingTrackParticipation = typeof programmingTrackParticipations.$inferInsert;
+
+// Per-day scoring for non-WOD tracks (sit-up reps, step counts, grams of
+// veggies, etc.) — see spec §3.2. WOD-shaped track days route to the
+// existing `scores` table; this table is only for `programming_track_days`
+// rows that have no linked workout.
+export const trackDayScores = pgTable(
+  "track_day_scores",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    trackDayId: uuid("track_day_id")
+      .notNull()
+      .references(() => programmingTrackDays.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    numericValue: numeric("numeric_value"),
+    textValue: text("text_value"),
+    // Denormalized from the parent track's scoring_config at write time so
+    // a coach changing the unit mid-month doesn't rewrite past entries.
+    unit: text("unit"),
+    isComplete: boolean("is_complete").default(true).notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("track_day_scores_unique").on(table.trackDayId, table.userId),
+    index("track_day_scores_user_idx").on(table.userId, table.createdAt),
+  ]
+);
+
+export type TrackDayScore = typeof trackDayScores.$inferSelect;
+export type NewTrackDayScore = typeof trackDayScores.$inferInsert;
 
 // ============================================
 // Classes (spec §2.2)

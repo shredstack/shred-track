@@ -253,6 +253,7 @@ export async function fetchActiveChallenge(
       name: programmingTracks.name,
       startsOn: programmingTracks.startsOn,
       endsOn: programmingTracks.endsOn,
+      scoringConfig: programmingTracks.scoringConfig,
     })
     .from(programmingTracks)
     .where(
@@ -281,12 +282,54 @@ export async function fetchActiveChallenge(
   const end = new Date(`${track.endsOn}T00:00:00Z`).getTime();
   const dayNumber = Math.floor((todayMs - start) / 86_400_000) + 1;
   const totalDays = Math.floor((end - start) / 86_400_000) + 1;
+
+  // Cumulative rollup — only when the track has scoring configured. The
+  // sum aggregates across all of this user's `track_day_scores` rows on
+  // any day of the track.
+  let rollup: ChallengeCardData["rollup"] = null;
+  const config = (track.scoringConfig ?? null) as {
+    unit?: string;
+    unitLabel?: string;
+  } | null;
+  if (config && config.unit) {
+    const { trackDayScores } = await import("@/db/schema");
+    const [agg] = await db
+      .select({
+        sum: sql<string | null>`sum(${trackDayScores.numericValue})`,
+        daysLogged: sql<number>`count(*)::int`,
+      })
+      .from(trackDayScores)
+      .innerJoin(
+        programmingTrackDays,
+        eq(trackDayScores.trackDayId, programmingTrackDays.id)
+      )
+      .where(
+        and(
+          eq(programmingTrackDays.trackId, track.id),
+          eq(trackDayScores.userId, userId)
+        )
+      );
+    const sum = agg?.sum != null ? Number(agg.sum) : 0;
+    if (sum > 0 || (agg?.daysLogged ?? 0) > 0) {
+      const unitLabel =
+        config.unit === "custom"
+          ? config.unitLabel ?? "units"
+          : config.unit;
+      rollup = {
+        sum,
+        unitLabel,
+        daysLogged: agg?.daysLogged ?? 0,
+      };
+    }
+  }
+
   return {
     trackId: track.id,
     name: track.name,
     dayNumber,
     totalDays,
     todayBody: day?.body ?? null,
+    rollup,
   };
 }
 

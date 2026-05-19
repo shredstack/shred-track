@@ -69,6 +69,11 @@ export interface AdminTool {
   description: string;
   icon: LucideIcon;
   group: AdminGroup;
+  // When true, only super admins (users.is_admin) see this tool. Otherwise
+  // any gym admin/coach can see it too. Movements, benchmarks, and recovery
+  // movements are intentionally open to gym staff so coaches can curate
+  // their library without going through a super admin.
+  superOnly: boolean;
 }
 
 export const ADMIN_TOOLS: AdminTool[] = [
@@ -78,6 +83,7 @@ export const ADMIN_TOOLS: AdminTool[] = [
     description: "Toggle features per gym (gym_programming, classes, etc.)",
     icon: Flag,
     group: "platform",
+    superOnly: true,
   },
   {
     slug: "movements",
@@ -85,6 +91,7 @@ export const ADMIN_TOOLS: AdminTool[] = [
     description: "Validate user submissions, edit, and add canonical movements",
     icon: Dumbbell,
     group: "crossfit",
+    superOnly: false,
   },
   {
     slug: "benchmarks",
@@ -92,6 +99,7 @@ export const ADMIN_TOOLS: AdminTool[] = [
     description: "Manage canonical benchmark workouts (Girls, Heroes, etc.)",
     icon: Trophy,
     group: "crossfit",
+    superOnly: false,
   },
   {
     slug: "gyms",
@@ -99,6 +107,7 @@ export const ADMIN_TOOLS: AdminTool[] = [
     description: "Create gyms and assign gym admins",
     icon: Building,
     group: "users",
+    superOnly: true,
   },
   {
     slug: "vips",
@@ -106,6 +115,7 @@ export const ADMIN_TOOLS: AdminTool[] = [
     description: "Grant blanket VIP access to users (free paid features)",
     icon: Crown,
     group: "users",
+    superOnly: true,
   },
   {
     slug: "hyrox-vip",
@@ -113,6 +123,7 @@ export const ADMIN_TOOLS: AdminTool[] = [
     description: "Metered HYROX plan allowance per user",
     icon: Sparkles,
     group: "hyrox",
+    superOnly: true,
   },
   {
     slug: "recovery-movements",
@@ -120,6 +131,7 @@ export const ADMIN_TOOLS: AdminTool[] = [
     description: "Validate user submissions, edit, delete, and manage videos",
     icon: HeartPulse,
     group: "recovery",
+    superOnly: false,
   },
 ];
 
@@ -127,7 +139,16 @@ export function getAdminTool(slug: string): AdminTool | undefined {
   return ADMIN_TOOLS.find((t) => t.slug === slug);
 }
 
-export function groupAdminTools(): Record<AdminGroup, AdminTool[]> {
+/** Returns the subset of tools the caller is allowed to see. */
+export function visibleAdminTools(isSuperAdmin: boolean): AdminTool[] {
+  return isSuperAdmin
+    ? ADMIN_TOOLS
+    : ADMIN_TOOLS.filter((t) => !t.superOnly);
+}
+
+export function groupAdminTools(
+  isSuperAdmin: boolean
+): Record<AdminGroup, AdminTool[]> {
   const grouped = {
     platform: [],
     crossfit: [],
@@ -135,6 +156,8 @@ export function groupAdminTools(): Record<AdminGroup, AdminTool[]> {
     recovery: [],
     users: [],
   } as Record<AdminGroup, AdminTool[]>;
-  for (const tool of ADMIN_TOOLS) grouped[tool.group].push(tool);
+  for (const tool of visibleAdminTools(isSuperAdmin)) {
+    grouped[tool.group].push(tool);
+  }
   return grouped;
 }

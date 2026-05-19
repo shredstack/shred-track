@@ -6,7 +6,7 @@
 // touches user-edited fields so the CAP re-paste guard skips it.
 
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   WORKOUT_SECTION_KINDS,
@@ -93,13 +93,17 @@ export async function POST(
       );
     }
     workoutId = await db.transaction(async (tx) => {
+      // Only reuse a workout if it already belongs to a programmed release.
+      // Legacy WODs (no programmingReleaseId) stay separate so adding a new
+      // programmed day never absorbs a coach's ad-hoc WOD title/body.
       const [existing] = await tx
         .select({ id: workouts.id })
         .from(workouts)
         .where(
           and(
             eq(workouts.communityId, communityId),
-            eq(workouts.workoutDate, workoutDate)
+            eq(workouts.workoutDate, workoutDate),
+            isNotNull(workouts.programmingReleaseId)
           )
         )
         .limit(1);

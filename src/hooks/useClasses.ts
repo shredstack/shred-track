@@ -42,6 +42,43 @@ export function useGymClasses(
   });
 }
 
+/**
+ * Upcoming events across the next ~12 weeks. Members see this above the
+ * weekly class grid so a Murph or partner WOD isn't hidden behind a
+ * week-paginator.
+ */
+export function useUpcomingEvents(communityId: string | null) {
+  return useQuery<{ instances: ClassInstanceListItem[] }>({
+    queryKey: ["gym", communityId, "upcoming-events"],
+    enabled: !!communityId,
+    queryFn: async () => {
+      const today = new Date();
+      const to = new Date(today.getTime() + 84 * 86_400_000);
+      const from = today.toISOString().slice(0, 10);
+      const toIso = to.toISOString().slice(0, 10);
+      const res = await fetch(
+        `/api/gym/${communityId}/classes/instances?from=${from}&to=${toIso}&kind=event`
+      );
+      if (!res.ok) throw new Error("Failed to load events");
+      return res.json();
+    },
+  });
+}
+
+function invalidateClassesAndEvents(
+  qc: ReturnType<typeof useQueryClient>,
+  communityId: string | null,
+  fromIso: string,
+  toIso: string
+) {
+  qc.invalidateQueries({
+    queryKey: ["gym", communityId, "classes", fromIso, toIso],
+  });
+  qc.invalidateQueries({
+    queryKey: ["gym", communityId, "upcoming-events"],
+  });
+}
+
 export function useRegisterForClass(
   communityId: string | null,
   fromIso: string,
@@ -58,11 +95,8 @@ export function useRegisterForClass(
         throw new Error(body?.error || "Could not register");
       }
     },
-    onSuccess: () => {
-      qc.invalidateQueries({
-        queryKey: ["gym", communityId, "classes", fromIso, toIso],
-      });
-    },
+    onSuccess: () =>
+      invalidateClassesAndEvents(qc, communityId, fromIso, toIso),
   });
 }
 
@@ -78,10 +112,7 @@ export function useUnregisterFromClass(
         method: "DELETE",
       });
     },
-    onSuccess: () => {
-      qc.invalidateQueries({
-        queryKey: ["gym", communityId, "classes", fromIso, toIso],
-      });
-    },
+    onSuccess: () =>
+      invalidateClassesAndEvents(qc, communityId, fromIso, toIso),
   });
 }

@@ -26,7 +26,7 @@ export default function GymPostPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const { data, isLoading } = usePostComments(id);
-  const create = useCreatePostComment(id);
+  const create = useCreatePostComment(id, null);
   const [body, setBody] = useState("");
 
   return (

@@ -12,6 +12,7 @@ import {
 } from "@/db/schema";
 import { eq, and, inArray, notInArray } from "drizzle-orm";
 import { getAdminUser } from "@/lib/admin";
+import { getAdminAccess } from "@/lib/admin/access";
 import {
   coerceBenchmarkBlockValues,
   coerceBenchmarkMovementValues,
@@ -19,15 +20,15 @@ import {
   type BenchmarkPartInput,
 } from "@/lib/crossfit/benchmark-parts";
 
-// PUT /api/admin/benchmarks/[id] — update any benchmark (admin can edit
-// system benchmarks). Accepts the multi-part shape; diffs parts &
-// movements like the workouts PUT route.
+// PUT /api/admin/benchmarks/[id] — update any benchmark (including system).
+// Open to super admins and to gym coaches/admins. Edits land globally and
+// immediately; there is no review queue today.
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const user = await getAdminUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const access = await getAdminAccess();
+  if (!access) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
   const body = await req.json();
@@ -543,7 +544,9 @@ export async function PUT(
   return NextResponse.json(result);
 }
 
-// DELETE /api/admin/benchmarks/[id] — delete any benchmark (admin only)
+// DELETE /api/admin/benchmarks/[id] — delete any benchmark. Super admin
+// only: benchmarks are globally shared, so coaches at one gym shouldn't be
+// able to delete rows other gyms reference.
 export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   ChevronDown,
   ChevronUp,
+  Eye,
   Loader2,
   Plus,
   Trash2,
@@ -14,7 +15,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
@@ -32,12 +32,12 @@ import {
 import {
   WORKOUT_SECTION_KINDS,
   WORKOUT_SECTION_KIND_LABELS,
-  WORKOUT_SECTION_SCORE_TYPES,
   type WorkoutSectionKind,
 } from "@/db/schema";
 import { SmartBuilder } from "@/components/crossfit/smart-builder";
 import { builderPartToPayload } from "@/lib/crossfit/builder-payload";
 import type { WorkoutBuilderForm } from "@/types/crossfit";
+import { WorkoutPreviewDialog } from "./workout-preview-dialog";
 
 interface SectionWire {
   id: string;
@@ -85,6 +85,7 @@ export function ProgrammingDayCard({
   const [expanded, setExpanded] = useState(true);
   const [adding, setAdding] = useState(false);
   const [newKind, setNewKind] = useState<WorkoutSectionKind>("wod");
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   async function addSection() {
     setAdding(true);
@@ -142,7 +143,25 @@ export function ProgrammingDayCard({
             </span>
           )}
         </button>
+        {workout && sortedSections.length > 0 ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setPreviewOpen(true)}
+            className="gap-1.5"
+            title="See how athletes will view this day"
+          >
+            <Eye className="h-3.5 w-3.5" />
+            Preview
+          </Button>
+        ) : null}
       </CardHeader>
+      <WorkoutPreviewDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        workoutId={workout?.id ?? null}
+        dateLabel={formatHeader(date)}
+      />
       {expanded ? (
         <CardContent className="space-y-2">
           {sortedSections.map((s) => (
@@ -200,10 +219,6 @@ function SectionRow({ communityId, section, onMutated }: SectionRowProps) {
   const [kind, setKind] = useState<WorkoutSectionKind>(section.kind);
   const [title, setTitle] = useState(section.title ?? "");
   const [bodyText, setBodyText] = useState(section.body ?? "");
-  const [isScored, setIsScored] = useState(section.isScored);
-  const [scoreType, setScoreType] = useState<string>(
-    section.scoreType ?? "no_score"
-  );
   const [saving, setSaving] = useState(false);
   const [builderOpen, setBuilderOpen] = useState(false);
   const [builderSaving, setBuilderSaving] = useState(false);
@@ -260,8 +275,6 @@ function SectionRow({ communityId, section, onMutated }: SectionRowProps) {
             kind,
             title: title || null,
             body: bodyText || null,
-            isScored,
-            scoreType: isScored ? scoreType : null,
           }),
         }
       );
@@ -308,15 +321,6 @@ function SectionRow({ communityId, section, onMutated }: SectionRowProps) {
               <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-primary">
                 {WORKOUT_SECTION_KIND_LABELS[section.kind]}
               </span>
-              {section.isScored ? (
-                <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-400">
-                  {section.scoreType?.toUpperCase() ?? "SCORED"}
-                </span>
-              ) : (
-                <span className="rounded bg-muted/30 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground">
-                  NO SCORE
-                </span>
-              )}
               {section.title ? (
                 <span className="ml-1 truncate text-xs text-muted-foreground">
                   {section.title}
@@ -436,37 +440,10 @@ function SectionRow({ communityId, section, onMutated }: SectionRowProps) {
           open the Smart Builder.
         </p>
       </div>
-      <div className="flex items-center justify-between gap-2 rounded-md bg-background/40 px-2 py-1.5">
-        <div>
-          <div className="text-xs font-medium">Scored</div>
-          <div className="text-[10px] text-muted-foreground">
-            Members can log a score on this section.
-          </div>
-        </div>
-        <Switch checked={isScored} onCheckedChange={setIsScored} />
-      </div>
-      {isScored ? (
-        <div className="space-y-1">
-          <Label className="text-[10px] text-muted-foreground">Score type</Label>
-          <Select
-            value={scoreType}
-            onValueChange={(v) => setScoreType(v ?? "no_score")}
-          >
-            <SelectTrigger className="h-8">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {WORKOUT_SECTION_SCORE_TYPES.filter((t) => t !== "no_score").map(
-                (t) => (
-                  <SelectItem key={t} value={t}>
-                    {t.charAt(0).toUpperCase() + t.slice(1)}
-                  </SelectItem>
-                )
-              )}
-            </SelectContent>
-          </Select>
-        </div>
-      ) : null}
+      <p className="rounded-md border border-border/60 bg-muted/20 px-2 py-1.5 text-[10px] text-muted-foreground">
+        Scoring is configured per-part in the Smart Builder. Click{" "}
+        <strong>Build</strong> from the section row to set score types.
+      </p>
       <div className="flex justify-end gap-2 pt-1">
         <Button
           size="sm"

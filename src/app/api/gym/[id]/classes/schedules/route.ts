@@ -102,7 +102,10 @@ export async function POST(
   });
 
   // Materialize class_instances right away so athletes see them on the
-  // schedule without waiting for the next daily cron.
+  // schedule without waiting for the next weekly cron. Surface failures —
+  // a schedule with no instances is invisible to athletes, so silent
+  // failure is the wrong default. The schedule row already committed, so
+  // the user can retry via the cron or by re-saving.
   try {
     await materializeScheduleSlotsForCommunity({
       communityId,
@@ -110,6 +113,14 @@ export async function POST(
     });
   } catch (err) {
     console.error("materialize-after-schedule-create failed", err);
+    return NextResponse.json(
+      {
+        schedule: inserted,
+        warning:
+          "Schedule saved but failed to generate class instances. Try editing the schedule to retry.",
+      },
+      { status: 207 }
+    );
   }
 
   return NextResponse.json(inserted, { status: 201 });

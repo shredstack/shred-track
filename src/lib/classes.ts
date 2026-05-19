@@ -23,6 +23,12 @@ export interface SlotExpansion {
  * Expand a slot's RRULE within [windowStart, windowEnd) using the gym's
  * timezone. The slot stores rrule + start_time (local). For each rrule
  * occurrence we attach the local start_time and resolve to a UTC instant.
+ *
+ * Because RRule operates on naive UTC dates while windowStart/windowEnd are
+ * real UTC instants, we expand against the slot's active range first, then
+ * filter to [windowStart, windowEnd] after converting each occurrence to its
+ * real UTC instant. Filtering in the naive frame would drop today's still-
+ * upcoming classes for gyms west of UTC.
  */
 export function expandSlotOccurrences(opts: {
   rrule: string;
@@ -34,14 +40,8 @@ export function expandSlotOccurrences(opts: {
   windowStart: Date;
   windowEnd: Date;
 }): SlotExpansion[] {
-  const lower = max(opts.activeFrom, opts.windowStart);
-  const upper = opts.activeTo
-    ? min(addDays(opts.activeTo, 1), opts.windowEnd)
-    : opts.windowEnd;
-  if (upper <= lower) return [];
+  if (opts.windowEnd <= opts.windowStart) return [];
 
-  // RRule operates on naive dates. We anchor with DTSTART derived from
-  // activeFrom + startTime to keep BYHOUR/BYMINUTE meaningful.
   const [hh, mm, ss] = opts.startTime.split(":").map((s) => Number(s) || 0);
   const dtStart = new Date(
     Date.UTC(
@@ -59,16 +59,23 @@ export function expandSlotOccurrences(opts: {
   } catch {
     return [];
   }
-  const occurrences = rule.between(lower, upper, true);
+  // Expand across the slot's active range in the naive frame, then filter
+  // post-conversion below. Add a 1-day buffer on either side so DST shifts
+  // and gym tz offsets never cause the right occurrence to fall outside.
+  const naiveLower = addDays(opts.activeFrom, -1);
+  const naiveUpper = opts.activeTo
+    ? addDays(opts.activeTo, 2)
+    : addDays(opts.windowEnd, 2);
+  const occurrences = rule.between(naiveLower, naiveUpper, true);
   const out: SlotExpansion[] = [];
   for (const occ of occurrences) {
-    // `occ` is in UTC-naive form per rrule semantics. Treat the
-    // year/month/day as gym-local, apply the gym tz offset to get a real UTC
-    // instant.
     const localISO = `${occ.getUTCFullYear()}-${pad(occ.getUTCMonth() + 1)}-${pad(
       occ.getUTCDate()
     )}T${pad(hh)}:${pad(mm)}:${pad(ss)}`;
     const startUtc = gymLocalToUtc(localISO, opts.gymTimezone);
+    if (startUtc < opts.windowStart) continue;
+    if (startUtc >= opts.windowEnd) continue;
+    if (opts.activeTo && startUtc > addDays(opts.activeTo, 1)) continue;
     out.push({
       startAt: startUtc,
       endAt: addMinutes(startUtc, opts.durationMin),
@@ -88,12 +95,6 @@ function pad(n: number): string {
   return n.toString().padStart(2, "0");
 }
 
-function max(a: Date, b: Date): Date {
-  return a > b ? a : b;
-}
-function min(a: Date, b: Date): Date {
-  return a < b ? a : b;
-}
 function addDays(d: Date, n: number): Date {
   const x = new Date(d);
   x.setUTCDate(x.getUTCDate() + n);
@@ -114,16 +115,17 @@ export function gymLocalToUtc(localIso: string, tz: string): Date {
 
 /**
  * Materialize `class_instances` rows for one community's active schedule
- * slots over the next `windowDays` days. Shared by the daily Inngest cron
+ * slots over the next `windowDays` days. Shared by the weekly Inngest cron
  * and the schedule-creation API so coaches see classes immediately after
- * saving a schedule. Idempotent via the `(slot_id, start_at)` unique index.
+ * saving a schedule. Idempotent via the `(slot_id, start_at)` unique index,
+ * so re-runs preserve per-instance overrides (coach swap, cancellation).
  */
 export async function materializeScheduleSlotsForCommunity(opts: {
   communityId: string;
   windowDays?: number;
   scheduleIds?: string[];
 }): Promise<{ slots: number; inserted: number }> {
-  const windowDays = opts.windowDays ?? 28;
+  const windowDays = opts.windowDays ?? 84;
   const today = new Date();
   const windowEnd = new Date(today.getTime() + windowDays * 86_400_000);
 

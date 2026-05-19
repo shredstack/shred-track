@@ -15,7 +15,8 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { DateNavigator } from "@/components/shared/date-navigator";
-import { useGymContext, useActiveMembership } from "@/hooks/useGymContext";
+import { useActiveMembership } from "@/hooks/useGymContext";
+import { useAdminAccess } from "@/hooks/useAdminAccess";
 import {
   useRecoveryToday,
   useStartRecoverySession,
@@ -330,9 +331,8 @@ function EmptyState() {
 }
 
 function ManageLink() {
-  const { data: ctx } = useGymContext();
-  const isSuper = !!ctx?.user.isSuperAdmin;
-  if (!isSuper) return null;
+  const { canAccessAdmin } = useAdminAccess();
+  if (!canAccessAdmin) return null;
   return (
     <Link
       href="/admin/recovery-movements"

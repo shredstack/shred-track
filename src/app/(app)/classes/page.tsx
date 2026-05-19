@@ -11,6 +11,7 @@ import {
   useGymClasses,
   useRegisterForClass,
   useUnregisterFromClass,
+  useUpcomingEvents,
   type ClassInstanceListItem,
 } from "@/hooks/useClasses";
 import { Card, CardContent } from "@/components/ui/card";
@@ -38,6 +39,10 @@ export default function ClassesPage() {
   const { fromIso, toIso } = useMemo(() => weekBounds(weekOffset), [weekOffset]);
   const activeId = ctx?.activeCommunityId ?? null;
   const { data, isLoading } = useGymClasses(activeId, fromIso, toIso);
+  const { data: eventData } = useUpcomingEvents(activeId);
+  const upcomingEvents = (eventData?.instances ?? []).filter(
+    (e) => e.status !== "cancelled"
+  );
 
   if (!activeId) {
     return (
@@ -70,6 +75,22 @@ export default function ClassesPage() {
 
   return (
     <div className="space-y-4">
+      {upcomingEvents.length > 0 ? (
+        <section className="space-y-2">
+          <h2 className="text-xs uppercase tracking-wider text-muted-foreground">
+            Upcoming events
+          </h2>
+          {upcomingEvents.map((evt) => (
+            <ClassRow
+              key={evt.id}
+              instance={evt}
+              communityId={activeId}
+              fromIso={fromIso}
+              toIso={toIso}
+            />
+          ))}
+        </section>
+      ) : null}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Classes</h1>
         <div className="flex items-center gap-2">

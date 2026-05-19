@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GymToolHeader } from "@/components/gym/gym-tool-header";
 import { CalendarRange } from "lucide-react";
+import { toast } from "sonner";
 
 const RRULE_DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
 const DAY_LABELS: Record<(typeof RRULE_DAYS)[number], string> = {
@@ -61,11 +62,24 @@ export default function SchedulesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error("Failed");
-      return res.json();
+      const body = await res.json().catch(() => null);
+      if (!res.ok && res.status !== 207) {
+        throw new Error(body?.error ?? "Failed to save schedule");
+      }
+      // 207: schedule saved but instance materialization failed. Surface the
+      // warning so the coach knows to retry rather than thinking it worked.
+      if (res.status === 207 && body?.warning) {
+        toast.warning(body.warning);
+      } else {
+        toast.success("Schedule saved");
+      }
+      return body;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["gym", activeId, "class-schedules"] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
     },
   });
 

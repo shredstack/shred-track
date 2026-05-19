@@ -1,8 +1,10 @@
 // materialize-class-instances (spec §2.2)
 //
-// Daily cron. Expands every active class_schedule_slot 4 weeks ahead via
+// Weekly cron. Expands every active class_schedule_slot 12 weeks ahead via
 // RRULE and inserts class_instances rows that don't yet exist. Idempotent:
-// the (slot_id, start_at) unique index guarantees re-runs are no-ops.
+// the (slot_id, start_at) unique index guarantees re-runs are no-ops, so
+// per-instance overrides (coach swap, cancellation) survive subsequent
+// materializations.
 
 import { and, eq, isNull, lte, or } from "drizzle-orm";
 import { sql } from "drizzle-orm";
@@ -16,7 +18,7 @@ import {
 } from "@/db/schema";
 import { expandSlotOccurrences } from "@/lib/classes";
 
-const CRON = "0 9 * * *"; // daily 09:00 UTC
+const CRON = "0 9 * * 1"; // every Monday 09:00 UTC
 
 export const materializeClassInstances = inngest.createFunction(
   {
@@ -27,7 +29,7 @@ export const materializeClassInstances = inngest.createFunction(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async ({ step }: { step: any }) => {
     const today = new Date();
-    const fourWeeks = new Date(today.getTime() + 28 * 86_400_000);
+    const twelveWeeks = new Date(today.getTime() + 84 * 86_400_000);
 
     const slots = (await step.run("list-active-slots", async () => {
       return db
@@ -60,7 +62,7 @@ export const materializeClassInstances = inngest.createFunction(
               isNull(classScheduleSlots.activeTo),
               lte(
                 sql`${classScheduleSlots.activeFrom}`,
-                fourWeeks.toISOString().slice(0, 10)
+                twelveWeeks.toISOString().slice(0, 10)
               )
             )
           )
@@ -91,7 +93,7 @@ export const materializeClassInstances = inngest.createFunction(
         activeTo: s.activeTo ? new Date(`${s.activeTo}T00:00:00Z`) : null,
         gymTimezone: s.gymTimezone,
         windowStart: today,
-        windowEnd: fourWeeks,
+        windowEnd: twelveWeeks,
       });
       if (!expansions.length) continue;
       const result = (await step.run(`insert-slot-${s.slotId}`, async () => {

@@ -275,7 +275,13 @@ function MovementRow({
       <span className="flex-1">
         {mov.isMaxReps ? (
           <span className="mr-1 inline-flex items-center rounded bg-amber-500/15 px-1 py-px text-[10px] font-bold text-amber-300">
-            MAX
+            {mov.metricType === "calories"
+              ? "MAX CAL"
+              : mov.metricType === "distance"
+                ? "MAX DIST"
+                : mov.metricType === "duration"
+                  ? "MAX TIME"
+                  : "MAX REPS"}
           </span>
         ) : (
           mov.prescribedReps && (
@@ -329,12 +335,21 @@ function PartSection({
 
     if (part.workoutType === "intervals") {
       if (part.intervalRounds && part.intervalRounds.length > 0) {
-        return part.intervalRounds
-          .map(
-            (r) =>
-              `${formatSecondsAsClock(r.workSeconds)}/${formatSecondsAsClock(r.restSeconds)}`
-          )
-          .join(" → ");
+        return (
+          <span className="flex flex-col gap-0.5 text-base sm:text-lg">
+            <span className="text-[10px] font-normal uppercase tracking-wider text-muted-foreground">
+              work / rest
+            </span>
+            <span>
+              {part.intervalRounds
+                .map(
+                  (r) =>
+                    `${formatSecondsAsClock(r.workSeconds)} / ${formatSecondsAsClock(r.restSeconds)}`
+                )
+                .join(" → ")}
+            </span>
+          </span>
+        );
       }
       const work =
         part.intervalWorkSeconds != null
@@ -345,7 +360,18 @@ function PartSection({
           ? formatSecondsAsClock(part.intervalRestSeconds)
           : null;
       if (work || rest || part.rounds) {
-        return `${part.rounds ? `${part.rounds} × ` : ""}${work || "?"}${rest ? ` / ${rest}` : ""}`;
+        const roundsLabel = part.rounds
+          ? `${part.rounds} ${part.rounds === 1 ? "round" : "rounds"}`
+          : null;
+        const workLabel = work ? `${work} work` : null;
+        const restLabel = rest ? `${rest} rest` : null;
+        const cadence = [workLabel, restLabel].filter(Boolean).join(" / ");
+        const text =
+          roundsLabel && cadence
+            ? `${roundsLabel} · ${cadence}`
+            : (roundsLabel ?? cadence);
+        if (!text) return null;
+        return <span className="text-base sm:text-lg">{text}</span>;
       }
       return null;
     }

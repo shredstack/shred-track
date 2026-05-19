@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, Flag } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
@@ -12,6 +12,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { AdminToolHeader } from "@/components/admin/admin-tool-header";
+import { getAdminTool } from "@/lib/admin/tools";
 
 interface FlagRow {
   key: string;
@@ -104,24 +106,27 @@ export default function AdminFeatureFlagsPage() {
     }
   }
 
+  const tool = getAdminTool("feature-flags");
+  const header = tool ? (
+    <AdminToolHeader label={tool.label} description={tool.description} icon={tool.icon} />
+  ) : (
+    <AdminToolHeader label="Feature flags" description="Toggle features per gym." icon={Flag} />
+  );
+
   if (isLoading || !data) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      <div className="space-y-5">
+        {header}
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">Feature flags</h1>
-        <p className="text-sm text-muted-foreground">
-          Toggle features per gym. User-scoped flags are managed separately
-          (see the legacy <code className="text-xs">move_to_gym</code> tool
-          for an example).
-        </p>
-      </div>
+    <div className="space-y-5">
+      {header}
 
       <Card>
         <CardHeader>

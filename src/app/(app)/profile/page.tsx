@@ -76,6 +76,7 @@ import {
   type StationAssessment,
 } from "@/hooks/useProfile";
 import { useGymContext } from "@/hooks/useGymContext";
+import { useAdminAccess } from "@/hooks/useAdminAccess";
 import { JoinGymDialog } from "@/components/shared/join-gym-dialog";
 import {
   DIVISIONS,
@@ -460,7 +461,7 @@ function PersonalInfoSection() {
             <div className="space-y-1.5">
               <Label htmlFor="profile-country">Country</Label>
               <Select
-                value={fields.country || undefined}
+                value={fields.country || null}
                 onValueChange={(value) => {
                   const v = value ?? "";
                   setField("country", v);
@@ -518,7 +519,7 @@ function PersonalInfoSection() {
                 </Label>
                 {fields.country === "US" ? (
                   <Select
-                    value={fields.state || undefined}
+                    value={fields.state || null}
                     onValueChange={(value) => {
                       setField("state", value ?? "");
                       markTouched("state");
@@ -764,7 +765,7 @@ function EmergencyContactSection() {
             <div className="space-y-1.5">
               <Label htmlFor="emc-relation">Relationship</Label>
               <Select
-                value={fields.relation || undefined}
+                value={fields.relation || null}
                 onValueChange={(value) => {
                   setField("relation", value ?? "");
                   markTouched("relation");
@@ -1769,23 +1770,11 @@ export default function ProfilePage() {
         </CardContent>
       </Card>
 
-      {/* Admin (only visible to admins) */}
-      {user?.isAdmin && (
-        <Card>
-          <CardContent className="pt-4">
-            <Link
-              href="/admin"
-              className="flex w-full items-center gap-3 rounded-lg px-2 py-3.5 text-sm transition-colors hover:bg-muted/40 group"
-            >
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-                <Shield className="h-4 w-4 text-primary" />
-              </div>
-              <span className="flex-1 text-left font-medium">Admin</span>
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
-            </Link>
-          </CardContent>
-        </Card>
-      )}
+      {/* Admin — visible to super admins and to active gym admins/coaches.
+          Source of truth is useAdminAccess so nav, Profile, and Recovery's
+          "Manage" link stay in sync. */}
+      <ProfileAdminLink />
+
 
       {/* Security — change/set password */}
       <SecuritySection />
@@ -1838,6 +1827,32 @@ function SettingsLink({
       <span className="flex-1 text-left font-medium">{label}</span>
       <ChevronRight className="h-4 w-4 text-muted-foreground" />
     </Link>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Admin entry — shown for super admins and active gym admins/coaches.
+// Driven by useAdminAccess so this matches the nav's visibility rule.
+// ---------------------------------------------------------------------------
+
+function ProfileAdminLink() {
+  const { canAccessAdmin } = useAdminAccess();
+  if (!canAccessAdmin) return null;
+  return (
+    <Card>
+      <CardContent className="pt-4">
+        <Link
+          href="/admin"
+          className="flex w-full items-center gap-3 rounded-lg px-2 py-3.5 text-sm transition-colors hover:bg-muted/40 group"
+        >
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+            <Shield className="h-4 w-4 text-primary" />
+          </div>
+          <span className="flex-1 text-left font-medium">Admin</span>
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        </Link>
+      </CardContent>
+    </Card>
   );
 }
 

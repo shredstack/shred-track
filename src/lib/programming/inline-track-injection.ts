@@ -123,6 +123,35 @@ export async function injectInlineTrackSections(opts: {
         await db.execute(
           sql`update workout_sections set position = position + 1 where workout_id = ${w.id} and position >= ${position}`
         );
+      } else if (insertPosition === "before_at_home") {
+        // Slot between Stretching and At-Home. If no at-home section
+        // exists, fall through to end_of_day so the section is still
+        // visible.
+        const atHome = await db
+          .select({ position: workoutSections.position })
+          .from(workoutSections)
+          .where(
+            and(
+              eq(workoutSections.workoutId, w.id),
+              eq(workoutSections.kind, "at_home")
+            )
+          )
+          .orderBy(asc(workoutSections.position))
+          .limit(1);
+        if (atHome.length > 0) {
+          position = atHome[0].position;
+          await db.execute(
+            sql`update workout_sections set position = position + 1 where workout_id = ${w.id} and position >= ${position}`
+          );
+        } else {
+          const [maxRow] = await db
+            .select({
+              max: sql<number>`coalesce(max(${workoutSections.position}), -1)::int`,
+            })
+            .from(workoutSections)
+            .where(eq(workoutSections.workoutId, w.id));
+          position = (maxRow?.max ?? -1) + 1;
+        }
       } else {
         // end_of_day
         const [maxRow] = await db

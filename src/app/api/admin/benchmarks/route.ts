@@ -7,7 +7,7 @@ import {
   benchmarkWorkoutParts,
 } from "@/db/schema";
 import { asc } from "drizzle-orm";
-import { getAdminUser } from "@/lib/admin";
+import { getAdminAccess } from "@/lib/admin/access";
 import {
   assembleBenchmarkParts,
   coerceBenchmarkBlockValues,
@@ -17,10 +17,11 @@ import {
   type BenchmarkPartInput,
 } from "@/lib/crossfit/benchmark-parts";
 
-// GET /api/admin/benchmarks — list all benchmarks (admin only, includes system)
+// GET /api/admin/benchmarks — list all benchmarks (includes system).
+// Open to super admins and to gym coaches/admins so they can curate.
 export async function GET(_req: NextRequest) {
-  const user = await getAdminUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const access = await getAdminAccess();
+  if (!access) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const rows = await db
     .select()
@@ -55,14 +56,16 @@ export async function GET(_req: NextRequest) {
   return NextResponse.json(result);
 }
 
-// POST /api/admin/benchmarks — create a benchmark (admin can create system benchmarks).
+// POST /api/admin/benchmarks — create a benchmark (system or otherwise).
+// Open to super admins and to gym coaches/admins. There is no review
+// queue today; new rows are visible globally on save.
 //
 // Multi-part shape: `parts: [...]` (same schema as the user-facing
 // benchmark POST). The first part's structural fields are mirrored onto
 // the legacy top-level columns on benchmark_workouts for read-fallback.
 export async function POST(req: NextRequest) {
-  const user = await getAdminUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const access = await getAdminAccess();
+  if (!access) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
   const {
@@ -138,7 +141,7 @@ export async function POST(req: NextRequest) {
         timeCapSeconds: firstPartValues.timeCapSeconds,
         amrapDurationSeconds: firstPartValues.amrapDurationSeconds,
         repScheme: firstPartValues.repScheme,
-        createdBy: isSystem ? null : user.id,
+        createdBy: isSystem ? null : access.user.id,
         isSystem: isSystem ?? false,
         requiresVest: !!requiresVest,
         vestWeightMaleLb:

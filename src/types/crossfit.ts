@@ -496,6 +496,19 @@ export interface WorkoutSectionDisplay {
   /** Ordered list of workout_part IDs that belong to this section.
    *  The CrossFit tab renders these parts inline under the section card. */
   partIds: string[];
+  /** When the section came from a programming track (Custom Tracks v2),
+   *  these surface the link back so the athlete UI can render a
+   *  TrackDayScoreInput for free-form (no-workout) track days. */
+  sourceTrackId?: string | null;
+  trackDayId?: string | null;
+  /** Inlined from the parent track's scoring_config for free-form track
+   *  days, so the per-day input knows the unit / aggregation / target. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  trackScoringConfig?: any | null;
+  /** Prescribed numeric amount for the day (e.g. 40 sit-ups). Used to
+   *  auto-fill the rollup when the athlete taps "Mark done" without
+   *  entering a number. Null on rest days / unconfigured tracks. */
+  trackPrescribedValue?: number | null;
 }
 
 export interface WorkoutDisplay {

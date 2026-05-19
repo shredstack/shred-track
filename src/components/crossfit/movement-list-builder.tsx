@@ -572,7 +572,7 @@ export function MovementListBuilder({
           onClick={() => setAdvancedFormOpen(true)}
           className="text-[11px] text-primary/80 hover:text-primary whitespace-nowrap"
         >
-          + Custom (advanced)
+          + New Movement
         </button>
       </div>
 

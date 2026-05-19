@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Plus, ClipboardPaste, Wrench, Zap, Trophy, Loader2, Search } from "lucide-react";
+import { Plus, ClipboardPaste, Wrench, Zap, Trophy, Loader2, Search, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -16,6 +16,10 @@ import { BenchmarkPicker } from "@/components/crossfit/benchmark-picker";
 import { ScoreEntry } from "@/components/crossfit/score-entry";
 import { LeaderboardSheet } from "@/components/crossfit/leaderboard-sheet";
 import { DateNavigator } from "@/components/shared/date-navigator";
+import { AvailableTracksSheet } from "@/components/crossfit/available-tracks-sheet";
+import { TrackDayScoreInput } from "@/components/crossfit/track-day-score-input";
+import { useMyTrackDays } from "@/hooks/useTracks";
+import { useIsFeatureOn } from "@/hooks/useFeatureFlag";
 import {
   useWorkoutsByDate,
   useCreateWorkout,
@@ -287,6 +291,17 @@ function CrossfitPageBody() {
     }
     return { mode: "personal" };
   }, [activeMembership, view]);
+
+  // Custom Tracks v2 — opt-in standalone track days for this athlete on
+  // the displayed date (spec §1.4). Inline-only tracks already show up
+  // via injected workout_sections, so they're filtered out server-side.
+  const customTracksV2On = useIsFeatureOn("custom_tracks_v2");
+  const [showAvailableTracks, setShowAvailableTracks] = useState(false);
+  const { data: myTrackDaysData } = useMyTrackDays(
+    customTracksV2On && inGymMode ? activeMembership?.communityId ?? null : null,
+    dateStr
+  );
+  const myTrackDays = myTrackDaysData?.trackDays ?? [];
 
   // Wait for gym context to settle before firing the workouts query —
   // otherwise scope falls through to "personal" during the load window and
@@ -592,6 +607,17 @@ function CrossfitPageBody() {
       )}
 
       <div className="flex items-center justify-end gap-2">
+        {customTracksV2On && inGymMode && activeMembership && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 border-white/[0.08]"
+            onClick={() => setShowAvailableTracks(true)}
+          >
+            <Sparkles className="h-4 w-4" />
+            Available tracks
+          </Button>
+        )}
         <Link href="/crossfit/search">
           <Button variant="outline" size="sm" className="gap-1.5 border-white/[0.08]">
             <Search className="h-4 w-4" />
@@ -676,7 +702,37 @@ function CrossfitPageBody() {
             );
           })}
 
-          {workouts.length === 0 && (
+          {/* Opted-in standalone-track days (spec §1.4). Render as extra
+              cards alongside the CAP workouts — never replacing them. */}
+          {customTracksV2On && inGymMode && myTrackDays.length > 0 &&
+            myTrackDays
+              .filter((td) => !td.workoutId)
+              .map((td) => (
+                <Card key={td.trackDayId} className="border-white/[0.06]">
+                  <CardContent className="space-y-2 py-3">
+                    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <Sparkles className="size-3" />
+                      <span>
+                        Track: {td.trackName} — Day {td.dayNumber}
+                      </span>
+                    </div>
+                    {td.body && (
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
+                        {td.body}
+                      </p>
+                    )}
+                    {td.isScored && (
+                      <TrackDayScoreInput
+                        trackDayId={td.trackDayId}
+                        scoringConfig={td.scoringConfig}
+                        prescribedValue={td.prescribedValue ?? null}
+                      />
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+
+          {workouts.length === 0 && myTrackDays.length === 0 && (
             <Card className="border-dashed border-white/[0.06]">
               <CardContent className="flex flex-col items-center gap-4 py-10">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
@@ -704,6 +760,14 @@ function CrossfitPageBody() {
             </Card>
           )}
         </>
+      )}
+
+      {customTracksV2On && inGymMode && activeMembership && (
+        <AvailableTracksSheet
+          open={showAvailableTracks}
+          onOpenChange={setShowAvailableTracks}
+          communityId={activeMembership.communityId}
+        />
       )}
 
       <Dialog open={showAddWorkout} onOpenChange={setShowAddWorkout}>
