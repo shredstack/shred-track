@@ -1,7 +1,7 @@
 // POST /api/workouts/[id]/move-to-gym — moves a personal workout (the
-// caller's, communityId == null) into a gym they admin. Locked to a single
-// allowlisted email so this stays a temporary one-shot tool for cleaning up
-// pre–multi-gym workouts and doesn't drift into a general-purpose feature.
+// caller's, communityId == null) into a gym they admin. Gated by the
+// `move_to_gym` per-user feature flag so access is granted explicitly via
+// /admin/feature-flags rather than baked-into-code.
 
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
@@ -9,8 +9,7 @@ import { db } from "@/db";
 import { workouts } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canAdminGym } from "@/lib/authz/community";
-
-const ALLOWED_EMAIL = "sarah.dorich@gmail.com";
+import { isFlagOn } from "@/lib/feature-flags";
 
 export async function POST(
   req: NextRequest,
@@ -21,7 +20,7 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  if (user.email.toLowerCase() !== ALLOWED_EMAIL) {
+  if (!(await isFlagOn("move_to_gym", { userId: user.id }))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

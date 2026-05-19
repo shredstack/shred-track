@@ -63,19 +63,29 @@ export const notifyReactionCreated = inngest.createFunction(
 
     if (!pref.inAppEnabled) return { skipped: "pref-disabled" };
 
-    await step.run("insert-notification", async () => {
-      await db.insert(notifications).values({
-        recipientId: ctx.ownerId,
-        actorId,
-        kind: "score_reaction",
-        scoreId,
-        reactionId,
-        workoutId: ctx.workoutId,
-        workoutPartId: ctx.workoutPartId,
-        communityId: ctx.communityId,
-      });
+    const inserted = await step.run("insert-notification", async () => {
+      const [row] = await db
+        .insert(notifications)
+        .values({
+          recipientId: ctx.ownerId,
+          actorId,
+          kind: "score_reaction",
+          scoreId,
+          reactionId,
+          workoutId: ctx.workoutId,
+          workoutPartId: ctx.workoutPartId,
+          communityId: ctx.communityId,
+        })
+        .returning({ id: notifications.id });
+      return row;
     });
 
-    return { delivered: true };
+    // Fan out push delivery via the dispatcher.
+    await step.sendEvent("dispatch-push", {
+      name: "notifications/created",
+      data: { notificationId: inserted.id },
+    });
+
+    return { delivered: true, notificationId: inserted.id };
   }
 );

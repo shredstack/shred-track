@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, ShieldCheck, Star, UserMinus, UserPlus } from "lucide-react";
+import { Loader2, ShieldCheck, Star, UserMinus, UserPlus, Users } from "lucide-react";
 import { useQueryClient, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useGymContext } from "@/hooks/useGymContext";
 import { useGymMembers } from "@/hooks/useGymMembers";
+import { GymToolHeader } from "@/components/gym/gym-tool-header";
 
 export default function GymMembersPage() {
   const { data: ctx } = useGymContext();
@@ -81,7 +82,13 @@ export default function GymMembersPage() {
   });
 
   return (
-    <Card>
+    <div className="space-y-4">
+      <GymToolHeader
+        icon={Users}
+        label="Members"
+        description="Promote coaches and admins, deactivate former members"
+      />
+      <Card>
       <CardHeader>
         <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
           Members
@@ -181,6 +188,7 @@ export default function GymMembersPage() {
           ))
         )}
       </CardContent>
-    </Card>
+      </Card>
+    </div>
   );
 }

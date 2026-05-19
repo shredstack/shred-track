@@ -2,29 +2,77 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Dumbbell, Trophy, Clock, User, Heart } from "lucide-react";
+import {
+  CalendarDays,
+  ClipboardList,
+  Dumbbell,
+  Heart,
+  Home,
+  LayoutGrid,
+  Shield,
+  Trophy,
+  User,
+  type LucideIcon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsRacing } from "@/hooks/useRaceMode";
+import { useIsCoachMode } from "@/hooks/useCoachMode";
+import { useIsFeatureOn } from "@/hooks/useFeatureFlag";
+import { useActiveMembership } from "@/hooks/useGymContext";
+import { useAdminAccess } from "@/hooks/useAdminAccess";
 
-const tabs = [
+interface NavTab {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+}
+
+const baseMemberTabs: NavTab[] = [
+  { href: "/home", label: "Home", icon: Home },
   { href: "/crossfit", label: "CrossFit", icon: Dumbbell },
   { href: "/hyrox", label: "HYROX", icon: Trophy },
   { href: "/recovery", label: "Recovery", icon: Heart },
-  { href: "/history", label: "History", icon: Clock },
   { href: "/profile", label: "Profile", icon: User },
-] as const;
+];
+
+const baseCoachTabs: NavTab[] = [
+  { href: "/gym/programming", label: "Programming", icon: ClipboardList },
+  { href: "/gym/classes", label: "Classes", icon: CalendarDays },
+  { href: "/gym", label: "Gym Tools", icon: LayoutGrid },
+  { href: "/profile", label: "Profile", icon: User },
+];
+
+const ADMIN_TAB: NavTab = { href: "/admin", label: "Admin", icon: Shield };
 
 export function BottomNav() {
   const pathname = usePathname();
   const isRacing = useIsRacing();
+  const isCoachMode = useIsCoachMode();
+  const classesOn = useIsFeatureOn("classes");
+  const activeMembership = useActiveMembership();
+  const { canAccessAdmin } = useAdminAccess();
+  const memberTabs: NavTab[] =
+    classesOn && activeMembership
+      ? [
+          baseMemberTabs[0],
+          { href: "/classes", label: "Classes", icon: CalendarDays },
+          ...baseMemberTabs.slice(1),
+        ]
+      : baseMemberTabs;
+  // Admin sits before Profile so Profile stays the last tab.
+  const coachTabs: NavTab[] = canAccessAdmin
+    ? [...baseCoachTabs.slice(0, -1), ADMIN_TAB, baseCoachTabs[baseCoachTabs.length - 1]]
+    : baseCoachTabs;
+  const tabs = isCoachMode ? coachTabs : memberTabs;
 
   if (isRacing) return null;
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 glass border-t border-white/[0.06]">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 glass border-t border-white/[0.06] md:hidden">
       <div className="mx-auto flex max-w-lg items-center justify-around py-1">
         {tabs.map(({ href, label, icon: Icon }) => {
-          const isActive = pathname.startsWith(href);
+          const isActive =
+            href === "/gym" ? pathname === "/gym" : pathname.startsWith(href);
           return (
             <Link
               key={href}

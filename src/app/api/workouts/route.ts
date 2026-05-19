@@ -13,7 +13,11 @@ import {
   scores,
   scoreMovementDetails,
   communityMemberships,
+  communities,
+  workoutSections,
   users,
+  programmingTrackDays,
+  programmingTracks,
 } from "@/db/schema";
 import { eq, desc, and, inArray, gte, lte, or, ilike, isNull } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
@@ -285,6 +289,127 @@ export async function GET(req: NextRequest) {
       : [];
   const creatorNameById = new Map(creatorRows.map((r) => [r.id, r.name]));
 
+  // Resolve gym name + logo for each gym-scoped workout. Replaces the
+  // "Programmed by" attribution on member-facing cards (spec §1.3).
+  const communityIds = Array.from(
+    new Set(
+      workoutRows
+        .map((w) => w.communityId)
+        .filter((id): id is string => !!id)
+    )
+  );
+  const communityRows =
+    communityIds.length > 0
+      ? await db
+          .select({
+            id: communities.id,
+            name: communities.name,
+            logoUrl: communities.logoUrl,
+          })
+          .from(communities)
+          .where(inArray(communities.id, communityIds))
+      : [];
+  const communityById = new Map(communityRows.map((r) => [r.id, r]));
+
+  // Typed sections (spec §1.6). When a workout has sections, the CrossFit
+  // tab renders one card per section; otherwise the legacy flat body.
+  const sectionRows = await db
+    .select({
+      id: workoutSections.id,
+      workoutId: workoutSections.workoutId,
+      kind: workoutSections.kind,
+      position: workoutSections.position,
+      title: workoutSections.title,
+      body: workoutSections.body,
+      isScored: workoutSections.isScored,
+      scoreType: workoutSections.scoreType,
+      sourceTrackId: workoutSections.sourceTrackId,
+    })
+    .from(workoutSections)
+    .where(inArray(workoutSections.workoutId, workoutIds))
+    .orderBy(workoutSections.position);
+  const sectionsByWorkout = new Map<string, typeof sectionRows>();
+  for (const s of sectionRows) {
+    const list = sectionsByWorkout.get(s.workoutId) ?? [];
+    list.push(s);
+    sectionsByWorkout.set(s.workoutId, list);
+  }
+  const partIdsBySection = new Map<string, string[]>();
+  for (const p of partRows) {
+    if (p.workoutSectionId) {
+      const list = partIdsBySection.get(p.workoutSectionId) ?? [];
+      list.push(p.id);
+      partIdsBySection.set(p.workoutSectionId, list);
+    }
+  }
+
+  // Track-day lookup for sections sourced from a programming track (spec
+  // §3.5). The athlete needs the track_day_id to log a per-day score on
+  // the free-form (non-Smart-Builder) variant of the section.
+  const trackSectionRows = sectionRows.filter((s) => s.sourceTrackId);
+  const trackDayBySectionId = new Map<
+    string,
+    {
+      trackDayId: string;
+      body: string | null;
+      isScored: boolean;
+      scoreType: string | null;
+      scoringConfig: unknown;
+      prescribedValue: number | null;
+    }
+  >();
+  if (trackSectionRows.length > 0) {
+    // Fetch all (trackId, workoutId) pairs in one round-trip, then match
+    // back per section row.
+    const trackIds = Array.from(
+      new Set(trackSectionRows.map((s) => s.sourceTrackId as string))
+    );
+    const sectionWorkoutIds = Array.from(
+      new Set(trackSectionRows.map((s) => s.workoutId))
+    );
+    const candidateDays = await db
+      .select({
+        id: programmingTrackDays.id,
+        trackId: programmingTrackDays.trackId,
+        workoutId: programmingTrackDays.workoutId,
+        body: programmingTrackDays.body,
+        isScored: programmingTrackDays.isScored,
+        scoreType: programmingTrackDays.scoreType,
+        scoringConfig: programmingTracks.scoringConfig,
+        prescribedValue: programmingTrackDays.prescribedValue,
+      })
+      .from(programmingTrackDays)
+      .innerJoin(
+        programmingTracks,
+        eq(programmingTracks.id, programmingTrackDays.trackId)
+      )
+      .where(
+        and(
+          inArray(programmingTrackDays.trackId, trackIds),
+          inArray(programmingTrackDays.workoutId, sectionWorkoutIds)
+        )
+      );
+    const dayByKey = new Map<string, (typeof candidateDays)[number]>();
+    for (const d of candidateDays) {
+      if (!d.workoutId) continue;
+      dayByKey.set(`${d.trackId}|${d.workoutId}`, d);
+    }
+    for (const s of trackSectionRows) {
+      if (!s.sourceTrackId) continue;
+      const td = dayByKey.get(`${s.sourceTrackId}|${s.workoutId}`);
+      if (!td) continue;
+      trackDayBySectionId.set(s.id, {
+        trackDayId: td.id,
+        body: td.body,
+        isScored: td.isScored,
+        scoreType: td.scoreType,
+        scoringConfig: td.scoringConfig,
+        prescribedValue:
+          td.prescribedValue == null ? null : Number(td.prescribedValue),
+      });
+    }
+  }
+
   const scoreIds = scoreRows.map((s) => s.id);
   const detailRows =
     scoreIds.length > 0
@@ -331,6 +456,33 @@ export async function GET(req: NextRequest) {
     isPartner: w.isPartner,
     partnerCount: w.partnerCount,
     creatorName: creatorNameById.get(w.createdBy) ?? null,
+    communityName: w.communityId
+      ? communityById.get(w.communityId)?.name ?? null
+      : null,
+    communityLogoUrl: w.communityId
+      ? communityById.get(w.communityId)?.logoUrl ?? null
+      : null,
+    sections: (sectionsByWorkout.get(w.id) ?? []).map((s) => {
+      const td = trackDayBySectionId.get(s.id);
+      // Track-injected sections may have empty body on the section but
+      // have body on the underlying track day; surface the track-day
+      // body so the athlete sees the prescription text.
+      const effectiveBody = s.body ?? td?.body ?? null;
+      return {
+        id: s.id,
+        kind: s.kind,
+        position: s.position,
+        title: s.title,
+        body: effectiveBody,
+        isScored: td?.isScored ?? s.isScored,
+        scoreType: td?.scoreType ?? s.scoreType,
+        partIds: partIdsBySection.get(s.id) ?? [],
+        sourceTrackId: s.sourceTrackId ?? null,
+        trackDayId: td?.trackDayId ?? null,
+        trackScoringConfig: td?.scoringConfig ?? null,
+        trackPrescribedValue: td?.prescribedValue ?? null,
+      };
+    }),
     parts: (partsByWorkout.get(w.id) ?? []).map((p) => {
       const score = scoreByPart.get(p.id);
       return {

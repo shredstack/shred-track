@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Loader2, RefreshCcw } from "lucide-react";
+import { KeyRound, Loader2, RefreshCcw } from "lucide-react";
+import { GymToolHeader } from "@/components/gym/gym-tool-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,6 +50,11 @@ export default function GymJoinCodePage() {
 
   return (
     <div className="space-y-4">
+      <GymToolHeader
+        icon={KeyRound}
+        label="Join code"
+        description="Share or rotate the code members use to join your gym"
+      />
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">

@@ -466,6 +466,51 @@ export interface WorkoutBlockDisplay {
   title: string;
 }
 
+export type WorkoutSectionKindDisplay =
+  | "warm_up"
+  | "pre_skill"
+  | "wod"
+  | "post_skill"
+  | "stretching"
+  | "at_home"
+  | "monthly_challenge"
+  | "custom";
+
+export type WorkoutSectionScoreTypeDisplay =
+  | "time"
+  | "rounds"
+  | "reps"
+  | "weight"
+  | "no_score";
+
+export interface WorkoutSectionDisplay {
+  id: string;
+  kind: WorkoutSectionKindDisplay;
+  position: number;
+  title: string | null;
+  /** Freeform prescription text — used for sections without Smart Builder
+   *  parts (warm-ups, stretching, etc.). Rendered above the parts list. */
+  body?: string | null;
+  isScored: boolean;
+  scoreType: WorkoutSectionScoreTypeDisplay | null;
+  /** Ordered list of workout_part IDs that belong to this section.
+   *  The CrossFit tab renders these parts inline under the section card. */
+  partIds: string[];
+  /** When the section came from a programming track (Custom Tracks v2),
+   *  these surface the link back so the athlete UI can render a
+   *  TrackDayScoreInput for free-form (no-workout) track days. */
+  sourceTrackId?: string | null;
+  trackDayId?: string | null;
+  /** Inlined from the parent track's scoring_config for free-form track
+   *  days, so the per-day input knows the unit / aggregation / target. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  trackScoringConfig?: any | null;
+  /** Prescribed numeric amount for the day (e.g. 40 sit-ups). Used to
+   *  auto-fill the rollup when the athlete taps "Mark done" without
+   *  entering a number. Null on rest days / unconfigured tracks. */
+  trackPrescribedValue?: number | null;
+}
+
 export interface WorkoutDisplay {
   id: string;
   title?: string;
@@ -476,6 +521,15 @@ export interface WorkoutDisplay {
   createdByName?: string;
   /** Null = personal workout. Non-null = gym workout, scoped to that gym. */
   communityId?: string | null;
+  /** Gym name, only set when communityId is set. Replaces "Programmed by"
+   *  attribution on member-facing cards (spec §1.3). */
+  communityName?: string | null;
+  /** Gym logo URL, only set when communityId is set. */
+  communityLogoUrl?: string | null;
+  /** Typed sections (spec §1.6). When present, the CrossFit tab renders one
+   *  card per section instead of a flat body. When empty, falls back to
+   *  the legacy single-body layout. */
+  sections?: WorkoutSectionDisplay[];
   benchmarkWorkoutId?: string | null;
   requiresVest?: boolean;
   vestWeightMaleLb?: number;

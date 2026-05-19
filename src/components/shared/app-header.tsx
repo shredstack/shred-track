@@ -20,16 +20,16 @@ import {
 } from "@/hooks/useGymContext";
 import { JoinGymDialog } from "@/components/shared/join-gym-dialog";
 import { useUnreadNotificationCount } from "@/hooks/useNotifications";
+import { CoachModePill } from "@/components/shared/coach-mode-pill";
 
 const PERSONAL_LABEL = "Personal";
 
-function activeLabel(
+function activeMembership(
   activeId: string | null,
   memberships: GymMembership[] | undefined
-): string {
-  if (!activeId) return PERSONAL_LABEL;
-  const m = memberships?.find((x) => x.communityId === activeId);
-  return m?.communityName ?? PERSONAL_LABEL;
+): GymMembership | null {
+  if (!activeId) return null;
+  return memberships?.find((x) => x.communityId === activeId) ?? null;
 }
 
 export function AppHeader() {
@@ -40,29 +40,33 @@ export function AppHeader() {
   const unreadCount = unread?.count ?? 0;
 
   const memberships = data?.memberships.filter((m) => m.isActive) ?? [];
-  const label = isLoading ? PERSONAL_LABEL : activeLabel(data?.activeCommunityId ?? null, memberships);
+  const active = activeMembership(data?.activeCommunityId ?? null, memberships);
+  const label = isLoading ? PERSONAL_LABEL : active?.communityName ?? PERSONAL_LABEL;
 
   return (
     <header className="sticky top-0 z-40 glass border-b border-white/[0.06]">
       {/* Safe area spacer for iOS */}
       <div className="h-[env(safe-area-inset-top)]" />
-      <div className="mx-auto flex h-14 max-w-lg items-center justify-between px-4">
+      <div className="flex h-14 items-center justify-between px-4 sm:px-6">
         {/* Logo / brand */}
         <Link href="/crossfit" className="flex items-center gap-2.5">
           <Image
             src="/shredtrack_logo.png"
             alt="ShredTrack"
-            width={64}
-            height={64}
-            className="h-16 w-16 rounded-lg"
+            width={32}
+            height={32}
+            className="h-8 w-8 rounded-lg"
             priority
           />
-          <span className="font-heading text-lg font-bold uppercase tracking-wide text-gradient-primary">
+          <span className="hidden font-heading text-lg font-bold uppercase tracking-wide text-gradient-primary sm:inline-block">
             ShredTrack
           </span>
         </Link>
 
         <div className="flex items-center gap-2">
+        {/* Coach/Member view pill — visible only to coaches/admins of the
+            active gym (per-device preference). */}
+        <CoachModePill />
         {/* Notification bell */}
         <Link
           href="/notifications"
@@ -85,7 +89,17 @@ export function AppHeader() {
             gyms or hasn't picked one yet. Members can join a gym by code
             via the dialog at the bottom of the menu. */}
         <DropdownMenu>
-          <DropdownMenuTrigger className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.06] bg-white/[0.04] px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-white/[0.08] hover:text-foreground focus:outline-none">
+          <DropdownMenuTrigger className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.06] bg-white/[0.04] px-2.5 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-white/[0.08] hover:text-foreground focus:outline-none">
+            {active?.logoUrl ? (
+              <Image
+                src={active.logoUrl}
+                alt=""
+                width={20}
+                height={20}
+                className="h-5 w-5 rounded object-contain"
+                unoptimized
+              />
+            ) : null}
             {label}
             <ChevronDown className="h-3.5 w-3.5 opacity-50" />
           </DropdownMenuTrigger>

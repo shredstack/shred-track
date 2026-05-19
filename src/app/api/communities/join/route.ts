@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { communities, communityMemberships, users } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
+import { hasRequiredOnJoinDocs } from "@/lib/documents";
 
 // POST /api/communities/join — join a community with a code.
 // On success the user is set to this community as their active gym so the
@@ -45,23 +46,29 @@ export async function POST(req: NextRequest) {
     )
     .limit(1);
 
+  // Sign-on-join (PR 3 §3.2): if this gym has required-on-join docs,
+  // create/keep the membership inactive until signatures land. The
+  // sign endpoint flips isActive=true once the queue is empty.
+  const requiresDocs = await hasRequiredOnJoinDocs(community.id);
+
   if (existing) {
-    if (!existing.isActive) {
+    if (!existing.isActive && !requiresDocs) {
       await db
         .update(communityMemberships)
         .set({ isActive: true, deactivatedAt: null })
         .where(eq(communityMemberships.id, existing.id));
-    } else {
-      // Already an active member. Not an error — fall through and set
-      // active gym.
     }
+    // If existing.isActive is already true: leave it alone (an existing
+    // member shouldn't get bounced back through the sign flow on a
+    // reissued code; instead they'll see the re-sign banner if a new
+    // version was published).
   } else {
     await db.insert(communityMemberships).values({
       communityId: community.id,
       userId: user.id,
       isAdmin: false,
       isCoach: false,
-      isActive: true,
+      isActive: !requiresDocs,
     });
   }
 
@@ -72,7 +79,11 @@ export async function POST(req: NextRequest) {
     .where(eq(users.id, user.id));
 
   return NextResponse.json(
-    { communityId: community.id, name: community.name },
+    {
+      communityId: community.id,
+      name: community.name,
+      requiresDocuments: requiresDocs,
+    },
     { status: 200 }
   );
 }

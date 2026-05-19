@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -27,6 +27,9 @@ import {
   Eye,
   EyeOff,
   Camera,
+  Bell,
+  Smartphone,
+  LifeBuoy,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -35,6 +38,24 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  US_STATES,
+  COUNTRY_OPTIONS,
+  formatPhoneInput,
+  normalizePhone,
+  personalInfoSchema,
+  emergencyContactSchema,
+  fieldErrors,
+  type PersonalInfoFields,
+  type EmergencyContactFields,
+} from "@/lib/profile-validation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -55,6 +76,7 @@ import {
   type StationAssessment,
 } from "@/hooks/useProfile";
 import { useGymContext } from "@/hooks/useGymContext";
+import { useAdminAccess } from "@/hooks/useAdminAccess";
 import { JoinGymDialog } from "@/components/shared/join-gym-dialog";
 import {
   DIVISIONS,
@@ -273,6 +295,541 @@ function GeneralSection() {
                   month: "long",
                   year: "numeric",
                 })}
+              </p>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Personal info + emergency contact (PR 3 §3.1)
+//
+// Optional everywhere except when a gym requires sign-on-join documents
+// (§3.2). Stored on `users` so a single account carries them across gyms.
+// ---------------------------------------------------------------------------
+
+function PersonalInfoSection() {
+  const { data: user, isLoading } = useUserProfile();
+  const updateUser = useUpdateUserProfile();
+  const [editing, setEditing] = useState(false);
+  const [fields, setFields] = useState<PersonalInfoFields>({
+    dateOfBirth: "",
+    phone: "",
+    addressLine1: "",
+    addressLine2: "",
+    city: "",
+    state: "",
+    postalCode: "",
+    country: "",
+  });
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  const setField = useCallback(
+    <K extends keyof PersonalInfoFields>(key: K, value: PersonalInfoFields[K]) => {
+      setFields((prev) => ({ ...prev, [key]: value }));
+    },
+    []
+  );
+
+  const markTouched = useCallback((key: keyof PersonalInfoFields) => {
+    setTouched((prev) => ({ ...prev, [key]: true }));
+  }, []);
+
+  // Derived per-field errors. Recomputed each render so the UI stays in
+  // sync with `fields` without an extra effect+setState hop.
+  const errors = useMemo(
+    () => (editing ? fieldErrors(personalInfoSchema.safeParse(fields)) : {}),
+    [fields, editing]
+  );
+
+  const startEditing = useCallback(() => {
+    if (!user) return;
+    setFields({
+      dateOfBirth: user.dateOfBirth ?? "",
+      phone: user.phone ? formatPhoneInput(user.phone) : "",
+      addressLine1: user.addressLine1 ?? "",
+      addressLine2: user.addressLine2 ?? "",
+      city: user.city ?? "",
+      state: user.state ?? "",
+      postalCode: user.postalCode ?? "",
+      country: user.country ?? "",
+    });
+    setTouched({});
+    setEditing(true);
+  }, [user]);
+
+  const save = useCallback(() => {
+    const result = personalInfoSchema.safeParse(fields);
+    if (!result.success) {
+      const errs = fieldErrors(result);
+      // Touch every field so all errors become visible.
+      setTouched(
+        Object.fromEntries(Object.keys(errs).map((k) => [k, true]))
+      );
+      toast.error("Fix the highlighted fields first.");
+      return;
+    }
+    const v = result.data;
+    updateUser.mutate(
+      {
+        dateOfBirth: v.dateOfBirth || null,
+        phone: v.phone ? normalizePhone(v.phone) : null,
+        addressLine1: v.addressLine1 || null,
+        addressLine2: v.addressLine2 || null,
+        city: v.city || null,
+        state: v.state || null,
+        postalCode: v.postalCode || null,
+        country: v.country || null,
+      },
+      {
+        onSuccess: () => setEditing(false),
+        onError: (e: Error) => toast.error(e.message),
+      }
+    );
+  }, [fields, updateUser]);
+
+  const showErr = (key: keyof PersonalInfoFields) =>
+    touched[key] ? errors[key] : undefined;
+
+  if (isLoading || !user) return null;
+
+  const hasAddress =
+    user.addressLine1 || user.city || user.state || user.postalCode;
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+          Personal info
+        </CardTitle>
+        {!editing && (
+          <Button variant="ghost" size="sm" onClick={startEditing}>
+            <Pencil className="mr-1 h-3.5 w-3.5" />
+            Edit
+          </Button>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {editing ? (
+          <>
+            <div className="space-y-1.5">
+              <Label htmlFor="profile-dob">Date of birth</Label>
+              <Input
+                id="profile-dob"
+                type="date"
+                value={fields.dateOfBirth}
+                max={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => setField("dateOfBirth", e.target.value)}
+                onBlur={() => markTouched("dateOfBirth")}
+                aria-invalid={!!showErr("dateOfBirth") || undefined}
+              />
+              {showErr("dateOfBirth") ? (
+                <p className="text-[11px] text-destructive">
+                  {showErr("dateOfBirth")}
+                </p>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  Used for age-graded leaderboards and birthday shoutouts in
+                  your gym&apos;s feed.
+                </p>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="profile-phone">Phone</Label>
+              <Input
+                id="profile-phone"
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                value={fields.phone}
+                onChange={(e) =>
+                  setField("phone", formatPhoneInput(e.target.value))
+                }
+                onBlur={() => markTouched("phone")}
+                placeholder="(555) 123-4567"
+                aria-invalid={!!showErr("phone") || undefined}
+              />
+              {showErr("phone") && (
+                <p className="text-[11px] text-destructive">
+                  {showErr("phone")}
+                </p>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="profile-country">Country</Label>
+              <Select
+                value={fields.country || null}
+                onValueChange={(value) => {
+                  const v = value ?? "";
+                  setField("country", v);
+                  if (v !== "US") setField("state", fields.state);
+                  markTouched("country");
+                }}
+              >
+                <SelectTrigger id="profile-country">
+                  <SelectValue placeholder="Select a country" />
+                </SelectTrigger>
+                <SelectContent>
+                  {COUNTRY_OPTIONS.map((c) => (
+                    <SelectItem key={c.code} value={c.code}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="profile-address1">Address line 1</Label>
+              <Input
+                id="profile-address1"
+                autoComplete="address-line1"
+                value={fields.addressLine1}
+                onChange={(e) => setField("addressLine1", e.target.value)}
+                onBlur={() => markTouched("addressLine1")}
+                placeholder="Street address"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="profile-address2">Address line 2</Label>
+              <Input
+                id="profile-address2"
+                autoComplete="address-line2"
+                value={fields.addressLine2}
+                onChange={(e) => setField("addressLine2", e.target.value)}
+                placeholder="Apt, suite, etc. (optional)"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="profile-city">City</Label>
+                <Input
+                  id="profile-city"
+                  autoComplete="address-level2"
+                  value={fields.city}
+                  onChange={(e) => setField("city", e.target.value)}
+                  onBlur={() => markTouched("city")}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="profile-state">
+                  {fields.country === "US" ? "State" : "State / region"}
+                </Label>
+                {fields.country === "US" ? (
+                  <Select
+                    value={fields.state || null}
+                    onValueChange={(value) => {
+                      setField("state", value ?? "");
+                      markTouched("state");
+                    }}
+                  >
+                    <SelectTrigger
+                      id="profile-state"
+                      aria-invalid={!!showErr("state") || undefined}
+                    >
+                      <SelectValue placeholder="Select" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {US_STATES.map((s) => (
+                        <SelectItem key={s.code} value={s.code}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    id="profile-state"
+                    autoComplete="address-level1"
+                    value={fields.state}
+                    onChange={(e) => setField("state", e.target.value)}
+                    onBlur={() => markTouched("state")}
+                  />
+                )}
+                {showErr("state") && (
+                  <p className="text-[11px] text-destructive">
+                    {showErr("state")}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="profile-postal">Postal code</Label>
+                <Input
+                  id="profile-postal"
+                  inputMode={fields.country === "US" ? "numeric" : "text"}
+                  autoComplete="postal-code"
+                  value={fields.postalCode}
+                  onChange={(e) =>
+                    setField(
+                      "postalCode",
+                      fields.country === "US"
+                        ? e.target.value.replace(/[^\d-]/g, "")
+                        : e.target.value
+                    )
+                  }
+                  onBlur={() => markTouched("postalCode")}
+                  placeholder={
+                    fields.country === "US"
+                      ? "12345"
+                      : fields.country === "CA"
+                        ? "K1A 0B1"
+                        : ""
+                  }
+                  aria-invalid={!!showErr("postalCode") || undefined}
+                />
+                {showErr("postalCode") && (
+                  <p className="text-[11px] text-destructive">
+                    {showErr("postalCode")}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={save} disabled={updateUser.isPending}>
+                {updateUser.isPending ? (
+                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Save className="mr-1 h-3.5 w-3.5" />
+                )}
+                Save
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setEditing(false)}
+              >
+                <X className="mr-1 h-3.5 w-3.5" />
+                Cancel
+              </Button>
+            </div>
+          </>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <p className="text-xs text-muted-foreground">Date of birth</p>
+              <p className="text-sm font-medium">{user.dateOfBirth ?? "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Phone</p>
+              <p className="text-sm font-medium">
+                {user.phone ? formatPhoneInput(user.phone) : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Address</p>
+              <p className="text-sm font-medium whitespace-pre-line">
+                {hasAddress
+                  ? [
+                      user.addressLine1,
+                      user.addressLine2,
+                      [user.city, user.state, user.postalCode]
+                        .filter(Boolean)
+                        .join(", "),
+                      COUNTRY_OPTIONS.find((c) => c.code === user.country)
+                        ?.name ?? user.country,
+                    ]
+                      .filter(Boolean)
+                      .join("\n")
+                  : "—"}
+              </p>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function EmergencyContactSection() {
+  const { data: user, isLoading } = useUserProfile();
+  const updateUser = useUpdateUserProfile();
+  const [editing, setEditing] = useState(false);
+  const [fields, setFields] = useState<EmergencyContactFields>({
+    name: "",
+    phone: "",
+    relation: "",
+  });
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  const setField = useCallback(
+    <K extends keyof EmergencyContactFields>(
+      key: K,
+      value: EmergencyContactFields[K]
+    ) => {
+      setFields((prev) => ({ ...prev, [key]: value }));
+    },
+    []
+  );
+
+  const markTouched = useCallback((key: keyof EmergencyContactFields) => {
+    setTouched((prev) => ({ ...prev, [key]: true }));
+  }, []);
+
+  const errors = useMemo(
+    () => (editing ? fieldErrors(emergencyContactSchema.safeParse(fields)) : {}),
+    [fields, editing]
+  );
+
+  const startEditing = useCallback(() => {
+    if (!user) return;
+    setFields({
+      name: user.emergencyContactName ?? "",
+      phone: user.emergencyContactPhone
+        ? formatPhoneInput(user.emergencyContactPhone)
+        : "",
+      relation: user.emergencyContactRelation ?? "",
+    });
+    setTouched({});
+    setEditing(true);
+  }, [user]);
+
+  const save = useCallback(() => {
+    const result = emergencyContactSchema.safeParse(fields);
+    if (!result.success) {
+      const errs = fieldErrors(result);
+      setTouched(
+        Object.fromEntries(Object.keys(errs).map((k) => [k, true]))
+      );
+      toast.error("Fix the highlighted fields first.");
+      return;
+    }
+    const v = result.data;
+    updateUser.mutate(
+      {
+        emergencyContactName: v.name || null,
+        emergencyContactPhone: v.phone ? normalizePhone(v.phone) : null,
+        emergencyContactRelation: v.relation || null,
+      },
+      {
+        onSuccess: () => setEditing(false),
+        onError: (e: Error) => toast.error(e.message),
+      }
+    );
+  }, [fields, updateUser]);
+
+  const showErr = (key: keyof EmergencyContactFields) =>
+    touched[key] ? errors[key] : undefined;
+
+  if (isLoading || !user) return null;
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+          Emergency contact
+        </CardTitle>
+        {!editing && (
+          <Button variant="ghost" size="sm" onClick={startEditing}>
+            <Pencil className="mr-1 h-3.5 w-3.5" />
+            Edit
+          </Button>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {editing ? (
+          <>
+            <div className="space-y-1.5">
+              <Label htmlFor="emc-name">Name</Label>
+              <Input
+                id="emc-name"
+                autoComplete="name"
+                value={fields.name}
+                onChange={(e) => setField("name", e.target.value)}
+                onBlur={() => markTouched("name")}
+                placeholder="Full name"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="emc-phone">Phone</Label>
+              <Input
+                id="emc-phone"
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                value={fields.phone}
+                onChange={(e) =>
+                  setField("phone", formatPhoneInput(e.target.value))
+                }
+                onBlur={() => markTouched("phone")}
+                placeholder="(555) 123-4567"
+                aria-invalid={!!showErr("phone") || undefined}
+              />
+              {showErr("phone") && (
+                <p className="text-[11px] text-destructive">
+                  {showErr("phone")}
+                </p>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="emc-relation">Relationship</Label>
+              <Select
+                value={fields.relation || null}
+                onValueChange={(value) => {
+                  setField("relation", value ?? "");
+                  markTouched("relation");
+                }}
+              >
+                <SelectTrigger id="emc-relation">
+                  <SelectValue placeholder="Select relationship" />
+                </SelectTrigger>
+                <SelectContent>
+                  {[
+                    "Spouse",
+                    "Partner",
+                    "Parent",
+                    "Sibling",
+                    "Child",
+                    "Friend",
+                    "Other",
+                  ].map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {r}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={save} disabled={updateUser.isPending}>
+                {updateUser.isPending ? (
+                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Save className="mr-1 h-3.5 w-3.5" />
+                )}
+                Save
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setEditing(false)}
+              >
+                <X className="mr-1 h-3.5 w-3.5" />
+                Cancel
+              </Button>
+            </div>
+          </>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <p className="text-xs text-muted-foreground">Name</p>
+              <p className="text-sm font-medium">
+                {user.emergencyContactName ?? "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Phone</p>
+              <p className="text-sm font-medium">
+                {user.emergencyContactPhone
+                  ? formatPhoneInput(user.emergencyContactPhone)
+                  : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Relationship</p>
+              <p className="text-sm font-medium">
+                {user.emergencyContactRelation ?? "—"}
               </p>
             </div>
           </div>
@@ -1022,6 +1579,16 @@ function GymsSection() {
                       Code: {m.joinCode}
                     </p>
                   )}
+                  {m.websiteUrl && (
+                    <a
+                      href={m.websiteUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="truncate text-[11px] text-primary underline underline-offset-2"
+                    >
+                      {m.websiteUrl.replace(/^https?:\/\//, "")}
+                    </a>
+                  )}
                 </div>
                 <div className="flex items-center gap-1">
                   {m.isAdmin && (
@@ -1135,8 +1702,10 @@ export default function ProfilePage() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="general" className="mt-4">
+        <TabsContent value="general" className="mt-4 space-y-4">
           <GeneralSection />
+          <PersonalInfoSection />
+          <EmergencyContactSection />
         </TabsContent>
 
         <TabsContent value="crossfit" className="mt-4">
@@ -1192,23 +1761,20 @@ export default function ProfilePage() {
         </Card>
       )}
 
-      {/* Admin (only visible to admins) */}
-      {user?.isAdmin && (
-        <Card>
-          <CardContent className="pt-4">
-            <Link
-              href="/admin"
-              className="flex w-full items-center gap-3 rounded-lg px-2 py-3.5 text-sm transition-colors hover:bg-muted/40 group"
-            >
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-                <Shield className="h-4 w-4 text-primary" />
-              </div>
-              <span className="flex-1 text-left font-medium">Admin</span>
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
-            </Link>
-          </CardContent>
-        </Card>
-      )}
+      {/* Settings shortcuts */}
+      <Card>
+        <CardContent className="pt-2 pb-2">
+          <SettingsLink href="/settings/notifications" icon={Bell} label="Notifications" />
+          <SettingsLink href="/settings/support" icon={LifeBuoy} label="Help & support" />
+          <SettingsLink href="/settings/native" icon={Smartphone} label="Native app" />
+        </CardContent>
+      </Card>
+
+      {/* Admin — visible to super admins and to active gym admins/coaches.
+          Source of truth is useAdminAccess so nav, Profile, and Recovery's
+          "Manage" link stay in sync. */}
+      <ProfileAdminLink />
+
 
       {/* Security — change/set password */}
       <SecuritySection />
@@ -1233,6 +1799,60 @@ export default function ProfilePage() {
 
       <p className="text-center text-[11px] text-muted-foreground/40">ShredTrack v0.1.0</p>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Settings shortcut row — keeps the orphan /settings/* routes
+// discoverable from the profile page.
+// ---------------------------------------------------------------------------
+
+function SettingsLink({
+  href,
+  icon: Icon,
+  label,
+}: {
+  href: string;
+  icon: typeof Bell;
+  label: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="flex w-full items-center gap-3 rounded-lg px-2 py-3 text-sm transition-colors hover:bg-muted/40"
+    >
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+        <Icon className="h-4 w-4 text-primary" />
+      </div>
+      <span className="flex-1 text-left font-medium">{label}</span>
+      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+    </Link>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Admin entry — shown for super admins and active gym admins/coaches.
+// Driven by useAdminAccess so this matches the nav's visibility rule.
+// ---------------------------------------------------------------------------
+
+function ProfileAdminLink() {
+  const { canAccessAdmin } = useAdminAccess();
+  if (!canAccessAdmin) return null;
+  return (
+    <Card>
+      <CardContent className="pt-4">
+        <Link
+          href="/admin"
+          className="flex w-full items-center gap-3 rounded-lg px-2 py-3.5 text-sm transition-colors hover:bg-muted/40 group"
+        >
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+            <Shield className="h-4 w-4 text-primary" />
+          </div>
+          <span className="flex-1 text-left font-medium">Admin</span>
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        </Link>
+      </CardContent>
+    </Card>
   );
 }
 

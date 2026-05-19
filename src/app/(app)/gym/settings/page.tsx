@@ -9,11 +9,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useGymContext } from "@/hooks/useGymContext";
+import { GymBrandingForm } from "@/components/gym/gym-branding-form";
+import { GymToolHeader } from "@/components/gym/gym-tool-header";
+import { Settings } from "lucide-react";
 
 interface GymDetail {
   id: string;
   name: string;
   joinCode: string | null;
+  websiteUrl: string | null;
+  adminEmail: string | null;
 }
 
 function useGymDetail(communityId: string | null) {
@@ -33,11 +38,17 @@ export default function GymSettingsPage() {
   const communityId = ctx?.activeCommunityId ?? null;
   const { data: gym } = useGymDetail(communityId);
   const [name, setName] = useState("");
+  const [websiteUrl, setWebsiteUrl] = useState("");
+  const [adminEmail, setAdminEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const qc = useQueryClient();
 
   useEffect(() => {
-    if (gym) setName(gym.name);
+    if (gym) {
+      setName(gym.name);
+      setWebsiteUrl(gym.websiteUrl ?? "");
+      setAdminEmail(gym.adminEmail ?? "");
+    }
   }, [gym]);
 
   async function save() {
@@ -47,7 +58,11 @@ export default function GymSettingsPage() {
       const res = await fetch(`/api/communities/${communityId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim() }),
+        body: JSON.stringify({
+          name: name.trim(),
+          websiteUrl: websiteUrl.trim() || null,
+          adminEmail: adminEmail.trim() || null,
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
@@ -64,28 +79,68 @@ export default function GymSettingsPage() {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
-          Gym settings
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="gym-name" className="text-xs">
-            Gym name
-          </Label>
-          <Input
-            id="gym-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </div>
-        <Button onClick={save} disabled={submitting || !name.trim()}>
-          {submitting && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
-          Save changes
-        </Button>
-      </CardContent>
-    </Card>
+    <div className="space-y-4">
+      <GymToolHeader
+        icon={Settings}
+        label="Gym settings"
+        description="Name, website, admin email, and branding"
+      />
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+            Gym settings
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="gym-name" className="text-xs">
+              Gym name
+            </Label>
+            <Input
+              id="gym-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="gym-website" className="text-xs">
+              Website URL
+            </Label>
+            <Input
+              id="gym-website"
+              type="url"
+              value={websiteUrl}
+              onChange={(e) => setWebsiteUrl(e.target.value)}
+              placeholder="https://crossfitdraper.com"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Shown on the home header strip and the public invite landing.
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="gym-admin-email" className="text-xs">
+              Admin email
+            </Label>
+            <Input
+              id="gym-admin-email"
+              type="email"
+              value={adminEmail}
+              onChange={(e) => setAdminEmail(e.target.value)}
+              placeholder="owner@yourgym.com"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Where the &ldquo;Ask the gym owner&rdquo; support form delivers.
+              Falls back to admin user emails if blank.
+            </p>
+          </div>
+          <Button onClick={save} disabled={submitting || !name.trim()}>
+            {submitting && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+            Save changes
+          </Button>
+        </CardContent>
+      </Card>
+
+      {communityId ? <GymBrandingForm communityId={communityId} /> : null}
+    </div>
   );
 }

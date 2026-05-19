@@ -1,18 +1,24 @@
 // ---------------------------------------------------------------------------
 // Admin dashboard.
 //
-// Card grid driven by the registry in src/lib/admin/tools.ts. To add a new
-// admin tool, append to ADMIN_TOOLS and create the corresponding route file
-// at src/app/(app)/admin/<slug>/page.tsx.
+// Card grid driven by the registry in src/lib/admin/tools.ts. Filtered by
+// the caller's tier — gym admins/coaches only see tools that aren't
+// superOnly. To add a new admin tool, append to ADMIN_TOOLS and create the
+// corresponding route file (under (super)/ if super-only).
 // ---------------------------------------------------------------------------
 
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { ADMIN_GROUPS, groupAdminTools, type AdminGroup } from "@/lib/admin/tools";
+import { getAdminAccess } from "@/lib/admin/access";
 
-export default function AdminPage() {
-  const grouped = groupAdminTools();
+export default async function AdminPage() {
+  const access = await getAdminAccess();
+  if (!access) redirect("/");
+
+  const grouped = groupAdminTools(access.isSuperAdmin);
   const orderedGroups = Object.keys(ADMIN_GROUPS) as AdminGroup[];
 
   return (
@@ -20,7 +26,9 @@ export default function AdminPage() {
       <div>
         <h1 className="text-2xl font-bold">Admin</h1>
         <p className="text-sm text-muted-foreground">
-          Tools for managing canonical data and user access
+          {access.isSuperAdmin
+            ? "Tools for managing canonical data and user access"
+            : "Curate the shared movement and benchmark libraries"}
         </p>
       </div>
 

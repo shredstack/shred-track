@@ -2,14 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { movements, users } from "@/db/schema";
 import { ilike, asc, eq, and, type SQL } from "drizzle-orm";
-import { getAdminUser } from "@/lib/admin";
+import { getAdminAccess } from "@/lib/admin/access";
 import { ensureWeightliftingBenchmark } from "@/lib/crossfit/weightlifting-benchmarks";
 
-// GET /api/admin/movements — list all movements (admin only).
+// GET /api/admin/movements — list all movements.
+// Open to super admins and to gym coaches/admins (they need the same
+// catalog to curate movements for their gym).
 // Optional filters: ?search=&category=&status=pending|validated|all (default all)
 export async function GET(req: NextRequest) {
-  const user = await getAdminUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const access = await getAdminAccess();
+  if (!access) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const search = req.nextUrl.searchParams.get("search");
   const category = req.nextUrl.searchParams.get("category");
@@ -49,10 +51,12 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(rows);
 }
 
-// POST /api/admin/movements — create a new movement (admin only)
+// POST /api/admin/movements — create a new movement. Open to super admins
+// and to gym coaches/admins. New rows are isValidated=true immediately —
+// there is no review queue today (movements are a globally shared table).
 export async function POST(req: NextRequest) {
-  const user = await getAdminUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const access = await getAdminAccess();
+  if (!access) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
   const {

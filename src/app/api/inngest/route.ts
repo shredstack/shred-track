@@ -10,6 +10,12 @@ import {
   notifyCommentCreated,
   notifyCommentMentioned,
 } from "@/inngest/functions/notify-comment-created";
+import { dispatchNotification } from "@/inngest/functions/dispatch-notification";
+import { materializeClassInstances } from "@/inngest/functions/materialize-class-instances";
+import { autoAnniversaryPosts } from "@/inngest/functions/auto-anniversary-posts";
+import { committedClubProgress } from "@/inngest/functions/committed-club-progress";
+import { committedClubEndOfMonth } from "@/inngest/functions/committed-club-end-of-month";
+import { classReservationReminder } from "@/inngest/functions/class-reservation-reminder";
 
 // Each Inngest step runs as a separate Vercel function invocation.
 // Vercel Pro allows up to 300s per invocation. Each step makes one Claude
@@ -27,5 +33,11 @@ export const { GET, POST, PUT } = serve({
     notifyReactionCreated,
     notifyCommentCreated,
     notifyCommentMentioned,
+    dispatchNotification,
+    materializeClassInstances,
+    autoAnniversaryPosts,
+    committedClubProgress,
+    committedClubEndOfMonth,
+    classReservationReminder,
   ],
 });
