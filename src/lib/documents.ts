@@ -42,10 +42,13 @@ export async function getPendingDocuments(
   communityId: string,
   requiredOnJoinOnly = false
 ): Promise<PendingDocument[]> {
-  // Latest version per document.
+  // Latest version per document. Reference documents.id with the table
+  // qualifier so the correlation isn't shadowed by dv.id in the inner
+  // scope — ${documents.id} alone renders as just "id", which Postgres
+  // resolves to dv.id and silently breaks the join.
   const latestVersionSql = sql<string>`(
     SELECT dv.id FROM document_versions dv
-    WHERE dv.document_id = ${documents.id}
+    WHERE dv.document_id = documents.id
     ORDER BY dv.version DESC
     LIMIT 1
   )`;
@@ -54,7 +57,7 @@ export async function getPendingDocuments(
   const hasAnySignatureSql = sql<boolean>`EXISTS (
     SELECT 1 FROM document_signatures ds
     JOIN document_versions dv ON dv.id = ds.document_version_id
-    WHERE dv.document_id = ${documents.id}
+    WHERE dv.document_id = documents.id
       AND ds.user_id = ${userId}
   )`;
 
