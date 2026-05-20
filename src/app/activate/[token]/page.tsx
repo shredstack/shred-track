@@ -36,10 +36,17 @@ export default function ActivatePage({
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/family/activate/${token}`)
-      .then((r) => r.json())
-      .then((data) => {
+      .then(async (r) => {
+        const data = await r.json().catch(() => null);
         if (cancelled) return;
-        setInfo(data);
+        // The expired/already_activated branches return JSON with a
+        // `status` field on a non-2xx (410/200) — render them. Anything
+        // else without a recognized status is an unrecoverable error.
+        if (data && (data.status === "valid" || data.status === "expired" || data.status === "already_activated")) {
+          setInfo(data);
+        } else {
+          setError(data?.error || "This invite link is invalid.");
+        }
       })
       .catch(() => {
         if (cancelled) return;
@@ -127,7 +134,9 @@ export default function ActivatePage({
 
         <div className="gradient-border rounded-2xl">
           <div className="rounded-2xl bg-card/80 p-6 backdrop-blur-sm">
-            {info?.status === "expired" ? (
+            {!info && error ? (
+              <InvalidState message={error} />
+            ) : info?.status === "expired" ? (
               <ExpiredState accountHolderName={info.accountHolderName} />
             ) : info?.status === "already_activated" ? (
               <AlreadyActivated />
@@ -245,6 +254,17 @@ function AlreadyActivated() {
       <p className="text-center text-sm text-muted-foreground">
         This account is already active. Use the regular sign-in page.
       </p>
+    </div>
+  );
+}
+
+function InvalidState({ message }: { message: string }) {
+  return (
+    <div className="flex flex-col items-center gap-4 py-4">
+      <h2 className="text-center text-lg font-semibold">
+        This invite link is invalid
+      </h2>
+      <p className="text-center text-sm text-muted-foreground">{message}</p>
     </div>
   );
 }

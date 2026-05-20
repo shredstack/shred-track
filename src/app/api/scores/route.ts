@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
+  communityMemberships,
   familyMembers,
   scores,
   scoreMovementDetails,
@@ -181,6 +182,26 @@ export async function POST(req: NextRequest) {
     if (!link) {
       return NextResponse.json(
         { error: "You don't manage that dependent in this gym" },
+        { status: 403 }
+      );
+    }
+    // Defense in depth: the family link is only meaningful while the
+    // account holder is still an active member of the gym. A removed /
+    // deactivated holder shouldn't be able to keep logging for dependents.
+    const [callerMembership] = await db
+      .select({ id: communityMemberships.id })
+      .from(communityMemberships)
+      .where(
+        and(
+          eq(communityMemberships.communityId, w.communityId),
+          eq(communityMemberships.userId, user.id),
+          eq(communityMemberships.isActive, true)
+        )
+      )
+      .limit(1);
+    if (!callerMembership) {
+      return NextResponse.json(
+        { error: "You're no longer an active member of this gym" },
         { status: 403 }
       );
     }

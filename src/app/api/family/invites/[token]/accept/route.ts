@@ -37,7 +37,7 @@ export async function POST(
   }
 
   try {
-    const result = await acceptFamilyInvite(token);
+    const result = await acceptFamilyInvite(token, user.id);
     return NextResponse.json({ ok: true, communityId: result.communityId });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "";
@@ -52,6 +52,12 @@ export async function POST(
     }
     if (msg.includes("INVITE_NOT_FOUND")) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    if (msg.includes("INVITE_WRONG_RECIPIENT")) {
+      return NextResponse.json(
+        { error: "This invite is for a different account" },
+        { status: 403 }
+      );
     }
     throw err;
   }

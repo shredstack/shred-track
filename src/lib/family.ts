@@ -410,11 +410,15 @@ export async function softDeleteShadowDependent(
  */
 export async function mergeShadowIntoUser(
   shadowUserId: string,
-  realUserId: string
+  realUserId: string,
+  txOrDb: DbOrTx = db
 ): Promise<void> {
   if (shadowUserId === realUserId) return;
 
-  await db.transaction(async (tx) => {
+  // If the caller already opened a transaction, run inline so a downstream
+  // failure (e.g. the family_members activation update) rolls back the
+  // merge too. Otherwise open our own transaction so the merge is atomic.
+  const run = async (tx: DbOrTx) => {
     // Simple reassigns (no uniqueness conflicts).
     await tx
       .update(scores)
@@ -572,7 +576,13 @@ export async function mergeShadowIntoUser(
 
     // Finally, soft-delete the shadow row.
     await softDeleteShadowDependent(shadowUserId, tx);
-  });
+  };
+
+  if (txOrDb === db) {
+    await db.transaction(run);
+  } else {
+    await run(txOrDb);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -682,8 +692,18 @@ export async function createFamilyInvite(
   return { token, expiresAt };
 }
 
-/** Accept a pending family invite; materializes the family_members row. */
-export async function acceptFamilyInvite(token: string): Promise<{
+/**
+ * Accept a pending family invite; materializes the family_members row.
+ *
+ * `callerUserId` is the signed-in user. We re-validate the token →
+ * invitee match inside the transaction so a leaked token (e.g. forwarded
+ * to the wrong inbox) can't be accepted by anyone other than the
+ * intended invitee, even if a future caller skips the route-level guard.
+ */
+export async function acceptFamilyInvite(
+  token: string,
+  callerUserId: string
+): Promise<{
   communityId: string;
   accountHolderUserId: string;
   inviteeUserId: string;
@@ -696,6 +716,9 @@ export async function acceptFamilyInvite(token: string): Promise<{
       .where(eq(familyInvites.token, token))
       .limit(1);
     if (!invite) throw new Error("INVITE_NOT_FOUND");
+    if (invite.inviteeUserId !== callerUserId) {
+      throw new Error("INVITE_WRONG_RECIPIENT");
+    }
     if (invite.respondedAt) throw new Error("INVITE_ALREADY_RESPONDED");
     if (invite.expiresAt.getTime() < Date.now()) throw new Error("INVITE_EXPIRED");
 

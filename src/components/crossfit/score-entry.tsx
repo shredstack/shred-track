@@ -792,7 +792,7 @@ export function ScoreEntry({
 
       return score;
     },
-    [workoutId, requiresVest, woreVest, vestWeightLbDraft]
+    [workoutId, requiresVest, woreVest, vestWeightLbDraft, forUserId]
   );
 
   const partHasData = useCallback(
@@ -1199,19 +1199,27 @@ export function ScoreEntry({
               <Label htmlFor="score-for-user" className="text-muted-foreground">
                 Logging for
               </Label>
-              <select
-                id="score-for-user"
-                className="rounded-md border border-border bg-muted/40 px-2 py-1 text-xs"
-                value={forUserId ?? ""}
-                onChange={(e) => setForUserId(e.target.value || null)}
+              <Select
+                value={forUserId ?? "self"}
+                onValueChange={(val) =>
+                  setForUserId(val === "self" ? null : val)
+                }
               >
-                <option value="">Yourself</option>
-                {dependents.map((d) => (
-                  <option key={d.userId} value={d.userId}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger
+                  id="score-for-user"
+                  className="h-7 w-auto min-w-[8rem] text-xs"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="self">Yourself</SelectItem>
+                  {dependents.map((d) => (
+                    <SelectItem key={d.userId} value={d.userId}>
+                      {d.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           )}
           {isEditing && activePart.score?.estimatedKcalActiveWithEpoc != null && (

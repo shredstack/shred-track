@@ -73,6 +73,7 @@ export async function POST(req: Request) {
   const [dep] = await db
     .select({
       id: users.id,
+      name: users.name,
       email: users.email,
       isShadow: users.isShadow,
     })
@@ -124,21 +125,27 @@ export async function POST(req: Request) {
     // Merge shadow into the existing real account. We don't create a
     // new auth user; we just reassign references. The recipient must
     // sign in with their existing credentials separately.
-    await mergeShadowIntoUser(dep.id, existingReal.id);
+    //
+    // Run the merge + activation update in a single transaction so a
+    // crash between them can't leave the family link pointing at a
+    // soft-deleted shadow with has_own_login=false.
+    await db.transaction(async (tx) => {
+      await mergeShadowIntoUser(dep.id, existingReal.id, tx);
 
-    // Mark this family_members row as activated under the real id.
-    await db
-      .update(familyMembers)
-      .set({
-        dependentUserId: existingReal.id,
-        hasOwnLogin: true,
-        activatedAt: new Date(),
-        activationToken: null,
-        activationTokenSentAt: null,
-        activationTokenExpiresAt: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(familyMembers.id, fm.id));
+      // Mark this family_members row as activated under the real id.
+      await tx
+        .update(familyMembers)
+        .set({
+          dependentUserId: existingReal.id,
+          hasOwnLogin: true,
+          activatedAt: new Date(),
+          activationToken: null,
+          activationTokenSentAt: null,
+          activationTokenExpiresAt: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(familyMembers.id, fm.id));
+    });
 
     // Notify the account holder (spec §9.3).
     const [holder] = await db
@@ -158,7 +165,7 @@ export async function POST(req: Request) {
         subject: "Family link kept intact",
         react: FamilyShadowMergedEmail({
           accountHolderName: holder.name,
-          dependentName: existingReal.id === dep.id ? "Your dependent" : "Your dependent",
+          dependentName: dep.name || "Your dependent",
           communityName: gym?.name ?? "your gym",
         }),
       });

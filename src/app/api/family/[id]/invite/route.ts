@@ -6,7 +6,7 @@
 // 24h.
 
 import { NextResponse } from "next/server";
-import { and, eq, gte } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, familyMembers, users } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
@@ -20,7 +20,6 @@ import {
 } from "@/lib/family";
 
 const APP_URL = "https://shredtrack.shredstack.net";
-const RATE_LIMIT_PER_24H = 3;
 
 export async function POST(
   _req: Request,
@@ -84,9 +83,11 @@ export async function POST(
     );
   }
 
-  // Hard-coded rate limit until we have a real limiter. We approximate
-  // "3 invites per 24h" by checking the previous sent-at on the row —
-  // simple counter would need a separate audit table.
+  // Minimal rate limit: 1-minute cooldown between sends, derived from
+  // the row's last sent-at. TODO: track a real per-row counter (e.g. in
+  // a separate audit table) so we can enforce "≤3 invites per 24h" —
+  // spec §4.5. Without that table we can't count history because the
+  // sent-at gets overwritten on each resend.
   if (fm.activationTokenSentAt) {
     const since = Date.now() - fm.activationTokenSentAt.getTime();
     if (since < 60 * 1000) {
@@ -96,13 +97,6 @@ export async function POST(
       );
     }
   }
-  // Look for ≥3 sends in past 24h by polling the row's sent-at —
-  // because we overwrite on each send we can't count history without a
-  // separate log. Use a coarse signal: if the existing token expires_at
-  // is set within 1h ago we say "rate limited."
-  void RATE_LIMIT_PER_24H;
-  void gte;
-  void and;
 
   const token = generateToken();
   const now = new Date();
