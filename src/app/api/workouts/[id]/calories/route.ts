@@ -46,8 +46,8 @@ export async function GET(
   return NextResponse.json(row);
 }
 
-// POST /api/workouts/[id]/calories/recompute — admin only synchronous
-// recompute. Useful for the admin movement-MET editor to recompute on demand.
+// POST /api/workouts/[id]/calories — admin only synchronous recompute.
+// Useful for the admin movement-MET editor to recompute on demand.
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }

@@ -86,3 +86,39 @@ create table if not exists community_calorie_preferences (
 alter table users
   add column if not exists epoc_enabled boolean,
   add column if not exists push_to_apple_health boolean not null default true;
+
+-- ---------- RLS ----------
+-- App writes go through the postgres service role (bypasses RLS), so these
+-- policies are defense-in-depth for any access via the Supabase JS client.
+
+alter table user_movement_paces enable row level security;
+
+create policy "user_movement_paces_select_own"
+  on user_movement_paces for select using (auth.uid() = user_id);
+create policy "user_movement_paces_insert_own"
+  on user_movement_paces for insert with check (auth.uid() = user_id);
+create policy "user_movement_paces_update_own"
+  on user_movement_paces for update using (auth.uid() = user_id);
+create policy "user_movement_paces_delete_own"
+  on user_movement_paces for delete using (auth.uid() = user_id);
+
+alter table community_calorie_preferences enable row level security;
+
+create policy "community_calorie_preferences_select_members"
+  on community_calorie_preferences for select using (
+    community_id in (
+      select community_id from community_memberships where user_id = auth.uid()
+    )
+  );
+create policy "community_calorie_preferences_write_admin"
+  on community_calorie_preferences for all using (
+    community_id in (
+      select community_id from community_memberships
+      where user_id = auth.uid() and is_admin = true
+    )
+  ) with check (
+    community_id in (
+      select community_id from community_memberships
+      where user_id = auth.uid() and is_admin = true
+    )
+  );

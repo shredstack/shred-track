@@ -1,5 +1,6 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { pushTodaySnapshotToWatch } from "@/lib/native/today-snapshot";
+import type { UserProfile } from "@/hooks/useProfile";
 import type {
   WorkoutDisplay,
   WorkoutPartDisplay,
@@ -597,35 +598,39 @@ export function useLogScore() {
       queryClient.invalidateQueries({ queryKey: ["benchmarks"] });
       queryClient.invalidateQueries({ queryKey: ["benchmark-history"] });
       void pushTodaySnapshotToWatch();
-      void maybePushToAppleHealth(saved);
+      void maybePushToAppleHealth(saved, queryClient);
     },
   });
 }
 
 // Best-effort Apple Health push. Lives outside the mutation chain so a
 // HealthKit failure never bubbles into the UI as a score-save error.
-async function maybePushToAppleHealth(saved: {
-  id?: string;
-  startedAt?: string | null;
-  endedAt?: string | null;
-  durationSeconds?: number | null;
-  estimatedKcalActiveWithEpoc?: number | null;
-}): Promise<void> {
+async function maybePushToAppleHealth(
+  saved: {
+    id?: string;
+    startedAt?: string | null;
+    endedAt?: string | null;
+    durationSeconds?: number | null;
+    estimatedKcalActiveWithEpoc?: number | null;
+    appleHealthWorkoutUuid?: string | null;
+  },
+  queryClient: QueryClient,
+): Promise<void> {
   if (!saved?.id) return;
+  // Score already pushed — server-side guard would no-op anyway, but skipping
+  // here avoids creating an orphaned HK workout if the user edited the time
+  // bracket between saves.
+  if (saved.appleHealthWorkoutUuid) return;
   const active = saved.estimatedKcalActiveWithEpoc;
   if (active == null || active <= 0) return;
 
-  // Pull push pref once. Don't gate the mutation on this read.
-  let pushPref = true;
-  try {
-    const r = await fetch("/api/user/profile");
-    if (r.ok) {
-      const body = await r.json();
-      pushPref = body?.pushToAppleHealth !== false;
-    }
-  } catch {
-    // ignore; default to true
-  }
+  // Read pref from the React Query cache so we don't add a round-trip on
+  // every score save. If the cache is cold (user hasn't visited a page that
+  // loaded the profile yet) we conservatively skip the push — the next save
+  // after the profile loads will pick it up.
+  const cached = queryClient.getQueryData<UserProfile>(["user-profile"]);
+  if (!cached) return;
+  const pushPref = cached.pushToAppleHealth !== false;
   if (!pushPref) return;
 
   const start = saved.startedAt ? new Date(saved.startedAt).getTime() : null;
@@ -675,7 +680,7 @@ export function useUpdateScore() {
       queryClient.invalidateQueries({ queryKey: ["workouts"] });
       queryClient.invalidateQueries({ queryKey: ["benchmarks"] });
       queryClient.invalidateQueries({ queryKey: ["benchmark-history"] });
-      void maybePushToAppleHealth(saved);
+      void maybePushToAppleHealth(saved, queryClient);
     },
   });
 }
