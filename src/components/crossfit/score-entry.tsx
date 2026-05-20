@@ -1179,6 +1179,19 @@ export function ScoreEntry({
             {workoutTitle || "Workout"}
             {!multiPart && ` · ${WORKOUT_TYPE_LABELS[workoutType]}`}
           </DialogDescription>
+          {isEditing && activePart.score?.estimatedKcalActiveWithEpoc != null && (
+            <div className="mt-2 flex items-center gap-2 rounded-lg border border-orange-500/30 bg-orange-500/5 px-3 py-2 text-xs text-orange-200">
+              <span className="font-semibold">
+                ≈ {activePart.score.estimatedKcalActiveWithEpoc} kcal
+              </span>
+              <span
+                className="text-[10px] text-orange-200/70"
+                title="Active-energy estimate based on movement MET values, your bodyweight, vest, RPE, and EPOC. Real burn varies ±20%."
+              >
+                est. active energy — your bodyweight applied
+              </span>
+            </div>
+          )}
         </DialogHeader>
 
         {/* Part switcher */}

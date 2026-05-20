@@ -25,6 +25,21 @@ interface HealthKitTimerPlugin {
   getDistanceMeters(opts: { from: number; to: number }): Promise<{
     meters: number;
   }>;
+  // Calorie-estimation feature additions.
+  requestWritePermission?(): Promise<{
+    granted: boolean;
+    available: boolean;
+    error?: string;
+  }>;
+  hasOverlappingWorkout?(opts: { from: number; to: number }): Promise<{
+    overlap: boolean;
+  }>;
+  saveWorkout?(opts: {
+    from: number;
+    to: number;
+    activeEnergyKcal: number;
+    activityType?: number;
+  }): Promise<{ workoutUuid: string }>;
 }
 
 function getPlugin(): HealthKitTimerPlugin | null {
@@ -110,5 +125,67 @@ export async function getHealthKitDistanceMeters(
     return Math.max(0, result?.meters ?? 0);
   } catch {
     return 0;
+  }
+}
+
+// HKWorkoutActivityType raw values we care about. Full list:
+// https://developer.apple.com/documentation/healthkit/hkworkoutactivitytype
+export const HK_ACTIVITY_TYPE = {
+  highIntensityIntervalTraining: 64,
+  functionalStrengthTraining: 20,
+  running: 37,
+  traditionalStrengthTraining: 50,
+} as const;
+
+export async function requestHealthKitWritePermission(): Promise<boolean> {
+  const plugin = getPlugin();
+  if (!plugin?.requestWritePermission) return false;
+  try {
+    const r = await plugin.requestWritePermission();
+    return Boolean(r?.granted);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when HealthKit already has a workout overlapping [from, to] — typically
+ * because the user's Apple Watch ran the Workout app concurrently. Callers
+ * should skip the push and surface the "Apple Watch already logged this"
+ * toast to avoid double-rings.
+ */
+export async function healthKitHasOverlappingWorkout(
+  fromMs: number,
+  toMs: number,
+): Promise<boolean> {
+  const plugin = getPlugin();
+  if (!plugin?.hasOverlappingWorkout) return false;
+  try {
+    const r = await plugin.hasOverlappingWorkout({ from: fromMs, to: toMs });
+    return Boolean(r?.overlap);
+  } catch {
+    return false;
+  }
+}
+
+export async function saveHealthKitWorkout(opts: {
+  fromMs: number;
+  toMs: number;
+  activeEnergyKcal: number;
+  activityType?: number;
+}): Promise<string | null> {
+  const plugin = getPlugin();
+  if (!plugin?.saveWorkout) return null;
+  try {
+    const r = await plugin.saveWorkout({
+      from: opts.fromMs,
+      to: opts.toMs,
+      activeEnergyKcal: opts.activeEnergyKcal,
+      activityType: opts.activityType ?? HK_ACTIVITY_TYPE.highIntensityIntervalTraining,
+    });
+    return r?.workoutUuid || null;
+  } catch (err) {
+    console.error("[healthkit] saveWorkout failed", err);
+    return null;
   }
 }

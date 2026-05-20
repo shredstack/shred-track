@@ -59,6 +59,11 @@ export const users = pgTable("users", {
   emergencyContactName: text("emergency_contact_name"),
   emergencyContactPhone: text("emergency_contact_phone"),
   emergencyContactRelation: text("emergency_contact_relation"),
+  // Calorie estimation preferences. `epoc_enabled` is tri-state: null means
+  // inherit the active community's default, true/false overrides it. Solo
+  // users default to enabled at the community's default multiplier (1.10).
+  epocEnabled: boolean("epoc_enabled"),
+  pushToAppleHealth: boolean("push_to_apple_health").default(true).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -236,6 +241,19 @@ export const movements = pgTable(
     videoUrl: text("video_url"),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     isValidated: boolean("is_validated").default(false).notNull(),
+    // Calorie-estimation fields (see crossfit_calorie_estimation_spec.md). Base
+    // MET at typical intensity; the estimator applies an intensity modifier at
+    // compute time. `is_paced_run` / `is_paced_erg` mean "look me up by pace,
+    // ignore met_value".
+    metValue: numeric("met_value"),
+    metCompendiumCode: text("met_compendium_code"),
+    metIsEstimated: boolean("met_is_estimated").default(false).notNull(),
+    metSource: text("met_source").default("2024 Adult Compendium"),
+    metNotes: text("met_notes"),
+    repSecondsDefault: numeric("rep_seconds_default"),
+    isPacedRun: boolean("is_paced_run").default(false).notNull(),
+    isPacedErg: text("is_paced_erg"), // 'row' | 'ski' | null
+    metUpdatedAt: timestamp("met_updated_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [index("movements_created_by_idx").on(table.createdBy)]
@@ -277,6 +295,15 @@ export const workouts = pgTable("workouts", {
   // When the coach last saved changes to this workout (CAP-import overwrite
   // guard).
   reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  // Template-level calorie estimate computed against a 75 kg reference
+  // athlete. Per-athlete numbers live on `scores`.
+  estimatedKcalLow: integer("estimated_kcal_low"),
+  estimatedKcalHigh: integer("estimated_kcal_high"),
+  estimatedKcalMethod: text("estimated_kcal_method"),
+  estimatedKcalConfidence: text("estimated_kcal_confidence"),
+  estimatedKcalComputedAt: timestamp("estimated_kcal_computed_at", {
+    withTimezone: true,
+  }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -318,6 +345,12 @@ export const workoutParts = pgTable(
     // SQL migration to keep the circular type dependency at the schema
     // level instead of the TS level.
     workoutSectionId: uuid("workout_section_id"),
+    // Per-part calorie estimate at 75 kg reference. Workout-level totals are
+    // the sum of these. Storing per-part means a mixed strength+metcon workout
+    // gets the right `workoutType`-specific math on each section.
+    estimatedKcalLow: integer("estimated_kcal_low"),
+    estimatedKcalHigh: integer("estimated_kcal_high"),
+    estimatedKcalConfidence: text("estimated_kcal_confidence"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -420,6 +453,30 @@ export const scores = pgTable(
     // reaction / comment write paths; a nightly cron reconciles drift.
     reactionCount: integer("reaction_count").default(0).notNull(),
     commentCount: integer("comment_count").default(0).notNull(),
+    // Session bracket — populated by the live logger when available, else
+    // derived from the score's own time fields at save time. Used both as the
+    // duration source for the calorie estimator and as the timestamp we push
+    // to Apple Health so retroactively-logged scores land at the right time.
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    durationSeconds: integer("duration_seconds"),
+    // Bodyweight snapshot at the moment the score was logged. Canonical lb;
+    // the estimator converts to kg internally. Never retroactively recomputed.
+    bodyweightLbAtScore: numeric("bodyweight_lb_at_score"),
+    // Calorie outputs. We pre-compute all four flavors at save time so the
+    // EPOC toggle and the active/total switch are display-time flips with no
+    // recompute. `_active` strips the BMR baseline and is what we push to
+    // Apple Health so the Move ring doesn't double-count resting energy.
+    estimatedKcal: integer("estimated_kcal"),
+    estimatedKcalActive: integer("estimated_kcal_active"),
+    estimatedKcalWithEpoc: integer("estimated_kcal_with_epoc"),
+    estimatedKcalActiveWithEpoc: integer("estimated_kcal_active_with_epoc"),
+    estimatedKcalMethod: text("estimated_kcal_method"),
+    estimatedKcalConfidence: text("estimated_kcal_confidence"),
+    // 'model' | 'apple_health_user' | 'manual_override'. The kcal value itself
+    // is not user-editable — only this flag is.
+    estimatedKcalSource: text("estimated_kcal_source").default("model").notNull(),
+    appleHealthWorkoutUuid: uuid("apple_health_workout_uuid"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -428,6 +485,56 @@ export const scores = pgTable(
     index("scores_part_idx").on(table.workoutPartId),
   ]
 );
+
+// ============================================
+// Calorie estimation — per-athlete cadence + per-gym EPOC
+// ============================================
+
+// Populated nightly by an Inngest job once a user has ≥3 logged scores of a
+// given movement with derivable rep-time. The estimator prefers this over
+// `movements.rep_seconds_default` when available.
+export const userMovementPaces = pgTable(
+  "user_movement_paces",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    movementId: uuid("movement_id")
+      .notNull()
+      .references(() => movements.id, { onDelete: "cascade" }),
+    repSecondsObserved: numeric("rep_seconds_observed").notNull(),
+    sampleSize: integer("sample_size").notNull(),
+    lastComputedAt: timestamp("last_computed_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.movementId] }),
+    index("user_movement_paces_movement_idx").on(table.movementId),
+  ]
+);
+
+export const communityCaloriePreferences = pgTable(
+  "community_calorie_preferences",
+  {
+    communityId: uuid("community_id")
+      .primaryKey()
+      .references(() => communities.id, { onDelete: "cascade" }),
+    epocDefaultEnabled: boolean("epoc_default_enabled").default(true).notNull(),
+    // HIIT-default 1.10. Range 1.0–1.20 enforced in SQL.
+    epocMultiplier: numeric("epoc_multiplier").default("1.10").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  }
+);
+
+export type UserMovementPace = typeof userMovementPaces.$inferSelect;
+export type NewUserMovementPace = typeof userMovementPaces.$inferInsert;
+export type CommunityCaloriePreferences =
+  typeof communityCaloriePreferences.$inferSelect;
+export type NewCommunityCaloriePreferences =
+  typeof communityCaloriePreferences.$inferInsert;
 
 export const scoreMovementDetails = pgTable("score_movement_details", {
   id: uuid("id").defaultRandom().primaryKey(),

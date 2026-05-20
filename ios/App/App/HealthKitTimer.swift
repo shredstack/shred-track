@@ -15,6 +15,11 @@ public class HealthKitTimer: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "resumeWorkout", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "endWorkout", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getDistanceMeters", returnType: CAPPluginReturnPromise),
+        // Calorie-estimation feature: push ShredTrack's MET-based estimate to
+        // Apple Health so rings/Move calories reflect CrossFit work.
+        CAPPluginMethod(name: "requestWritePermission", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "hasOverlappingWorkout", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "saveWorkout", returnType: CAPPluginReturnPromise),
     ]
 
     private let healthStore = HKHealthStore()
@@ -97,5 +102,120 @@ public class HealthKitTimer: CAPPlugin, CAPBridgedPlugin {
             call.resolve(["meters": meters])
         }
         healthStore.execute(query)
+    }
+
+    // MARK: - Workout writes (calorie estimation feature)
+
+    private func activeEnergyType() -> HKQuantityType? {
+        HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)
+    }
+
+    @objc func requestWritePermission(_ call: CAPPluginCall) {
+        guard Self.isAvailable, let active = activeEnergyType() else {
+            call.resolve(["granted": false, "available": false])
+            return
+        }
+        let workoutType = HKObjectType.workoutType()
+        healthStore.requestAuthorization(
+            toShare: [workoutType, active],
+            read: [workoutType, active]
+        ) { success, error in
+            if let error = error {
+                call.resolve([
+                    "granted": false, "available": true,
+                    "error": error.localizedDescription,
+                ])
+                return
+            }
+            call.resolve(["granted": success, "available": true])
+        }
+    }
+
+    @objc func hasOverlappingWorkout(_ call: CAPPluginCall) {
+        guard Self.isAvailable else {
+            call.resolve(["overlap": false])
+            return
+        }
+        guard
+            let fromMs = call.getDouble("from"),
+            let toMs = call.getDouble("to")
+        else {
+            call.reject("Missing from/to (ms-since-epoch)")
+            return
+        }
+        let start = Date(timeIntervalSince1970: fromMs / 1000.0)
+        let end = Date(timeIntervalSince1970: toMs / 1000.0)
+        let predicate = HKQuery.predicateForSamples(
+            withStart: start, end: end, options: []
+        )
+        let query = HKSampleQuery(
+            sampleType: HKObjectType.workoutType(),
+            predicate: predicate,
+            limit: 1,
+            sortDescriptors: nil
+        ) { _, samples, _ in
+            call.resolve(["overlap": !(samples?.isEmpty ?? true)])
+        }
+        healthStore.execute(query)
+    }
+
+    @objc func saveWorkout(_ call: CAPPluginCall) {
+        guard Self.isAvailable, let active = activeEnergyType() else {
+            call.reject("HealthKit unavailable")
+            return
+        }
+        guard
+            let fromMs = call.getDouble("from"),
+            let toMs = call.getDouble("to"),
+            let activeKcal = call.getDouble("activeEnergyKcal")
+        else {
+            call.reject("Missing from/to/activeEnergyKcal")
+            return
+        }
+        let start = Date(timeIntervalSince1970: fromMs / 1000.0)
+        let end = Date(timeIntervalSince1970: toMs / 1000.0)
+        let activityRaw = call.getInt("activityType") ?? Int(HKWorkoutActivityType.highIntensityIntervalTraining.rawValue)
+        guard let activity = HKWorkoutActivityType(rawValue: UInt(activityRaw)) else {
+            call.reject("Invalid activityType")
+            return
+        }
+
+        let config = HKWorkoutConfiguration()
+        config.activityType = activity
+
+        let builder = HKWorkoutBuilder(
+            healthStore: healthStore,
+            configuration: config,
+            device: nil
+        )
+        builder.beginCollection(withStart: start) { [self] beginOk, beginErr in
+            guard beginOk else {
+                call.reject(beginErr?.localizedDescription ?? "beginCollection failed")
+                return
+            }
+            let energySample = HKQuantitySample(
+                type: active,
+                quantity: HKQuantity(unit: .kilocalorie(), doubleValue: activeKcal),
+                start: start,
+                end: end
+            )
+            builder.add([energySample]) { _, _ in
+                builder.endCollection(withEnd: end) { _, endErr in
+                    if let endErr = endErr {
+                        call.reject(endErr.localizedDescription)
+                        return
+                    }
+                    builder.finishWorkout { workout, finishErr in
+                        if let finishErr = finishErr {
+                            call.reject(finishErr.localizedDescription)
+                            return
+                        }
+                        call.resolve([
+                            "workoutUuid": workout?.uuid.uuidString ?? "",
+                        ])
+                    }
+                }
+            }
+        }
     }
 }

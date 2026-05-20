@@ -22,6 +22,7 @@ import {
 import type { WorkoutType } from "@/types/crossfit";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
 import { parseDurationToSeconds } from "@/lib/crossfit/duration-parser";
+import { inngest } from "@/inngest/client";
 
 // GET /api/workouts/[id] — single workout with its parts, movements, and
 // (if the requester has one) the caller's scores per part.
@@ -785,6 +786,16 @@ export async function PUT(
 
     return updatedWorkout;
   });
+
+  // Re-fire the calorie compute — parts/movements may have changed.
+  try {
+    await inngest.send({
+      name: "workouts/calories.compute",
+      data: { workoutId: id },
+    });
+  } catch (err) {
+    console.error("[calories] failed to dispatch compute event on PUT", err);
+  }
 
   return NextResponse.json(result);
 }

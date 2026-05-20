@@ -28,6 +28,7 @@ import {
   insertWorkoutParts,
   type PartInput,
 } from "@/lib/crossfit/insert-workout-parts";
+import { inngest } from "@/inngest/client";
 
 async function loadSection(sectionId: string, communityId: string) {
   const [row] = await db
@@ -238,6 +239,20 @@ export async function PUT(
         .where(eq(workoutSections.id, sectionId));
     }
   });
+
+  // Recompute the workout-level calorie estimate — parts/movements on this
+  // section may have changed.
+  try {
+    await inngest.send({
+      name: "workouts/calories.compute",
+      data: { workoutId: section.workoutId },
+    });
+  } catch (err) {
+    console.error(
+      "[calories] failed to dispatch compute event on section content PUT",
+      err
+    );
+  }
 
   return NextResponse.json({ ok: true });
 }

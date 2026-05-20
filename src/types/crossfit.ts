@@ -536,6 +536,11 @@ export interface WorkoutDisplay {
   vestWeightFemaleLb?: number;
   isPartner?: boolean;
   partnerCount?: number | null;
+  /** Template-level calorie estimate (75 kg reference). May be null when the
+   *  Inngest compute job hasn't run yet on a freshly-created workout. */
+  estimatedKcalLow?: number | null;
+  estimatedKcalHigh?: number | null;
+  estimatedKcalConfidence?: "high" | "medium" | "low" | null;
 }
 
 export interface ScoreDisplay {
@@ -559,6 +564,13 @@ export interface ScoreDisplay {
   userName?: string;
   scalingDetails?: MovementScalingDisplay[];
   movementDetails?: ScoreMovementDetailDisplay[];
+  /** Personalized calorie estimate (athlete bodyweight, EPOC applied per
+   *  user preference). Surfaced in post-score summary and the score row. */
+  estimatedKcal?: number | null;
+  estimatedKcalActive?: number | null;
+  estimatedKcalWithEpoc?: number | null;
+  estimatedKcalActiveWithEpoc?: number | null;
+  estimatedKcalConfidence?: "high" | "medium" | "low" | null;
 }
 
 // One per-set entry on a for_load movement. `weight` is required (lb);

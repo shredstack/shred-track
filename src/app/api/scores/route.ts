@@ -11,6 +11,7 @@ import { getSessionUser } from "@/lib/session";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
 import { invalidateCrossfitInsightsCache } from "@/lib/crossfit/insights/cache";
 import type { SetEntry } from "@/types/crossfit";
+import { computeScoreEstimate } from "@/lib/calories/orchestrator";
 
 // ============================================
 // Request types
@@ -47,6 +48,10 @@ interface ScorePostBody {
   rpe?: number;
   woreVest?: boolean;
   vestWeightLb?: number;
+  // Live-logger bracket. When omitted, the calorie estimator falls back to
+  // the score's own time fields and (last resort) the part's time cap.
+  startedAt?: string;
+  endedAt?: string;
   movementDetails?: MovementDetailInput[];
   // Legacy name used by client before multi-part landed.
   movementScalings?: MovementDetailInput[];
@@ -162,6 +167,42 @@ export async function POST(req: NextRequest) {
     if (max > 0) weightLbs = max;
   }
 
+  const startedAt = body.startedAt ? new Date(body.startedAt) : null;
+  const endedAt = body.endedAt ? new Date(body.endedAt) : null;
+
+  // Compute the personalized calorie estimate before opening the transaction.
+  // Worth noting: this issues a handful of read queries (parts, movements,
+  // paces, user, community pref). All reads — safe outside the tx.
+  let calorieEstimate: Awaited<ReturnType<typeof computeScoreEstimate>> | null =
+    null;
+  try {
+    calorieEstimate = await computeScoreEstimate({
+      workoutId: workoutId!,
+      userId: user.id,
+      score: {
+        timeSeconds: body.timeSeconds ?? null,
+        hitTimeCap: body.hitTimeCap ?? false,
+        woreVest: body.woreVest ?? null,
+        vestWeightLb: body.vestWeightLb ?? null,
+        rpe: body.rpe ?? null,
+        startedAt,
+        endedAt,
+      },
+    });
+  } catch (err) {
+    // Never block score save on estimator failure. Log and continue.
+    console.error("[calories] estimator failed for score POST", err);
+  }
+
+  const durationSeconds = (() => {
+    if (startedAt && endedAt) {
+      const diff = (endedAt.getTime() - startedAt.getTime()) / 1000;
+      if (diff > 0) return Math.round(diff);
+    }
+    if (body.timeSeconds && body.timeSeconds > 0) return body.timeSeconds;
+    return null;
+  })();
+
   try {
     const score = await db.transaction(async (tx) => {
       const [inserted] = await tx
@@ -183,6 +224,20 @@ export async function POST(req: NextRequest) {
           woreVest: body.woreVest ?? null,
           vestWeightLb:
             body.vestWeightLb != null ? body.vestWeightLb.toString() : null,
+          startedAt,
+          endedAt,
+          durationSeconds,
+          bodyweightLbAtScore:
+            calorieEstimate?.bodyweightLb != null
+              ? calorieEstimate.bodyweightLb.toString()
+              : null,
+          estimatedKcal: calorieEstimate?.estimate.gross ?? null,
+          estimatedKcalActive: calorieEstimate?.estimate.active ?? null,
+          estimatedKcalWithEpoc: calorieEstimate?.estimate.grossWithEpoc ?? null,
+          estimatedKcalActiveWithEpoc:
+            calorieEstimate?.estimate.activeWithEpoc ?? null,
+          estimatedKcalMethod: calorieEstimate?.estimate.method ?? null,
+          estimatedKcalConfidence: calorieEstimate?.estimate.confidence ?? null,
         })
         .returning();
 

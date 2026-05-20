@@ -8,6 +8,7 @@ on:
       - 'src/db/seeds/**'
       - 'src/lib/hyrox-generic-plans/**'
       - 'src/lib/crossfit/weightlifting-benchmarks.ts'
+      - 'src/lib/calories/met-seed.ts'
 
   # Allow manual trigger from GitHub UI
   workflow_dispatch:
@@ -38,6 +39,7 @@ jobs:
               - 'src/db/seeds/**'
               - 'src/lib/hyrox-generic-plans/**'
               - 'src/lib/crossfit/weightlifting-benchmarks.ts'
+              - 'src/lib/calories/met-seed.ts'
 
   deploy-migrations:
     needs: changes

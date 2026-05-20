@@ -1,5 +1,6 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { pushTodaySnapshotToWatch } from "@/lib/native/today-snapshot";
+import type { UserProfile } from "@/hooks/useProfile";
 import type {
   WorkoutDisplay,
   WorkoutPartDisplay,
@@ -84,6 +85,13 @@ interface WireScore {
   hitTimeCap: boolean;
   notes?: string;
   rpe?: number;
+  woreVest?: boolean | null;
+  vestWeightLb?: number;
+  estimatedKcal?: number | null;
+  estimatedKcalActive?: number | null;
+  estimatedKcalWithEpoc?: number | null;
+  estimatedKcalActiveWithEpoc?: number | null;
+  estimatedKcalConfidence?: "high" | "medium" | "low" | null;
   movementDetails?: WireMovementDetail[];
 }
 
@@ -144,6 +152,14 @@ interface WireWorkout {
   description: string | null;
   workoutDate: string;
   benchmarkWorkoutId: string | null;
+  requiresVest?: boolean | null;
+  vestWeightMaleLb?: number | null;
+  vestWeightFemaleLb?: number | null;
+  isPartner?: boolean | null;
+  partnerCount?: number | null;
+  estimatedKcalLow?: number | null;
+  estimatedKcalHigh?: number | null;
+  estimatedKcalConfidence?: "high" | "medium" | "low" | null;
   sections?: WireSection[];
   parts: WirePart[];
 }
@@ -207,6 +223,13 @@ function wireScoreToDisplay(s: WireScore): ScoreDisplay {
     hitTimeCap: s.hitTimeCap,
     notes: s.notes,
     rpe: s.rpe,
+    woreVest: s.woreVest ?? null,
+    vestWeightLb: s.vestWeightLb,
+    estimatedKcal: s.estimatedKcal ?? null,
+    estimatedKcalActive: s.estimatedKcalActive ?? null,
+    estimatedKcalWithEpoc: s.estimatedKcalWithEpoc ?? null,
+    estimatedKcalActiveWithEpoc: s.estimatedKcalActiveWithEpoc ?? null,
+    estimatedKcalConfidence: s.estimatedKcalConfidence ?? null,
     movementDetails: s.movementDetails,
   };
 }
@@ -248,6 +271,14 @@ function wireWorkoutToDisplay(w: WireWorkout): WorkoutDisplay {
     communityLogoUrl: w.communityLogoUrl,
     sections: w.sections ?? [],
     benchmarkWorkoutId: w.benchmarkWorkoutId,
+    requiresVest: w.requiresVest ?? undefined,
+    vestWeightMaleLb: w.vestWeightMaleLb ?? undefined,
+    vestWeightFemaleLb: w.vestWeightFemaleLb ?? undefined,
+    isPartner: w.isPartner ?? undefined,
+    partnerCount: w.partnerCount ?? undefined,
+    estimatedKcalLow: w.estimatedKcalLow ?? null,
+    estimatedKcalHigh: w.estimatedKcalHigh ?? null,
+    estimatedKcalConfidence: w.estimatedKcalConfidence ?? null,
     parts: w.parts.map(wirePartToDisplay),
   };
 }
@@ -562,12 +593,64 @@ export function useLogScore() {
       }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ["workouts"] });
       queryClient.invalidateQueries({ queryKey: ["benchmarks"] });
       queryClient.invalidateQueries({ queryKey: ["benchmark-history"] });
       void pushTodaySnapshotToWatch();
+      void maybePushToAppleHealth(saved, queryClient);
     },
+  });
+}
+
+// Best-effort Apple Health push. Lives outside the mutation chain so a
+// HealthKit failure never bubbles into the UI as a score-save error.
+async function maybePushToAppleHealth(
+  saved: {
+    id?: string;
+    startedAt?: string | null;
+    endedAt?: string | null;
+    durationSeconds?: number | null;
+    estimatedKcalActiveWithEpoc?: number | null;
+    appleHealthWorkoutUuid?: string | null;
+  },
+  queryClient: QueryClient,
+): Promise<void> {
+  if (!saved?.id) return;
+  // Score already pushed — server-side guard would no-op anyway, but skipping
+  // here avoids creating an orphaned HK workout if the user edited the time
+  // bracket between saves.
+  if (saved.appleHealthWorkoutUuid) return;
+  const active = saved.estimatedKcalActiveWithEpoc;
+  if (active == null || active <= 0) return;
+
+  // Read pref from the React Query cache so we don't add a round-trip on
+  // every score save. If the cache is cold (user hasn't visited a page that
+  // loaded the profile yet) we conservatively skip the push — the next save
+  // after the profile loads will pick it up.
+  const cached = queryClient.getQueryData<UserProfile>(["user-profile"]);
+  if (!cached) return;
+  const pushPref = cached.pushToAppleHealth !== false;
+  if (!pushPref) return;
+
+  const start = saved.startedAt ? new Date(saved.startedAt).getTime() : null;
+  const end = saved.endedAt ? new Date(saved.endedAt).getTime() : null;
+  let fromMs = start ?? null;
+  let toMs = end ?? null;
+  // If no live bracket, back-fill the window from durationSeconds.
+  if (toMs == null) toMs = Date.now();
+  if (fromMs == null) {
+    const dur = (saved.durationSeconds ?? 0) * 1000;
+    fromMs = dur > 0 ? toMs - dur : toMs - 30 * 60 * 1000; // last-ditch 30 min
+  }
+
+  const mod = await import("@/lib/native/push-score-to-health");
+  await mod.pushScoreToAppleHealth({
+    scoreId: saved.id,
+    fromMs,
+    toMs,
+    activeEnergyKcal: active,
+    pushPrefEnabled: pushPref,
   });
 }
 
@@ -593,10 +676,11 @@ export function useUpdateScore() {
       }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ["workouts"] });
       queryClient.invalidateQueries({ queryKey: ["benchmarks"] });
       queryClient.invalidateQueries({ queryKey: ["benchmark-history"] });
+      void maybePushToAppleHealth(saved, queryClient);
     },
   });
 }
