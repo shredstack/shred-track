@@ -24,6 +24,87 @@ export interface ClassInstanceListItem {
   isManager: boolean;
 }
 
+export interface ClassDetailInstance {
+  id: string;
+  communityId: string;
+  scheduleId: string | null;
+  startAt: string;
+  endAt: string;
+  capacity: number;
+  status: "scheduled" | "cancelled" | "completed";
+  kind: "class" | "event";
+  cancellationReason: string | null;
+  name: string;
+  description: string | null;
+  coachId: string | null;
+  coachName: string | null;
+  coachImage: string | null;
+  eventImageUrl: string | null;
+  myStatus: "registered" | "cancelled" | "no_show" | "attended" | null;
+}
+
+export interface ClassRosterEntry {
+  registrationId: string;
+  userId: string;
+  userName: string;
+  userImage: string | null;
+  status: "registered" | "cancelled" | "no_show" | "attended";
+  // Manager-only fields.
+  registeredAt?: string;
+}
+
+export interface ClassDetailResponse {
+  instance: ClassDetailInstance;
+  isManager: boolean;
+  roster: ClassRosterEntry[];
+}
+
+export function useClassDetail(classInstanceId: string | null) {
+  return useQuery<ClassDetailResponse>({
+    queryKey: ["class-instance", classInstanceId],
+    enabled: !!classInstanceId,
+    queryFn: async () => {
+      const res = await fetch(`/api/classes/${classInstanceId}`);
+      if (!res.ok) throw new Error("Failed to load class");
+      return res.json();
+    },
+  });
+}
+
+export function useRegisterForClassDetail(classInstanceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/classes/${classInstanceId}/register`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || "Could not register");
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["class-instance", classInstanceId] });
+      qc.invalidateQueries({ queryKey: ["gym"] });
+    },
+  });
+}
+
+export function useUnregisterFromClassDetail(classInstanceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      await fetch(`/api/classes/${classInstanceId}/register`, {
+        method: "DELETE",
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["class-instance", classInstanceId] });
+      qc.invalidateQueries({ queryKey: ["gym"] });
+    },
+  });
+}
+
 export function useGymClasses(
   communityId: string | null,
   fromIso: string,

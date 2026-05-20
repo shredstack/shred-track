@@ -48,6 +48,8 @@ import { formatSecondsAsClock } from "@/lib/crossfit/duration-parser";
 import { formatMovementPrescription } from "@/lib/crossfit/prescription";
 import { DeleteWorkoutDialog } from "@/components/crossfit/delete-workout-dialog";
 import { WorkoutSectionBlock } from "@/components/crossfit/workout-section-block";
+import { CalorieBadge } from "@/components/crossfit/calorie-badge";
+import { useEffectiveEpocEnabled } from "@/hooks/useEpocPreference";
 
 // Programmed Rest is identified by name + duration metric, mirroring the
 // builder's `isLegacyRestMovement` check. For a Rest the duration is the
@@ -89,9 +91,19 @@ const DIVISION_LABELS = {
   rx_plus: "Rx+",
 } as const;
 
-function ScoreRow({ part }: { part: WorkoutPartDisplay }) {
+function ScoreRow({
+  part,
+  communityId,
+}: {
+  part: WorkoutPartDisplay;
+  communityId: string | null | undefined;
+}) {
   const s = part.score;
+  const epocEnabled = useEffectiveEpocEnabled(communityId);
   if (!s) return null;
+  const kcalForDisplay = epocEnabled
+    ? s.estimatedKcalActiveWithEpoc
+    : s.estimatedKcalActive;
 
   let scoreDisplay = "";
   if (s.timeSeconds) {
@@ -146,6 +158,14 @@ function ScoreRow({ part }: { part: WorkoutPartDisplay }) {
           <span className="ml-auto text-[10px] text-muted-foreground font-mono">
             RPE {s.rpe}
           </span>
+        )}
+        {kcalForDisplay != null && (
+          <CalorieBadge
+            variant="score"
+            midpoint={kcalForDisplay}
+            confidence={s.estimatedKcalConfidence}
+            className={s.rpe ? "" : "ml-auto"}
+          />
         )}
       </div>
 
@@ -315,10 +335,12 @@ function PartSection({
   part,
   index,
   showLabel,
+  communityId,
 }: {
   part: WorkoutPartDisplay;
   index: number;
   showLabel: boolean;
+  communityId: string | null | undefined;
 }) {
   const typeColor = WORKOUT_TYPE_COLORS[part.workoutType];
   const typeLabel = WORKOUT_TYPE_LABELS[part.workoutType];
@@ -500,7 +522,7 @@ function PartSection({
         })()}
       </div>
 
-      {part.score && <ScoreRow part={part} />}
+      {part.score && <ScoreRow part={part} communityId={communityId} />}
     </div>
   );
 }
@@ -611,6 +633,20 @@ export function WorkoutCard({
           </div>
         )}
 
+        {(workout.estimatedKcalLow != null && workout.estimatedKcalHigh != null) && (
+          <div className="flex items-center gap-1.5">
+            <CalorieBadge
+              variant="detail"
+              low={workout.estimatedKcalLow}
+              high={workout.estimatedKcalHigh}
+              confidence={workout.estimatedKcalConfidence}
+            />
+            <span className="text-[10px] text-muted-foreground/70">
+              ref. 75 kg
+            </span>
+          </div>
+        )}
+
         {hasSections ? (
           // Section layout: one card per typed section. Parts without a
           // section (legacy or freshly-added without grouping) trail at
@@ -649,6 +685,7 @@ export function WorkoutCard({
                           part={part}
                           index={idx}
                           showLabel={sectionParts.length > 1}
+                          communityId={workout.communityId}
                         />
                       </div>
                     ))}
@@ -670,6 +707,7 @@ export function WorkoutCard({
                         part={part}
                         index={idx}
                         showLabel={orphanParts.length > 1}
+                        communityId={workout.communityId}
                       />
                     </div>
                   ))}
@@ -681,7 +719,12 @@ export function WorkoutCard({
           parts.map((part, idx) => (
             <div key={part.id} className="space-y-4">
               {idx > 0 && <Separator />}
-              <PartSection part={part} index={idx} showLabel={multiPart} />
+              <PartSection
+                part={part}
+                index={idx}
+                showLabel={multiPart}
+                communityId={workout.communityId}
+              />
             </div>
           ))
         )}

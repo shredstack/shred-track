@@ -37,6 +37,7 @@ import { AvatarEditModal } from "@/components/profile/avatar-edit-modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -845,16 +846,104 @@ function EmergencyContactSection() {
 
 function CrossFitSection() {
   return (
+    <div className="space-y-4">
+      <CalorieEstimationSection />
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-bold text-muted-foreground uppercase tracking-wider">
+            CrossFit
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground text-center py-6">
+            More CrossFit profile fields coming soon.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function CalorieEstimationSection() {
+  const { data: user } = useUserProfile();
+  const updateUser = useUpdateUserProfile();
+
+  if (!user) return null;
+  const epoc = user.epocEnabled;
+  const push = user.pushToAppleHealth;
+
+  // Three-state for EPOC: inherit | on | off. Stored as null | true | false.
+  const epocLabel =
+    epoc === null
+      ? "Inherit gym default"
+      : epoc
+      ? "On (~+10% afterburn)"
+      : "Off";
+
+  return (
     <Card>
       <CardHeader>
         <CardTitle className="text-sm font-bold text-muted-foreground uppercase tracking-wider">
-          CrossFit
+          Calorie estimates
         </CardTitle>
       </CardHeader>
-      <CardContent>
-        <p className="text-sm text-muted-foreground text-center py-8">
-          CrossFit profile coming soon.
-        </p>
+      <CardContent className="space-y-4">
+        <div className="space-y-1">
+          <Label className="text-sm font-medium">Include afterburn (EPOC)</Label>
+          <p className="text-[11px] text-muted-foreground">
+            EPOC adds ~10% to account for elevated metabolism after intense
+            workouts. Override your gym&apos;s default if you want.
+          </p>
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {(
+              [
+                { v: null as boolean | null, label: "Inherit gym default" },
+                { v: true, label: "On" },
+                { v: false, label: "Off" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={String(opt.v)}
+                type="button"
+                onClick={() =>
+                  updateUser.mutate(
+                    { epocEnabled: opt.v },
+                    { onError: (e: Error) => toast.error(e.message) }
+                  )
+                }
+                className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                  epoc === opt.v
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-white/[0.08] text-muted-foreground hover:bg-white/[0.04]"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-[10px] text-muted-foreground pt-1">
+            Current: <span className="text-foreground">{epocLabel}</span>
+          </p>
+        </div>
+
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-medium">Push to Apple Health</Label>
+            <Switch
+              checked={push}
+              onCheckedChange={(v: boolean) =>
+                updateUser.mutate(
+                  { pushToAppleHealth: v },
+                  { onError: (e: Error) => toast.error(e.message) }
+                )
+              }
+            />
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Logs each workout to the iPhone&apos;s Health app so your Move ring
+            reflects CrossFit work. Requires HealthKit permission on first save.
+          </p>
+        </div>
       </CardContent>
     </Card>
   );

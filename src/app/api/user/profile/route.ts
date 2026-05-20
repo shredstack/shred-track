@@ -37,6 +37,8 @@ export async function GET() {
       emergencyContactName: users.emergencyContactName,
       emergencyContactPhone: users.emergencyContactPhone,
       emergencyContactRelation: users.emergencyContactRelation,
+      epocEnabled: users.epocEnabled,
+      pushToAppleHealth: users.pushToAppleHealth,
     })
     .from(users)
     .where(eq(users.id, session.id))
@@ -157,6 +159,27 @@ export async function PUT(req: Request) {
       );
     }
   }
+  if ("epocEnabled" in body) {
+    // Tri-state: true / false / null (inherit community default). Reject any
+    // other shape so we don't silently store strings or numbers.
+    if (body.epocEnabled === null || typeof body.epocEnabled === "boolean") {
+      updates.epocEnabled = body.epocEnabled;
+    } else {
+      return NextResponse.json(
+        { error: "Invalid epocEnabled (expect true | false | null)" },
+        { status: 400 }
+      );
+    }
+  }
+  if ("pushToAppleHealth" in body) {
+    if (typeof body.pushToAppleHealth !== "boolean") {
+      return NextResponse.json(
+        { error: "Invalid pushToAppleHealth (expect boolean)" },
+        { status: 400 }
+      );
+    }
+    updates.pushToAppleHealth = body.pushToAppleHealth;
+  }
   if ("bodyWeightLb" in body) {
     if (body.bodyWeightLb === null || body.bodyWeightLb === "") {
       updates.bodyWeightLb = null;
@@ -199,6 +222,8 @@ export async function PUT(req: Request) {
       emergencyContactName: users.emergencyContactName,
       emergencyContactPhone: users.emergencyContactPhone,
       emergencyContactRelation: users.emergencyContactRelation,
+      epocEnabled: users.epocEnabled,
+      pushToAppleHealth: users.pushToAppleHealth,
     });
 
   return NextResponse.json({

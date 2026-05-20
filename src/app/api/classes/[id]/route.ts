@@ -7,6 +7,7 @@ import { db } from "@/db";
 import {
   classInstances,
   classRegistrations,
+  classSchedules,
   communityMemberships,
   notifications,
   users,
@@ -22,12 +23,21 @@ export async function GET(
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
-  const [instance] = await db
-    .select()
+  const [row] = await db
+    .select({
+      instance: classInstances,
+      scheduleName: classSchedules.name,
+      scheduleDescription: classSchedules.description,
+      coachName: users.name,
+      coachImage: users.image,
+    })
     .from(classInstances)
+    .leftJoin(classSchedules, eq(classSchedules.id, classInstances.scheduleId))
+    .leftJoin(users, eq(users.id, classInstances.coachId))
     .where(eq(classInstances.id, id))
     .limit(1);
-  if (!instance) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const { instance, scheduleName, scheduleDescription, coachName, coachImage } = row;
   if (!(await canViewGym(user.id, instance.communityId))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -45,11 +55,30 @@ export async function GET(
     .innerJoin(users, eq(users.id, classRegistrations.userId))
     .where(eq(classRegistrations.classInstanceId, id))
     .orderBy(asc(classRegistrations.registeredAt));
+
+  // Event metadata lives on the instance; regular classes inherit name +
+  // description from their schedule.
+  const displayName =
+    instance.kind === "event"
+      ? instance.eventTitle ?? scheduleName ?? "Event"
+      : scheduleName ?? "Class";
+  const displayDescription =
+    instance.kind === "event"
+      ? instance.eventDescription
+      : scheduleDescription;
+  const myEntry = roster.find((r) => r.userId === user.id);
+  const myStatus = myEntry ? myEntry.status : null;
+
   return NextResponse.json({
     instance: {
       ...instance,
       startAt: instance.startAt.toISOString(),
       endAt: instance.endAt.toISOString(),
+      name: displayName,
+      description: displayDescription,
+      coachName,
+      coachImage,
+      myStatus,
     },
     isManager,
     roster: isManager

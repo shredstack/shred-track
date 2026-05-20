@@ -30,6 +30,10 @@ export interface UserProfile {
   emergencyContactName: string | null;
   emergencyContactPhone: string | null;
   emergencyContactRelation: string | null;
+  // Tri-state EPOC pref: null = inherit gym default (default), true/false override.
+  epocEnabled: boolean | null;
+  // Default true — toggled off if the user revokes HealthKit grant.
+  pushToAppleHealth: boolean;
 }
 
 export type PersonalInfoFields = {
@@ -66,6 +70,8 @@ export function useUpdateUserProfile() {
         username?: string | null;
         gender?: "male" | "female" | "other" | null;
         bodyWeightLb?: number | null;
+        epocEnabled?: boolean | null;
+        pushToAppleHealth?: boolean;
       } & PersonalInfoFields
     ) => {
       const res = await fetch("/api/user/profile", {

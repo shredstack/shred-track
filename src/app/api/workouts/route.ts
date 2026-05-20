@@ -31,6 +31,7 @@ import {
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
 import { parseDurationToSeconds } from "@/lib/crossfit/duration-parser";
 import { inferWeightliftingBenchmark } from "@/lib/crossfit/weightlifting-benchmarks";
+import { inngest } from "@/inngest/client";
 
 // ============================================
 // Types
@@ -455,6 +456,10 @@ export async function GET(req: NextRequest) {
       w.vestWeightFemaleLb != null ? Number(w.vestWeightFemaleLb) : null,
     isPartner: w.isPartner,
     partnerCount: w.partnerCount,
+    estimatedKcalLow: w.estimatedKcalLow ?? null,
+    estimatedKcalHigh: w.estimatedKcalHigh ?? null,
+    estimatedKcalConfidence:
+      (w.estimatedKcalConfidence as "high" | "medium" | "low" | null) ?? null,
     creatorName: creatorNameById.get(w.createdBy) ?? null,
     communityName: w.communityId
       ? communityById.get(w.communityId)?.name ?? null
@@ -574,6 +579,18 @@ export async function GET(req: NextRequest) {
                 score.vestWeightLb != null
                   ? Number(score.vestWeightLb)
                   : undefined,
+              estimatedKcal: score.estimatedKcal ?? null,
+              estimatedKcalActive: score.estimatedKcalActive ?? null,
+              estimatedKcalWithEpoc: score.estimatedKcalWithEpoc ?? null,
+              estimatedKcalActiveWithEpoc:
+                score.estimatedKcalActiveWithEpoc ?? null,
+              estimatedKcalConfidence:
+                (score.estimatedKcalConfidence as
+                  | "high"
+                  | "medium"
+                  | "low"
+                  | null
+                  | undefined) ?? null,
               movementDetails: (detailsByScore.get(score.id) ?? []).map((d) => {
                 const entries = normalizeSetEntries(d.setEntries);
                 return {
@@ -944,6 +961,7 @@ export async function POST(req: NextRequest) {
       return workout;
     });
 
+    await fireCalorieEstimate(result.id);
     return NextResponse.json(result, { status: 201 });
     } // end else (non-weightlifting benchmark fast-path)
   }
@@ -1144,7 +1162,25 @@ export async function POST(req: NextRequest) {
     return workout;
   });
 
+  await fireCalorieEstimate(result.id);
   return NextResponse.json(result, { status: 201 });
+}
+
+/**
+ * Fire-and-forget Inngest event so the workout's template-level calorie
+ * estimate is computed asynchronously. Failing to send must not break the
+ * workout creation — the estimate can always be backfilled later via the
+ * admin recompute endpoint.
+ */
+async function fireCalorieEstimate(workoutId: string): Promise<void> {
+  try {
+    await inngest.send({
+      name: "workouts/calories.compute",
+      data: { workoutId },
+    });
+  } catch (err) {
+    console.error("[calories] failed to dispatch compute event", err);
+  }
 }
 
 // ============================================

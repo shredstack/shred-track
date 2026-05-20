@@ -5,6 +5,7 @@
 // `classes` flag is off or the user has no active gym, the page is empty.
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useGymContext } from "@/hooks/useGymContext";
 import { useIsFeatureOn, useFeatureFlagsLoading } from "@/hooks/useFeatureFlag";
 import {
@@ -201,96 +202,117 @@ function ClassRow({
   const isRegistered =
     instance.myStatus === "registered" || instance.myStatus === "attended";
 
+  const detailHref = `/classes/${instance.id}`;
+  // Stop link navigation when tapping the register/cancel action so
+  // members can register inline without bouncing into the detail page.
+  const stopNav = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
   // Events render with the optional banner image + description block on
   // top of the standard register affordances (spec §3.3).
   if (instance.kind === "event") {
     return (
-      <Card
-        id={`class-${instance.id}`}
-        className="overflow-hidden border-primary/30"
-      >
-        {instance.eventImageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={instance.eventImageUrl}
-            alt={instance.name}
-            className="h-32 w-full object-cover"
-          />
-        ) : null}
-        <CardContent className="space-y-2 py-3">
-          <div className="flex items-center gap-2">
-            <Badge>Event</Badge>
-            <span className="text-xs text-muted-foreground">{time}</span>
-            {isCancelled && <Badge variant="destructive">Cancelled</Badge>}
-          </div>
-          <p className="text-base font-semibold">{instance.name}</p>
-          {instance.eventDescription ? (
-            <p className="whitespace-pre-line text-xs text-muted-foreground">
-              {instance.eventDescription}
-            </p>
+      <Link href={detailHref} id={`class-${instance.id}`} className="block">
+        <Card className="overflow-hidden border-primary/30 transition-colors hover:bg-accent/30">
+          {instance.eventImageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={instance.eventImageUrl}
+              alt={instance.name}
+              className="h-32 w-full object-cover"
+            />
           ) : null}
-          <div className="flex items-center justify-between">
-            <p className="text-[11px] text-muted-foreground">
-              {instance.registeredCount}/{instance.capacity} registered
-              {instance.coachName ? ` · ${instance.coachName}` : null}
-            </p>
-            {isCancelled ? null : isRegistered ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={unregister.isPending}
-                onClick={() => unregister.mutate(instance.id)}
-              >
-                Cancel
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                disabled={register.isPending}
-                onClick={() => register.mutate(instance.id)}
-              >
-                Register
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+          <CardContent className="space-y-2 py-3">
+            <div className="flex items-center gap-2">
+              <Badge>Event</Badge>
+              <span className="text-xs text-muted-foreground">{time}</span>
+              {isCancelled && <Badge variant="destructive">Cancelled</Badge>}
+            </div>
+            <p className="text-base font-semibold">{instance.name}</p>
+            {instance.eventDescription ? (
+              <p className="whitespace-pre-line text-xs text-muted-foreground">
+                {instance.eventDescription}
+              </p>
+            ) : null}
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] text-muted-foreground">
+                {instance.registeredCount}/{instance.capacity} registered
+                {instance.coachName ? ` · ${instance.coachName}` : null}
+              </p>
+              {isCancelled ? null : isRegistered ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={unregister.isPending}
+                  onClick={(e) => {
+                    stopNav(e);
+                    unregister.mutate(instance.id);
+                  }}
+                >
+                  Cancel
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  disabled={register.isPending}
+                  onClick={(e) => {
+                    stopNav(e);
+                    register.mutate(instance.id);
+                  }}
+                >
+                  Register
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </Link>
     );
   }
 
   return (
-    <Card id={`class-${instance.id}`}>
-      <CardContent className="flex items-center gap-3 py-3">
-        <div className="w-16 shrink-0 text-sm font-medium">{time}</div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-medium truncate">{instance.name}</p>
-            {isCancelled && <Badge variant="destructive">Cancelled</Badge>}
+    <Link href={detailHref} id={`class-${instance.id}`} className="block">
+      <Card className="transition-colors hover:bg-accent/30">
+        <CardContent className="flex items-center gap-3 py-3">
+          <div className="w-16 shrink-0 text-sm font-medium">{time}</div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium truncate">{instance.name}</p>
+              {isCancelled && <Badge variant="destructive">Cancelled</Badge>}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {instance.registeredCount}/{instance.capacity}
+              {instance.coachName ? ` · ${instance.coachName}` : null}
+            </p>
           </div>
-          <p className="text-xs text-muted-foreground">
-            {instance.registeredCount}/{instance.capacity}
-            {instance.coachName ? ` · ${instance.coachName}` : null}
-          </p>
-        </div>
-        {isCancelled ? null : isRegistered ? (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={unregister.isPending}
-            onClick={() => unregister.mutate(instance.id)}
-          >
-            Cancel
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            disabled={register.isPending}
-            onClick={() => register.mutate(instance.id)}
-          >
-            Register
-          </Button>
-        )}
-      </CardContent>
-    </Card>
+          {isCancelled ? null : isRegistered ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={unregister.isPending}
+              onClick={(e) => {
+                stopNav(e);
+                unregister.mutate(instance.id);
+              }}
+            >
+              Cancel
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              disabled={register.isPending}
+              onClick={(e) => {
+                stopNav(e);
+                register.mutate(instance.id);
+              }}
+            >
+              Register
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+    </Link>
   );
 }

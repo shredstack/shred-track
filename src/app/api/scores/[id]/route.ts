@@ -6,6 +6,7 @@ import { getSessionUser } from "@/lib/session";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
 import { invalidateCrossfitInsightsCache } from "@/lib/crossfit/insights/cache";
 import type { SetEntry } from "@/types/crossfit";
+import { computeScoreEstimate } from "@/lib/calories/orchestrator";
 
 interface MovementDetailInput {
   workoutMovementId: string;
@@ -59,6 +60,45 @@ export async function PUT(
     if (max > 0) weightLbs = max;
   }
 
+  // Recompute the calorie estimate against the merged shape. We rebuild the
+  // score context from `body` + the existing row so unrelated edits (notes,
+  // movement details) don't blow away the kcal value.
+  const mergedScore = {
+    timeSeconds: body.timeSeconds ?? existing.timeSeconds,
+    hitTimeCap: body.hitTimeCap ?? existing.hitTimeCap,
+    woreVest: body.woreVest !== undefined ? body.woreVest : existing.woreVest,
+    vestWeightLb:
+      body.vestWeightLb != null
+        ? Number(body.vestWeightLb)
+        : existing.vestWeightLb != null
+        ? Number(existing.vestWeightLb)
+        : null,
+    rpe: body.rpe ?? existing.rpe,
+    startedAt: body.startedAt
+      ? new Date(body.startedAt)
+      : existing.startedAt
+      ? new Date(existing.startedAt)
+      : null,
+    endedAt: body.endedAt
+      ? new Date(body.endedAt)
+      : existing.endedAt
+      ? new Date(existing.endedAt)
+      : null,
+  };
+
+  let calorieEstimate: Awaited<ReturnType<typeof computeScoreEstimate>> | null =
+    null;
+  try {
+    calorieEstimate = await computeScoreEstimate({
+      scoreId: id,
+      workoutId: existing.workoutId,
+      userId: user.id,
+      score: mergedScore,
+    });
+  } catch (err) {
+    console.error("[calories] estimator failed for score PUT", err);
+  }
+
   const updated = await db.transaction(async (tx) => {
     const [row] = await tx
       .update(scores)
@@ -78,6 +118,34 @@ export async function PUT(
           body.vestWeightLb != null
             ? body.vestWeightLb.toString()
             : existing.vestWeightLb,
+        startedAt: mergedScore.startedAt,
+        endedAt: mergedScore.endedAt,
+        durationSeconds: (() => {
+          if (mergedScore.startedAt && mergedScore.endedAt) {
+            const diff =
+              (mergedScore.endedAt.getTime() - mergedScore.startedAt.getTime()) /
+              1000;
+            if (diff > 0) return Math.round(diff);
+          }
+          if (mergedScore.timeSeconds && mergedScore.timeSeconds > 0) {
+            return mergedScore.timeSeconds;
+          }
+          return existing.durationSeconds;
+        })(),
+        ...(calorieEstimate
+          ? {
+              bodyweightLbAtScore:
+                calorieEstimate.bodyweightLb != null
+                  ? calorieEstimate.bodyweightLb.toString()
+                  : existing.bodyweightLbAtScore,
+              estimatedKcal: calorieEstimate.estimate.gross,
+              estimatedKcalActive: calorieEstimate.estimate.active,
+              estimatedKcalWithEpoc: calorieEstimate.estimate.grossWithEpoc,
+              estimatedKcalActiveWithEpoc: calorieEstimate.estimate.activeWithEpoc,
+              estimatedKcalMethod: calorieEstimate.estimate.method,
+              estimatedKcalConfidence: calorieEstimate.estimate.confidence,
+            }
+          : {}),
         updatedAt: new Date(),
       })
       .where(eq(scores.id, id))

@@ -11,4 +11,7 @@ CAP_PLUGIN(HealthKitTimer, "HealthKitTimer",
     CAP_PLUGIN_METHOD(resumeWorkout, CAPPluginReturnPromise);
     CAP_PLUGIN_METHOD(endWorkout, CAPPluginReturnPromise);
     CAP_PLUGIN_METHOD(getDistanceMeters, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(requestWritePermission, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(hasOverlappingWorkout, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(saveWorkout, CAPPluginReturnPromise);
 )

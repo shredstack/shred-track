@@ -84,6 +84,13 @@ interface WireScore {
   hitTimeCap: boolean;
   notes?: string;
   rpe?: number;
+  woreVest?: boolean | null;
+  vestWeightLb?: number;
+  estimatedKcal?: number | null;
+  estimatedKcalActive?: number | null;
+  estimatedKcalWithEpoc?: number | null;
+  estimatedKcalActiveWithEpoc?: number | null;
+  estimatedKcalConfidence?: "high" | "medium" | "low" | null;
   movementDetails?: WireMovementDetail[];
 }
 
@@ -144,6 +151,14 @@ interface WireWorkout {
   description: string | null;
   workoutDate: string;
   benchmarkWorkoutId: string | null;
+  requiresVest?: boolean | null;
+  vestWeightMaleLb?: number | null;
+  vestWeightFemaleLb?: number | null;
+  isPartner?: boolean | null;
+  partnerCount?: number | null;
+  estimatedKcalLow?: number | null;
+  estimatedKcalHigh?: number | null;
+  estimatedKcalConfidence?: "high" | "medium" | "low" | null;
   sections?: WireSection[];
   parts: WirePart[];
 }
@@ -207,6 +222,13 @@ function wireScoreToDisplay(s: WireScore): ScoreDisplay {
     hitTimeCap: s.hitTimeCap,
     notes: s.notes,
     rpe: s.rpe,
+    woreVest: s.woreVest ?? null,
+    vestWeightLb: s.vestWeightLb,
+    estimatedKcal: s.estimatedKcal ?? null,
+    estimatedKcalActive: s.estimatedKcalActive ?? null,
+    estimatedKcalWithEpoc: s.estimatedKcalWithEpoc ?? null,
+    estimatedKcalActiveWithEpoc: s.estimatedKcalActiveWithEpoc ?? null,
+    estimatedKcalConfidence: s.estimatedKcalConfidence ?? null,
     movementDetails: s.movementDetails,
   };
 }
@@ -248,6 +270,14 @@ function wireWorkoutToDisplay(w: WireWorkout): WorkoutDisplay {
     communityLogoUrl: w.communityLogoUrl,
     sections: w.sections ?? [],
     benchmarkWorkoutId: w.benchmarkWorkoutId,
+    requiresVest: w.requiresVest ?? undefined,
+    vestWeightMaleLb: w.vestWeightMaleLb ?? undefined,
+    vestWeightFemaleLb: w.vestWeightFemaleLb ?? undefined,
+    isPartner: w.isPartner ?? undefined,
+    partnerCount: w.partnerCount ?? undefined,
+    estimatedKcalLow: w.estimatedKcalLow ?? null,
+    estimatedKcalHigh: w.estimatedKcalHigh ?? null,
+    estimatedKcalConfidence: w.estimatedKcalConfidence ?? null,
     parts: w.parts.map(wirePartToDisplay),
   };
 }
@@ -562,12 +592,60 @@ export function useLogScore() {
       }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ["workouts"] });
       queryClient.invalidateQueries({ queryKey: ["benchmarks"] });
       queryClient.invalidateQueries({ queryKey: ["benchmark-history"] });
       void pushTodaySnapshotToWatch();
+      void maybePushToAppleHealth(saved);
     },
+  });
+}
+
+// Best-effort Apple Health push. Lives outside the mutation chain so a
+// HealthKit failure never bubbles into the UI as a score-save error.
+async function maybePushToAppleHealth(saved: {
+  id?: string;
+  startedAt?: string | null;
+  endedAt?: string | null;
+  durationSeconds?: number | null;
+  estimatedKcalActiveWithEpoc?: number | null;
+}): Promise<void> {
+  if (!saved?.id) return;
+  const active = saved.estimatedKcalActiveWithEpoc;
+  if (active == null || active <= 0) return;
+
+  // Pull push pref once. Don't gate the mutation on this read.
+  let pushPref = true;
+  try {
+    const r = await fetch("/api/user/profile");
+    if (r.ok) {
+      const body = await r.json();
+      pushPref = body?.pushToAppleHealth !== false;
+    }
+  } catch {
+    // ignore; default to true
+  }
+  if (!pushPref) return;
+
+  const start = saved.startedAt ? new Date(saved.startedAt).getTime() : null;
+  const end = saved.endedAt ? new Date(saved.endedAt).getTime() : null;
+  let fromMs = start ?? null;
+  let toMs = end ?? null;
+  // If no live bracket, back-fill the window from durationSeconds.
+  if (toMs == null) toMs = Date.now();
+  if (fromMs == null) {
+    const dur = (saved.durationSeconds ?? 0) * 1000;
+    fromMs = dur > 0 ? toMs - dur : toMs - 30 * 60 * 1000; // last-ditch 30 min
+  }
+
+  const mod = await import("@/lib/native/push-score-to-health");
+  await mod.pushScoreToAppleHealth({
+    scoreId: saved.id,
+    fromMs,
+    toMs,
+    activeEnergyKcal: active,
+    pushPrefEnabled: pushPref,
   });
 }
 
@@ -593,10 +671,11 @@ export function useUpdateScore() {
       }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ["workouts"] });
       queryClient.invalidateQueries({ queryKey: ["benchmarks"] });
       queryClient.invalidateQueries({ queryKey: ["benchmark-history"] });
+      void maybePushToAppleHealth(saved);
     },
   });
 }
