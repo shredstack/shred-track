@@ -120,6 +120,7 @@ export default async function GymInviteLandingPage({
           .values({
             communityId: gym.id,
             userId: sessionUser.id,
+            accountId: sessionUser.id,
             isAdmin: false,
             isCoach: false,
             isActive: !requiresDocs,

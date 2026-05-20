@@ -130,7 +130,13 @@ export async function GET(
     .from(scores)
     .innerJoin(users, eq(users.id, scores.userId))
     .innerJoin(workoutParts, eq(workoutParts.id, scores.workoutPartId))
-    .where(eq(workoutParts.workoutId, workoutId));
+    .where(
+      and(
+        eq(workoutParts.workoutId, workoutId),
+        // Dependents spec §3.6: shadow users never appear on leaderboards.
+        eq(users.isShadow, false)
+      )
+    );
 
   if (rows.length === 0) {
     const empty: Record<string, LeaderboardEntry[]> = {};

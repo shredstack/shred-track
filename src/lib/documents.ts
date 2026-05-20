@@ -1,13 +1,15 @@
-// Document-signature helpers (PR 3 §3.2).
+// Document-signature helpers (PR 3 §3.2 + dependents spec §3.5).
 //
 // A document needs a fresh signature in two cases:
 //   1. Sign-on-join: a new gym member who has never signed it.
 //   2. Re-sign on update: a member who signed an older version but not
 //      the latest published version.
 //
-// Both reduce to "the user is missing a signature for the latest
-// version." This module returns rows describing what's still pending so
-// the home banner / sign-documents page can render them uniformly.
+// Both reduce to "the subject is missing a signature for the latest
+// version." Sign-on-behalf changes "subject" from "the signer" to
+// "subject_user_id when set, else user_id" — getPendingDocumentsForMember
+// uses that COALESCE to count guardian-signed-for-minor signatures
+// against the minor's pending queue.
 
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
@@ -53,12 +55,15 @@ export async function getPendingDocuments(
     LIMIT 1
   )`;
 
-  // Has the user ever signed THIS document (any version)?
+  // Has the user ever signed THIS document (any version)? A signature
+  // counts when either ds.user_id matches (self-signed) or
+  // ds.subject_user_id matches (a guardian signed on the user's behalf,
+  // dependents spec §3.5).
   const hasAnySignatureSql = sql<boolean>`EXISTS (
     SELECT 1 FROM document_signatures ds
     JOIN document_versions dv ON dv.id = ds.document_version_id
     WHERE dv.document_id = documents.id
-      AND ds.user_id = ${userId}
+      AND COALESCE(ds.subject_user_id, ds.user_id) = ${userId}
   )`;
 
   const rows = await db
@@ -94,13 +99,15 @@ export async function getPendingDocuments(
       .limit(1);
     if (!version) continue;
 
+    // Self-signed OR signed-on-behalf — either counts as covering the
+    // pending requirement for this user (dependents spec §3.5).
     const [existing] = await db
       .select({ id: documentSignatures.id })
       .from(documentSignatures)
       .where(
         and(
           eq(documentSignatures.documentVersionId, version.id),
-          eq(documentSignatures.userId, userId)
+          sql`coalesce(${documentSignatures.subjectUserId}, ${documentSignatures.userId}) = ${userId}`
         )
       )
       .limit(1);
@@ -119,6 +126,19 @@ export async function getPendingDocuments(
   }
 
   return pending;
+}
+
+/**
+ * Dependents spec §3.5 alias. Returns the same shape as
+ * getPendingDocuments — kept under a more explicit name for callers
+ * that walk a list of family members and ask "what's pending for each
+ * of them?"
+ */
+export async function getPendingDocumentsForMember(
+  userId: string,
+  communityId: string
+): Promise<PendingDocument[]> {
+  return getPendingDocuments(userId, communityId);
 }
 
 /**

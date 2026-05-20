@@ -64,6 +64,12 @@ export const users = pgTable("users", {
   // users default to enabled at the community's default multiplier (1.10).
   epocEnabled: boolean("epoc_enabled"),
   pushToAppleHealth: boolean("push_to_apple_health").default(true).notNull(),
+  // Dependents (spec §3.3). Account-holder–controlled profiles with no
+  // auth user behind them. Filtered out of every social/leaderboard
+  // surface — see src/lib/family.ts and the audit list in the spec §3.6.
+  isShadow: boolean("is_shadow").default(false).notNull(),
+  shadowCreatedByUserId: uuid("shadow_created_by_user_id"),
+  shadowCreatedAt: timestamp("shadow_created_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -149,9 +155,134 @@ export const communityMemberships = pgTable(
     // Source for the anniversary auto-post job (spec §2.3). Defaults to
     // joined_at::date in the migration; member/admin can override later.
     gymAnniversaryDate: date("gym_anniversary_date"),
+    // Who pays for this seat (dependents spec §3.2). For self-pay
+    // adults, accountId = userId. For dependents, accountId points to
+    // the account holder. Invariant enforced in the app layer (see
+    // src/lib/family.ts `assertAccountConsistency`).
+    accountId: uuid("account_id").notNull(),
   },
   (table) => [uniqueIndex("community_memberships_unique").on(table.communityId, table.userId)]
 );
+
+// ============================================
+// Family memberships (dependents)
+// ============================================
+//
+// Spec: claude_code_instructions/cfd_readiness/dependents_spec.md §3.1.
+// A `familyMembers` row is the administrative tie between an account
+// holder and a dependent inside a single gym. v1: one account holder
+// per dependent per gym (no joint custody).
+//
+// Activation tokens (single-use, 14-day expiry) live on this row so
+// the account holder can invite a shadow dependent to sign in.
+
+export const familyMembers = pgTable(
+  "family_members",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    communityId: uuid("community_id")
+      .notNull()
+      .references(() => communities.id, { onDelete: "cascade" }),
+    // Restrict on delete: dependents must be re-parented or
+    // cascade-deleted explicitly. SQL constraint is "restrict" — see
+    // migration 20260520120000.
+    accountHolderUserId: uuid("account_holder_user_id")
+      .notNull()
+      .references(() => users.id),
+    dependentUserId: uuid("dependent_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // 'spouse' | 'partner' | 'child' | 'parent' | 'sibling' | 'other'
+    relationship: text("relationship").notNull(),
+    // Denormalized mirror of users.isShadow = false. Kept in sync by
+    // the activation flow (spec §3.3).
+    hasOwnLogin: boolean("has_own_login").default(false).notNull(),
+    activationToken: text("activation_token").unique(),
+    activationTokenSentAt: timestamp("activation_token_sent_at", {
+      withTimezone: true,
+    }),
+    activationTokenExpiresAt: timestamp("activation_token_expires_at", {
+      withTimezone: true,
+    }),
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("family_members_community_dependent_unique").on(
+      table.communityId,
+      table.dependentUserId
+    ),
+    uniqueIndex("family_members_community_pair_unique").on(
+      table.communityId,
+      table.accountHolderUserId,
+      table.dependentUserId
+    ),
+    index("family_members_account_holder_idx").on(
+      table.accountHolderUserId,
+      table.communityId
+    ),
+    index("family_members_dependent_idx").on(
+      table.dependentUserId,
+      table.communityId
+    ),
+  ]
+);
+
+// Pending consent invites for the "existing user as dependent" branch
+// (spec §3.3 step 4 + §4.6). Only on accept does a `familyMembers`
+// row get created.
+export const familyInvites = pgTable(
+  "family_invites",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    communityId: uuid("community_id")
+      .notNull()
+      .references(() => communities.id, { onDelete: "cascade" }),
+    accountHolderUserId: uuid("account_holder_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    inviteeUserId: uuid("invitee_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    relationship: text("relationship").notNull(),
+    token: text("token").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+    // 'accepted' | 'declined' | null (pending)
+    response: text("response"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("family_invites_invitee_idx").on(table.inviteeUserId),
+    index("family_invites_account_holder_idx").on(
+      table.accountHolderUserId,
+      table.communityId
+    ),
+  ]
+);
+
+export type FamilyMember = typeof familyMembers.$inferSelect;
+export type NewFamilyMember = typeof familyMembers.$inferInsert;
+export type FamilyInvite = typeof familyInvites.$inferSelect;
+export type NewFamilyInvite = typeof familyInvites.$inferInsert;
+
+export const FAMILY_RELATIONSHIPS = [
+  "spouse",
+  "partner",
+  "child",
+  "parent",
+  "sibling",
+  "other",
+] as const;
+export type FamilyRelationship = (typeof FAMILY_RELATIONSHIPS)[number];
 
 // ============================================
 // Feature flags
@@ -2171,9 +2302,22 @@ export const documentSignatures = pgTable(
     documentVersionId: uuid("document_version_id")
       .notNull()
       .references(() => documentVersions.id, { onDelete: "cascade" }),
+    // The signer. For sign-on-behalf, this is the guardian.
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    // The person the signature applies to. Null = same as userId (the
+    // signer signed for themselves). Populated when a guardian signs
+    // for a minor dependent (spec §3.5).
+    subjectUserId: uuid("subject_user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+    // 'parent_of_minor' | 'legal_guardian' | null.
+    // v1 only emits 'parent_of_minor'.
+    signedOnBehalfReason: text("signed_on_behalf_reason"),
+    // Free-form audit JSON — captures DOB-at-signing, guardian typed
+    // name, IP, etc. so juvenile-era signatures are auditable later.
+    signedOnBehalfMeta: jsonb("signed_on_behalf_meta"),
     typedName: text("typed_name").notNull(),
     signedAt: timestamp("signed_at", { withTimezone: true })
       .defaultNow()
@@ -2184,11 +2328,14 @@ export const documentSignatures = pgTable(
     pdfUrl: text("pdf_url"),
   },
   (table) => [
-    uniqueIndex("document_signatures_version_user_unique").on(
-      table.documentVersionId,
-      table.userId
-    ),
+    // The unique constraint that actually exists in Postgres is
+    // `(document_version_id, coalesce(subject_user_id, user_id))` —
+    // declared in migration 20260520120400. Drizzle's uniqueIndex
+    // helper can't express COALESCE, so the index name below is here
+    // for documentation/introspection only; the migration is the
+    // source of truth.
     index("document_signatures_user_id_idx").on(table.userId),
+    index("document_signatures_subject_user_id_idx").on(table.subjectUserId),
   ]
 );
 

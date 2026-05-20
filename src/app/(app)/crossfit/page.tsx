@@ -866,6 +866,7 @@ function CrossfitPageBody() {
           parts={scoringWorkout.parts}
           workout={scoringWorkout}
           onSubmit={handlePartScoreSubmit}
+          communityId={scoringWorkout.communityId ?? null}
         />
       )}
 

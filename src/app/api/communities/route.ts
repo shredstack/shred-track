@@ -77,6 +77,7 @@ export async function POST(req: NextRequest) {
   await db.insert(communityMemberships).values({
     communityId: community.id,
     userId: admin.id,
+    accountId: admin.id,
     isAdmin: true,
     isCoach: true,
     isActive: true,
