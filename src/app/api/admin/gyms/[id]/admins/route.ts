@@ -61,6 +61,7 @@ export async function POST(
     await db.insert(communityMemberships).values({
       communityId: id,
       userId: target.id,
+      accountId: target.id,
       isAdmin: true,
       isCoach: true,
       isActive: true,

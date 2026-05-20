@@ -179,7 +179,13 @@ export async function GET(
         eq(trackDayScores.trackDayId, programmingTrackDays.id)
       )
       .innerJoin(users, eq(users.id, trackDayScores.userId))
-      .where(eq(programmingTrackDays.trackId, track.id))
+      .where(
+        and(
+          eq(programmingTrackDays.trackId, track.id),
+          // Dependents spec §3.6: shadow users never appear on leaderboards.
+          eq(users.isShadow, false)
+        )
+      )
       .groupBy(
         trackDayScores.userId,
         users.name,
@@ -231,7 +237,13 @@ export async function GET(
       })
       .from(trackDayScores)
       .innerJoin(users, eq(users.id, trackDayScores.userId))
-      .where(eq(trackDayScores.trackDayId, trackDayId));
+      .where(
+        and(
+          eq(trackDayScores.trackDayId, trackDayId),
+          // Dependents spec §3.6: shadow users never appear on leaderboards.
+          eq(users.isShadow, false)
+        )
+      );
 
     entries = rows
       .filter((r) => activeIds.has(r.userId))

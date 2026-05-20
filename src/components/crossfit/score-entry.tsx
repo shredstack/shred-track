@@ -36,6 +36,7 @@ import {
 } from "@/lib/crossfit/prescription";
 import { useUserProfile } from "@/hooks/useProfile";
 import { useMovements } from "@/hooks/useMovements";
+import { useLogForCandidates } from "@/hooks/useFamily";
 import type {
   WorkoutPartDisplay,
   WorkoutMovementDisplay,
@@ -499,6 +500,12 @@ interface ScoreEntryProps {
     WorkoutDisplay,
     "requiresVest" | "vestWeightMaleLb" | "vestWeightFemaleLb"
   >;
+  // "Log for…" dependent picker (family_memberships, spec §8). When
+  // candidates are non-empty the sheet shows a dropdown to attribute the
+  // score to a dependent instead of the signed-in user. The active gym's
+  // communityId is required for the candidates list — the consumer
+  // passes both.
+  communityId?: string | null;
 }
 
 // ============================================
@@ -514,7 +521,14 @@ export function ScoreEntry({
   initialPartId,
   onSubmit,
   workout,
+  communityId,
 }: ScoreEntryProps) {
+  // forUserId is null for "log for myself" (the default), or a
+  // dependent's userId when the account holder picked one from the
+  // dropdown. Threaded into buildScoreInput below.
+  const [forUserId, setForUserId] = useState<string | null>(null);
+  const { data: logForData } = useLogForCandidates(communityId);
+  const dependents = logForData?.candidates ?? [];
   const [activePartId, setActivePartId] = useState<string>(
     () => initialPartId ?? parts[0]?.id ?? ""
   );
@@ -714,6 +728,7 @@ export function ScoreEntry({
       const score: ScoreInput = {
         workoutId,
         workoutPartId: part.id,
+        ...(forUserId ? { forUserId } : {}),
         division: st.division,
         hitTimeCap: st.hitTimeCap,
         notes: st.notes || undefined,
@@ -777,7 +792,7 @@ export function ScoreEntry({
 
       return score;
     },
-    [workoutId, requiresVest, woreVest, vestWeightLbDraft]
+    [workoutId, requiresVest, woreVest, vestWeightLbDraft, forUserId]
   );
 
   const partHasData = useCallback(
@@ -1179,6 +1194,34 @@ export function ScoreEntry({
             {workoutTitle || "Workout"}
             {!multiPart && ` · ${WORKOUT_TYPE_LABELS[workoutType]}`}
           </DialogDescription>
+          {dependents.length > 0 && (
+            <div className="mt-2 flex items-center gap-2 text-xs">
+              <Label htmlFor="score-for-user" className="text-muted-foreground">
+                Logging for
+              </Label>
+              <Select
+                value={forUserId ?? "self"}
+                onValueChange={(val) =>
+                  setForUserId(val === "self" ? null : val)
+                }
+              >
+                <SelectTrigger
+                  id="score-for-user"
+                  className="h-7 w-auto min-w-[8rem] text-xs"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="self">Yourself</SelectItem>
+                  {dependents.map((d) => (
+                    <SelectItem key={d.userId} value={d.userId}>
+                      {d.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           {isEditing && activePart.score?.estimatedKcalActiveWithEpoc != null && (
             <div className="mt-2 flex items-center gap-2 rounded-lg border border-orange-500/30 bg-orange-500/5 px-3 py-2 text-xs text-orange-200">
               <span className="font-semibold">

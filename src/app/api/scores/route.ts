@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
+  communityMemberships,
+  familyMembers,
   scores,
   scoreMovementDetails,
   workouts,
   workoutParts,
 } from "@/db/schema";
-import { eq, desc, asc } from "drizzle-orm";
+import { and, eq, desc, asc } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
 import { invalidateCrossfitInsightsCache } from "@/lib/crossfit/insights/cache";
@@ -36,6 +38,11 @@ interface MovementDetailInput {
 interface ScorePostBody {
   workoutId?: string;
   workoutPartId?: string;
+  // Dependents (family_memberships): account holder logging on behalf
+  // of a dependent. When set, the row's user_id is the dependent's id
+  // (must be a family_members.dependent_user_id of the caller in the
+  // workout's gym). When null, the row's user_id is the caller.
+  forUserId?: string;
   division: "rx" | "scaled" | "rx_plus";
   timeSeconds?: number;
   rounds?: number;
@@ -146,6 +153,61 @@ export async function POST(req: NextRequest) {
     workoutId = part.workoutId;
   }
 
+  // Resolve effective user_id. "Log for" override (spec §8) lets an
+  // account holder log scores on behalf of a dependent in the same gym.
+  let effectiveUserId = user.id;
+  if (body.forUserId && body.forUserId !== user.id) {
+    const [w] = await db
+      .select({ communityId: workouts.communityId })
+      .from(workouts)
+      .where(eq(workouts.id, workoutId!))
+      .limit(1);
+    if (!w?.communityId) {
+      return NextResponse.json(
+        { error: "Can only log for a dependent in a gym workout" },
+        { status: 400 }
+      );
+    }
+    const [link] = await db
+      .select({ id: familyMembers.id })
+      .from(familyMembers)
+      .where(
+        and(
+          eq(familyMembers.accountHolderUserId, user.id),
+          eq(familyMembers.dependentUserId, body.forUserId),
+          eq(familyMembers.communityId, w.communityId)
+        )
+      )
+      .limit(1);
+    if (!link) {
+      return NextResponse.json(
+        { error: "You don't manage that dependent in this gym" },
+        { status: 403 }
+      );
+    }
+    // Defense in depth: the family link is only meaningful while the
+    // account holder is still an active member of the gym. A removed /
+    // deactivated holder shouldn't be able to keep logging for dependents.
+    const [callerMembership] = await db
+      .select({ id: communityMemberships.id })
+      .from(communityMemberships)
+      .where(
+        and(
+          eq(communityMemberships.communityId, w.communityId),
+          eq(communityMemberships.userId, user.id),
+          eq(communityMemberships.isActive, true)
+        )
+      )
+      .limit(1);
+    if (!callerMembership) {
+      return NextResponse.json(
+        { error: "You're no longer an active member of this gym" },
+        { status: 403 }
+      );
+    }
+    effectiveUserId = body.forUserId;
+  }
+
   const details = body.movementDetails ?? body.movementScalings ?? [];
 
   // Normalize setEntries on every detail up front so downstream code can
@@ -178,7 +240,7 @@ export async function POST(req: NextRequest) {
   try {
     calorieEstimate = await computeScoreEstimate({
       workoutId: workoutId!,
-      userId: user.id,
+      userId: effectiveUserId,
       score: {
         timeSeconds: body.timeSeconds ?? null,
         hitTimeCap: body.hitTimeCap ?? false,
@@ -210,7 +272,7 @@ export async function POST(req: NextRequest) {
         .values({
           workoutId: workoutId!,
           workoutPartId,
-          userId: user.id,
+          userId: effectiveUserId,
           division,
           timeSeconds: body.timeSeconds ?? null,
           rounds: body.rounds ?? null,
@@ -276,7 +338,8 @@ export async function POST(req: NextRequest) {
       return inserted;
     });
 
-    await invalidateCrossfitInsightsCache(user.id);
+    // Invalidate insights cache for whichever user the score belongs to.
+    await invalidateCrossfitInsightsCache(effectiveUserId);
 
     return NextResponse.json(score, { status: 201 });
   } catch (err: unknown) {

@@ -79,6 +79,8 @@ import {
 import { useGymContext } from "@/hooks/useGymContext";
 import { useAdminAccess } from "@/hooks/useAdminAccess";
 import { JoinGymDialog } from "@/components/shared/join-gym-dialog";
+import { FamilyLinksSection } from "@/components/family/FamilyLinksSection";
+import { FamilyShortcutLink } from "@/components/family/FamilyShortcutLink";
 import {
   DIVISIONS,
   STATION_ORDER,
@@ -1814,6 +1816,10 @@ export default function ProfilePage() {
           ever forcing them to belong to a gym. */}
       <GymsSection />
 
+      {/* Family link — only renders when the current user is someone
+          else's dependent (spec §9.2). */}
+      <FamilyLinksSection />
+
       {/* Notes processing privacy disclaimer (VIP only) */}
       {user?.isVip && (
         <Card className="border-fuchsia-500/20 bg-fuchsia-500/[0.04]">
@@ -1853,6 +1859,7 @@ export default function ProfilePage() {
       {/* Settings shortcuts */}
       <Card>
         <CardContent className="pt-2 pb-2">
+          <FamilyShortcutLink />
           <SettingsLink href="/settings/notifications" icon={Bell} label="Notifications" />
           <SettingsLink href="/settings/support" icon={LifeBuoy} label="Help & support" />
           <SettingsLink href="/settings/native" icon={Smartphone} label="Native app" />

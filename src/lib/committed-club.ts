@@ -181,7 +181,10 @@ export async function getMonthlyLeaderboard(
           eq(classRegistrations.status, "attended"),
           eq(classInstances.communityId, communityId),
           gte(classInstances.startAt, startUtc),
-          lt(classInstances.startAt, endUtc)
+          lt(classInstances.startAt, endUtc),
+          // Dependents spec §3.6: shadow users never appear on social
+          // surfaces like the Committed Club leaderboard.
+          eq(users.isShadow, false)
         )
       )
       .groupBy(classRegistrations.userId, users.name, users.image)
@@ -208,7 +211,9 @@ export async function getMonthlyLeaderboard(
     .where(
       and(
         eq(committedClubSnapshots.communityId, communityId),
-        eq(committedClubSnapshots.yearMonth, yearMonth)
+        eq(committedClubSnapshots.yearMonth, yearMonth),
+        // Dependents spec §3.6.
+        eq(users.isShadow, false)
       )
     )
     .orderBy(committedClubSnapshots.rank)

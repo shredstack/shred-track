@@ -281,6 +281,7 @@ export default function CrossfitSearchPage() {
           parts={scoringWorkout.parts}
           workout={scoringWorkout}
           onSubmit={handlePartScoreSubmit}
+          communityId={scoringWorkout.communityId ?? null}
         />
       )}
     </div>

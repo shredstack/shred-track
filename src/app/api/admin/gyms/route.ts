@@ -123,6 +123,7 @@ export async function POST(req: NextRequest) {
       await tx.insert(communityMemberships).values({
         communityId: c.id,
         userId: admin.id,
+        accountId: admin.id,
         isAdmin: true,
         isCoach: true,
         isActive: true,
@@ -133,6 +134,7 @@ export async function POST(req: NextRequest) {
         await tx.insert(communityMemberships).values({
           communityId: c.id,
           userId: initialAdminUserId,
+          accountId: initialAdminUserId,
           isAdmin: true,
           isCoach: true,
           isActive: true,

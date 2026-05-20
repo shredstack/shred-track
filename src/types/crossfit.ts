@@ -615,6 +615,10 @@ export interface MovementScalingDisplay {
 export interface ScoreInput {
   workoutId: string;
   workoutPartId?: string;
+  // Dependents (family_memberships): the account holder is logging a
+  // score on behalf of a dependent. The server validates that the
+  // current user manages this dependent in the workout's gym.
+  forUserId?: string;
   division: "rx" | "scaled" | "rx_plus";
   timeSeconds?: number;
   rounds?: number;

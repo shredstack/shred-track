@@ -55,6 +55,9 @@ export async function GET(
       and(
         eq(communityMemberships.communityId, communityId),
         eq(communityMemberships.isActive, true),
+        // Dependents spec §3.6: shadow users never appear in the
+        // @-mention typeahead.
+        eq(users.isShadow, false),
         nameFilter
       )
     )
