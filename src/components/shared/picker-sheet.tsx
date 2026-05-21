@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
+import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -76,8 +77,8 @@ export function PickerSheet({
               className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-white/[0.15]"
             />
           )}
-          {(title || description) && (
-            <div className="flex flex-col gap-1 px-4 pt-3 pb-2">
+          <div className="flex items-start justify-between gap-2 px-4 pt-3 pb-2">
+            <div className="flex flex-col gap-1">
               {title && (
                 <DialogPrimitive.Title className="font-heading text-base font-medium">
                   {title}
@@ -89,7 +90,13 @@ export function PickerSheet({
                 </DialogPrimitive.Description>
               )}
             </div>
-          )}
+            <DialogPrimitive.Close
+              aria-label="Close"
+              className="-mr-1 -mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <X className="size-4" />
+            </DialogPrimitive.Close>
+          </div>
           {children}
         </DialogPrimitive.Popup>
       </DialogPrimitive.Portal>

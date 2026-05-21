@@ -138,6 +138,8 @@ export async function POST(req: Request) {
     await sendEmail({
       to: dest,
       subject: `[ShredTrack ${body.variant === "bug-report" ? "Bug" : "Member"}] ${subject}`,
+      // Replies land in the sender's inbox, not the no-reply address.
+      replyTo: me.email,
       react: SupportMessageEmail({
         subject,
         message,

@@ -10,6 +10,7 @@ import { communities } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canViewGym } from "@/lib/authz/community";
 import { getMonthlyLeaderboard, gymMonthBounds } from "@/lib/committed-club";
+import { resolveGymTimezone } from "@/lib/timezone";
 
 export async function GET(
   req: NextRequest,
@@ -29,7 +30,7 @@ export async function GET(
       .from(communities)
       .where(eq(communities.id, communityId))
       .limit(1);
-    yearMonth = gymMonthBounds(c?.tz ?? "America/Denver").yearMonth;
+    yearMonth = gymMonthBounds(resolveGymTimezone(c?.tz)).yearMonth;
   }
   const rows = await getMonthlyLeaderboard(communityId, yearMonth, 100);
   return NextResponse.json({ yearMonth, rows });

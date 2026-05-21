@@ -186,7 +186,7 @@ export async function PATCH(
       })
       .where(eq(classInstances.id, id));
 
-    // Notify everyone who was registered.
+    // Notify everyone who was registered (other than the admin cancelling).
     const registrations = await db
       .select({ userId: classRegistrations.userId })
       .from(classRegistrations)
@@ -196,19 +196,18 @@ export async function PATCH(
           eq(classRegistrations.status, "registered")
         )
       );
-    if (registrations.length) {
+    const recipients = registrations.filter((r) => r.userId !== user.id);
+    if (recipients.length) {
       const inserted = await db
         .insert(notifications)
         .values(
-          registrations
-            .filter((r) => r.userId !== user.id)
-            .map((r) => ({
-              recipientId: r.userId,
-              actorId: user.id,
-              kind: "class_cancelled",
-              communityId: instance.communityId,
-              classInstanceId: id,
-            }))
+          recipients.map((r) => ({
+            recipientId: r.userId,
+            actorId: user.id,
+            kind: "class_cancelled",
+            communityId: instance.communityId,
+            classInstanceId: id,
+          }))
         )
         .returning({ id: notifications.id });
       // Fan out push delivery.

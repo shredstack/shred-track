@@ -24,6 +24,7 @@ import {
 import { getSessionUser } from "@/lib/session";
 import { getPendingDocuments } from "@/lib/documents";
 import { isMinor } from "@/lib/family";
+import { resolveGymTimezone } from "@/lib/timezone";
 
 export async function POST(
   req: Request,
@@ -110,7 +111,7 @@ export async function POST(
         { status: 400 }
       );
     }
-    if (!isMinor(subject.dob, gym?.timezone ?? "UTC")) {
+    if (!isMinor(subject.dob, resolveGymTimezone(gym?.timezone))) {
       return NextResponse.json(
         { error: "adult_dependents_sign_themselves" },
         { status: 403 }

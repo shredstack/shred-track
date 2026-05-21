@@ -381,6 +381,19 @@ function setsFromRepScheme(repScheme?: string): number {
   return 1;
 }
 
+// For Load set count. An explicit prescribed set count (`rounds` — surfaced
+// in the builder as "Sets", required for complexes where the per-movement
+// rep scheme is a single number) wins over the dash-derived scheme count.
+// Falls back to the rep scheme so legacy for_load workouts that predate the
+// Sets field render exactly as before.
+function setCountForLoad(
+  rounds: number | undefined | null,
+  repScheme?: string
+): number {
+  if (rounds && rounds > 0) return Math.min(rounds, MAX_SET_INPUTS);
+  return setsFromRepScheme(repScheme);
+}
+
 function repsPerSetFromRepScheme(repScheme?: string): number {
   const parts = repSchemeParts(repScheme);
   if (parts.length > 0) {
@@ -968,7 +981,7 @@ export function ScoreEntry({
             {loadMovements.map((mov) => {
                 const movScheme =
                   mov.prescribedReps || activePart.repScheme;
-                const sets = setsFromRepScheme(movScheme);
+                const sets = setCountForLoad(activePart.rounds, movScheme);
                 const fallbackRepsPerSet = repsPerSetFromRepScheme(movScheme);
                 const drafts = state.setEntriesMap[mov.id] ?? [];
                 // Resolve drafts → SetEntry[] for the breakdown display.

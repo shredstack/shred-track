@@ -8,6 +8,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, users } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
+import { DEFAULT_GYM_TIMEZONE, resolveGymTimezone } from "@/lib/timezone";
 import {
   fetchActiveChallenge,
   fetchCommittedClub,
@@ -49,14 +50,14 @@ export default async function HomePage() {
     .limit(1);
   const activeCommunityId = u?.activeCommunityId ?? null;
 
-  let gymTimezone = "America/Denver";
+  let gymTimezone = DEFAULT_GYM_TIMEZONE;
   if (activeCommunityId) {
     const [c] = await db
       .select({ tz: communities.gymTimezone })
       .from(communities)
       .where(eq(communities.id, activeCommunityId))
       .limit(1);
-    if (c?.tz) gymTimezone = c.tz;
+    if (c) gymTimezone = resolveGymTimezone(c.tz);
   }
 
   // Solo mode — no gym-scoped cards.

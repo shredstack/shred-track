@@ -6,7 +6,16 @@ let _db: ReturnType<typeof drizzle<typeof schema>> | null = null;
 
 function getDb() {
   if (!_db) {
-    const client = postgres(process.env.DATABASE_URL!);
+    // Production connects through the Supabase transaction-mode pooler
+    // (`...pooler.supabase.com:6543`). On serverless each warm instance is its
+    // own process, so keep the per-instance pool tiny to avoid exhausting the
+    // pooler. `prepare: false` is required: transaction-mode pooling cannot
+    // carry prepared statements across statements.
+    const client = postgres(process.env.DATABASE_URL!, {
+      max: 1,
+      prepare: false,
+      idle_timeout: 20,
+    });
     _db = drizzle(client, { schema });
   }
   return _db;

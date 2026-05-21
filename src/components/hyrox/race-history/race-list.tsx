@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { Trophy } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { QueryError } from "@/components/shared/query-error";
 import { RaceListCard } from "./race-list-card";
 import {
   usePracticeRaces,
@@ -18,7 +19,8 @@ interface Props {
 }
 
 export function RaceList({ limit, initialRaces }: Props) {
-  const { data: races, isLoading } = usePracticeRaces();
+  const { data: races, isLoading, isError, isFetching, refetch } =
+    usePracticeRaces();
 
   // Compute per-template ordered list to derive deltas vs previous same-template race.
   const enriched = useMemo(() => {
@@ -53,6 +55,18 @@ export function RaceList({ limit, initialRaces }: Props) {
         <div className="h-16 rounded-xl bg-white/[0.04]" />
         <div className="h-16 rounded-xl bg-white/[0.04]" />
       </div>
+    );
+  }
+
+  // A failed fetch must look different from "no races yet" — otherwise a
+  // flaky connection reads as an empty race history.
+  if (isError && !initialRaces) {
+    return (
+      <QueryError
+        onRetry={() => refetch()}
+        retrying={isFetching}
+        description="Couldn't load your saved races. Check your connection and try again."
+      />
     );
   }
 

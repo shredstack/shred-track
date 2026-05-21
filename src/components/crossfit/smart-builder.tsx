@@ -126,7 +126,39 @@ function smartBuilderMovementBlockKey(
   return m.blockTempRef ?? m.blockId ?? null;
 }
 
+// A for_load complex renders as one unbroken line — "5 Shoulder Press +
+// 5 Push Press + 5 Push Jerk" — so the "+" makes the no-rest sequence clear.
+function SmartBuilderComplexLine({
+  movements,
+}: {
+  movements: WorkoutBuilderMovement[];
+}) {
+  if (movements.length === 0) return null;
+  return (
+    <div className="space-y-1">
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm">
+        {movements.map((m, i) => (
+          <span key={m.tempId} className="flex items-center gap-1.5">
+            {i > 0 && <span className="text-muted-foreground">+</span>}
+            {m.prescribedReps && (
+              <span className="text-muted-foreground">{m.prescribedReps}</span>
+            )}
+            <span className="font-medium">{m.movementName}</span>
+          </span>
+        ))}
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        Unbroken — no rest between movements.
+      </p>
+    </div>
+  );
+}
+
 function SmartBuilderMovementBlocks({ part }: { part: WorkoutBuilderPart }) {
+  // A complex is one unbroken set — render it joined, ignoring block grouping.
+  if (part.structure === "complex") {
+    return <SmartBuilderComplexLine movements={part.movements} />;
+  }
   const blocks = part.blocks ?? [];
   const orderedBlocks = [...blocks].sort(
     (a, b) => a.orderIndex - b.orderIndex
@@ -458,6 +490,13 @@ export function SmartBuilder({
                     {part.workoutType === "for_reps" &&
                     part.structure === "tabata"
                       ? " · Tabata"
+                      : ""}
+                    {part.workoutType === "for_load" &&
+                    part.structure === "complex"
+                      ? " · Complex"
+                      : ""}
+                    {part.workoutType === "for_load" && part.rounds
+                      ? ` · ${part.rounds} sets`
                       : ""}
                     {part.repScheme ? ` · ${part.repScheme}` : ""}
                     {part.workoutType === "amrap" && part.amrapDurationInput

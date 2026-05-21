@@ -451,10 +451,11 @@ export const workoutParts = pgTable(
     amrapDurationSeconds: integer("amrap_duration_seconds"),
     emomIntervalSeconds: integer("emom_interval_seconds"),
     repScheme: text("rep_scheme"),
+    // For for_load parts, doubles as the prescribed set count ("5 sets of…").
     rounds: integer("rounds"),
-    // Structural pattern modifier for the part (currently 'tabata' on for_reps,
-    // null otherwise). Lets a "For Reps" part declare a Tabata cadence without
-    // creating a new workout_type.
+    // Structural pattern modifier for the part, null otherwise. 'tabata' on a
+    // for_reps part declares a Tabata cadence; 'complex' on a for_load part
+    // marks an unbroken barbell complex. Avoids minting a new workout_type.
     structure: text("structure"),
     // Populated only on the new "intervals" workout type — work + rest
     // alternation per round (e.g. 8 rounds × 1:00 work / 3:00 rest).

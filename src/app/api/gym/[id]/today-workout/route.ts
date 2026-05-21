@@ -9,6 +9,7 @@ import { db } from "@/db";
 import { communities, workouts } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canViewGym } from "@/lib/authz/community";
+import { resolveGymTimezone } from "@/lib/timezone";
 
 function todayInTz(tz: string): string {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -38,7 +39,7 @@ export async function GET(
     .from(communities)
     .where(eq(communities.id, communityId))
     .limit(1);
-  const today = todayInTz(c?.tz ?? "America/Denver");
+  const today = todayInTz(resolveGymTimezone(c?.tz));
   const [w] = await db
     .select({
       workoutId: workouts.id,

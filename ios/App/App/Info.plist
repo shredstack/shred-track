@@ -31,9 +31,9 @@
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>ShredTrack accesses your photo library so you can choose a profile picture.</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>ShredTrack reads your distance and workout data to show live and average pace during a HYROX race.</string>
+	<string>ShredTrack reads your distance and workout data to show live and average pace during a race, and to detect workouts already recorded by Apple Watch so it doesn't double-count your calories.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>ShredTrack saves completed HYROX races to Apple Health so they appear in your Activity rings.</string>
+	<string>ShredTrack saves your completed workouts and races to Apple Health, including estimated active energy, so they appear in your Activity rings.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

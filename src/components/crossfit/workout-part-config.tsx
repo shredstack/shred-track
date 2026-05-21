@@ -65,7 +65,11 @@ export function WorkoutPartConfig({
         <Label className={labelClass}>Type</Label>
         <WorkoutTypeSelector
           value={part.workoutType}
-          onSelect={(type) => onChange({ workoutType: type })}
+          onSelect={(type) =>
+            // `structure` is workout-type-specific (tabata→for_reps,
+            // complex→for_load), so a type change always clears it.
+            onChange({ workoutType: type, structure: undefined })
+          }
         />
       </div>
 
@@ -92,15 +96,20 @@ export function WorkoutPartConfig({
         </div>
       )}
 
-      {part.workoutType === "for_reps" && (
+      {(part.workoutType === "for_reps" ||
+        part.workoutType === "for_load") && (
         <div className="space-y-1.5">
           <Label className={labelClass}>Structure</Label>
           <div className="flex gap-1">
-            {(
-              [
-                { key: undefined, label: "None" },
-                { key: "tabata", label: "Tabata" },
-              ] as const
+            {(part.workoutType === "for_load"
+              ? ([
+                  { key: undefined, label: "None" },
+                  { key: "complex", label: "Complex" },
+                ] as const)
+              : ([
+                  { key: undefined, label: "None" },
+                  { key: "tabata", label: "Tabata" },
+                ] as const)
             ).map((opt) => {
               const selected = (part.structure ?? undefined) === opt.key;
               return (
@@ -123,6 +132,12 @@ export function WorkoutPartConfig({
             <p className="text-[11px] text-muted-foreground pt-1">
               8 rounds × :20 work / :10 rest per movement. Score is total reps
               across all movements.
+            </p>
+          )}
+          {part.structure === "complex" && (
+            <p className="text-[11px] text-muted-foreground pt-1">
+              Movements are performed back-to-back as one unbroken set — no
+              rest between them. Score is the heaviest set.
             </p>
           )}
         </div>
@@ -157,6 +172,24 @@ export function WorkoutPartConfig({
       {part.workoutType === "for_time" && (
         <div className="space-y-1.5">
           <Label className={labelClass}>Rounds (optional)</Label>
+          <Input
+            type="number"
+            min={1}
+            value={part.rounds}
+            onChange={(e) => onChange({ rounds: e.target.value })}
+            placeholder="e.g. 5"
+            className={inputHeight}
+          />
+        </div>
+      )}
+
+      {/* For Load doubles `rounds` as the prescribed set count. Required
+          framing for a complex ("5 sets of…"), optional for a plain lift. */}
+      {part.workoutType === "for_load" && (
+        <div className="space-y-1.5">
+          <Label className={labelClass}>
+            {part.structure === "complex" ? "Sets" : "Sets (optional)"}
+          </Label>
           <Input
             type="number"
             min={1}

@@ -13,6 +13,7 @@ import {
   committedClubSnapshots,
   users,
 } from "@/db/schema";
+import { resolveGymTimezone } from "@/lib/timezone";
 
 export interface CommittedClubProgress {
   classesAttended: number;
@@ -105,7 +106,9 @@ export async function getCurrentMonthProgress(
     };
   }
 
-  const { startUtc, endUtc, yearMonth } = gymMonthBounds(gym.timezone);
+  const { startUtc, endUtc, yearMonth } = gymMonthBounds(
+    resolveGymTimezone(gym.timezone)
+  );
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(classRegistrations)
@@ -159,10 +162,11 @@ export async function getMonthlyLeaderboard(
     .limit(1);
   if (!gym) return [];
 
-  const currentMonth = gymMonthBounds(gym.timezone).yearMonth;
+  const tz = resolveGymTimezone(gym.timezone);
+  const currentMonth = gymMonthBounds(tz).yearMonth;
 
   if (yearMonth === currentMonth) {
-    const { startUtc, endUtc } = gymMonthBounds(gym.timezone);
+    const { startUtc, endUtc } = gymMonthBounds(tz);
     const rows = await db
       .select({
         userId: classRegistrations.userId,

@@ -1,4 +1,9 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  keepPreviousData,
+} from "@tanstack/react-query";
 import type {
   MovementOption,
   MovementCategory,
@@ -84,6 +89,11 @@ export function useMovements(filters: MovementsFilters = {}) {
       return rows.map(toMovementOption);
     },
     staleTime: 5 * 60 * 1000, // movements change rarely
+    // Each distinct `q` is its own cache entry. Without this, every search
+    // keystroke drops `data` to `undefined` until the new fetch resolves —
+    // leaving the picker with no real movements to offer mid-search. Keeping
+    // the previous results means the list always holds saveable rows.
+    placeholderData: keepPreviousData,
   });
 }
 

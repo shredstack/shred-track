@@ -189,12 +189,18 @@ export function builderPartToPayload(
     sideCadenceOpenEnded: !!part.sideCadenceOpenEnded,
     repScheme: part.repScheme || undefined,
     rounds:
-      (part.workoutType === "for_time" || part.workoutType === "intervals") &&
+      (part.workoutType === "for_time" ||
+        part.workoutType === "intervals" ||
+        // for_load uses `rounds` as the prescribed set count ("5 sets of…").
+        part.workoutType === "for_load") &&
       part.rounds
         ? parseInt(part.rounds)
         : undefined,
+    // `structure` is type-specific — only let the matching pair through so a
+    // stale value left over from a workout-type switch can't be persisted.
     structure:
-      part.workoutType === "for_reps" && part.structure
+      (part.workoutType === "for_reps" && part.structure === "tabata") ||
+      (part.workoutType === "for_load" && part.structure === "complex")
         ? part.structure
         : undefined,
     movements: movements.map((m, i) => ({

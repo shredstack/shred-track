@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, users } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
+import { resolveGymTimezone } from "@/lib/timezone";
 
 function mondayOfThisWeekInTz(tz: string): string {
   // Pull today's date in the gym tz, then walk back to Monday.
@@ -52,7 +53,7 @@ export default async function ProgrammingIndexPage() {
     .where(eq(communities.id, row.activeCommunityId))
     .limit(1);
 
-  const tz = gym?.gymTimezone ?? "America/Denver";
+  const tz = resolveGymTimezone(gym?.gymTimezone);
   const weekStart = mondayOfThisWeekInTz(tz);
   redirect(`/gym/programming/${weekStart}`);
 }

@@ -219,7 +219,7 @@ host = "smtp.resend.com"
 port = 465
 user = "resend"
 pass = "env(RESEND_API_KEY)"
-admin_email = "shredtrack@shredstack.net"
+admin_email = "noreply@shredstack.net"
 sender_name = "ShredTrack"
 
 # Uncomment to customize email template
