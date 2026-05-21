@@ -16,11 +16,13 @@ import { BenchmarkPicker } from "@/components/crossfit/benchmark-picker";
 import { ScoreEntry } from "@/components/crossfit/score-entry";
 import { LeaderboardSheet } from "@/components/crossfit/leaderboard-sheet";
 import { DateNavigator } from "@/components/shared/date-navigator";
+import { QueryError } from "@/components/shared/query-error";
 import { AvailableTracksSheet } from "@/components/crossfit/available-tracks-sheet";
 import { TrackDayScoreInput } from "@/components/crossfit/track-day-score-input";
 import { TrackDayLeaderboardSheet } from "@/components/crossfit/track-day-leaderboard-sheet";
 import { useMyTrackDays } from "@/hooks/useTracks";
 import { useIsFeatureOn } from "@/hooks/useFeatureFlag";
+import { useHasMounted } from "@/hooks/useHasMounted";
 import {
   useWorkoutsByDate,
   useCreateWorkout,
@@ -242,6 +244,11 @@ function CrossfitPageBody() {
   // was added to. The param is read once on mount — subsequent date
   // navigation is local state.
   const searchParams = useSearchParams();
+  // The persisted React Query cache (gym context, feature flags) is restored
+  // from localStorage on the client but unavailable to the server, so the
+  // first client render would otherwise diverge from the SSR HTML. Gating the
+  // body on this keeps the first render in sync; see useHasMounted.
+  const hasMounted = useHasMounted();
   const [selectedDate, setSelectedDate] = useState(
     () => parseLocalDate(searchParams.get("date")) ?? new Date()
   );
@@ -315,7 +322,13 @@ function CrossfitPageBody() {
   // Wait for gym context to settle before firing the workouts query —
   // otherwise scope falls through to "personal" during the load window and
   // gym-scoped workouts flash as missing.
-  const { data: workouts = [], isLoading } = useWorkoutsByDate(dateStr, scope, {
+  const {
+    data: workouts = [],
+    isLoading,
+    isError: workoutsFailed,
+    isFetching: workoutsFetching,
+    refetch: refetchWorkouts,
+  } = useWorkoutsByDate(dateStr, scope, {
     enabled: !gymContextPending,
   });
   const { data: movementLibrary = [] } = useMovements();
@@ -584,6 +597,23 @@ function CrossfitPageBody() {
     return isCoach;
   };
 
+  // Until the client has mounted, render the SSR-equivalent pending state so
+  // the first client render matches the server HTML. Once mounted, the
+  // persisted cache is safe to read and the real UI renders below.
+  if (!hasMounted) {
+    return (
+      <div className="flex flex-col gap-5">
+        <DateNavigator
+          selectedDate={selectedDate}
+          onDateChange={setSelectedDate}
+        />
+        <div className="flex items-center justify-center py-10">
+          <Loader2 className="size-5 animate-spin text-muted-foreground" />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-5">
       <DateNavigator selectedDate={selectedDate} onDateChange={setSelectedDate} />
@@ -672,6 +702,14 @@ function CrossfitPageBody() {
         <div className="flex items-center justify-center py-10">
           <Loader2 className="size-5 animate-spin text-muted-foreground" />
         </div>
+      ) : workoutsFailed ? (
+        // A failed fetch must not fall through to "No workouts" — that reads
+        // as "your data is gone" when it's really just a connection problem.
+        <QueryError
+          onRetry={() => refetchWorkouts()}
+          retrying={workoutsFetching}
+          description="Couldn't load your workouts. Check your connection and try again."
+        />
       ) : (
         <>
           {workouts.map((workout) => {

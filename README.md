@@ -61,6 +61,12 @@ npm run dev
 
 Open http://localhost:3000 — you'll be redirected to the login page. Create an account with email/password to get started.
 
+### 6. Start the Inngest server
+
+```bash
+npx inngest-cli@latest dev -u http://localhost:3000/api/inngest
+```
+
 ## Supabase Commands
 
 | Command | Description |

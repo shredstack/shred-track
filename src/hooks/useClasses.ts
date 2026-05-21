@@ -10,6 +10,10 @@ export interface ClassInstanceListItem {
   endAt: string;
   coachId: string | null;
   coachName: string | null;
+  coachImage: string | null;
+  // Unified blurb for the class card — schedule description for classes,
+  // event description for events.
+  description: string | null;
   capacity: number;
   status: "scheduled" | "cancelled" | "completed";
   kind: "class" | "event";
@@ -105,6 +109,27 @@ export function useUnregisterFromClassDetail(classInstanceId: string) {
   });
 }
 
+export interface CoachOption {
+  id: string;
+  name: string;
+}
+
+/**
+ * Active coach/admin users for a gym. Used by the classes admin view's
+ * per-instance coach picker and the schedule editor's default-coach picker.
+ */
+export function useGymCoaches(communityId: string | null) {
+  return useQuery<{ coaches: CoachOption[] }>({
+    queryKey: ["gym", communityId, "coaches"],
+    enabled: !!communityId,
+    queryFn: async () => {
+      const res = await fetch(`/api/gym/${communityId}/coaches`);
+      if (!res.ok) throw new Error("Failed to load coaches");
+      return res.json();
+    },
+  });
+}
+
 export function useGymClasses(
   communityId: string | null,
   fromIso: string,
@@ -146,25 +171,22 @@ export function useUpcomingEvents(communityId: string | null) {
   });
 }
 
+/**
+ * Refresh every cached classes window for a gym (the date-range portion of
+ * the query key varies by which day the calendar is showing) plus the
+ * member upcoming-events banner.
+ */
 function invalidateClassesAndEvents(
   qc: ReturnType<typeof useQueryClient>,
-  communityId: string | null,
-  fromIso: string,
-  toIso: string
+  communityId: string | null
 ) {
-  qc.invalidateQueries({
-    queryKey: ["gym", communityId, "classes", fromIso, toIso],
-  });
+  qc.invalidateQueries({ queryKey: ["gym", communityId, "classes"] });
   qc.invalidateQueries({
     queryKey: ["gym", communityId, "upcoming-events"],
   });
 }
 
-export function useRegisterForClass(
-  communityId: string | null,
-  fromIso: string,
-  toIso: string
-) {
+export function useRegisterForClass(communityId: string | null) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (classInstanceId: string) => {
@@ -176,16 +198,11 @@ export function useRegisterForClass(
         throw new Error(body?.error || "Could not register");
       }
     },
-    onSuccess: () =>
-      invalidateClassesAndEvents(qc, communityId, fromIso, toIso),
+    onSuccess: () => invalidateClassesAndEvents(qc, communityId),
   });
 }
 
-export function useUnregisterFromClass(
-  communityId: string | null,
-  fromIso: string,
-  toIso: string
-) {
+export function useUnregisterFromClass(communityId: string | null) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (classInstanceId: string) => {
@@ -193,7 +210,6 @@ export function useUnregisterFromClass(
         method: "DELETE",
       });
     },
-    onSuccess: () =>
-      invalidateClassesAndEvents(qc, communityId, fromIso, toIso),
+    onSuccess: () => invalidateClassesAndEvents(qc, communityId),
   });
 }

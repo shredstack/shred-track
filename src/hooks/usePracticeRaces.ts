@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { fetchJson } from "@/lib/api-fetch";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -57,22 +58,16 @@ export const practiceRaceKeys = {
 export function usePracticeRaces() {
   return useQuery({
     queryKey: practiceRaceKeys.lists(),
-    queryFn: async (): Promise<PracticeRace[]> => {
-      const response = await fetch("/api/hyrox/practice-races");
-      if (!response.ok) throw new Error("Failed to fetch races");
-      return response.json();
-    },
+    queryFn: (): Promise<PracticeRace[]> =>
+      fetchJson<PracticeRace[]>("/api/hyrox/practice-races"),
   });
 }
 
 export function usePracticeRace(id: string | null) {
   return useQuery({
     queryKey: id ? practiceRaceKeys.detail(id) : ["practice-races", "detail", "none"],
-    queryFn: async (): Promise<PracticeRaceWithSplits> => {
-      const response = await fetch(`/api/hyrox/practice-races/${id}`);
-      if (!response.ok) throw new Error("Failed to fetch race");
-      return response.json();
-    },
+    queryFn: (): Promise<PracticeRaceWithSplits> =>
+      fetchJson<PracticeRaceWithSplits>(`/api/hyrox/practice-races/${id}`),
     enabled: !!id,
   });
 }

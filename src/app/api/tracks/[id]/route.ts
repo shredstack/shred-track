@@ -10,6 +10,7 @@ import {
   programmingTracks,
   communities,
 } from "@/db/schema";
+import { resolveGymTimezone } from "@/lib/timezone";
 import { getSessionUser } from "@/lib/session";
 import { canViewGym } from "@/lib/authz/community";
 
@@ -47,7 +48,7 @@ export async function GET(
     .from(communities)
     .where(eq(communities.id, track.communityId))
     .limit(1);
-  const today = todayInTz(gym?.tz ?? "America/Denver");
+  const today = todayInTz(resolveGymTimezone(gym?.tz));
   const days = await db
     .select()
     .from(programmingTrackDays)

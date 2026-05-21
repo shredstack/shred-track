@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { fetchJson } from "@/lib/api-fetch";
 import { pushTodaySnapshotToWatch } from "@/lib/native/today-snapshot";
 import type { UserProfile } from "@/hooks/useProfile";
 import type {
@@ -318,9 +319,9 @@ export function useWorkoutsByDate(
       params.set("date", date);
       if (scope.mode === "gym") params.set("communityId", scope.communityId);
       else if (scope.mode === "personal") params.set("personal", "1");
-      const res = await fetch(`/api/workouts?${params.toString()}`);
-      if (!res.ok) throw new Error("Failed to fetch workouts");
-      const rows = (await res.json()) as WireWorkout[];
+      const rows = await fetchJson<WireWorkout[]>(
+        `/api/workouts?${params.toString()}`,
+      );
       return rows.map(wireWorkoutToDisplay);
     },
   });
@@ -354,9 +355,9 @@ export function useWorkoutSearch(filters: WorkoutSearchFilters) {
       if (movementId) params.set("movementId", movementId);
       if (startDate) params.set("startDate", startDate);
       if (endDate) params.set("endDate", endDate);
-      const res = await fetch(`/api/workouts?${params.toString()}`);
-      if (!res.ok) throw new Error("Failed to search workouts");
-      const rows = (await res.json()) as WireWorkout[];
+      const rows = await fetchJson<WireWorkout[]>(
+        `/api/workouts?${params.toString()}`,
+      );
       return rows.map(wireWorkoutToDisplay);
     },
   });
@@ -564,14 +565,10 @@ export interface WorkoutDeleteImpact {
 export function useWorkoutDeleteImpact(workoutId: string | null) {
   return useQuery<WorkoutDeleteImpact>({
     queryKey: ["workouts", "delete-impact", workoutId],
-    queryFn: async () => {
-      const res = await fetch(`/api/workouts/${workoutId}/delete-impact`);
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error || "Failed to load delete impact");
-      }
-      return res.json();
-    },
+    queryFn: () =>
+      fetchJson<WorkoutDeleteImpact>(
+        `/api/workouts/${workoutId}/delete-impact`,
+      ),
     enabled: !!workoutId,
     staleTime: 0,
   });

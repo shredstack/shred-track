@@ -17,6 +17,7 @@ import {
   communities,
 } from "@/db/schema";
 import { expandSlotOccurrences } from "@/lib/classes";
+import { resolveGymTimezone } from "@/lib/timezone";
 
 const CRON = "0 9 * * 1"; // every Monday 09:00 UTC
 
@@ -91,7 +92,7 @@ export const materializeClassInstances = inngest.createFunction(
         durationMin: s.durationMin,
         activeFrom: new Date(`${s.activeFrom}T00:00:00Z`),
         activeTo: s.activeTo ? new Date(`${s.activeTo}T00:00:00Z`) : null,
-        gymTimezone: s.gymTimezone,
+        gymTimezone: resolveGymTimezone(s.gymTimezone),
         windowStart: today,
         windowEnd: twelveWeeks,
       });

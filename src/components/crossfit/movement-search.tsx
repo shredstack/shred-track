@@ -8,7 +8,6 @@ import { useMovements, useRecentMovements } from "@/hooks/useMovements";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { PickerSheet } from "@/components/shared/picker-sheet";
 import { CategoryPills } from "@/components/shared/category-pills";
-import { inferDefaultMetricType } from "@/lib/crossfit/rep-scheme-parser";
 import type {
   MovementOption,
   MovementCategory,
@@ -17,86 +16,12 @@ import type {
 import { CATEGORY_FILTER_OPTIONS, MOVEMENT_CATEGORY_COLORS } from "@/types/crossfit";
 
 // ============================================
-// Fallback library — used only when the live fetch hasn't returned yet
-// or when a caller explicitly opts out (e.g. tests, storybook).
-// ============================================
-
-type FallbackMovement = Omit<MovementOption, "metricType">;
-
-const FALLBACK_MOVEMENTS_RAW: FallbackMovement[] = [
-  { id: "m-1", canonicalName: "Thruster", category: "barbell", isWeighted: true, is1rmApplicable: false },
-  { id: "m-2", canonicalName: "Clean", category: "barbell", isWeighted: true, is1rmApplicable: true },
-  { id: "m-3", canonicalName: "Power Clean", category: "barbell", isWeighted: true, is1rmApplicable: true },
-  { id: "m-4", canonicalName: "Squat Clean", category: "barbell", isWeighted: true, is1rmApplicable: true },
-  { id: "m-5", canonicalName: "Hang Power Clean", category: "barbell", isWeighted: true, is1rmApplicable: false },
-  { id: "m-6", canonicalName: "Hang Squat Clean", category: "barbell", isWeighted: true, is1rmApplicable: false },
-  { id: "m-7", canonicalName: "Snatch", category: "barbell", isWeighted: true, is1rmApplicable: true },
-  { id: "m-8", canonicalName: "Power Snatch", category: "barbell", isWeighted: true, is1rmApplicable: true },
-  { id: "m-9", canonicalName: "Squat Snatch", category: "barbell", isWeighted: true, is1rmApplicable: true },
-  { id: "m-10", canonicalName: "Deadlift", category: "barbell", isWeighted: true, is1rmApplicable: true },
-  { id: "m-11", canonicalName: "Front Squat", category: "barbell", isWeighted: true, is1rmApplicable: true },
-  { id: "m-12", canonicalName: "Back Squat", category: "barbell", isWeighted: true, is1rmApplicable: true },
-  { id: "m-13", canonicalName: "Overhead Squat", category: "barbell", isWeighted: true, is1rmApplicable: true },
-  { id: "m-14", canonicalName: "Push Press", category: "barbell", isWeighted: true, is1rmApplicable: true },
-  { id: "m-15", canonicalName: "Push Jerk", category: "barbell", isWeighted: true, is1rmApplicable: true },
-  { id: "m-16", canonicalName: "Split Jerk", category: "barbell", isWeighted: true, is1rmApplicable: true },
-  { id: "m-17", canonicalName: "Strict Press", category: "barbell", isWeighted: true, is1rmApplicable: true },
-  { id: "m-18", canonicalName: "Bench Press", category: "barbell", isWeighted: true, is1rmApplicable: true },
-  { id: "m-19", canonicalName: "Sumo Deadlift High Pull", category: "barbell", isWeighted: true, is1rmApplicable: false },
-  { id: "m-20", canonicalName: "Clean and Jerk", category: "barbell", isWeighted: true, is1rmApplicable: true },
-  { id: "m-21", canonicalName: "Cluster", category: "barbell", isWeighted: true, is1rmApplicable: false },
-  { id: "m-22", canonicalName: "Shoulder-to-Overhead", category: "barbell", isWeighted: true, is1rmApplicable: false },
-  { id: "m-23", canonicalName: "Ground-to-Overhead", category: "barbell", isWeighted: true, is1rmApplicable: false },
-  { id: "m-30", canonicalName: "Dumbbell Snatch", category: "dumbbell", isWeighted: true, is1rmApplicable: false },
-  { id: "m-31", canonicalName: "Dumbbell Clean", category: "dumbbell", isWeighted: true, is1rmApplicable: false },
-  { id: "m-32", canonicalName: "Devil Press", category: "dumbbell", isWeighted: true, is1rmApplicable: false },
-  { id: "m-33", canonicalName: "Dumbbell Thruster", category: "dumbbell", isWeighted: true, is1rmApplicable: false },
-  { id: "m-40", canonicalName: "Kettlebell Swing", category: "kettlebell", isWeighted: true, is1rmApplicable: false },
-  { id: "m-41", canonicalName: "Turkish Get-Up", category: "kettlebell", isWeighted: true, is1rmApplicable: false },
-  { id: "m-42", canonicalName: "Goblet Squat", category: "kettlebell", isWeighted: true, is1rmApplicable: false },
-  { id: "m-50", canonicalName: "Pull-Up", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
-  { id: "m-51", canonicalName: "Chest-to-Bar Pull-Up", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
-  { id: "m-52", canonicalName: "Bar Muscle-Up", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
-  { id: "m-53", canonicalName: "Ring Muscle-Up", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
-  { id: "m-54", canonicalName: "Toes-to-Bar", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
-  { id: "m-55", canonicalName: "Knees-to-Elbows", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
-  { id: "m-56", canonicalName: "Handstand Push-Up", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
-  { id: "m-57", canonicalName: "Handstand Walk", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
-  { id: "m-58", canonicalName: "Ring Dip", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
-  { id: "m-59", canonicalName: "Rope Climb", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
-  { id: "m-60", canonicalName: "Legless Rope Climb", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
-  { id: "m-61", canonicalName: "Wall Walk", category: "gymnastics", isWeighted: false, is1rmApplicable: false },
-  { id: "m-70", canonicalName: "Air Squat", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
-  { id: "m-71", canonicalName: "Burpee", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
-  { id: "m-72", canonicalName: "Push-Up", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
-  { id: "m-73", canonicalName: "Sit-Up", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
-  { id: "m-74", canonicalName: "Lunge", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
-  { id: "m-75", canonicalName: "Pistol Squat", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
-  { id: "m-76", canonicalName: "Box Jump", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
-  { id: "m-77", canonicalName: "Box Jump Over", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
-  { id: "m-78", canonicalName: "Bar-Facing Burpee", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
-  { id: "m-79", canonicalName: "Burpee Box Jump Over", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
-  { id: "m-80", canonicalName: "Wall Ball Shot", category: "bodyweight", isWeighted: true, is1rmApplicable: false },
-  { id: "m-81", canonicalName: "GHD Sit-Up", category: "bodyweight", isWeighted: false, is1rmApplicable: false },
-  { id: "m-90", canonicalName: "Row", category: "monostructural", isWeighted: false, is1rmApplicable: false },
-  { id: "m-91", canonicalName: "Assault Bike", category: "monostructural", isWeighted: false, is1rmApplicable: false },
-  { id: "m-92", canonicalName: "Echo Bike", category: "monostructural", isWeighted: false, is1rmApplicable: false },
-  { id: "m-93", canonicalName: "Run", category: "monostructural", isWeighted: false, is1rmApplicable: false },
-  { id: "m-94", canonicalName: "Ski Erg", category: "monostructural", isWeighted: false, is1rmApplicable: false },
-  { id: "m-95", canonicalName: "Double-Under", category: "monostructural", isWeighted: false, is1rmApplicable: false },
-  { id: "m-96", canonicalName: "Single-Under", category: "monostructural", isWeighted: false, is1rmApplicable: false },
-];
-
-const FALLBACK_MOVEMENTS: MovementOption[] = FALLBACK_MOVEMENTS_RAW.map(
-  (m) => ({
-    ...m,
-    metricType: inferDefaultMetricType(m.canonicalName, m.category, m.isWeighted),
-  })
-);
-
-// ============================================
 // Component
 // ============================================
+
+// Stable empty reference for the pre-load window, so `movements` keeps a
+// constant identity and downstream useMemos don't rerun every render.
+const NO_MOVEMENTS: MovementOption[] = [];
 
 interface MovementSearchProps {
   onSelect: (movement: MovementOption) => void;
@@ -127,7 +52,13 @@ export function MovementSearch({
     q: debouncedQuery || undefined,
   });
   const { data: recentIds, refetch: refetchRecent } = useRecentMovements();
-  const movements = movementsOverride ?? fetched ?? FALLBACK_MOVEMENTS;
+  // No placeholder list: the picker only ever offers real, saveable
+  // movements. A fake-id stand-in could be selected and would fail the
+  // workout insert (movement_id must be a real UUID). `useMovements` uses
+  // keepPreviousData, so after the first load this only empties on a cold
+  // open — handled by the "Loading movements…" state below.
+  const movements = movementsOverride ?? fetched ?? NO_MOVEMENTS;
+  const movementsLoading = !movementsOverride && fetched === undefined;
 
   // Force a fresh fetch the moment the user opens the picker. Catches the
   // case where movements were created elsewhere and this cache key never
@@ -295,7 +226,7 @@ export function MovementSearch({
         >
           {displayItems.length === 0 && !showAddNew && (
             <div className="px-3 py-6 text-center text-sm text-muted-foreground">
-              No movements found
+              {movementsLoading ? "Loading movements…" : "No movements found"}
             </div>
           )}
 
@@ -365,5 +296,3 @@ export function MovementSearch({
     </>
   );
 }
-
-export { FALLBACK_MOVEMENTS };

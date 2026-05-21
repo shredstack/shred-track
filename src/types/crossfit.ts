@@ -424,7 +424,11 @@ export interface WorkoutMovementDisplay {
   repSchemeParsed?: RepSchemeParsed | null;
 }
 
-export type WorkoutPartStructure = "tabata";
+// Structural pattern modifier for a part. `tabata` is a For Reps cadence
+// (8 × :20/:10). `complex` marks a For Load part whose movements are
+// performed back-to-back as one unbroken set (a barbell complex) — no rest
+// between movements, scored by load.
+export type WorkoutPartStructure = "tabata" | "complex";
 
 export interface IntervalRoundSpec {
   workSeconds: number;

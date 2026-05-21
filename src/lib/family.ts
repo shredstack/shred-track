@@ -15,6 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { resolveGymTimezone } from "@/lib/timezone";
 
 // Helpers that can be invoked either at the top level (`db`) or inside
 // an existing transaction (`db.transaction(async (tx) => …)`). Drizzle's
@@ -898,7 +899,7 @@ export async function listFamilyForAccountHolder(
     .from(communities)
     .where(eq(communities.id, communityId))
     .limit(1);
-  const tz = gym?.timezone ?? "UTC";
+  const tz = resolveGymTimezone(gym?.timezone);
 
   const rows = await db
     .select({
@@ -961,7 +962,7 @@ export async function listFamiliesByGym(
     .from(communities)
     .where(eq(communities.id, communityId))
     .limit(1);
-  const tz = gym?.timezone ?? "UTC";
+  const tz = resolveGymTimezone(gym?.timezone);
 
   const dependentUsers = users;
   // Alias the second join to the account holder.

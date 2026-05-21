@@ -1,46 +1,23 @@
 "use client";
 
-// Member-facing class schedule (spec §2.2). Week-ahead view of class
-// instances for the active gym, with register/cancel actions. When the
-// `classes` flag is off or the user has no active gym, the page is empty.
+// Member-facing class schedule (spec §2.2). Date-based calendar — pick a day
+// and register for the classes running that day, the same way the /crossfit
+// tab works. Sparse one-off events stay pinned in a banner above the
+// calendar so they aren't missed. When the `classes` flag is off or the user
+// has no active gym, the page shows an explanatory empty state.
 
-import { useMemo, useState } from "react";
-import Link from "next/link";
+import { useUpcomingEvents } from "@/hooks/useClasses";
 import { useGymContext } from "@/hooks/useGymContext";
-import { useIsFeatureOn, useFeatureFlagsLoading } from "@/hooks/useFeatureFlag";
-import {
-  useGymClasses,
-  useRegisterForClass,
-  useUnregisterFromClass,
-  useUpcomingEvents,
-  type ClassInstanceListItem,
-} from "@/hooks/useClasses";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-
-function weekBounds(offsetWeeks: number): { fromIso: string; toIso: string } {
-  const now = new Date();
-  const day = (now.getUTCDay() + 6) % 7; // monday=0
-  const monday = new Date(now);
-  monday.setUTCDate(monday.getUTCDate() - day + offsetWeeks * 7);
-  monday.setUTCHours(0, 0, 0, 0);
-  const sunday = new Date(monday);
-  sunday.setUTCDate(sunday.getUTCDate() + 6);
-  return {
-    fromIso: monday.toISOString().slice(0, 10),
-    toIso: sunday.toISOString().slice(0, 10),
-  };
-}
+import { useFeatureFlagsLoading, useIsFeatureOn } from "@/hooks/useFeatureFlag";
+import { ClassCalendar } from "@/components/gym/class-calendar";
+import { MemberClassCard } from "@/components/gym/class-card";
 
 export default function ClassesPage() {
   const { data: ctx } = useGymContext();
   const classesOn = useIsFeatureOn("classes");
   const flagsLoading = useFeatureFlagsLoading();
-  const [weekOffset, setWeekOffset] = useState(0);
-  const { fromIso, toIso } = useMemo(() => weekBounds(weekOffset), [weekOffset]);
   const activeId = ctx?.activeCommunityId ?? null;
-  const { data, isLoading } = useGymClasses(activeId, fromIso, toIso);
+
   const { data: eventData } = useUpcomingEvents(activeId);
   const upcomingEvents = (eventData?.instances ?? []).filter(
     (e) => e.status !== "cancelled"
@@ -75,244 +52,27 @@ export default function ClassesPage() {
     );
   }
 
-  const byDay = new Map<string, ClassInstanceListItem[]>();
-  for (const c of data?.instances ?? []) {
-    const day = c.startAt.slice(0, 10);
-    const list = byDay.get(day) ?? [];
-    list.push(c);
-    byDay.set(day, list);
-  }
-
   return (
     <div className="space-y-4">
+      <h1 className="text-2xl font-bold">Classes</h1>
+
       {upcomingEvents.length > 0 ? (
         <section className="space-y-2">
           <h2 className="text-xs uppercase tracking-wider text-muted-foreground">
             Upcoming events
           </h2>
           {upcomingEvents.map((evt) => (
-            <ClassRow
+            <MemberClassCard
               key={evt.id}
               instance={evt}
               communityId={activeId}
-              fromIso={fromIso}
-              toIso={toIso}
+              showDate
             />
           ))}
         </section>
       ) : null}
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Classes</h1>
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setWeekOffset((w) => w - 1)}
-          >
-            ←
-          </Button>
-          <span className="text-xs text-muted-foreground">
-            {weekOffset === 0 ? "This week" : `Week ${weekOffset > 0 ? "+" : ""}${weekOffset}`}
-          </span>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setWeekOffset((w) => w + 1)}
-          >
-            →
-          </Button>
-        </div>
-      </div>
-      {isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
-      ) : byDay.size === 0 ? (
-        <p className="text-sm text-muted-foreground">No classes this week.</p>
-      ) : (
-        [...byDay.entries()]
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([day, list]) => (
-            <DayBlock
-              key={day}
-              day={day}
-              instances={list}
-              communityId={activeId}
-              fromIso={fromIso}
-              toIso={toIso}
-            />
-          ))
-      )}
+
+      <ClassCalendar mode="member" communityId={activeId} />
     </div>
-  );
-}
-
-function DayBlock({
-  day,
-  instances,
-  communityId,
-  fromIso,
-  toIso,
-}: {
-  day: string;
-  instances: ClassInstanceListItem[];
-  communityId: string;
-  fromIso: string;
-  toIso: string;
-}) {
-  const label = new Date(`${day}T00:00:00`).toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "short",
-    day: "numeric",
-  });
-  return (
-    <div className="space-y-2">
-      <p className="text-xs uppercase tracking-wider text-muted-foreground">
-        {label}
-      </p>
-      {instances.map((i) => (
-        <ClassRow
-          key={i.id}
-          instance={i}
-          communityId={communityId}
-          fromIso={fromIso}
-          toIso={toIso}
-        />
-      ))}
-    </div>
-  );
-}
-
-function ClassRow({
-  instance,
-  communityId,
-  fromIso,
-  toIso,
-}: {
-  instance: ClassInstanceListItem;
-  communityId: string;
-  fromIso: string;
-  toIso: string;
-}) {
-  const register = useRegisterForClass(communityId, fromIso, toIso);
-  const unregister = useUnregisterFromClass(communityId, fromIso, toIso);
-  const time = new Date(instance.startAt).toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-  const isCancelled = instance.status === "cancelled";
-  const isRegistered =
-    instance.myStatus === "registered" || instance.myStatus === "attended";
-
-  const detailHref = `/classes/${instance.id}`;
-  // Stop link navigation when tapping the register/cancel action so
-  // members can register inline without bouncing into the detail page.
-  const stopNav = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-  };
-
-  // Events render with the optional banner image + description block on
-  // top of the standard register affordances (spec §3.3).
-  if (instance.kind === "event") {
-    return (
-      <Link href={detailHref} id={`class-${instance.id}`} className="block">
-        <Card className="overflow-hidden border-primary/30 transition-colors hover:bg-accent/30">
-          {instance.eventImageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={instance.eventImageUrl}
-              alt={instance.name}
-              className="h-32 w-full object-cover"
-            />
-          ) : null}
-          <CardContent className="space-y-2 py-3">
-            <div className="flex items-center gap-2">
-              <Badge>Event</Badge>
-              <span className="text-xs text-muted-foreground">{time}</span>
-              {isCancelled && <Badge variant="destructive">Cancelled</Badge>}
-            </div>
-            <p className="text-base font-semibold">{instance.name}</p>
-            {instance.eventDescription ? (
-              <p className="whitespace-pre-line text-xs text-muted-foreground">
-                {instance.eventDescription}
-              </p>
-            ) : null}
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] text-muted-foreground">
-                {instance.registeredCount}/{instance.capacity} registered
-                {instance.coachName ? ` · ${instance.coachName}` : null}
-              </p>
-              {isCancelled ? null : isRegistered ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={unregister.isPending}
-                  onClick={(e) => {
-                    stopNav(e);
-                    unregister.mutate(instance.id);
-                  }}
-                >
-                  Cancel
-                </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  disabled={register.isPending}
-                  onClick={(e) => {
-                    stopNav(e);
-                    register.mutate(instance.id);
-                  }}
-                >
-                  Register
-                </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </Link>
-    );
-  }
-
-  return (
-    <Link href={detailHref} id={`class-${instance.id}`} className="block">
-      <Card className="transition-colors hover:bg-accent/30">
-        <CardContent className="flex items-center gap-3 py-3">
-          <div className="w-16 shrink-0 text-sm font-medium">{time}</div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <p className="text-sm font-medium truncate">{instance.name}</p>
-              {isCancelled && <Badge variant="destructive">Cancelled</Badge>}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {instance.registeredCount}/{instance.capacity}
-              {instance.coachName ? ` · ${instance.coachName}` : null}
-            </p>
-          </div>
-          {isCancelled ? null : isRegistered ? (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={unregister.isPending}
-              onClick={(e) => {
-                stopNav(e);
-                unregister.mutate(instance.id);
-              }}
-            >
-              Cancel
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              disabled={register.isPending}
-              onClick={(e) => {
-                stopNav(e);
-                register.mutate(instance.id);
-              }}
-            >
-              Register
-            </Button>
-          )}
-        </CardContent>
-      </Card>
-    </Link>
   );
 }

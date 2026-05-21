@@ -331,6 +331,43 @@ function MovementRow({
   );
 }
 
+// Renders a for_load complex as a single unbroken line —
+// "5 Shoulder Press + 5 Push Press + 5 Push Jerk" — followed by the no-rest
+// reminder. The "+" notation is the signal that the movements are performed
+// as one continuous set rather than three separate lifts.
+function ComplexMovementLine({
+  movements,
+}: {
+  movements: WorkoutMovementDisplay[];
+}) {
+  if (movements.length === 0) return null;
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-start gap-2.5 text-sm">
+        <div className="mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded bg-primary/10">
+          <Dumbbell className="size-3 text-primary/70" />
+        </div>
+        <span className="flex-1 leading-relaxed">
+          {movements.map((mov, i) => (
+            <span key={mov.id}>
+              {i > 0 && <span className="mx-1 text-muted-foreground">+</span>}
+              {mov.prescribedReps && (
+                <span className="font-mono font-bold text-foreground">
+                  {mov.prescribedReps}{" "}
+                </span>
+              )}
+              <span className="text-foreground/85">{mov.movementName}</span>
+            </span>
+          ))}
+        </span>
+      </div>
+      <p className="pl-[30px] text-[11px] text-muted-foreground">
+        Unbroken — no rest between movements. Score is the heaviest set.
+      </p>
+    </div>
+  );
+}
+
 function PartSection({
   part,
   index,
@@ -464,7 +501,12 @@ function PartSection({
       )}
 
       <div className="space-y-1.5 rounded-lg bg-white/[0.02] border border-white/[0.04] p-3">
-        {(() => {
+        {part.structure === "complex" ? (
+          // A complex is one unbroken set — render the movements joined,
+          // ignoring any block grouping (a complex has none by definition).
+          <ComplexMovementLine movements={part.movements} />
+        ) : (
+        (() => {
           const ungrouped = part.movements.filter((m) => !m.workoutBlockId);
           const movementsByBlock = new Map<string, WorkoutMovementDisplay[]>();
           for (const m of part.movements) {
@@ -519,7 +561,8 @@ function PartSection({
               })}
             </>
           );
-        })()}
+        })()
+        )}
       </div>
 
       {part.score && <ScoreRow part={part} communityId={communityId} />}

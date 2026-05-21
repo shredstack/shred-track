@@ -9,6 +9,7 @@ import {
   classSchedules,
   communities,
 } from "@/db/schema";
+import { resolveGymTimezone } from "@/lib/timezone";
 
 function addMinutes(d: Date, n: number): Date {
   return new Date(d.getTime() + n * 60_000);
@@ -168,7 +169,7 @@ export async function materializeScheduleSlotsForCommunity(opts: {
       durationMin: s.durationMin,
       activeFrom: new Date(`${s.activeFrom}T00:00:00Z`),
       activeTo: s.activeTo ? new Date(`${s.activeTo}T00:00:00Z`) : null,
-      gymTimezone: s.gymTimezone,
+      gymTimezone: resolveGymTimezone(s.gymTimezone),
       windowStart: today,
       windowEnd,
     });

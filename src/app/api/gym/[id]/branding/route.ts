@@ -11,6 +11,7 @@ import { db } from "@/db";
 import { communities } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canAdminGym, canViewGym } from "@/lib/authz/community";
+import { isValidTimeZone } from "@/lib/timezone";
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const SLUG_RE = /^[a-z0-9-]{2,32}$/;
@@ -93,6 +94,18 @@ export async function PUT(
   ) {
     return NextResponse.json(
       { error: "inviteUrlSlug must be 2-32 lowercase letters, digits, or dashes" },
+      { status: 400 }
+    );
+  }
+
+  // An invalid time zone would later crash `Intl.DateTimeFormat` on every
+  // page that reads it — reject it here rather than storing a landmine.
+  if (
+    body.gymTimezone !== undefined &&
+    !isValidTimeZone(body.gymTimezone)
+  ) {
+    return NextResponse.json(
+      { error: "gymTimezone must be a valid IANA time zone (e.g. America/Denver)" },
       { status: 400 }
     );
   }

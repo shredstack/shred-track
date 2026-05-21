@@ -64,6 +64,7 @@ export async function GET(
       id: classInstances.id,
       scheduleId: classInstances.scheduleId,
       scheduleName: classSchedules.name,
+      scheduleDescription: classSchedules.description,
       startAt: classInstances.startAt,
       endAt: classInstances.endAt,
       coachId: classInstances.coachId,
@@ -122,15 +123,16 @@ export async function GET(
     }
   }
 
-  // Coach names (small set, batched).
+  // Coach name + avatar (small set, batched) so cards can show who's
+  // teaching without an extra round-trip per instance.
   const coachIds = [...new Set(rows.map((r) => r.coachId).filter(Boolean))] as string[];
   const coaches = coachIds.length
     ? await db
-        .select({ id: users.id, name: users.name })
+        .select({ id: users.id, name: users.name, image: users.image })
         .from(users)
         .where(inArray(users.id, coachIds))
     : [];
-  const coachName = new Map(coaches.map((c) => [c.id, c.name]));
+  const coachById = new Map(coaches.map((c) => [c.id, c]));
 
   return NextResponse.json({
     instances: rows.map((r) => ({
@@ -140,7 +142,9 @@ export async function GET(
       startAt: r.startAt.toISOString(),
       endAt: r.endAt.toISOString(),
       coachId: r.coachId,
-      coachName: r.coachId ? coachName.get(r.coachId) ?? null : null,
+      coachName: r.coachId ? coachById.get(r.coachId)?.name ?? null : null,
+      coachImage: r.coachId ? coachById.get(r.coachId)?.image ?? null : null,
+      description: r.kind === "event" ? r.eventDescription : r.scheduleDescription,
       capacity: r.capacity,
       status: r.status,
       kind: r.kind,

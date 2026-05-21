@@ -4,7 +4,7 @@
 // POST: create a class_schedule with optional initial slots.
 
 import { NextRequest, NextResponse } from "next/server";
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { classScheduleSlots, classSchedules } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
@@ -31,10 +31,17 @@ export async function GET(
   if (!(await canManageGym(user.id, communityId))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  // Only active schedules. A "deleted" schedule is soft-deleted
+  // (is_active=false) so its past class instances keep their name.
   const schedules = await db
     .select()
     .from(classSchedules)
-    .where(eq(classSchedules.communityId, communityId))
+    .where(
+      and(
+        eq(classSchedules.communityId, communityId),
+        eq(classSchedules.isActive, true)
+      )
+    )
     .orderBy(asc(classSchedules.name));
   const ids = schedules.map((s) => s.id);
   const slots = ids.length

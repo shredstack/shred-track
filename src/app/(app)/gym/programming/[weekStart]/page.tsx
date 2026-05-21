@@ -11,6 +11,7 @@ import { getSessionUser } from "@/lib/session";
 import { redirect } from "next/navigation";
 import { ProgrammingWeekView } from "@/components/gym/programming/programming-week-view";
 import { isFlagOn } from "@/lib/feature-flags";
+import { resolveGymTimezone } from "@/lib/timezone";
 
 function isIsoDate(s: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
@@ -68,7 +69,7 @@ export default async function ProgrammingWeekPage({
     <ProgrammingWeekView
       communityId={gym!.id}
       gymName={gym!.name}
-      gymTimezone={gym!.gymTimezone}
+      gymTimezone={resolveGymTimezone(gym!.gymTimezone)}
       weekStart={weekStart}
       capPasteEnabled={capPasteOn}
     />
