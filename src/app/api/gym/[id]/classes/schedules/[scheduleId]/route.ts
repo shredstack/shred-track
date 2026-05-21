@@ -253,6 +253,25 @@ export async function PATCH(
   const now = new Date();
   let notifyTargets: Array<{ userId: string; classInstanceId: string }> = [];
   await db.transaction(async (tx) => {
+    // Lock the schedule row and re-read its coach/capacity inside the
+    // transaction. The propagation below matches future instances against the
+    // *previous* default values; `sched` was read before the request body was
+    // even parsed, so two admins editing the same schedule concurrently could
+    // otherwise match against a stale snapshot and skip or double-update
+    // instances. `FOR UPDATE` serializes the racers — the second PATCH blocks
+    // here until the first commits, then reads the now-current values.
+    const [locked] = await tx
+      .select({
+        defaultCoachId: classSchedules.defaultCoachId,
+        defaultCapacity: classSchedules.defaultCapacity,
+      })
+      .from(classSchedules)
+      .where(eq(classSchedules.id, scheduleId))
+      .for("update")
+      .limit(1);
+    const prevCoachId = locked?.defaultCoachId ?? sched.defaultCoachId;
+    const prevCapacity = locked?.defaultCapacity ?? sched.defaultCapacity;
+
     await tx
       .update(classSchedules)
       .set(updates)
@@ -298,9 +317,9 @@ export async function PATCH(
               inArray(classInstances.slotId, slotIds),
               gt(classInstances.startAt, now),
               eq(classInstances.status, "scheduled"),
-              sched.defaultCoachId === null
+              prevCoachId === null
                 ? isNull(classInstances.coachId)
-                : eq(classInstances.coachId, sched.defaultCoachId)
+                : eq(classInstances.coachId, prevCoachId)
             )
           );
       }
@@ -329,7 +348,7 @@ export async function PATCH(
               inArray(classInstances.slotId, slotIds),
               gt(classInstances.startAt, now),
               eq(classInstances.status, "scheduled"),
-              eq(classInstances.capacity, sched.defaultCapacity)
+              eq(classInstances.capacity, prevCapacity)
             )
           );
       }
