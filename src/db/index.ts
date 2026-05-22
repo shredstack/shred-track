@@ -6,16 +6,19 @@ let _db: ReturnType<typeof drizzle<typeof schema>> | null = null;
 
 function getDb() {
   if (!_db) {
-    // Production connects through the Supabase transaction-mode pooler
-    // (`...pooler.supabase.com:6543`). On serverless each warm instance is its
-    // own process, so keep the per-instance pool tiny to avoid exhausting the
-    // pooler. `prepare: false` is required: transaction-mode pooling cannot
-    // carry prepared statements across statements.
-    const client = postgres(process.env.DATABASE_URL!, {
-      max: 1,
-      prepare: false,
-      idle_timeout: 20,
-    });
+    // DATABASE_URL points at Supabase's transaction-mode pooler (port 6543),
+    // which multiplexes many serverless clients over a small server pool — the
+    // fix for the "max clients reached in session mode" exhaustion seen on the
+    // session pooler. `prepare: false` is REQUIRED there: transaction-mode
+    // pooling cannot carry prepared statements across statements.
+    //
+    // Do NOT set `max: 1`. Capping each serverless instance to a single
+    // connection serialized every query onto it; because a page render fans
+    // out many concurrent queries, the lone connection could stall and hang
+    // the whole request until Vercel's 300s timeout. The postgres.js default
+    // pool is the known-good behavior — the transaction pooler is built to
+    // absorb it.
+    const client = postgres(process.env.DATABASE_URL!, { prepare: false });
     _db = drizzle(client, { schema });
   }
   return _db;
