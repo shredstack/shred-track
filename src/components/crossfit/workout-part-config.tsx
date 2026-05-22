@@ -3,7 +3,10 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { WorkoutTypeSelector } from "@/components/crossfit/workout-type-selector";
-import { MovementListBuilder } from "@/components/crossfit/movement-list-builder";
+import {
+  MovementListBuilder,
+  type EarlierLoadPart,
+} from "@/components/crossfit/movement-list-builder";
 import { IntervalsConfig } from "@/components/crossfit/intervals-config";
 import { DurationInput } from "@/components/crossfit/duration-input";
 import type {
@@ -44,6 +47,12 @@ export interface WorkoutPartConfigProps {
   showRepScheme?: boolean;
   /** Smaller inputs for nested contexts. Defaults to false. */
   compact?: boolean;
+  /**
+   * Earlier for_load parts whose logged max a movement in this part can be
+   * prescribed as a percentage of. Empty/undefined hides the weight_pct
+   * option. Computed by MultiPartConfig from the parts above this one.
+   */
+  earlierLoadParts?: EarlierLoadPart[];
 }
 
 export function WorkoutPartConfig({
@@ -53,6 +62,7 @@ export function WorkoutPartConfig({
   onBlocksChange,
   showRepScheme = false,
   compact = false,
+  earlierLoadParts = [],
 }: WorkoutPartConfigProps) {
   const labelClass = compact
     ? "text-xs text-muted-foreground"
@@ -276,6 +286,7 @@ export function WorkoutPartConfig({
         onChange={onMovementsChange}
         blocks={part.blocks}
         onBlocksChange={onBlocksChange}
+        earlierLoadParts={earlierLoadParts}
         showSideCadence={
           (part.workoutType === "for_time" ||
             part.workoutType === "amrap" ||

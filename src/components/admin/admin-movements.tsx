@@ -57,6 +57,17 @@ interface Movement {
 
 type StatusFilter = "all" | "pending" | "validated";
 
+// Base UI's <Select.Value> shows the raw value unless the <Select> root is
+// given an `items` map from value → display label.
+const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
+  all: "All",
+  pending: "Pending",
+  validated: "Validated",
+};
+const MOVEMENT_CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
+  MOVEMENT_CATEGORIES.map((c) => [c, c.charAt(0).toUpperCase() + c.slice(1)])
+);
+
 function useAdminMovements(
   search?: string,
   status: StatusFilter = "all",
@@ -320,7 +331,11 @@ export function AdminMovements() {
               className="pl-9"
             />
           </div>
-          <Select value={status} onValueChange={(v) => setStatus(v as StatusFilter)}>
+          <Select
+            value={status}
+            items={STATUS_FILTER_LABELS}
+            onValueChange={(v) => setStatus(v as StatusFilter)}
+          >
             <SelectTrigger className="w-[140px]">
               <SelectValue />
             </SelectTrigger>
@@ -450,6 +465,7 @@ export function AdminMovements() {
               <Label>Category</Label>
               <Select
                 value={form.category}
+                items={MOVEMENT_CATEGORY_LABELS}
                 onValueChange={(val) =>
                   setForm((prev) => ({
                     ...prev,
@@ -463,7 +479,7 @@ export function AdminMovements() {
                 <SelectContent>
                   {MOVEMENT_CATEGORIES.map((cat) => (
                     <SelectItem key={cat} value={cat}>
-                      {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                      {MOVEMENT_CATEGORY_LABELS[cat]}
                     </SelectItem>
                   ))}
                 </SelectContent>

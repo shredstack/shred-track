@@ -7,6 +7,7 @@ import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
 import { invalidateCrossfitInsightsCache } from "@/lib/crossfit/insights/cache";
 import type { SetEntry } from "@/types/crossfit";
 import { computeScoreEstimate } from "@/lib/calories/orchestrator";
+import { workingWeightFromSetData } from "@/lib/calories/one-rep-max";
 
 interface MovementDetailInput {
   workoutMovementId: string;
@@ -86,14 +87,25 @@ export async function PUT(
       : null,
   };
 
+  // Per-movement working weights for the load-relative modifier — only when
+  // the edit actually carries movement details.
+  const movementWeights = new Map<string, number>();
+  for (const d of normalizedDetails ?? []) {
+    if (!d.workoutMovementId) continue;
+    const w = workingWeightFromSetData(d.actualWeight ?? null, d.setEntries);
+    if (w != null) movementWeights.set(d.workoutMovementId, w);
+  }
+
   let calorieEstimate: Awaited<ReturnType<typeof computeScoreEstimate>> | null =
     null;
   try {
     calorieEstimate = await computeScoreEstimate({
       scoreId: id,
       workoutId: existing.workoutId,
+      workoutPartId: existing.workoutPartId,
       userId: user.id,
       score: mergedScore,
+      movementWeights: movementWeights.size > 0 ? movementWeights : undefined,
     });
   } catch (err) {
     console.error("[calories] estimator failed for score PUT", err);
@@ -138,12 +150,12 @@ export async function PUT(
                 calorieEstimate.bodyweightLb != null
                   ? calorieEstimate.bodyweightLb.toString()
                   : existing.bodyweightLbAtScore,
-              estimatedKcal: calorieEstimate.estimate.gross,
-              estimatedKcalActive: calorieEstimate.estimate.active,
-              estimatedKcalWithEpoc: calorieEstimate.estimate.grossWithEpoc,
-              estimatedKcalActiveWithEpoc: calorieEstimate.estimate.activeWithEpoc,
-              estimatedKcalMethod: calorieEstimate.estimate.method,
-              estimatedKcalConfidence: calorieEstimate.estimate.confidence,
+              estimatedKcal: calorieEstimate.part.gross,
+              estimatedKcalActive: calorieEstimate.part.active,
+              estimatedKcalWithEpoc: calorieEstimate.part.grossWithEpoc,
+              estimatedKcalActiveWithEpoc: calorieEstimate.part.activeWithEpoc,
+              estimatedKcalMethod: calorieEstimate.part.method,
+              estimatedKcalConfidence: calorieEstimate.part.confidence,
             }
           : {}),
         updatedAt: new Date(),

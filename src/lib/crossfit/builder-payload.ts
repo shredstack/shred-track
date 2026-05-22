@@ -139,6 +139,9 @@ export function benchmarkPartToBuilderPart(
           m.prescribedWeightFemaleBwMultiplier != null
             ? String(m.prescribedWeightFemaleBwMultiplier)
             : "",
+        // Benchmarks don't carry weight_pct prescriptions (the builder only
+        // surfaces it for workouts) — seed the required field empty.
+        prescribedWeightPct: "",
         tempo: m.tempo ?? "",
         isMaxReps: !!m.isMaxReps,
         isSideCadence: !!m.isSideCadence,
@@ -164,6 +167,9 @@ export function builderPartToPayload(
   const stripRxWeights = part.workoutType === "for_load";
   return {
     id: part.id,
+    // Always sent: weight_pct movements in later parts reference this part
+    // by its builder tempId, which the server resolves to a real id.
+    tempRef: part.tempId,
     label: part.label || undefined,
     workoutType: part.workoutType,
     timeCapSeconds: parseDurationToSeconds(part.timeCapInput) ?? undefined,
@@ -209,11 +215,17 @@ export function builderPartToPayload(
       orderIndex: i,
       prescribedReps: m.prescribedReps || undefined,
       prescribedWeightMale:
-        !stripRxWeights && !m.useBwMultiplier && m.prescribedWeightMale
+        !stripRxWeights &&
+        !m.useBwMultiplier &&
+        !m.useWeightPct &&
+        m.prescribedWeightMale
           ? parseFloat(m.prescribedWeightMale)
           : undefined,
       prescribedWeightFemale:
-        !stripRxWeights && !m.useBwMultiplier && m.prescribedWeightFemale
+        !stripRxWeights &&
+        !m.useBwMultiplier &&
+        !m.useWeightPct &&
+        m.prescribedWeightFemale
           ? parseFloat(m.prescribedWeightFemale)
           : undefined,
       prescribedCaloriesMale: m.prescribedCaloriesMale || undefined,
@@ -240,6 +252,19 @@ export function builderPartToPayload(
         m.prescribedWeightFemaleBwMultiplier
           ? parseFloat(m.prescribedWeightFemaleBwMultiplier)
           : undefined,
+      // weight_pct — the percentage plus the source part's builder tempId.
+      // Only emitted when the movement is in % mode and anchored to a part.
+      prescribedWeightPct:
+        !stripRxWeights &&
+        m.useWeightPct &&
+        m.weightPctSourcePartTempRef &&
+        m.prescribedWeightPct
+          ? parseFloat(m.prescribedWeightPct)
+          : undefined,
+      weightPctSourcePartTempRef:
+        !stripRxWeights && m.useWeightPct
+          ? m.weightPctSourcePartTempRef ?? null
+          : null,
       tempo: m.tempo?.trim() || undefined,
       isMaxReps: !!m.isMaxReps,
       isSideCadence: !!m.isSideCadence,

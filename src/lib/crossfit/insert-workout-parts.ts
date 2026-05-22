@@ -35,6 +35,10 @@ export interface PartMovementInput {
   prescribedHeightInchesFemale?: number | string;
   prescribedWeightMaleBwMultiplier?: number | string;
   prescribedWeightFemaleBwMultiplier?: number | string;
+  // weight_pct Rx — the percentage and the builder tempId of the earlier
+  // for_load part it anchors to (resolved to a real id at insert time).
+  prescribedWeightPct?: number | string;
+  weightPctSourcePartTempRef?: string | null;
   tempo?: string;
   isMaxReps?: boolean;
   isSideCadence?: boolean;
@@ -50,6 +54,9 @@ export interface PartBlockInput {
 }
 
 export interface PartInput {
+  // Builder tempId for this part. Earlier parts' tempRefs are resolved to
+  // real ids so later parts' weight_pct movements can anchor to them.
+  tempRef?: string;
   label?: string;
   workoutType: WorkoutType;
   timeCapSeconds?: number;
@@ -159,6 +166,9 @@ export async function insertWorkoutParts(
   }
 ): Promise<void> {
   const startIdx = opts.startOrderIndex ?? 0;
+  // tempRef → real part id. Parts insert in order, so a later part's
+  // weight_pct movement always finds its (earlier) source part here.
+  const partTempRefToId = new Map<string, string>();
   for (let i = 0; i < opts.parts.length; i++) {
     const p = opts.parts[i];
 
@@ -199,6 +209,8 @@ export async function insertWorkoutParts(
         notes: p.notes || null,
       })
       .returning();
+
+    if (p.tempRef) partTempRefToId.set(p.tempRef, part.id);
 
     const blockTempRefToId = new Map<string, string>();
     if (Array.isArray(p.blocks) && p.blocks.length > 0) {
@@ -260,6 +272,10 @@ export async function insertWorkoutParts(
           prescribedWeightFemaleBwMultiplier: toNumericOrNull(
             m.prescribedWeightFemaleBwMultiplier
           ),
+          prescribedWeightPct: toNumericOrNull(m.prescribedWeightPct),
+          prescribedWeightPctSourcePartId: m.weightPctSourcePartTempRef
+            ? partTempRefToId.get(m.weightPctSourcePartTempRef) ?? null
+            : null,
           tempo: m.tempo?.trim() || null,
           isMaxReps: !!m.isMaxReps,
           isSideCadence: !!m.isSideCadence,

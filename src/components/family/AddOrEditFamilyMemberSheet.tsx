@@ -59,6 +59,17 @@ const RELATIONSHIPS: Array<FamilyMemberDTO["relationship"]> = [
   "other",
 ];
 
+// Base UI's <Select.Value> shows the raw value unless the <Select> root is
+// given an `items` map from value → display label.
+const GENDER_LABELS: Record<string, string> = {
+  male: "Male",
+  female: "Female",
+  other: "Other",
+};
+const RELATIONSHIP_LABELS: Record<string, string> = Object.fromEntries(
+  RELATIONSHIPS.map((r) => [r, capitalize(r)])
+);
+
 export function AddOrEditFamilyMemberSheet({
   open,
   onOpenChange,
@@ -163,6 +174,7 @@ export function AddOrEditFamilyMemberSheet({
             <Label htmlFor="fm-gender">Gender</Label>
             <Select
               value={values.gender ?? ""}
+              items={GENDER_LABELS}
               onValueChange={(v) =>
                 patch(
                   "gender",
@@ -185,6 +197,7 @@ export function AddOrEditFamilyMemberSheet({
             <Label htmlFor="fm-rel">Relationship</Label>
             <Select
               value={values.relationship}
+              items={RELATIONSHIP_LABELS}
               onValueChange={(v) =>
                 patch("relationship", v as FamilyMemberDTO["relationship"])
               }

@@ -375,6 +375,9 @@ export interface BenchmarkMovement {
   prescribedHeightInchesFemale?: number | null;
   prescribedWeightMaleBwMultiplier?: number | null;
   prescribedWeightFemaleBwMultiplier?: number | null;
+  // weight_pct Rx — % of the max load logged on an earlier for_load part.
+  prescribedWeightPct?: number | null;
+  prescribedWeightPctSourcePartId?: string | null;
   tempo?: string | null;
   isMaxReps?: boolean;
   isSideCadence?: boolean;
@@ -411,6 +414,9 @@ export interface WorkoutMovementDisplay {
   prescribedHeightInchesFemale?: number;
   prescribedWeightMaleBwMultiplier?: number;
   prescribedWeightFemaleBwMultiplier?: number;
+  // weight_pct Rx — % of the max load logged on an earlier for_load part.
+  prescribedWeightPct?: number;
+  prescribedWeightPctSourcePartId?: string;
   tempo?: string;
   isMaxReps?: boolean;
   // When true, this movement runs on the part's side-cadence rather than
@@ -701,6 +707,13 @@ export interface WorkoutBuilderMovement {
   useBwMultiplier?: boolean;
   prescribedWeightMaleBwMultiplier: string;
   prescribedWeightFemaleBwMultiplier: string;
+  // weight_pct Rx — builder-only. When `useWeightPct` is on, the movement's
+  // working weight is a percentage of the max load logged on an earlier
+  // for_load part. `weightPctSourcePartTempRef` references that part's
+  // builder tempId — the save path resolves it to a real workout_parts id.
+  useWeightPct?: boolean;
+  prescribedWeightPct: string;
+  weightPctSourcePartTempRef?: string | null;
   tempo: string;
   // When true, the prescribedReps field is suppressed and the score-entry
   // surfaces per-round rep inputs that auto-sum into the part's total.
@@ -826,6 +839,7 @@ export interface LeaderboardEntry {
 export const RX_FIELDS = [
   "weight",
   "weight_bw",
+  "weight_pct",
   "height",
   "calories",
   "distance",
@@ -843,6 +857,9 @@ export interface RxDefaults {
   weight_female?: number | string;
   weight_bw_male?: number | string;
   weight_bw_female?: number | string;
+  // Default percentage for the weight_pct field (e.g. 60 for 60%). Not
+  // gendered — a % of the athlete's own max applies the same either way.
+  weight_pct?: number | string;
   height_inches_male?: number | string;
   height_inches_female?: number | string;
   calories_male?: number | string;

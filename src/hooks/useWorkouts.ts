@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { fetchJson } from "@/lib/api-fetch";
 import { pushTodaySnapshotToWatch } from "@/lib/native/today-snapshot";
 import type { UserProfile } from "@/hooks/useProfile";
@@ -46,6 +47,8 @@ interface WireMovement {
   prescribedHeightInchesFemale: number | null;
   prescribedWeightMaleBwMultiplier: number | null;
   prescribedWeightFemaleBwMultiplier: number | null;
+  prescribedWeightPct: number | null;
+  prescribedWeightPctSourcePartId: string | null;
   tempo: string | null;
   isMaxReps: boolean;
   isSideCadence: boolean;
@@ -195,6 +198,9 @@ function wireMovementToDisplay(m: WireMovement): WorkoutMovementDisplay {
       m.prescribedWeightMaleBwMultiplier ?? undefined,
     prescribedWeightFemaleBwMultiplier:
       m.prescribedWeightFemaleBwMultiplier ?? undefined,
+    prescribedWeightPct: m.prescribedWeightPct ?? undefined,
+    prescribedWeightPctSourcePartId:
+      m.prescribedWeightPctSourcePartId ?? undefined,
     tempo: m.tempo ?? undefined,
     isMaxReps: m.isMaxReps,
     isSideCadence: m.isSideCadence,
@@ -388,6 +394,11 @@ export interface CreatePartMovementInput {
   prescribedHeightInchesFemale?: number | string;
   prescribedWeightMaleBwMultiplier?: number | string;
   prescribedWeightFemaleBwMultiplier?: number | string;
+  // weight_pct Rx — the percentage, plus the builder tempId of the earlier
+  // for_load part it anchors to. The save route resolves the tempRef to a
+  // real workout_parts id (parts are upserted before their dependents).
+  prescribedWeightPct?: number | string;
+  weightPctSourcePartTempRef?: string | null;
   tempo?: string;
   isMaxReps?: boolean;
   isSideCadence?: boolean;
@@ -412,6 +423,9 @@ export interface CreatePartBlockInput {
 export interface CreatePartInput {
   // Real DB id when editing — keeps the row (and its score) in place.
   id?: string;
+  // Builder tempId for this part. Always sent so weight_pct movements in
+  // later parts can resolve their source-part reference on the server.
+  tempRef?: string;
   label?: string;
   workoutType: WorkoutType;
   timeCapSeconds?: number;
@@ -642,13 +656,27 @@ async function maybePushToAppleHealth(
   }
 
   const mod = await import("@/lib/native/push-score-to-health");
-  await mod.pushScoreToAppleHealth({
+  const { status } = await mod.pushScoreToAppleHealth({
     scoreId: saved.id,
     fromMs,
     toMs,
     activeEnergyKcal: active,
     pushPrefEnabled: pushPref,
   });
+
+  // Surface the outcome so the user knows their workout reached Apple Health.
+  // Only the user-visible outcomes get a toast — `skipped` / `denied` /
+  // `unavailable` stay quiet (pref off, web, or the system permission dialog
+  // already spoke for itself).
+  if (status === "ok") {
+    toast.success("Added to Apple Health", {
+      description: `~${Math.round(active)} kcal logged to your Move ring.`,
+    });
+  } else if (status === "overlap") {
+    toast.info("Apple Watch already logged this", {
+      description: "Skipped the Apple Health push so your calories aren't double-counted.",
+    });
+  }
 }
 
 export function useUpdateScore() {

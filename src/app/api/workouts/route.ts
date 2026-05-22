@@ -63,6 +63,10 @@ interface PartMovementInput {
   prescribedHeightInchesFemale?: number | string;
   prescribedWeightMaleBwMultiplier?: number | string;
   prescribedWeightFemaleBwMultiplier?: number | string;
+  // weight_pct Rx — the percentage and the builder tempId of the earlier
+  // for_load part it anchors to (resolved to a real id at insert time).
+  prescribedWeightPct?: number | string;
+  weightPctSourcePartTempRef?: string | null;
   tempo?: string;
   isMaxReps?: boolean;
   isSideCadence?: boolean;
@@ -81,6 +85,9 @@ interface PartBlockInput {
 }
 
 interface PartInput {
+  // Builder tempId for this part. Resolved to a real id so later parts'
+  // weight_pct movements can anchor to it.
+  tempRef?: string;
   label?: string;
   workoutType: WorkoutType;
   timeCapSeconds?: number;
@@ -234,6 +241,9 @@ export async function GET(req: NextRequest) {
           workoutMovements.prescribedWeightMaleBwMultiplier,
         prescribedWeightFemaleBwMultiplier:
           workoutMovements.prescribedWeightFemaleBwMultiplier,
+        prescribedWeightPct: workoutMovements.prescribedWeightPct,
+        prescribedWeightPctSourcePartId:
+          workoutMovements.prescribedWeightPctSourcePartId,
         tempo: workoutMovements.tempo,
         isMaxReps: workoutMovements.isMaxReps,
         isSideCadence: workoutMovements.isSideCadence,
@@ -552,6 +562,12 @@ export async function GET(req: NextRequest) {
             m.prescribedWeightFemaleBwMultiplier != null
               ? Number(m.prescribedWeightFemaleBwMultiplier)
               : undefined,
+          prescribedWeightPct:
+            m.prescribedWeightPct != null
+              ? Number(m.prescribedWeightPct)
+              : undefined,
+          prescribedWeightPctSourcePartId:
+            m.prescribedWeightPctSourcePartId ?? undefined,
           tempo: m.tempo ?? undefined,
           isMaxReps: !!m.isMaxReps,
           isSideCadence: !!m.isSideCadence,
@@ -1012,6 +1028,10 @@ export async function POST(req: NextRequest) {
       })
       .returning();
 
+    // tempRef → real part id. Parts insert in order, so a later part's
+    // weight_pct movement always finds its (earlier) source part here.
+    const partTempRefToId = new Map<string, string>();
+
     for (let i = 0; i < parts.length; i++) {
       const p = parts[i];
 
@@ -1051,6 +1071,8 @@ export async function POST(req: NextRequest) {
           notes: p.notes || null,
         })
         .returning();
+
+      if (p.tempRef) partTempRefToId.set(p.tempRef, part.id);
 
       const blockTempRefToId = new Map<string, string>();
       if (Array.isArray(p.blocks) && p.blocks.length > 0) {
@@ -1112,6 +1134,10 @@ export async function POST(req: NextRequest) {
             prescribedWeightFemaleBwMultiplier: toNumericOrNull(
               m.prescribedWeightFemaleBwMultiplier
             ),
+            prescribedWeightPct: toNumericOrNull(m.prescribedWeightPct),
+            prescribedWeightPctSourcePartId: m.weightPctSourcePartTempRef
+              ? partTempRefToId.get(m.weightPctSourcePartTempRef) ?? null
+              : null,
             tempo: m.tempo?.trim() || null,
             isMaxReps: !!m.isMaxReps,
             isSideCadence: !!m.isSideCadence,

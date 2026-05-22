@@ -253,6 +253,7 @@ Time Cap: 10 min`}
         </div>
         <Select
           value={parsed.workoutType}
+          items={WORKOUT_TYPE_LABELS}
           onValueChange={(val) =>
             updateParsedField("workoutType", val as WorkoutType)
           }

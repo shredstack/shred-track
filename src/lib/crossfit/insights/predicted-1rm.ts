@@ -12,6 +12,7 @@ import {
   scores,
   scoreMovementDetails,
   workoutMovements,
+  workoutParts,
   workouts,
   movements,
 } from "@/db/schema";
@@ -20,10 +21,8 @@ import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
 import type { SetEntry } from "@/types/crossfit";
 
 const PREDICTION_WINDOW_DAYS = 90;
-const SUFFICIENCY_WINDOW_DAYS = 180;
 const RECENT_TEST_WINDOW_DAYS = 365;
 const MAX_REPS_FOR_FORMULA = 10;
-const MIN_DISTINCT_SESSIONS = 2;
 // Sets logged at RPE < this are treated as warmups and excluded from the
 // e1RM pool. Sets without RPE are included (legacy data, pre-RPE rollout).
 // Per spec §7.3 "Phase 1.5".
@@ -38,6 +37,8 @@ export type Predicted1RM = {
   estimatedOneRm: number;
   confidenceBandPct: number;
   qualifyingSetsCount: number;
+  /** Distinct workout dates the prediction draws on — drives the band. */
+  distinctSessionsCount: number;
   bestSet: { weight: number; reps: number; loggedAt: string };
   lastDirectTest: { weight: number; loggedAt: string } | null;
   monthsSinceLastTest: number | null;
@@ -71,8 +72,16 @@ type RawSetRow = {
   is1rmApplicable: boolean;
   scoreId: string;
   workoutDate: string; // YYYY-MM-DD
+  // Workout type — `workoutType` is the legacy workout-level value;
+  // `partWorkoutType` is the (more reliable) per-part value for the
+  // structured-workout era. Reps live across three levels too: the
+  // movement's `prescribedReps` is most specific, then the part's
+  // `partRepScheme`, then the legacy workout-level `workoutRepScheme`.
   workoutType: string;
+  partWorkoutType: string | null;
   workoutRepScheme: string | null;
+  partRepScheme: string | null;
+  movementPrescribedReps: string | null;
   actualWeight: number | null;
   setEntries: SetEntry[];
 };
@@ -95,10 +104,15 @@ export function estimatedOneRmForSet(weight: number, reps: number): number {
   return Math.max(brzycki(weight, reps), epley(weight, reps));
 }
 
-function bandFor(qualifyingCount: number): number {
-  if (qualifyingCount >= 6) return 4;
-  if (qualifyingCount >= 3) return 6;
-  return 10;
+// Confidence band is keyed to the number of distinct *sessions* (workout
+// dates) behind a prediction — not the raw set count. Several sets logged on
+// the same day are correlated, so they must not earn a tighter band. A single
+// session still produces a prediction; it just carries the widest band.
+export function bandFor(distinctSessions: number): number {
+  if (distinctSessions >= 5) return 4;
+  if (distinctSessions >= 3) return 6;
+  if (distinctSessions >= 2) return 10;
+  return 15;
 }
 
 function monthsBetween(fromIso: string, to: Date): number {
@@ -134,7 +148,10 @@ async function fetchSetData(
       scoreId: scores.id,
       workoutDate: workouts.workoutDate,
       workoutType: workouts.workoutType,
+      partWorkoutType: workoutParts.workoutType,
       workoutRepScheme: workouts.repScheme,
+      partRepScheme: workoutParts.repScheme,
+      movementPrescribedReps: workoutMovements.prescribedReps,
       actualWeight: scoreMovementDetails.actualWeight,
       setEntries: scoreMovementDetails.setEntries,
     })
@@ -144,6 +161,8 @@ async function fetchSetData(
       workoutMovements,
       eq(workoutMovements.id, scoreMovementDetails.workoutMovementId)
     )
+    // Part is optional: legacy flat workouts have no workout_parts row.
+    .leftJoin(workoutParts, eq(workoutParts.id, workoutMovements.workoutPartId))
     .innerJoin(workouts, eq(workouts.id, scores.workoutId))
     .innerJoin(movements, eq(movements.id, workoutMovements.movementId))
     .where(
@@ -161,7 +180,10 @@ async function fetchSetData(
     scoreId: r.scoreId,
     workoutDate: r.workoutDate,
     workoutType: r.workoutType,
+    partWorkoutType: r.partWorkoutType,
     workoutRepScheme: r.workoutRepScheme,
+    partRepScheme: r.partRepScheme,
+    movementPrescribedReps: r.movementPrescribedReps,
     actualWeight: r.actualWeight != null ? Number(r.actualWeight) : null,
     setEntries: normalizeSetEntries(r.setEntries),
   }));
@@ -177,16 +199,17 @@ type WorkingSet = {
 // Expand a raw row into one or more (weight, reps, rpe?) sets we can score.
 //
 // Preferred shape: `setEntries` carries per-set { weight, reps?, rpe? }.
-// When reps is present we use it directly — most accurate. When reps is
-// missing on a set (legacy data pre-migration) we fall back to the workout's
-// repScheme.
+// When a set carries its own reps we use it directly — most accurate.
+// Otherwise we fall back to the prescribed reps (movement → part → workout;
+// see resolvePrescribedReps). Complexes, for instance, store per-set weight
+// but no per-set reps, so the prescription is the only reps signal.
 //
 // Single-set fallback: when there are no setEntries but `actualWeight` is
-// populated, treat it as one set and use the scheme reps.
+// populated, treat it as one set and use the prescribed reps.
 //
 // Skips sets whose reps are out of the formula's usable range (1..10).
 function expandSets(row: RawSetRow): WorkingSet[] {
-  const fallbackReps = parseRepScheme(row.workoutRepScheme);
+  const fallbackReps = resolvePrescribedReps(row);
 
   const out: WorkingSet[] = [];
 
@@ -248,17 +271,36 @@ export function parseRepScheme(scheme: string | null): number | null {
   return null;
 }
 
-function isDirectOneRmTest(row: RawSetRow): boolean {
-  if (
-    row.workoutType === "for_load" &&
-    row.workoutRepScheme &&
-    ONE_RM_REP_SCHEME.test(row.workoutRepScheme.trim())
-  ) {
-    return true;
+// Resolve the prescribed reps-per-set for a row, walking the
+// most-specific-first chain: the movement's own `prescribedReps`, then the
+// part's `repScheme`, then the legacy workout-level `repScheme`. Understands
+// both numeric schemes ("5", "5×3") and the "1RM" / "1 rep max" spellings
+// (which `parseRepScheme` deliberately rejects).
+function resolvePrescribedReps(row: RawSetRow): number | null {
+  for (const scheme of [
+    row.movementPrescribedReps,
+    row.partRepScheme,
+    row.workoutRepScheme,
+  ]) {
+    if (scheme == null) continue;
+    const trimmed = scheme.trim();
+    if (!trimmed) continue;
+    if (ONE_RM_REP_SCHEME.test(trimmed)) return 1;
+    const parsed = parseRepScheme(trimmed);
+    if (parsed != null) return parsed;
   }
-  // Any set with reps=1 also counts (per spec §7.2).
+  return null;
+}
+
+function isDirectOneRmTest(row: RawSetRow): boolean {
+  // Any individual set explicitly logged at a single rep (per spec §7.2).
   if (row.setEntries.some((e) => e.reps === 1)) return true;
-  return parseRepScheme(row.workoutRepScheme) === 1;
+  // A 1-rep *prescription* only counts as a max test on a strength piece —
+  // a single rep inside a metcon or EMOM is not a 1RM attempt. Prefer the
+  // per-part workout type; fall back to the legacy workout-level type.
+  const effectiveType = row.partWorkoutType ?? row.workoutType;
+  if (effectiveType !== "for_load") return false;
+  return resolvePrescribedReps(row) === 1;
 }
 
 function pickDirectTestWeight(row: RawSetRow): number | null {
@@ -302,7 +344,6 @@ export async function estimate1RMForUser(
   const staleLifts: StaleLift[] = [];
 
   const recentTestCutoff = daysAgo(RECENT_TEST_WINDOW_DAYS);
-  const sufficiencyCutoff = daysAgo(SUFFICIENCY_WINDOW_DAYS);
   const predictionCutoff = daysAgo(PREDICTION_WINDOW_DAYS);
 
   for (const [movementId, { name, rows: movRows }] of byMovement) {
@@ -328,31 +369,8 @@ export async function estimate1RMForUser(
       new Date(lastTestRow.workoutDate) >= recentTestCutoff;
 
     if (recentlyTested) {
-      // Excluded from predictions per §7.2(2).
-      continue;
-    }
-
-    // Sufficiency check — distinct sessions (workout dates) in last 180d.
-    const sufficiencyDates = new Set<string>();
-    for (const r of movRows) {
-      if (new Date(r.workoutDate) >= sufficiencyCutoff) {
-        sufficiencyDates.add(r.workoutDate);
-      }
-    }
-    const sufficient = sufficiencyDates.size >= MIN_DISTINCT_SESSIONS;
-
-    if (!sufficient) {
-      const lastAnyLog = movRows
-        .map((r) => r.workoutDate)
-        .sort()
-        .pop();
-      staleLifts.push({
-        movementId,
-        movementName: name,
-        lastDirectTest: lastTest,
-        monthsSinceLastTest,
-        monthsSinceAnyLog: lastAnyLog ? monthsBetween(lastAnyLog, now) : null,
-      });
+      // Excluded from predictions per §7.2(2) — the athlete already has a
+      // real, recent number, so there is nothing useful to estimate.
       continue;
     }
 
@@ -362,7 +380,9 @@ export async function estimate1RMForUser(
     const pool: ContributingSet[] = [];
     for (const r of movRows) {
       if (new Date(r.workoutDate) < predictionCutoff) continue;
-      if (parseRepScheme(r.workoutRepScheme) === 1) continue; // it IS a 1RM
+      // A 1-rep row is a max test, not a working set — the formula doesn't
+      // apply (the movement is also excluded above when the test is recent).
+      if (resolvePrescribedReps(r) === 1) continue;
       const sets = expandSets(r);
       for (const s of sets) {
         if (s.rpe != null && s.rpe < MIN_RPE_FOR_QUALIFYING) continue;
@@ -396,13 +416,15 @@ export async function estimate1RMForUser(
     }
 
     const best = pool.reduce((a, b) => (b.estimatedOneRm > a.estimatedOneRm ? b : a));
+    const distinctSessions = new Set(pool.map((s) => s.loggedAt)).size;
 
     predictions.push({
       movementId,
       movementName: name,
       estimatedOneRm: Math.round(best.estimatedOneRm),
-      confidenceBandPct: bandFor(pool.length),
+      confidenceBandPct: bandFor(distinctSessions),
       qualifyingSetsCount: pool.length,
+      distinctSessionsCount: distinctSessions,
       bestSet: {
         weight: best.weight,
         reps: best.reps,

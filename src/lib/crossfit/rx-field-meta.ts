@@ -25,6 +25,12 @@ export const RX_FIELD_META: Record<
       { key: "weight_bw_female", label: "F (×BW)", placeholder: "e.g. 1.25" },
     ],
   },
+  weight_pct: {
+    label: "% of earlier part max",
+    keys: [
+      { key: "weight_pct", label: "Default %", placeholder: "e.g. 60" },
+    ],
+  },
   height: {
     label: "Height (in)",
     keys: [

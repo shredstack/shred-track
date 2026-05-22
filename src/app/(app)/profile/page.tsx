@@ -96,6 +96,15 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
+// Base UI's <Select.Value> shows the raw value (a country/state code) unless
+// the <Select> root is given an `items` map from value → display label.
+const COUNTRY_LABELS: Record<string, string> = Object.fromEntries(
+  COUNTRY_OPTIONS.map((c) => [c.code, c.name])
+);
+const US_STATE_LABELS: Record<string, string> = Object.fromEntries(
+  US_STATES.map((s) => [s.code, s.name])
+);
+
 function formatPace(seconds: number | null, unit: string): string {
   if (!seconds) return "—";
   const m = Math.floor(seconds / 60);
@@ -465,6 +474,7 @@ function PersonalInfoSection() {
               <Label htmlFor="profile-country">Country</Label>
               <Select
                 value={fields.country || null}
+                items={COUNTRY_LABELS}
                 onValueChange={(value) => {
                   const v = value ?? "";
                   setField("country", v);
@@ -523,6 +533,7 @@ function PersonalInfoSection() {
                 {fields.country === "US" ? (
                   <Select
                     value={fields.state || null}
+                    items={US_STATE_LABELS}
                     onValueChange={(value) => {
                       setField("state", value ?? "");
                       markTouched("state");

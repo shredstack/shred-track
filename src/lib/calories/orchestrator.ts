@@ -15,17 +15,20 @@ import {
   workouts,
   workoutParts,
   scores,
+  scoreMovementDetails,
   users,
 } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { estimateCalories, resolveBodyweightKg, REFERENCE_KG } from "./estimator";
 import { loadEstimatorPartsForWorkout } from "./loader";
+import { workingWeightFromSetData } from "./one-rep-max";
 import { resolveEpocMultiplier } from "./preferences";
 import type {
   CalorieEstimate,
   CalorieEstimatorInput,
   CalorieScoreContext,
 } from "./types";
+import { scopeToScoredPart, type ScoredPartEstimate } from "./part-scope";
 
 // ----- Template-level (75 kg reference) -----
 
@@ -77,6 +80,12 @@ export async function computeAndStoreWorkoutEstimate(
 export interface ComputeScoreEstimateInput {
   scoreId?: string;
   workoutId: string;
+  /**
+   * The part this score is logged against. A score is always for one part —
+   * passing it lets us persist that part's slice of the estimate rather than
+   * the whole-workout total. Null only for legacy part-less scores.
+   */
+  workoutPartId?: string | null;
   userId: string;
   /** From the scores POST body — duplicated so the caller doesn't need to re-read. */
   score: {
@@ -90,10 +99,23 @@ export interface ComputeScoreEstimateInput {
   };
   /** Optional override; otherwise read from `users.activeCommunityId`. */
   communityId?: string | null;
+  /**
+   * Actual logged working weight (lb) per `workout_movements.id`. Drives the
+   * load-relative MET modifier. The score-save handler builds this from the
+   * per-movement details in the POST body (the score row doesn't exist yet).
+   */
+  movementWeights?: Map<string, number>;
 }
 
 export interface ComputeScoreEstimateResult {
+  /** Full-workout estimate (all parts). Kept for aggregate callers. */
   estimate: CalorieEstimate;
+  /**
+   * This score's part only. A score is logged against a single part, so this
+   * — not `estimate` — is what the score row persists. For a single-part
+   * workout it equals the workout total.
+   */
+  part: ScoredPartEstimate;
   bodyweightLb: number | null;
   isDefaultBodyweight: boolean;
 }
@@ -127,6 +149,7 @@ export async function computeScoreEstimate(
     workoutId: input.workoutId,
     userId: input.userId,
     gender: user?.gender ?? null,
+    actualWeightByWorkoutMovementId: input.movementWeights,
   });
 
   const scoreContext: CalorieScoreContext = {
@@ -154,6 +177,12 @@ export async function computeScoreEstimate(
 
   return {
     estimate,
+    part: scopeToScoredPart(
+      estimate,
+      input.workoutPartId,
+      epocMultiplier,
+      bw.isDefault
+    ),
     bodyweightLb: bw.isDefault ? null : bodyWeightLb,
     isDefaultBodyweight: bw.isDefault,
   };
@@ -170,6 +199,7 @@ export async function recomputeScoreEstimate(scoreId: string): Promise<void> {
       id: scores.id,
       userId: scores.userId,
       workoutId: scores.workoutId,
+      workoutPartId: scores.workoutPartId,
       timeSeconds: scores.timeSeconds,
       hitTimeCap: scores.hitTimeCap,
       woreVest: scores.woreVest,
@@ -185,10 +215,28 @@ export async function recomputeScoreEstimate(scoreId: string): Promise<void> {
 
   if (!row) return;
 
+  // Rebuild the per-movement working weights from the persisted detail rows
+  // so a recompute reproduces the load-relative modifier.
+  const details = await db
+    .select({
+      workoutMovementId: scoreMovementDetails.workoutMovementId,
+      actualWeight: scoreMovementDetails.actualWeight,
+      setEntries: scoreMovementDetails.setEntries,
+    })
+    .from(scoreMovementDetails)
+    .where(eq(scoreMovementDetails.scoreId, scoreId));
+  const movementWeights = new Map<string, number>();
+  for (const d of details) {
+    const w = workingWeightFromSetData(d.actualWeight, d.setEntries);
+    if (w != null) movementWeights.set(d.workoutMovementId, w);
+  }
+
   const result = await computeScoreEstimate({
     scoreId: row.id,
     workoutId: row.workoutId,
+    workoutPartId: row.workoutPartId,
     userId: row.userId,
+    movementWeights,
     score: {
       timeSeconds: row.timeSeconds,
       hitTimeCap: row.hitTimeCap,
@@ -203,12 +251,12 @@ export async function recomputeScoreEstimate(scoreId: string): Promise<void> {
   await db
     .update(scores)
     .set({
-      estimatedKcal: result.estimate.gross,
-      estimatedKcalActive: result.estimate.active,
-      estimatedKcalWithEpoc: result.estimate.grossWithEpoc,
-      estimatedKcalActiveWithEpoc: result.estimate.activeWithEpoc,
-      estimatedKcalMethod: result.estimate.method,
-      estimatedKcalConfidence: result.estimate.confidence,
+      estimatedKcal: result.part.gross,
+      estimatedKcalActive: result.part.active,
+      estimatedKcalWithEpoc: result.part.grossWithEpoc,
+      estimatedKcalActiveWithEpoc: result.part.activeWithEpoc,
+      estimatedKcalMethod: result.part.method,
+      estimatedKcalConfidence: result.part.confidence,
     })
     .where(eq(scores.id, scoreId));
 }

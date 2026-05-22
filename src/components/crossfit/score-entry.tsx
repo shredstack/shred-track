@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Save, Trophy, Shield, AlertTriangle } from "lucide-react";
+import { Save, Trophy, Shield, AlertTriangle, Loader2 } from "lucide-react";
 import { SetWeightBreakdown } from "@/components/crossfit/set-weight-breakdown";
 import {
   formatSecondsAsClock,
@@ -283,6 +283,42 @@ function emptyPartState(
   };
 }
 
+// Resolve the max load logged on a for_load source part — the basis for a
+// weight_pct prescription. Prefers the live in-dialog draft (the athlete is
+// scoring both parts in the same sitting) and falls back to a previously
+// saved score. Returns null when the source part has no result yet.
+function resolveSourcePartMax(
+  sourcePartId: string,
+  parts: WorkoutPartDisplay[],
+  partStates: Record<string, PartState>
+): number | null {
+  const sourcePart = parts.find((p) => p.id === sourcePartId);
+  if (!sourcePart) return null;
+
+  // 1) In-dialog draft — explicit weight, else the heaviest set entry.
+  const st = partStates[sourcePartId];
+  if (st) {
+    const explicit = parseFloat(st.weightLbs);
+    if (Number.isFinite(explicit) && explicit > 0) return explicit;
+    let maxSet = 0;
+    for (const entries of Object.values(st.setEntriesMap)) {
+      for (const e of entries) {
+        const w = parseFloat(e.weight);
+        if (Number.isFinite(w) && w > maxSet) maxSet = w;
+      }
+    }
+    if (maxSet > 0) return maxSet;
+  }
+
+  // 2) Previously saved score on the source part.
+  const saved = sourcePart.score?.weightLbs;
+  if (saved != null) {
+    const w = parseFloat(String(saved));
+    if (Number.isFinite(w) && w > 0) return w;
+  }
+  return null;
+}
+
 // Returns one movement per distinct movement_id, in first-occurrence order.
 function distinctMovements(part: WorkoutPartDisplay) {
   const seen = new Set<string>();
@@ -506,7 +542,10 @@ interface ScoreEntryProps {
   workoutTitle?: string;
   parts: WorkoutPartDisplay[];
   initialPartId?: string;
-  onSubmit?: (partId: string, score: ScoreInput) => void;
+  // Returns a promise that resolves on a successful save and rejects on
+  // failure. handleSubmit awaits every part so a failed part keeps the
+  // dialog open with an error instead of closing silently.
+  onSubmit?: (partId: string, score: ScoreInput) => void | Promise<unknown>;
   // Workout-level signal for the vest toggle. Pass when the workout has
   // a vest prescription (e.g. Murph). If omitted, the vest UI is hidden.
   workout?: Pick<
@@ -541,11 +580,32 @@ export function ScoreEntry({
   // dropdown. Threaded into buildScoreInput below.
   const [forUserId, setForUserId] = useState<string | null>(null);
   const { data: logForData } = useLogForCandidates(communityId);
-  const dependents = logForData?.candidates ?? [];
+  const dependents = useMemo(
+    () => logForData?.candidates ?? [],
+    [logForData]
+  );
+  // Base UI's <Select.Value> shows the raw value (a userId) unless the
+  // <Select> root is given an `items` map from value → display label.
+  const forUserLabels = useMemo<Record<string, string>>(
+    () => ({
+      self: "Yourself",
+      ...Object.fromEntries(dependents.map((d) => [d.userId, d.name])),
+    }),
+    [dependents]
+  );
   const [activePartId, setActivePartId] = useState<string>(
     () => initialPartId ?? parts[0]?.id ?? ""
   );
   const [divisionError, setDivisionError] = useState<string | null>(null);
+  // Save lifecycle. `saving` disables the button + shows a spinner;
+  // `submitError` surfaces a failed save in the dialog; `savedPartIds`
+  // tracks parts that already persisted so a retry only re-sends the
+  // failures (avoids a 409 on the parts that did save).
+  const [saving, setSaving] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [savedPartIds, setSavedPartIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const { data: profile } = useUserProfile();
   // Movement library — used by the per-movement details renderer to look
   // up rx_fields off the canonical movement (Phase 2 movement settings).
@@ -782,6 +842,18 @@ export function ScoreEntry({
           score.remainderReps = st.remainderReps
             ? parseInt(st.remainderReps)
             : undefined;
+          // A single-movement "AMRAP of max reps" (e.g. max push press in
+          // 60s) has no rounds — the athlete logs it via the per-round
+          // max-reps inputs. Surface that sum as the part-level total so the
+          // score is rankable (the leaderboard prefers totalReps for amrap).
+          if (
+            score.rounds == null &&
+            score.remainderReps == null &&
+            partHasMaxReps &&
+            sumFromMaxReps > 0
+          ) {
+            score.totalReps = sumFromMaxReps;
+          }
           break;
         case "for_load": {
           const explicit = st.weightLbs ? parseFloat(st.weightLbs) : undefined;
@@ -824,7 +896,16 @@ export function ScoreEntry({
         case "for_time":
           return st.timeSeconds != null || st.hitTimeCap;
         case "amrap":
-          return !!st.rounds || !!st.remainderReps;
+          return (
+            !!st.rounds ||
+            !!st.remainderReps ||
+            // A single-movement "AMRAP of max reps" is logged via the
+            // per-round max-reps inputs, not the rounds/remainder fields —
+            // count those as data so the part still gets submitted.
+            Object.values(st.maxRepsDrafts).some((rounds) =>
+              rounds.some((r) => parseInt(r, 10) > 0)
+            )
+          );
         case "for_load":
           return (
             !!st.weightLbs ||
@@ -852,7 +933,17 @@ export function ScoreEntry({
     []
   );
 
-  const handleSubmit = () => {
+  const partLabel = useCallback(
+    (part: WorkoutPartDisplay): string => {
+      const idx = parts.findIndex((p) => p.id === part.id);
+      return part.label || `Part ${String.fromCharCode(65 + idx)}`;
+    },
+    [parts]
+  );
+
+  const handleSubmit = async () => {
+    if (saving) return;
+
     // Every part with data must have a division picked. If one doesn't,
     // jump to it so the user sees the inline error.
     const missing = parts.find((part) => {
@@ -865,14 +956,57 @@ export function ScoreEntry({
       return;
     }
 
+    // Collect the parts that still need saving — has data, has a division,
+    // and didn't already persist on an earlier attempt this session.
+    const pending: { part: WorkoutPartDisplay; score: ScoreInput }[] = [];
     for (const part of parts) {
       const st = partStates[part.id];
       if (!st) continue;
       if (!partHasData(part, st)) continue;
       if (st.division === null) continue;
-      const score = buildScoreInput(part, { ...st, division: st.division });
-      onSubmit?.(part.id, score);
+      if (savedPartIds.has(part.id)) continue;
+      pending.push({
+        part,
+        score: buildScoreInput(part, { ...st, division: st.division }),
+      });
     }
+    if (pending.length === 0) {
+      onOpenChange(false);
+      return;
+    }
+
+    setSaving(true);
+    setSubmitError(null);
+    // Await every part. allSettled so one failure doesn't abort the others.
+    const results = await Promise.allSettled(
+      pending.map(({ part, score }) =>
+        Promise.resolve(onSubmit?.(part.id, score))
+      )
+    );
+    setSaving(false);
+
+    const failed: WorkoutPartDisplay[] = [];
+    const nextSaved = new Set(savedPartIds);
+    results.forEach((result, i) => {
+      if (result.status === "fulfilled") nextSaved.add(pending[i].part.id);
+      else failed.push(pending[i].part);
+    });
+    setSavedPartIds(nextSaved);
+
+    if (failed.length > 0) {
+      const names = failed.map(partLabel).join(", ");
+      const verb = parts.length > 1 ? '"Save All"' : "Save";
+      setSubmitError(
+        failed.length === pending.length
+          ? `Couldn't save ${names}. Check your connection and tap ${verb} to retry.`
+          : `Saved the rest, but ${names} failed. Tap ${verb} to retry just ${
+              failed.length > 1 ? "those" : "that"
+            }.`
+      );
+      setActivePartId(failed[0].id);
+      return;
+    }
+
     onOpenChange(false);
   };
 
@@ -1306,6 +1440,7 @@ export function ScoreEntry({
               </Label>
               <Select
                 value={forUserId ?? "self"}
+                items={forUserLabels}
                 onValueChange={(val) =>
                   setForUserId(val === "self" ? null : val)
                 }
@@ -1555,6 +1690,68 @@ export function ScoreEntry({
                   Sum auto-fills the workout total. Type a value in &quot;Total
                   Reps&quot; above to override.
                 </p>
+              </div>
+            );
+          })()}
+
+          {/* Working weight — for movements prescribed as a % of an
+              earlier for_load part's max. Resolves live from the source
+              part's draft (or saved score) so the athlete sees the exact
+              weight to load once they've entered that part's result. */}
+          {(() => {
+            const pctMovements = activePart.movements.filter(
+              (m) =>
+                m.prescribedWeightPct != null &&
+                !!m.prescribedWeightPctSourcePartId
+            );
+            if (pctMovements.length === 0) return null;
+            return (
+              <div className="space-y-2 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
+                <Label className="text-sm font-medium">Working weight</Label>
+                {pctMovements.map((mov) => {
+                  const pct = mov.prescribedWeightPct as number;
+                  const sourcePartId =
+                    mov.prescribedWeightPctSourcePartId as string;
+                  const sourceIdx = parts.findIndex(
+                    (p) => p.id === sourcePartId
+                  );
+                  const sourceLabel =
+                    sourceIdx >= 0
+                      ? parts[sourceIdx].label ||
+                        `Part ${String.fromCharCode(65 + sourceIdx)}`
+                      : "an earlier part";
+                  const sourceMax = resolveSourcePartMax(
+                    sourcePartId,
+                    parts,
+                    partStates
+                  );
+                  const working =
+                    sourceMax != null
+                      ? Math.round((pct / 100) * sourceMax)
+                      : null;
+                  return (
+                    <div key={mov.id} className="text-xs">
+                      <span className="font-medium">{mov.movementName}</span>
+                      <span className="text-muted-foreground">
+                        {" "}
+                        — {pct}% of {sourceLabel} max
+                      </span>
+                      {working != null ? (
+                        <div className="mt-0.5 font-mono text-sm font-bold text-sky-300">
+                          {working} lb
+                          <span className="ml-1 font-sans text-[10px] font-normal text-muted-foreground">
+                            ({pct}% × {sourceMax} lb)
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="mt-0.5 text-[11px] text-muted-foreground">
+                          Enter your {sourceLabel} result to see your
+                          working weight.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             );
           })()}
@@ -1914,16 +2111,35 @@ export function ScoreEntry({
           </div>
         </div>
 
-        <DialogFooter>
-          <Button onClick={handleSubmit} className="w-full sm:w-auto">
-            <Save className="size-4" />
-            {multiPart
-              ? isEditing
-                ? "Update All"
-                : "Save All"
-              : isEditing
-                ? "Update Score"
-                : "Save Score"}
+        <DialogFooter className="flex-col gap-2 sm:flex-col sm:items-stretch">
+          {submitError && (
+            <p
+              role="alert"
+              className="flex items-start gap-1.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            >
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+              <span>{submitError}</span>
+            </p>
+          )}
+          <Button
+            onClick={handleSubmit}
+            disabled={saving}
+            className="w-full sm:w-auto sm:self-end"
+          >
+            {saving ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Save className="size-4" />
+            )}
+            {saving
+              ? "Saving…"
+              : multiPart
+                ? isEditing
+                  ? "Update All"
+                  : "Save All"
+                : isEditing
+                  ? "Update Score"
+                  : "Save Score"}
           </Button>
         </DialogFooter>
       </DialogContent>

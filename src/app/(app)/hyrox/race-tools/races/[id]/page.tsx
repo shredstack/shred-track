@@ -65,6 +65,19 @@ export default function RaceDetailPage({
     );
   }, [allRaces, race]);
 
+  // Base UI's <Select.Value> shows the raw value (a race id) unless the
+  // <Select> root is given an `items` map from value → display label.
+  const compareItems = useMemo(
+    () =>
+      compareCandidates.map((r) => ({
+        value: r.id,
+        label: `${r.title || "Practice Race"} · ${new Date(
+          r.completedAt,
+        ).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`,
+      })),
+    [compareCandidates],
+  );
+
   if (isLoading) {
     return (
       <div className="flex flex-col gap-3 animate-pulse">
@@ -191,6 +204,7 @@ export default function RaceDetailPage({
           <CardContent className="flex flex-col gap-3">
             <Select
               value={compareTo ?? ""}
+              items={compareItems}
               onValueChange={(v) => setCompareTo(v || null)}
             >
               <SelectTrigger className="text-xs h-9">

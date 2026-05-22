@@ -20,6 +20,12 @@ import type {
   CalorieMovement,
 } from "./types";
 import { parseRepScheme, type RepSchemeParsed } from "@/lib/crossfit/rep-scheme-parser";
+import { loadUserOneRepMaxes } from "./one-rep-max";
+
+// A working load beyond this multiple of the athlete's estimated 1RM almost
+// certainly means a unit mismatch or a stale max — drop it rather than feed
+// the estimator a nonsense ratio.
+const MAX_PLAUSIBLE_LOAD_PCT = 1.5;
 
 function toNumber(v: string | number | null | undefined): number | null {
   if (v == null) return null;
@@ -50,9 +56,15 @@ function gendered<T extends string | number | null>(
 
 export interface LoadInput {
   workoutId: string;
-  /** Optional: when provided, prefer this user's observed paces. */
+  /** Optional: when provided, prefer this user's observed paces and 1RMs. */
   userId?: string | null;
   gender?: string | null;
+  /**
+   * Actual logged working weight (lb) keyed by `workout_movements.id`, taken
+   * from the score being saved. Combined with the user's estimated 1RM it
+   * yields the load-relative MET modifier. Absent → no load scaling.
+   */
+  actualWeightByWorkoutMovementId?: Map<string, number>;
 }
 
 export async function loadEstimatorPartsForWorkout(
@@ -91,6 +103,32 @@ export async function loadEstimatorPartsForWorkout(
     paces.map((p) => [p.movementId, Number(p.repSecondsObserved)])
   );
 
+  // Estimated 1RM per movement — only meaningful for a known athlete, since a
+  // 1RM is inherently personal. Template-level estimates skip this entirely.
+  const oneRmByMovement =
+    input.userId && movementIds.length > 0
+      ? await loadUserOneRepMaxes(input.userId, movementIds)
+      : new Map<string, number>();
+  const actualWeights = input.actualWeightByWorkoutMovementId;
+
+  /**
+   * Working load as a fraction of the athlete's estimated 1RM, or null when
+   * either side is missing. Keyed by `workout_movements.id` (the logged
+   * weight) and `movements.id` (the 1RM).
+   */
+  function resolveLoadPct1rm(
+    workoutMovementId: string,
+    movementId: string
+  ): number | null {
+    const weight = actualWeights?.get(workoutMovementId);
+    const oneRm = oneRmByMovement.get(movementId);
+    if (weight == null || weight <= 0 || oneRm == null || oneRm <= 0) {
+      return null;
+    }
+    const pct = weight / oneRm;
+    return pct > 0 && pct <= MAX_PLAUSIBLE_LOAD_PCT ? pct : null;
+  }
+
   return parts.map((part) => {
     const partMovs = wms.filter((r) => r.wm.workoutPartId === part.id);
     const movs: CaloriePartMovement[] = partMovs.map((row) => {
@@ -122,7 +160,7 @@ export async function loadEstimatorPartsForWorkout(
           typeof duration === "number" ? duration : toNumber(duration),
         isSideCadence: row.wm.isSideCadence,
         userRepSecondsObserved: paceByMovement.get(row.mv.id) ?? null,
-        loadPct1rm: null,
+        loadPct1rm: resolveLoadPct1rm(row.wm.id, row.mv.id),
       };
     });
 

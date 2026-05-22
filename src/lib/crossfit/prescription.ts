@@ -42,6 +42,9 @@ interface PrescriptionLikeMovement {
   prescribedHeightInchesFemale?: number | string | null;
   prescribedWeightMaleBwMultiplier?: number | string | null;
   prescribedWeightFemaleBwMultiplier?: number | string | null;
+  // weight_pct Rx — % of an earlier for_load part's max. Rendered
+  // symbolically here; the concrete weight resolves at score-entry time.
+  prescribedWeightPct?: number | string | null;
   tempo?: string | null;
   equipmentCount?: number | null;
 }
@@ -187,6 +190,7 @@ export function formatMovementPrescription(
   } else {
     const maleMult = num(mov.prescribedWeightMaleBwMultiplier);
     const femaleMult = num(mov.prescribedWeightFemaleBwMultiplier);
+    const pct = num(mov.prescribedWeightPct);
     if (maleMult != null || femaleMult != null) {
       const resolved = resolveRxWeightLb(gender, mov, userBodyWeightLb);
       const mult = gender === "female"
@@ -199,6 +203,10 @@ export function formatMovementPrescription(
           segments.push(`${formatMultiplier(mult)}× BW`);
         }
       }
+    } else if (pct != null) {
+      // Symbolic — the working weight is resolved against the athlete's
+      // logged max for the source part at score-entry time.
+      segments.push(`${formatMultiplier(pct)}% of earlier part max`);
     }
   }
 

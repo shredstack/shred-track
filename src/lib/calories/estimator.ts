@@ -43,6 +43,28 @@ const MET_LIGHT_WALK = 2.5;  // between intervals
 const MET_STANDING_REST = 1.5;
 const MET_TABATA_REST = 2.0; // sustained pace, not full rest
 
+// Load-relative MET scaling. A movement worked near 1RM costs more energy per
+// rep than the same movement at a light metcon load. `loadPct1rm` is the
+// working weight as a fraction of the athlete's estimated 1RM; the curve is
+// centered so a typical metcon load (~60% of 1RM) is neutral, and the factor
+// is self-clamped so load alone never swings a movement's MET past ±20%.
+const LOAD_REFERENCE_PCT = 0.6;
+const LOAD_MET_SENSITIVITY = 0.6;
+const LOAD_PCT_FLOOR = 0.2;
+const LOAD_PCT_CEIL = 1.0;
+const LOAD_FACTOR_MIN = 0.82;
+const LOAD_FACTOR_MAX = 1.2;
+
+// Barbell-complex adjustments (workout_parts.structure === "complex"). An
+// unbroken complex chains every movement on one bar without setting it down,
+// so: fatigued reps run slower than the broken-set population default, the
+// sustained continuous tension pushes the working MET above the discrete-rep
+// compendium values, and the inter-set rest is active recovery rather than a
+// standing rest.
+const COMPLEX_REP_TIME_FACTOR = 1.3;
+const COMPLEX_MET_BONUS = 1.0;
+const MET_COMPLEX_REST = 2.0;
+
 const CONFIDENCE_ORDER: Confidence[] = ["high", "medium", "low"];
 function lowestConfidence(values: Confidence[]): Confidence {
   let lowestIdx = 0;
@@ -174,13 +196,17 @@ export function intensityModifier(
     mult *= 1 + Math.min(0.15, vestKg * 0.0066);
   }
 
-  // 2. Load relative to 1RM if a 1RM exists.
-  if (m.loadPct1rm != null) {
-    if (m.loadPct1rm >= 0.85) mult *= 1.15;
-    else if (m.loadPct1rm >= 0.7) mult *= 1.05;
-    else if (m.loadPct1rm <= 0.4) mult *= 0.85;
+  // 2. Load relative to the athlete's 1RM, when we could derive one.
+  //    Continuous (not bucketed) so a 0.62 and a 0.65 working load don't fall
+  //    on opposite sides of a cliff. A heavy single-modality lift (e.g. a
+  //    near-1RM shoulder press in a barbell complex) earns the full bump;
+  //    a light load earns a discount.
+  if (m.loadPct1rm != null && m.loadPct1rm > 0) {
+    const pct = Math.min(LOAD_PCT_CEIL, Math.max(LOAD_PCT_FLOOR, m.loadPct1rm));
+    const loadFactor = 1 + LOAD_MET_SENSITIVITY * (pct - LOAD_REFERENCE_PCT);
+    mult *= Math.min(LOAD_FACTOR_MAX, Math.max(LOAD_FACTOR_MIN, loadFactor));
   } else if (score?.rpe != null) {
-    // 3. RPE fallback when 1RM unknown — the common case.
+    // 3. RPE fallback when no 1RM is on file — the common case.
     if (score.rpe >= 9) mult *= 1.1;
     else if (score.rpe <= 5) mult *= 0.9;
   }
@@ -417,8 +443,12 @@ function parseSetCount(parsed: RepSchemeParsed | null, repScheme: string | null)
 
 function estimateForLoad(part: CaloriePartInput, input: CalorieEstimatorInput) {
   const score = input.scoreContext ?? null;
+  const isComplex = part.structure === "complex";
   const setCount = parseSetCount(part.repSchemeParsed, part.repScheme);
   const main = part.movements.filter((m) => !m.isSideCadence);
+  // An unbroken complex never sets the bar down between movements, so its
+  // fatigued reps run slower than the broken-set population default.
+  const repTimeFactor = isComplex ? COMPLEX_REP_TIME_FACTOR : 1.0;
   const workPerSet = main.reduce(
     (acc, m) => {
       const parsed = m.repSchemeParsed ?? part.repSchemeParsed;
@@ -426,7 +456,7 @@ function estimateForLoad(part: CaloriePartInput, input: CalorieEstimatorInput) {
       if (parsed?.kind === "sets") reps = parsed.reps;
       else if (parsed?.kind === "fixed") reps = parsed.reps;
       else reps = 5;
-      return acc + reps * repSecondsFor(m);
+      return acc + reps * repSecondsFor(m) * repTimeFactor;
     },
     0
   );
@@ -439,8 +469,14 @@ function estimateForLoad(part: CaloriePartInput, input: CalorieEstimatorInput) {
     return 180;
   })();
   const weightedMet = weightedMovementMet(part, score, (workPerSet + restPerSet) * setCount);
-  const work = applyMet(weightedMet, input.bodyweightKg, workPerSet * setCount);
-  const rest = applyMet(MET_STANDING_REST, input.bodyweightKg, restPerSet * setCount);
+  // A complex sustains continuous tension — grip, bracing, and the inability
+  // to reset between movements push the working MET above the discrete-rep
+  // compendium values, and its inter-set rest is active recovery rather than
+  // a standing rest.
+  const workMet = isComplex ? weightedMet + COMPLEX_MET_BONUS : weightedMet;
+  const restMet = isComplex ? MET_COMPLEX_REST : MET_STANDING_REST;
+  const work = applyMet(workMet, input.bodyweightKg, workPerSet * setCount);
+  const rest = applyMet(restMet, input.bodyweightKg, restPerSet * setCount);
   const confidence: Confidence = score?.rpe != null
     ? confidenceFor(part, false)
     : downgrade(confidenceFor(part, false));

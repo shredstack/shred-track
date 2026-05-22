@@ -174,14 +174,100 @@ function multisetSymmetricDiff(a: string[], b: string[]): number {
 }
 
 // ============================================
+// Workout description (Haiku input)
+// ============================================
+
+function formatMinSec(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+/** "20 min" for whole minutes, "12:30" otherwise. */
+function formatDuration(totalSeconds: number): string {
+  return totalSeconds % 60 === 0
+    ? `${totalSeconds / 60} min`
+    : formatMinSec(totalSeconds);
+}
+
+/**
+ * Render the workout spec as a short, human-readable description.
+ * Haiku names workouts far more reliably from prose than from a raw JSON
+ * blob — it shouldn't have to guess what `timeCapSeconds` means.
+ */
+function describeWorkoutForHaiku(
+  parts: SuggestPartInput[],
+  movementNameById: Map<string, string>
+): string {
+  const describePart = (p: SuggestPartInput): string => {
+    const typeLabel = WORKOUT_TYPE_LABELS[p.workoutType] ?? "Workout";
+
+    // Structure clause — fold in the duration / time cap when we have one.
+    let structure = typeLabel;
+    if (p.workoutType === "amrap" && p.amrapDurationSeconds) {
+      structure = `AMRAP ${formatDuration(p.amrapDurationSeconds)}`;
+    } else if (p.timeCapSeconds) {
+      structure = `${typeLabel} (${formatMinSec(p.timeCapSeconds)} cap)`;
+    }
+    if (p.repScheme && p.repScheme.trim()) {
+      structure += `, rep scheme ${p.repScheme.trim()}`;
+    }
+
+    const names = [
+      ...p.movementIds
+        .map((id) => movementNameById.get(id))
+        .filter((n): n is string => !!n),
+      ...(p.extraMovementNames ?? []),
+    ];
+    return names.length
+      ? `${structure} — Movements: ${names.join(", ")}`
+      : structure;
+  };
+
+  if (parts.length === 1) {
+    return `Workout: ${describePart(parts[0])}`;
+  }
+  const lines = parts.map((p, i) => `Part ${i + 1}: ${describePart(p)}`);
+  return `Workout with ${parts.length} parts.\n${lines.join("\n")}`;
+}
+
+// ============================================
 // Haiku fallback
 // ============================================
 
-const HAIKU_SYSTEM_PROMPT = `You name CrossFit workouts. Output a single title — 1–5 words, no punctuation except apostrophes, no quotes, no emojis. Lean fun and descriptive. Prefer movement-evocative names ("Thruster Hell", "Deadlift Ladder") or vibe names ("Light 'Till It's Not", "Grip & Rip"). Avoid: "WOD", the word "workout", generic filler ("My Workout", "Today's Session"). Never invent weights or rep numbers the user didn't provide.
+const HAIKU_SYSTEM_PROMPT = `You name CrossFit workouts (WODs). Given a workout's structure and movements, return one short, memorable title.
 
-Output only the title. No explanation, no prefix.`;
+STYLE
+- 1–5 words, Title Case.
+- Fun and a little punchy, but grounded: the name should hint at what the athlete is in for — a signature movement, the structure (AMRAP, ladder, EMOM), or the rep scheme.
+- Lean into CrossFit naming culture. Nod to iconic rep schemes (21-15-9 or any descending ladder → "Down the Ladder", "Triple Down"). The short, snappy, evocative style of benchmark "Girl" WODs is fair game.
+- Movement-evocative ("Thruster Hell", "Deadlift Ladder") or vibe names ("Grip & Rip", "Light 'Till It's Not") both work.
 
-async function callHaiku(spec: object): Promise<string | null> {
+RULES
+- No punctuation except apostrophes and ampersands. No quotes, no emojis.
+- No numbers unless they come straight from the workout (a rep scheme like 21-15-9 is fine).
+- Never invent weights, rep counts, or movements the user didn't provide.
+- Never reuse the name of a real benchmark WOD (Fran, Murph, Cindy, Grace, Diane, Helen, etc.) — those are reserved.
+- Avoid the literal word "WOD" or "Workout", and generic filler ("My Workout", "Today's Session", "Daily Grind").
+
+EXAMPLES
+Workout: For Time, rep scheme 21-15-9 — Movements: Deadlift, Box Jump Over
+Title: Down the Ladder
+
+Workout: AMRAP 20 min — Movements: Wall Ball, Toes-to-Bar, Burpee
+Title: Wall Ball Wasteland
+
+Workout: EMOM — Movements: Power Clean, Burpee
+Title: Clean & Suffer
+
+Workout with 2 parts.
+Part 1: For Load — Movements: Back Squat
+Part 2: For Time (10:00 cap) — Movements: Pull-Up, Push-Up, Air Squat
+Title: Squat Then Sprint
+
+Output only the title — no explanation, no quotes, no prefix.`;
+
+async function callHaiku(prompt: string): Promise<string | null> {
   try {
     const client = new Anthropic({ maxRetries: 0 });
     const response = await client.messages.create(
@@ -192,10 +278,12 @@ async function callHaiku(spec: object): Promise<string | null> {
           {
             type: "text",
             text: HAIKU_SYSTEM_PROMPT,
+            // No-op until the system prompt clears Haiku's ~2k-token cache
+            // minimum, but harmless and future-proof if the prompt grows.
             cache_control: { type: "ephemeral" },
           },
         ],
-        messages: [{ role: "user", content: JSON.stringify(spec) }],
+        messages: [{ role: "user", content: prompt }],
       },
       { timeout: HAIKU_TIMEOUT_MS }
     );
@@ -205,9 +293,10 @@ async function callHaiku(spec: object): Promise<string | null> {
 
     const cleaned = block.text
       .trim()
-      .replace(/^["“”']+|["“”']+$/g, "")
-      .replace(/^title:\s*/i, "")
       .split("\n")[0]
+      .replace(/^title:\s*/i, "")
+      .replace(/^["“”']+|["“”']+$/g, "")
+      .replace(/[.]+$/, "")
       .trim();
 
     if (!cleaned || cleaned.length > 60) return null;
@@ -222,23 +311,18 @@ async function callHaiku(spec: object): Promise<string | null> {
 // Deterministic fallback (matches legacy behavior)
 // ============================================
 
-async function deterministicTitle(parts: SuggestPartInput[]): Promise<string> {
-  const firstPart = parts[0];
-  const typeLabel = WORKOUT_TYPE_LABELS[firstPart.workoutType] ?? "Workout";
+function deterministicTitle(
+  parts: SuggestPartInput[],
+  movementNameById: Map<string, string>
+): string {
+  const typeLabel = WORKOUT_TYPE_LABELS[parts[0].workoutType] ?? "Workout";
 
-  const allMovementIds = parts.flatMap((p) => p.movementIds);
-  const extraNames = parts.flatMap((p) => p.extraMovementNames ?? []);
-
-  let names: string[] = [];
-  if (allMovementIds.length > 0) {
-    const rows = await db
-      .select({ id: movements.id, canonicalName: movements.canonicalName })
-      .from(movements)
-      .where(inArray(movements.id, Array.from(new Set(allMovementIds))));
-    const byId = new Map(rows.map((r) => [r.id, r.canonicalName]));
-    names = allMovementIds.map((id) => byId.get(id)).filter((n): n is string => !!n);
-  }
-  names = [...names, ...extraNames];
+  const names = parts.flatMap((p) => [
+    ...p.movementIds
+      .map((id) => movementNameById.get(id))
+      .filter((n): n is string => !!n),
+    ...(p.extraMovementNames ?? []),
+  ]);
 
   const firstTwo = Array.from(new Set(names)).slice(0, 2).join(", ");
   return firstTwo ? `${typeLabel} — ${firstTwo}` : typeLabel;
@@ -288,42 +372,31 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 2. Haiku suggestion.
-  const haikuSpec = {
-    parts: parts.map((p) => ({
-      workoutType: p.workoutType,
-      repScheme: p.repScheme ?? null,
-      timeCapSeconds: p.timeCapSeconds ?? null,
-      amrapDurationSeconds: p.amrapDurationSeconds ?? null,
-      movementCount: p.movementIds.length,
-      extraMovementNames: p.extraMovementNames ?? [],
-    })),
-  };
-
-  // Resolve canonical movement names for the Haiku prompt so it has something
-  // concrete to riff on (IDs alone are useless to the model).
+  // 2. Haiku suggestion. Resolve canonical movement names up front so both
+  //    the Haiku prompt and the deterministic fallback can use them (IDs
+  //    alone are useless to the model).
   const allMovementIds = Array.from(
     new Set(parts.flatMap((p) => p.movementIds))
   );
+  const movementNameById = new Map<string, string>();
   if (allMovementIds.length > 0) {
     const rows = await db
       .select({ id: movements.id, canonicalName: movements.canonicalName })
       .from(movements)
       .where(inArray(movements.id, allMovementIds));
-    const byId = new Map(rows.map((r) => [r.id, r.canonicalName]));
-    (haikuSpec as unknown as { movementNames: string[] }).movementNames = parts.flatMap((p) =>
-      [...p.movementIds.map((id) => byId.get(id)).filter((n): n is string => !!n), ...(p.extraMovementNames ?? [])]
-    );
+    for (const r of rows) movementNameById.set(r.id, r.canonicalName);
   }
 
-  const haikuTitle = await callHaiku(haikuSpec);
+  const haikuTitle = await callHaiku(
+    describeWorkoutForHaiku(parts, movementNameById)
+  );
   if (haikuTitle) {
     const result: SuggestionResult = { title: haikuTitle, source: "ai" };
     return NextResponse.json(result);
   }
 
   // 3. Deterministic fallback.
-  const fallback = await deterministicTitle(parts);
+  const fallback = deterministicTitle(parts, movementNameById);
   const result: SuggestionResult = { title: fallback, source: "fallback" };
   return NextResponse.json(result);
 }

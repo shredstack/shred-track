@@ -87,15 +87,9 @@ function PredictionList({
 
   return (
     <div className="space-y-2">
-      {predictions.length > 0 ? (
-        predictions.map((p) => <PredictionRow key={p.movementId} p={p} />)
-      ) : (
-        <p className="rounded-md border border-dashed border-white/[0.06] py-3 px-3 text-xs text-muted-foreground">
-          All your tested lifts are still fresh — nice. We&apos;ll surface
-          predictions here once one hits the 12-month mark.
-        </p>
-      )}
-
+      {predictions.map((p) => (
+        <PredictionRow key={p.movementId} p={p} />
+      ))}
       {staleLifts.length > 0 && <StaleLiftsList items={staleLifts} />}
     </div>
   );
@@ -156,8 +150,14 @@ function PredictionRow({ p }: { p: Predicted1RM }) {
             </p>
           ) : (
             <p className="mt-1 text-[11px] text-muted-foreground">
-              Never directly tested · based on {p.qualifyingSetsCount}{" "}
-              recent set{p.qualifyingSetsCount === 1 ? "" : "s"}
+              Never directly tested · based on {p.distinctSessionsCount}{" "}
+              session{p.distinctSessionsCount === 1 ? "" : "s"}
+            </p>
+          )}
+
+          {p.distinctSessionsCount === 1 && (
+            <p className="mt-0.5 text-[11px] text-muted-foreground/80">
+              Rough estimate — log this lift again and the range tightens.
             </p>
           )}
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { WorkoutPartConfig } from "@/components/crossfit/workout-part-config";
+import type { EarlierLoadPart } from "@/components/crossfit/movement-list-builder";
 import type {
   WorkoutBuilderBlock,
   WorkoutBuilderPart,
@@ -101,6 +102,7 @@ interface PartCardProps {
   totalParts: number;
   isCollapsed: boolean;
   showRepScheme: boolean;
+  earlierLoadParts: EarlierLoadPart[];
   onToggleCollapse: () => void;
   onChange: (updates: Partial<WorkoutBuilderPart>) => void;
   onMovementsChange: (movements: WorkoutBuilderMovement[]) => void;
@@ -115,6 +117,7 @@ function PartCard({
   totalParts,
   isCollapsed,
   showRepScheme,
+  earlierLoadParts,
   onToggleCollapse,
   onChange,
   onMovementsChange,
@@ -136,6 +139,7 @@ function PartCard({
         onMovementsChange={onMovementsChange}
         onBlocksChange={onBlocksChange}
         showRepScheme={showRepScheme}
+        earlierLoadParts={earlierLoadParts}
         compact
       />
     );
@@ -163,7 +167,10 @@ function PartCard({
             {part.label || defaultLabel}
           </Badge>
           {isCollapsed && (
-            <span className="truncate text-xs text-muted-foreground">
+            // min-w-0 + flex-1: a flex child keeps its full intrinsic width
+            // otherwise, so `truncate` would never kick in and the long
+            // summary string would force the card (and dialog) to overflow.
+            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
               {partSummary(part, index)}
             </span>
           )}
@@ -219,6 +226,7 @@ function PartCard({
             onMovementsChange={onMovementsChange}
             onBlocksChange={onBlocksChange}
             showRepScheme={showRepScheme}
+            earlierLoadParts={earlierLoadParts}
             compact
           />
         </div>
@@ -236,6 +244,13 @@ export interface MultiPartConfigProps {
   showRepScheme?: boolean;
   /** Label for the "add another part" button. */
   addButtonLabel?: string;
+  /**
+   * Opt-in: surface the "% of earlier part" weight mode in the builder. A
+   * movement in a later part can then be prescribed as a percentage of the
+   * max load logged on an earlier for_load part. Off by default so the
+   * benchmark forms (which reuse this component) are unaffected.
+   */
+  enableWeightPct?: boolean;
 }
 
 export function MultiPartConfig({
@@ -244,8 +259,28 @@ export function MultiPartConfig({
   maxParts = DEFAULT_MAX_PARTS,
   showRepScheme = false,
   addButtonLabel = "Add another part",
+  enableWeightPct = false,
 }: MultiPartConfigProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+
+  // For each part, the for_load parts that come before it — the candidates
+  // a weight_pct prescription can anchor to. Keyed by part tempId. Empty
+  // when `enableWeightPct` is off.
+  const earlierLoadPartsByTempId = useMemo(() => {
+    const map = new Map<string, EarlierLoadPart[]>();
+    if (!enableWeightPct) return map;
+    const accumulated: EarlierLoadPart[] = [];
+    parts.forEach((p, idx) => {
+      map.set(p.tempId, [...accumulated]);
+      if (p.workoutType === "for_load") {
+        accumulated.push({
+          tempId: p.tempId,
+          label: p.label?.trim() || `Part ${String.fromCharCode(65 + idx)}`,
+        });
+      }
+    });
+    return map;
+  }, [parts, enableWeightPct]);
 
   const updatePart = useCallback(
     (tempId: string, updates: Partial<WorkoutBuilderPart>) => {
@@ -321,6 +356,7 @@ export function MultiPartConfig({
           totalParts={parts.length}
           isCollapsed={collapsed.has(part.tempId)}
           showRepScheme={showRepScheme}
+          earlierLoadParts={earlierLoadPartsByTempId.get(part.tempId) ?? []}
           onToggleCollapse={() => toggleCollapse(part.tempId)}
           onChange={(updates) => updatePart(part.tempId, updates)}
           onMovementsChange={(movements) =>

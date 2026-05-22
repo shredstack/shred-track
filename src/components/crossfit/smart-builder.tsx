@@ -433,6 +433,7 @@ export function SmartBuilder({
           <MultiPartConfig
             parts={form.parts}
             onPartsChange={handlePartsChange}
+            enableWeightPct
           />
 
           <div className="flex gap-2 pt-1">

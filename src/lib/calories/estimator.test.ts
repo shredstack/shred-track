@@ -5,7 +5,7 @@
 // values have ±20% real-world variance anyway.
 
 import { describe, expect, it } from "vitest";
-import { estimateCalories, REFERENCE_KG } from "./estimator";
+import { estimateCalories, REFERENCE_KG, __internal } from "./estimator";
 import type {
   CalorieEstimatorInput,
   CaloriePartInput,
@@ -332,5 +332,134 @@ describe("estimator — canonical workouts at 75 kg", () => {
     const lowConf = estimateCalories({ ...baseInput([part]), isDefaultBodyweight: true });
     const order = { high: 0, medium: 1, low: 2 };
     expect(order[lowConf.confidence]).toBeGreaterThanOrEqual(order[high.confidence]);
+  });
+});
+
+describe("estimator — load-relative MET scaling", () => {
+  // A bare for_load part; intensityModifier only reads `isWarmup` off it.
+  const loadPart: CaloriePartInput = {
+    id: "load-part",
+    workoutType: "for_load",
+    timeCapSeconds: null,
+    amrapDurationSeconds: null,
+    emomIntervalSeconds: null,
+    intervalWorkSeconds: null,
+    intervalRestSeconds: null,
+    intervalRounds: null,
+    rounds: 5,
+    repScheme: "5x5",
+    repSchemeParsed: { kind: "sets", sets: 5, reps: 5 },
+    structure: null,
+    movements: [],
+  };
+
+  const modFor = (loadPct1rm: number | null) =>
+    __internal.intensityModifier(
+      partMv(mv("Shoulder Press", { metValue: 5 }), { loadPct1rm }),
+      loadPart,
+      null
+    );
+
+  it("is neutral with no 1RM data", () => {
+    expect(modFor(null)).toBeCloseTo(1.0, 5);
+  });
+
+  it("is neutral at a typical metcon load (~60% 1RM)", () => {
+    expect(modFor(0.6)).toBeCloseTo(1.0, 2);
+  });
+
+  it("bumps MET for a near-1RM working load", () => {
+    expect(modFor(0.9)).toBeGreaterThan(1.1);
+    expect(modFor(0.9)).toBeLessThanOrEqual(1.2);
+  });
+
+  it("discounts MET for a light working load", () => {
+    expect(modFor(0.3)).toBeLessThan(0.9);
+    expect(modFor(0.3)).toBeGreaterThanOrEqual(0.82);
+  });
+
+  it("is monotonic in load and saturates at the extremes", () => {
+    expect(modFor(0.3)).toBeLessThan(modFor(0.6));
+    expect(modFor(0.6)).toBeLessThan(modFor(0.9));
+    expect(modFor(1.5)).toBeLessThanOrEqual(1.2);
+    expect(modFor(0.05)).toBeGreaterThanOrEqual(0.82);
+  });
+
+  it("load data overrides the RPE fallback", () => {
+    const heavyLowRpe = __internal.intensityModifier(
+      partMv(mv("Shoulder Press"), { loadPct1rm: 0.9 }),
+      loadPart,
+      {
+        timeSeconds: null,
+        hitTimeCap: false,
+        woreVest: null,
+        vestWeightLb: null,
+        rpe: 3,
+        startedAt: null,
+        endedAt: null,
+      }
+    );
+    // RPE 3 alone would discount; the near-1RM load wins and bumps instead.
+    expect(heavyLowRpe).toBeGreaterThan(1.0);
+  });
+
+  it("a heavy strength complex burns more than the same complex done light", () => {
+    const complex = (loadPct1rm: number): CaloriePartInput => ({
+      ...loadPart,
+      movements: ["Shoulder Press", "Push Press", "Push Jerk"].map((name) =>
+        partMv(mv(name, { metValue: 5.5, repSecondsDefault: 3 }), {
+          loadPct1rm,
+          repSchemeParsed: { kind: "sets", sets: 5, reps: 5 },
+        })
+      ),
+    });
+    const heavy = estimateCalories(baseInput([complex(0.9)]));
+    const light = estimateCalories(baseInput([complex(0.35)]));
+    expect(heavy.active).toBeGreaterThan(light.active);
+  });
+});
+
+describe("estimator — barbell complex timing", () => {
+  // 5 sets of (5 shoulder press + 5 push press + 5 push jerk) — Sarah's
+  // motivating workout. `structure` toggles unbroken-complex vs broken sets.
+  const overheadComplex = (structure: string | null): CaloriePartInput => ({
+    id: "complex-part",
+    workoutType: "for_load",
+    timeCapSeconds: null,
+    amrapDurationSeconds: null,
+    emomIntervalSeconds: null,
+    intervalWorkSeconds: null,
+    intervalRestSeconds: null,
+    intervalRounds: null,
+    rounds: 5,
+    repScheme: "5x5",
+    repSchemeParsed: { kind: "sets", sets: 5, reps: 5 },
+    structure,
+    movements: ["Shoulder Press", "Push Press", "Push Jerk"].map((name) =>
+      partMv(mv(name, { metValue: 5.5, repSecondsDefault: 3 }), {
+        repSchemeParsed: { kind: "sets", sets: 5, reps: 5 },
+      })
+    ),
+  });
+
+  it("an unbroken complex burns more than the same lifts as broken sets", () => {
+    const broken = estimateCalories(baseInput([overheadComplex(null)]));
+    const complex = estimateCalories(baseInput([overheadComplex("complex")]));
+    expect(complex.active).toBeGreaterThan(broken.active);
+  });
+
+  it("a 5-set overhead complex lands in a defensible active band at 75 kg", () => {
+    const complex = estimateCalories(baseInput([overheadComplex("complex")]));
+    expect(complex.active).toBeGreaterThan(35);
+    expect(complex.active).toBeLessThan(80);
+  });
+
+  it("the complex flag leaves non-complex for_load estimates untouched", () => {
+    // Regression guard: structure null must reproduce the pre-feature math.
+    const broken = estimateCalories(baseInput([overheadComplex(null)]));
+    expect(broken.active).toBeGreaterThan(0);
+    expect(broken.active).toBeLessThan(estimateCalories(
+      baseInput([overheadComplex("complex")])
+    ).active);
   });
 });

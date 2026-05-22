@@ -86,6 +86,9 @@ export async function GET(
         workoutMovements.prescribedWeightMaleBwMultiplier,
       prescribedWeightFemaleBwMultiplier:
         workoutMovements.prescribedWeightFemaleBwMultiplier,
+      prescribedWeightPct: workoutMovements.prescribedWeightPct,
+      prescribedWeightPctSourcePartId:
+        workoutMovements.prescribedWeightPctSourcePartId,
       tempo: workoutMovements.tempo,
       isMaxReps: workoutMovements.isMaxReps,
       isSideCadence: workoutMovements.isSideCadence,
@@ -260,6 +263,12 @@ export async function GET(
           m.prescribedWeightFemaleBwMultiplier != null
             ? Number(m.prescribedWeightFemaleBwMultiplier)
             : undefined,
+        prescribedWeightPct:
+          m.prescribedWeightPct != null
+            ? Number(m.prescribedWeightPct)
+            : undefined,
+        prescribedWeightPctSourcePartId:
+          m.prescribedWeightPctSourcePartId ?? undefined,
         tempo: m.tempo ?? undefined,
         isMaxReps: !!m.isMaxReps,
         isSideCadence: !!m.isSideCadence,
@@ -395,6 +404,10 @@ interface UpdatePartMovementInput {
   prescribedHeightInchesFemale?: number | string;
   prescribedWeightMaleBwMultiplier?: number | string;
   prescribedWeightFemaleBwMultiplier?: number | string;
+  // weight_pct Rx — the percentage and the builder tempId of the earlier
+  // for_load part it anchors to (resolved to a real id during the diff).
+  prescribedWeightPct?: number | string;
+  weightPctSourcePartTempRef?: string | null;
   tempo?: string;
   isMaxReps?: boolean;
   isSideCadence?: boolean;
@@ -415,6 +428,9 @@ interface UpdatePartBlockInput {
 
 interface UpdatePartInput {
   id?: string;
+  // Builder tempId — resolved so later parts' weight_pct movements can
+  // anchor to this part.
+  tempRef?: string;
   label?: string;
   workoutType: WorkoutType;
   timeCapSeconds?: number;
@@ -584,6 +600,9 @@ export async function PUT(
     }
 
     // 3) Upsert each part, then diff its movements.
+    // tempRef → real part id, populated as parts are upserted in order, so a
+    // later part's weight_pct movement resolves its (earlier) source part.
+    const partTempRefToId = new Map<string, string>();
     for (let i = 0; i < incomingParts.length; i++) {
       const p = incomingParts[i];
       let partId: string;
@@ -633,6 +652,8 @@ export async function PUT(
           .returning();
         partId = inserted.id;
       }
+
+      if (p.tempRef) partTempRefToId.set(p.tempRef, partId);
 
       // 3a) Diff blocks for this part. Blocks are inserted before
       // movements so movement.blockTempRef can be resolved when upserting.
@@ -747,6 +768,10 @@ export async function PUT(
           prescribedWeightFemaleBwMultiplier: toNumericOrNull(
             m.prescribedWeightFemaleBwMultiplier
           ),
+          prescribedWeightPct: toNumericOrNull(m.prescribedWeightPct),
+          prescribedWeightPctSourcePartId: m.weightPctSourcePartTempRef
+            ? partTempRefToId.get(m.weightPctSourcePartTempRef) ?? null
+            : null,
           tempo: m.tempo?.trim() || null,
           isMaxReps: !!m.isMaxReps,
           isSideCadence: !!m.isSideCadence,
