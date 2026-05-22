@@ -28,6 +28,7 @@ import type {
   CalorieEstimatorInput,
   CalorieScoreContext,
 } from "./types";
+import { scopeToScoredPart, type ScoredPartEstimate } from "./part-scope";
 
 // ----- Template-level (75 kg reference) -----
 
@@ -79,6 +80,12 @@ export async function computeAndStoreWorkoutEstimate(
 export interface ComputeScoreEstimateInput {
   scoreId?: string;
   workoutId: string;
+  /**
+   * The part this score is logged against. A score is always for one part —
+   * passing it lets us persist that part's slice of the estimate rather than
+   * the whole-workout total. Null only for legacy part-less scores.
+   */
+  workoutPartId?: string | null;
   userId: string;
   /** From the scores POST body — duplicated so the caller doesn't need to re-read. */
   score: {
@@ -101,7 +108,14 @@ export interface ComputeScoreEstimateInput {
 }
 
 export interface ComputeScoreEstimateResult {
+  /** Full-workout estimate (all parts). Kept for aggregate callers. */
   estimate: CalorieEstimate;
+  /**
+   * This score's part only. A score is logged against a single part, so this
+   * — not `estimate` — is what the score row persists. For a single-part
+   * workout it equals the workout total.
+   */
+  part: ScoredPartEstimate;
   bodyweightLb: number | null;
   isDefaultBodyweight: boolean;
 }
@@ -163,6 +177,12 @@ export async function computeScoreEstimate(
 
   return {
     estimate,
+    part: scopeToScoredPart(
+      estimate,
+      input.workoutPartId,
+      epocMultiplier,
+      bw.isDefault
+    ),
     bodyweightLb: bw.isDefault ? null : bodyWeightLb,
     isDefaultBodyweight: bw.isDefault,
   };
@@ -179,6 +199,7 @@ export async function recomputeScoreEstimate(scoreId: string): Promise<void> {
       id: scores.id,
       userId: scores.userId,
       workoutId: scores.workoutId,
+      workoutPartId: scores.workoutPartId,
       timeSeconds: scores.timeSeconds,
       hitTimeCap: scores.hitTimeCap,
       woreVest: scores.woreVest,
@@ -213,6 +234,7 @@ export async function recomputeScoreEstimate(scoreId: string): Promise<void> {
   const result = await computeScoreEstimate({
     scoreId: row.id,
     workoutId: row.workoutId,
+    workoutPartId: row.workoutPartId,
     userId: row.userId,
     movementWeights,
     score: {
@@ -229,12 +251,12 @@ export async function recomputeScoreEstimate(scoreId: string): Promise<void> {
   await db
     .update(scores)
     .set({
-      estimatedKcal: result.estimate.gross,
-      estimatedKcalActive: result.estimate.active,
-      estimatedKcalWithEpoc: result.estimate.grossWithEpoc,
-      estimatedKcalActiveWithEpoc: result.estimate.activeWithEpoc,
-      estimatedKcalMethod: result.estimate.method,
-      estimatedKcalConfidence: result.estimate.confidence,
+      estimatedKcal: result.part.gross,
+      estimatedKcalActive: result.part.active,
+      estimatedKcalWithEpoc: result.part.grossWithEpoc,
+      estimatedKcalActiveWithEpoc: result.part.activeWithEpoc,
+      estimatedKcalMethod: result.part.method,
+      estimatedKcalConfidence: result.part.confidence,
     })
     .where(eq(scores.id, scoreId));
 }

@@ -251,6 +251,7 @@ export async function POST(req: NextRequest) {
   try {
     calorieEstimate = await computeScoreEstimate({
       workoutId: workoutId!,
+      workoutPartId,
       userId: effectiveUserId,
       movementWeights,
       score: {
@@ -305,13 +306,13 @@ export async function POST(req: NextRequest) {
             calorieEstimate?.bodyweightLb != null
               ? calorieEstimate.bodyweightLb.toString()
               : null,
-          estimatedKcal: calorieEstimate?.estimate.gross ?? null,
-          estimatedKcalActive: calorieEstimate?.estimate.active ?? null,
-          estimatedKcalWithEpoc: calorieEstimate?.estimate.grossWithEpoc ?? null,
+          estimatedKcal: calorieEstimate?.part.gross ?? null,
+          estimatedKcalActive: calorieEstimate?.part.active ?? null,
+          estimatedKcalWithEpoc: calorieEstimate?.part.grossWithEpoc ?? null,
           estimatedKcalActiveWithEpoc:
-            calorieEstimate?.estimate.activeWithEpoc ?? null,
-          estimatedKcalMethod: calorieEstimate?.estimate.method ?? null,
-          estimatedKcalConfidence: calorieEstimate?.estimate.confidence ?? null,
+            calorieEstimate?.part.activeWithEpoc ?? null,
+          estimatedKcalMethod: calorieEstimate?.part.method ?? null,
+          estimatedKcalConfidence: calorieEstimate?.part.confidence ?? null,
         })
         .returning();
 
