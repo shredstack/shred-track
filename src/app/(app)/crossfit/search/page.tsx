@@ -100,14 +100,12 @@ export default function CrossfitSearchPage() {
     if (!scoringWorkout) return;
     const part = scoringWorkout.parts.find((p) => p.id === partId);
     if (!part) return;
-    try {
-      if (part.score?.id) {
-        await updateScore.mutateAsync({ scoreId: part.score.id, score });
-      } else {
-        await logScore.mutateAsync(score);
-      }
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Failed to save score");
+    // Errors propagate to ScoreEntry's handleSubmit, which surfaces them in
+    // the dialog and keeps it open so the failed part can be retried.
+    if (part.score?.id) {
+      await updateScore.mutateAsync({ scoreId: part.score.id, score });
+    } else {
+      await logScore.mutateAsync(score);
     }
   };
 

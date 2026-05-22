@@ -140,6 +140,26 @@
   }
 }
 
+/* ===== iOS input zoom guard =====
+   iOS WKWebView auto-zooms into any focused <input>/<textarea>/<select>
+   whose font-size is below 16px. The app viewport sets `user-scalable=false`
+   (see the `viewport` export in app/layout.tsx), so once that auto-zoom
+   fires the user cannot pinch back out — they are trapped zoomed in.
+
+   Flooring input font-size at 16px on touch-pointer devices stops the
+   auto-zoom from ever triggering. This rule is intentionally unlayered so
+   it overrides Tailwind's `text-xs` / `text-sm` utilities (which live in
+   @layer utilities). No input in the app is intentionally larger than 16px
+   on mobile, so this only ever bumps small inputs up — never shrinks one.
+   Desktop (pointer: fine) keeps the compact text sizes. */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
 /* Utility: hide scrollbar for horizontal nav */
 .no-scrollbar::-webkit-scrollbar {
   display: none;

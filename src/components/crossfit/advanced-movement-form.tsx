@@ -31,6 +31,12 @@ import {
 import { RX_FIELD_META } from "@/lib/crossfit/rx-field-meta";
 import type { CreateMovementInput } from "@/hooks/useMovements";
 
+// Base UI's <Select.Value> shows the raw value unless the <Select> root is
+// given an `items` map from value → display label.
+const MOVEMENT_CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
+  MOVEMENT_CATEGORIES.map((c) => [c, c.charAt(0).toUpperCase() + c.slice(1)])
+);
+
 // ============================================
 // AdvancedMovementForm
 // ============================================
@@ -229,6 +235,7 @@ export function AdvancedMovementForm({
             <Label>Category</Label>
             <Select
               value={form.category}
+              items={MOVEMENT_CATEGORY_LABELS}
               onValueChange={(v) =>
                 setForm((p) => ({ ...p, category: v as MovementCategory }))
               }
@@ -239,7 +246,7 @@ export function AdvancedMovementForm({
               <SelectContent>
                 {MOVEMENT_CATEGORIES.map((c) => (
                   <SelectItem key={c} value={c}>
-                    {c.charAt(0).toUpperCase() + c.slice(1)}
+                    {MOVEMENT_CATEGORY_LABELS[c]}
                   </SelectItem>
                 ))}
               </SelectContent>

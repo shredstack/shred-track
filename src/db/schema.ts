@@ -549,6 +549,15 @@ export const workoutMovements = pgTable("workout_movements", {
   // builder, not the DB.
   prescribedWeightMaleBwMultiplier: numeric("prescribed_weight_male_bw_multiplier"),
   prescribedWeightFemaleBwMultiplier: numeric("prescribed_weight_female_bw_multiplier"),
+  // weight_pct Rx — prescribe this movement as a percentage of the max load
+  // logged on an earlier for_load part. `prescribedWeightPct` is the
+  // percentage (e.g. 60); `prescribedWeightPctSourcePartId` points at that
+  // earlier part. Resolved to a concrete working weight at score-entry time.
+  // Non-gendered: it's a % of the athlete's own max either way.
+  prescribedWeightPct: numeric("prescribed_weight_pct"),
+  prescribedWeightPctSourcePartId: uuid(
+    "prescribed_weight_pct_source_part_id"
+  ).references(() => workoutParts.id, { onDelete: "set null" }),
   // Free-text tempo prescription, e.g. "30X1".
   tempo: text("tempo"),
   // When true the movement is the score-bearing movement of its part:

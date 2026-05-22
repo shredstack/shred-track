@@ -16,6 +16,12 @@ interface PickerSheetProps {
   children: React.ReactNode;
   /** Extra classes applied to the popup container. */
   className?: string;
+  /**
+   * Element to focus when the sheet opens. Forwarded to Base UI's Dialog
+   * popup. Without it, Base UI focuses the first focusable element — the
+   * ✕ close button — so a search input would need a second tap.
+   */
+  initialFocus?: React.ComponentProps<typeof DialogPrimitive.Popup>["initialFocus"];
 }
 
 /**
@@ -34,6 +40,7 @@ export function PickerSheet({
   description,
   children,
   className,
+  initialFocus,
 }: PickerSheetProps) {
   const isMobile = useIsMobile();
   const keyboardInset = useKeyboardInset();
@@ -45,6 +52,7 @@ export function PickerSheet({
           className="fixed inset-0 z-50 bg-black/40 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
         />
         <DialogPrimitive.Popup
+          initialFocus={initialFocus}
           className={cn(
             "fixed z-50 flex flex-col bg-popover text-popover-foreground shadow-2xl outline-none",
             isMobile

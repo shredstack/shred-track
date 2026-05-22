@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Search, Plus } from "lucide-react";
-import { useMovements, useRecentMovements } from "@/hooks/useMovements";
+import { useMovements } from "@/hooks/useMovements";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { PickerSheet } from "@/components/shared/picker-sheet";
 import { CategoryPills } from "@/components/shared/category-pills";
@@ -51,7 +51,6 @@ export function MovementSearch({
   const { data: fetched, refetch: refetchMovements } = useMovements({
     q: debouncedQuery || undefined,
   });
-  const { data: recentIds, refetch: refetchRecent } = useRecentMovements();
   // No placeholder list: the picker only ever offers real, saveable
   // movements. A fake-id stand-in could be selected and would fail the
   // workout insert (movement_id must be a real UUID). `useMovements` uses
@@ -66,8 +65,12 @@ export function MovementSearch({
   useEffect(() => {
     if (!open || movementsOverride) return;
     refetchMovements();
-    refetchRecent();
-  }, [open, movementsOverride, refetchMovements, refetchRecent]);
+  }, [open, movementsOverride, refetchMovements]);
+
+  // Pure-search picker: the list stays empty until the user types. Browsing
+  // the full library is slower than searching when a gym admin needs a
+  // specific movement, so the picker opens straight to a search prompt.
+  const hasQuery = query.trim().length > 0;
 
   const filtered = useMemo(() => {
     // Search is applied server-side via `q`; category stays client-side so
@@ -77,35 +80,9 @@ export function MovementSearch({
       : movements.filter((m) => m.category === category);
   }, [movements, category]);
 
-  // Show the "Recent" group only when the user hasn't narrowed the list — once
-  // they pick a category or start typing, grouping just gets in the way.
-  const showGroupedRecent =
-    category === "all" &&
-    query.trim().length === 0 &&
-    !!recentIds &&
-    recentIds.length > 0;
+  const displayItems = hasQuery ? filtered : NO_MOVEMENTS;
 
-  // When grouping is on, hoist recent movements to the top of the display list.
-  // The id-preserving order from the API drives the within-group order.
-  const { displayItems, recentCount } = useMemo(() => {
-    if (!showGroupedRecent || !recentIds) {
-      return { displayItems: filtered, recentCount: 0 };
-    }
-    const byId = new Map(filtered.map((m) => [m.id, m]));
-    const recent: MovementOption[] = [];
-    const seen = new Set<string>();
-    for (const id of recentIds) {
-      const m = byId.get(id);
-      if (m && !seen.has(id)) {
-        recent.push(m);
-        seen.add(id);
-      }
-    }
-    const rest = filtered.filter((m) => !seen.has(m.id));
-    return { displayItems: [...recent, ...rest], recentCount: recent.length };
-  }, [filtered, recentIds, showGroupedRecent]);
-
-  const showAddNew = !!onAddNew && query.trim().length > 0;
+  const showAddNew = !!onAddNew && hasQuery;
   const totalItems = displayItems.length + (showAddNew ? 1 : 0);
 
   const closeAndReset = useCallback(() => {
@@ -131,14 +108,9 @@ export function MovementSearch({
     }
   }, [onAddNew, query, closeAndReset]);
 
-  // Focus the search field once the sheet has opened. The next-frame defer
-  // gives the entrance animation time to settle so iOS reliably shows the
-  // keyboard.
-  useEffect(() => {
-    if (!open) return;
-    const id = requestAnimationFrame(() => inputRef.current?.focus());
-    return () => cancelAnimationFrame(id);
-  }, [open]);
+  // The search field is focused on open via PickerSheet's `initialFocus`
+  // prop (see the <PickerSheet> below) — Base UI focuses it as part of the
+  // dialog's own open sequence, so the user can type immediately.
 
   // Keep the highlighted item visible as the user arrows through the list.
   useEffect(() => {
@@ -184,6 +156,7 @@ export function MovementSearch({
 
       <PickerSheet
         open={open}
+        initialFocus={inputRef}
         onOpenChange={(next) => {
           if (!next) closeAndReset();
           else setOpen(true);
@@ -224,55 +197,45 @@ export function MovementSearch({
           className="flex-1 overflow-y-auto px-2 pb-4"
           role="listbox"
         >
-          {displayItems.length === 0 && !showAddNew && (
+          {!hasQuery && (
+            <div className="px-3 py-10 text-center text-sm text-muted-foreground">
+              Start typing to find a movement
+            </div>
+          )}
+
+          {hasQuery && displayItems.length === 0 && !showAddNew && (
             <div className="px-3 py-6 text-center text-sm text-muted-foreground">
               {movementsLoading ? "Loading movements…" : "No movements found"}
             </div>
           )}
 
-          {displayItems.map((movement, idx) => {
-            const isFirstRecent = showGroupedRecent && idx === 0;
-            const isFirstAfterRecent =
-              showGroupedRecent && recentCount > 0 && idx === recentCount;
-            return (
-              <div key={movement.id}>
-                {isFirstRecent && (
-                  <div className="px-3 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    Recent
-                  </div>
-                )}
-                {isFirstAfterRecent && (
-                  <div className="px-3 pt-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    All movements
-                  </div>
-                )}
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={idx === highlightIndex}
-                  className={`flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
-                    idx === highlightIndex
-                      ? "bg-accent text-accent-foreground"
-                      : "hover:bg-accent/50"
-                  }`}
-                  onMouseEnter={() => setHighlightIndex(idx)}
-                  onClick={() => handleSelect(movement)}
-                >
-                  <span className="flex-1">{movement.canonicalName}</span>
-                  <Badge
-                    variant="secondary"
-                    className={`text-[10px] ${
-                      MOVEMENT_CATEGORY_COLORS[
-                        movement.category as MovementCategory
-                      ] || ""
-                    }`}
-                  >
-                    {movement.category}
-                  </Badge>
-                </button>
-              </div>
-            );
-          })}
+          {displayItems.map((movement, idx) => (
+            <button
+              key={movement.id}
+              type="button"
+              role="option"
+              aria-selected={idx === highlightIndex}
+              className={`flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
+                idx === highlightIndex
+                  ? "bg-accent text-accent-foreground"
+                  : "hover:bg-accent/50"
+              }`}
+              onMouseEnter={() => setHighlightIndex(idx)}
+              onClick={() => handleSelect(movement)}
+            >
+              <span className="flex-1">{movement.canonicalName}</span>
+              <Badge
+                variant="secondary"
+                className={`text-[10px] ${
+                  MOVEMENT_CATEGORY_COLORS[
+                    movement.category as MovementCategory
+                  ] || ""
+                }`}
+              >
+                {movement.category}
+              </Badge>
+            </button>
+          ))}
 
           {showAddNew && (
             <button

@@ -25,6 +25,14 @@ import type { MovementLibraryRow } from "@/app/api/movements/library/route";
 
 type LoggedFilter = "all" | "logged" | "untried";
 
+// Base UI's <Select.Value> shows the raw value unless the <Select> root is
+// given an `items` map from value → display label.
+const LOGGED_FILTER_LABELS: Record<LoggedFilter, string> = {
+  all: "All movements",
+  logged: "Logged",
+  untried: "Untried",
+};
+
 const RECENT_LIMIT = 8;
 
 function useMovementLibrary() {
@@ -111,14 +119,20 @@ export default function MovementsPage() {
           className="-mx-1 px-1"
         />
         <div className="flex gap-2">
-          <Select value={logged} onValueChange={(v) => setLogged(v as LoggedFilter)}>
+          <Select
+            value={logged}
+            items={LOGGED_FILTER_LABELS}
+            onValueChange={(v) => setLogged(v as LoggedFilter)}
+          >
             <SelectTrigger className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All movements</SelectItem>
-              <SelectItem value="logged">Logged</SelectItem>
-              <SelectItem value="untried">Untried</SelectItem>
+              {(Object.keys(LOGGED_FILTER_LABELS) as LoggedFilter[]).map((v) => (
+                <SelectItem key={v} value={v}>
+                  {LOGGED_FILTER_LABELS[v]}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>

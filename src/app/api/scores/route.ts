@@ -14,6 +14,7 @@ import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
 import { invalidateCrossfitInsightsCache } from "@/lib/crossfit/insights/cache";
 import type { SetEntry } from "@/types/crossfit";
 import { computeScoreEstimate } from "@/lib/calories/orchestrator";
+import { workingWeightFromSetData } from "@/lib/calories/one-rep-max";
 
 // ============================================
 // Request types
@@ -232,6 +233,16 @@ export async function POST(req: NextRequest) {
   const startedAt = body.startedAt ? new Date(body.startedAt) : null;
   const endedAt = body.endedAt ? new Date(body.endedAt) : null;
 
+  // Per-movement working weights (lb) for the load-relative calorie modifier.
+  // Keyed by workout_movements.id — the score row doesn't exist yet, so this
+  // comes straight off the request body.
+  const movementWeights = new Map<string, number>();
+  for (const d of normalizedDetails) {
+    if (!d.workoutMovementId) continue;
+    const w = workingWeightFromSetData(d.actualWeight ?? null, d.setEntries);
+    if (w != null) movementWeights.set(d.workoutMovementId, w);
+  }
+
   // Compute the personalized calorie estimate before opening the transaction.
   // Worth noting: this issues a handful of read queries (parts, movements,
   // paces, user, community pref). All reads — safe outside the tx.
@@ -241,6 +252,7 @@ export async function POST(req: NextRequest) {
     calorieEstimate = await computeScoreEstimate({
       workoutId: workoutId!,
       userId: effectiveUserId,
+      movementWeights,
       score: {
         timeSeconds: body.timeSeconds ?? null,
         hitTimeCap: body.hitTimeCap ?? false,

@@ -15,11 +15,13 @@ import {
   workouts,
   workoutParts,
   scores,
+  scoreMovementDetails,
   users,
 } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { estimateCalories, resolveBodyweightKg, REFERENCE_KG } from "./estimator";
 import { loadEstimatorPartsForWorkout } from "./loader";
+import { workingWeightFromSetData } from "./one-rep-max";
 import { resolveEpocMultiplier } from "./preferences";
 import type {
   CalorieEstimate,
@@ -90,6 +92,12 @@ export interface ComputeScoreEstimateInput {
   };
   /** Optional override; otherwise read from `users.activeCommunityId`. */
   communityId?: string | null;
+  /**
+   * Actual logged working weight (lb) per `workout_movements.id`. Drives the
+   * load-relative MET modifier. The score-save handler builds this from the
+   * per-movement details in the POST body (the score row doesn't exist yet).
+   */
+  movementWeights?: Map<string, number>;
 }
 
 export interface ComputeScoreEstimateResult {
@@ -127,6 +135,7 @@ export async function computeScoreEstimate(
     workoutId: input.workoutId,
     userId: input.userId,
     gender: user?.gender ?? null,
+    actualWeightByWorkoutMovementId: input.movementWeights,
   });
 
   const scoreContext: CalorieScoreContext = {
@@ -185,10 +194,27 @@ export async function recomputeScoreEstimate(scoreId: string): Promise<void> {
 
   if (!row) return;
 
+  // Rebuild the per-movement working weights from the persisted detail rows
+  // so a recompute reproduces the load-relative modifier.
+  const details = await db
+    .select({
+      workoutMovementId: scoreMovementDetails.workoutMovementId,
+      actualWeight: scoreMovementDetails.actualWeight,
+      setEntries: scoreMovementDetails.setEntries,
+    })
+    .from(scoreMovementDetails)
+    .where(eq(scoreMovementDetails.scoreId, scoreId));
+  const movementWeights = new Map<string, number>();
+  for (const d of details) {
+    const w = workingWeightFromSetData(d.actualWeight, d.setEntries);
+    if (w != null) movementWeights.set(d.workoutMovementId, w);
+  }
+
   const result = await computeScoreEstimate({
     scoreId: row.id,
     workoutId: row.workoutId,
     userId: row.userId,
+    movementWeights,
     score: {
       timeSeconds: row.timeSeconds,
       hitTimeCap: row.hitTimeCap,

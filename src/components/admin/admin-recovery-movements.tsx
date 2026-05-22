@@ -80,6 +80,17 @@ const emptyForm: FormData = {
 const formatLabel = (s: string) =>
   s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
+// Base UI's <Select.Value> shows the raw value unless the <Select> root is
+// given an `items` map from value → display label.
+const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
+  all: "All",
+  pending: "Pending",
+  validated: "Validated",
+};
+const RECOVERY_CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
+  RECOVERY_CATEGORIES.map((c) => [c, formatLabel(c)])
+);
+
 export function AdminRecoveryMovements() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -211,6 +222,7 @@ export function AdminRecoveryMovements() {
           </div>
           <Select
             value={status}
+            items={STATUS_FILTER_LABELS}
             onValueChange={(v) => setStatus(v as StatusFilter)}
           >
             <SelectTrigger className="w-[140px]">
@@ -353,6 +365,7 @@ export function AdminRecoveryMovements() {
               <Label>Category</Label>
               <Select
                 value={form.category}
+                items={RECOVERY_CATEGORY_LABELS}
                 onValueChange={(val) =>
                   setForm((prev) => ({
                     ...prev,
@@ -366,7 +379,7 @@ export function AdminRecoveryMovements() {
                 <SelectContent>
                   {RECOVERY_CATEGORIES.map((c) => (
                     <SelectItem key={c} value={c}>
-                      {formatLabel(c)}
+                      {RECOVERY_CATEGORY_LABELS[c]}
                     </SelectItem>
                   ))}
                 </SelectContent>

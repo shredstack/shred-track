@@ -50,6 +50,17 @@ import type { CreatePartInput } from "@/hooks/useWorkouts";
 const NO_CATEGORY = "__none__";
 const NO_CATEGORY_FILTER = "__all__";
 
+// Base UI's <Select.Value> shows the raw value unless the <Select> root is
+// given an `items` map from value → display label.
+const CATEGORY_FILTER_LABELS: Record<string, string> = {
+  [NO_CATEGORY_FILTER]: "All categories",
+  ...BENCHMARK_CATEGORY_LABELS,
+};
+const CATEGORY_FORM_LABELS: Record<string, string> = {
+  [NO_CATEGORY]: "None",
+  ...BENCHMARK_CATEGORY_LABELS,
+};
+
 function useAdminBenchmarks() {
   return useQuery<BenchmarkWorkout[]>({
     queryKey: ["admin-benchmarks"],
@@ -249,6 +260,7 @@ export function AdminBenchmarks() {
         </div>
         <Select
           value={categoryFilter}
+          items={CATEGORY_FILTER_LABELS}
           onValueChange={(v) =>
             setCategoryFilter(v as BenchmarkCategoryName | typeof NO_CATEGORY_FILTER)
           }
@@ -382,6 +394,7 @@ export function AdminBenchmarks() {
               <Label htmlFor="ab-cat">Category</Label>
               <Select
                 value={form.category ?? NO_CATEGORY}
+                items={CATEGORY_FORM_LABELS}
                 onValueChange={(v) =>
                   setForm((prev) => ({
                     ...prev,

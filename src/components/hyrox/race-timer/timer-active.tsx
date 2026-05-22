@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Pause, Play, Square, ChevronRight, X } from "lucide-react";
+import { Pause, Play, Square, ChevronRight, X, Heart } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { setRaceMode } from "@/hooks/useRaceMode";
 import { formatRunPace } from "@/lib/hyrox-data";
@@ -242,39 +242,48 @@ export function TimerActive({
 
       {/* Live pace block (iOS native only — hidden on web) */}
       {showPaceBlock && (
-        <div className="mx-4 mb-3 grid grid-cols-2 gap-3">
-          <div className="rounded-xl bg-white/[0.04] border border-white/[0.06] px-3 py-2 text-center">
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
-              Current Pace
-            </p>
-            <span
-              className={`block text-[28px] landscape:text-[22px] leading-none font-mono font-bold tabular-nums mt-1 ${
-                isRun && currentRunPaceSecPerKm !== null
-                  ? "text-blue-400"
-                  : "text-muted-foreground"
-              }`}
-            >
-              {isRun
-                ? formatRunPace(currentRunPaceSecPerKm, paceUnit)
-                : "—"}
-            </span>
-            <p className="text-[10px] text-muted-foreground mt-1">
-              {isRun ? "live" : "no pace this segment"}
-            </p>
+        <div className="mx-4 mb-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-white/[0.04] border border-white/[0.06] px-3 py-2 text-center">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+                Current Pace
+              </p>
+              <span
+                className={`block text-[28px] landscape:text-[22px] leading-none font-mono font-bold tabular-nums mt-1 ${
+                  isRun && currentRunPaceSecPerKm !== null
+                    ? "text-blue-400"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {isRun
+                  ? formatRunPace(currentRunPaceSecPerKm, paceUnit)
+                  : "—"}
+              </span>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                {isRun ? "live" : "no pace this segment"}
+              </p>
+            </div>
+            <div className="rounded-xl bg-white/[0.04] border border-white/[0.06] px-3 py-2 text-center">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+                Avg Run Pace
+              </p>
+              <span className="block text-[28px] landscape:text-[22px] leading-none font-mono font-bold tabular-nums mt-1 text-muted-foreground">
+                {formatRunPace(avgRunPaceSecPerKm, paceUnit)}
+              </span>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                {completedRunCount > 0
+                  ? `across ${completedRunCount} run${completedRunCount === 1 ? "" : "s"}`
+                  : "after first run"}
+              </p>
+            </div>
           </div>
-          <div className="rounded-xl bg-white/[0.04] border border-white/[0.06] px-3 py-2 text-center">
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
-              Avg Run Pace
-            </p>
-            <span className="block text-[28px] landscape:text-[22px] leading-none font-mono font-bold tabular-nums mt-1 text-muted-foreground">
-              {formatRunPace(avgRunPaceSecPerKm, paceUnit)}
-            </span>
-            <p className="text-[10px] text-muted-foreground mt-1">
-              {completedRunCount > 0
-                ? `across ${completedRunCount} run${completedRunCount === 1 ? "" : "s"}`
-                : "after first run"}
-            </p>
-          </div>
+          {/* HealthKit attribution. App Store Guideline 2.5.1 requires
+              HealthKit functionality to be clearly identified in the app's
+              UI — this block reads running distance from Apple Health. */}
+          <p className="flex items-center justify-center gap-1 mt-1.5 text-[10px] text-muted-foreground">
+            <Heart className="h-3 w-3 text-red-400" />
+            Run pace measured via Apple Health
+          </p>
         </div>
       )}
 

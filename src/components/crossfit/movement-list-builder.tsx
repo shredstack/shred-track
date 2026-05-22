@@ -5,6 +5,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Trash2,
   ChevronUp,
   ChevronDown,
@@ -67,6 +74,14 @@ function generateBlockTempId() {
   return `block-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+// An earlier for_load part this part's movements may anchor a weight_pct
+// prescription to. `tempId` is the source part's builder tempId; `label` is
+// the human label shown in the picker. Empty list = no weight_pct option.
+export interface EarlierLoadPart {
+  tempId: string;
+  label: string;
+}
+
 interface MovementListBuilderProps {
   movements: WorkoutBuilderMovement[];
   onChange: (movements: WorkoutBuilderMovement[]) => void;
@@ -83,6 +98,9 @@ interface MovementListBuilderProps {
   // per movement that lets the user mark it as the side-cadence movement
   // (runs on the cadence rather than as part of the main task).
   showSideCadence?: boolean;
+  // Earlier for_load parts a movement's weight can be prescribed as a
+  // percentage of. Empty/undefined hides the "% of earlier part" toggle.
+  earlierLoadParts?: EarlierLoadPart[];
 }
 
 // ============================================
@@ -188,6 +206,7 @@ function makeBuilderMovement(option: MovementOption): WorkoutBuilderMovement {
       : "",
     prescribedWeightMaleBwMultiplier: "",
     prescribedWeightFemaleBwMultiplier: "",
+    prescribedWeightPct: asString(defaults.weight_pct),
     tempo: defaults.tempo ?? "",
     isMaxReps: false,
     isSideCadence: false,
@@ -215,6 +234,7 @@ export function MovementListBuilder({
   onBlocksChange,
   workoutType,
   showSideCadence = false,
+  earlierLoadParts = [],
 }: MovementListBuilderProps) {
   const showRxWeights = workoutType !== "for_load";
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -514,6 +534,7 @@ export function MovementListBuilder({
               workoutType={workoutType}
               showRxWeights={showRxWeights}
               showSideCadence={showSideCadence}
+              earlierLoadParts={earlierLoadParts}
               movementLibrary={movementLibrary}
               onAddMovement={(opt) => addMovementToSection(opt, null)}
               onAddCustomMovement={(name) =>
@@ -542,6 +563,7 @@ export function MovementListBuilder({
               workoutType={workoutType}
               showRxWeights={showRxWeights}
               showSideCadence={showSideCadence}
+              earlierLoadParts={earlierLoadParts}
               movementLibrary={movementLibrary}
               onAddMovement={(opt) =>
                 addMovementToSection(opt, block.tempId)
@@ -608,6 +630,7 @@ interface SectionBodyProps {
   workoutType?: WorkoutType;
   showRxWeights: boolean;
   showSideCadence: boolean;
+  earlierLoadParts: EarlierLoadPart[];
   movementLibrary: MovementOption[];
   onAddMovement: (option: MovementOption) => void;
   onAddCustomMovement: (name: string) => void;
@@ -726,6 +749,7 @@ function SectionBody({
   workoutType,
   showRxWeights,
   showSideCadence,
+  earlierLoadParts,
   movementLibrary,
   onAddMovement,
   onAddCustomMovement,
@@ -762,6 +786,7 @@ function SectionBody({
               workoutType={workoutType}
               showRxWeights={showRxWeights}
               showSideCadence={showSideCadence}
+              earlierLoadParts={earlierLoadParts}
               movementLibrary={movementLibrary}
             />
           ))
@@ -802,6 +827,7 @@ interface MovementCardProps {
   workoutType?: WorkoutType;
   showRxWeights: boolean;
   showSideCadence: boolean;
+  earlierLoadParts: EarlierLoadPart[];
   movementLibrary: MovementOption[];
 }
 
@@ -841,6 +867,7 @@ function MovementCard({
   workoutType,
   showRxWeights,
   showSideCadence,
+  earlierLoadParts,
   movementLibrary,
   dragListeners,
 }: MovementCardProps & { dragListeners?: Record<string, unknown> }) {
@@ -985,6 +1012,7 @@ function MovementCard({
           {rxFields.includes("weight") && showRxWeights && (
             <WeightOrBwInputs
               movement={mov}
+              earlierLoadParts={earlierLoadParts}
               onUpdate={(updates) => onUpdate(mov.tempId, updates)}
             />
           )}
@@ -1034,6 +1062,7 @@ function MovementCard({
           {mov.metricType === "weight" && showRxWeights && (
             <WeightOrBwInputs
               movement={mov}
+              earlierLoadParts={earlierLoadParts}
               onUpdate={(updates) => onUpdate(mov.tempId, updates)}
             />
           )}
@@ -1266,20 +1295,73 @@ interface MovementInputProps {
   onUpdate: (updates: Partial<WorkoutBuilderMovement>) => void;
 }
 
-// The weight metric block. Default mode shows the gendered lb pair; the
-// "Use × BW" toggle (only available on 1RM-applicable barbell lifts)
-// swaps to the BW-multiplier inputs. Mutually exclusive at the UI level
-// so users can't accidentally set both.
-function WeightOrBwInputs({ movement, onUpdate }: MovementInputProps) {
+// The weight metric block. Three mutually-exclusive notations:
+//   - lb  — the gendered absolute-weight pair (default)
+//   - bw  — × bodyweight multiplier ("Use × BW", barbell 1RMs only)
+//   - pct — % of an earlier for_load part's logged max ("Use % of earlier
+//           part", only when such a part exists)
+// Switching modes clears the other modes' fields so a workout can't carry
+// two conflicting prescriptions.
+function WeightOrBwInputs({
+  movement,
+  onUpdate,
+  earlierLoadParts,
+}: MovementInputProps & { earlierLoadParts: EarlierLoadPart[] }) {
   const useBw = !!movement.useBwMultiplier;
+  const useWeightPct = !!movement.useWeightPct;
   // BW multiplier notation only makes sense on barbell 1RMs ("1.5× BW
   // back squat"). Hide the toggle elsewhere so users don't tag a
   // pull-up as "1.5× BW".
   const canUseBw = !!movement.is1rmApplicable;
+  // % of an earlier max needs an earlier for_load part to anchor to.
+  const canUsePct = earlierLoadParts.length > 0;
+
+  const mode: "lb" | "bw" | "pct" = useWeightPct
+    ? "pct"
+    : useBw
+      ? "bw"
+      : "lb";
+
+  const switchTo = (next: "lb" | "bw" | "pct") => {
+    if (next === "bw") {
+      onUpdate({
+        useBwMultiplier: true,
+        useWeightPct: false,
+        prescribedWeightMale: "",
+        prescribedWeightFemale: "",
+        prescribedWeightPct: "",
+        weightPctSourcePartTempRef: null,
+      });
+    } else if (next === "pct") {
+      onUpdate({
+        useWeightPct: true,
+        useBwMultiplier: false,
+        prescribedWeightMale: "",
+        prescribedWeightFemale: "",
+        prescribedWeightMaleBwMultiplier: "",
+        prescribedWeightFemaleBwMultiplier: "",
+        // Default to the most recent earlier for_load part — the common
+        // "Part 1 builds load, Part 2 works at a %" shape.
+        weightPctSourcePartTempRef:
+          movement.weightPctSourcePartTempRef ??
+          earlierLoadParts[earlierLoadParts.length - 1]?.tempId ??
+          null,
+      });
+    } else {
+      onUpdate({
+        useBwMultiplier: false,
+        useWeightPct: false,
+        prescribedWeightMaleBwMultiplier: "",
+        prescribedWeightFemaleBwMultiplier: "",
+        prescribedWeightPct: "",
+        weightPctSourcePartTempRef: null,
+      });
+    }
+  };
 
   return (
     <div className="space-y-1.5">
-      {!useBw ? (
+      {mode === "lb" && (
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">
@@ -1308,32 +1390,115 @@ function WeightOrBwInputs({ movement, onUpdate }: MovementInputProps) {
             />
           </div>
         </div>
-      ) : (
+      )}
+      {mode === "bw" && (
         <BwMultiplierInputs movement={movement} onUpdate={onUpdate} />
       )}
-      {canUseBw && (
-        <button
-          type="button"
-          onClick={() =>
-            onUpdate(
-              useBw
-                ? {
-                    useBwMultiplier: false,
-                    prescribedWeightMaleBwMultiplier: "",
-                    prescribedWeightFemaleBwMultiplier: "",
-                  }
-                : {
-                    useBwMultiplier: true,
-                    prescribedWeightMale: "",
-                    prescribedWeightFemale: "",
-                  }
-            )
-          }
-          className="text-[11px] text-primary/80 hover:text-primary"
-        >
-          {useBw ? "Use lb instead" : "Use × BW instead"}
-        </button>
+      {mode === "pct" && (
+        <WeightPctInputs
+          movement={movement}
+          onUpdate={onUpdate}
+          earlierLoadParts={earlierLoadParts}
+        />
       )}
+      {(canUseBw || canUsePct) && (
+        <div className="flex flex-wrap gap-x-3 gap-y-1">
+          {canUseBw && (
+            <button
+              type="button"
+              onClick={() => switchTo(mode === "bw" ? "lb" : "bw")}
+              className="text-[11px] text-primary/80 hover:text-primary"
+            >
+              {mode === "bw" ? "Use lb instead" : "Use × BW instead"}
+            </button>
+          )}
+          {canUsePct && (
+            <button
+              type="button"
+              onClick={() => switchTo(mode === "pct" ? "lb" : "pct")}
+              className="text-[11px] text-primary/80 hover:text-primary"
+            >
+              {mode === "pct" ? "Use lb instead" : "Use % of earlier part"}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// % of an earlier for_load part's max. Non-gendered (it's a % of the
+// athlete's own max). The picker lists only earlier for_load parts; the
+// concrete working weight is resolved at score-entry time.
+function WeightPctInputs({
+  movement,
+  onUpdate,
+  earlierLoadParts,
+}: MovementInputProps & { earlierLoadParts: EarlierLoadPart[] }) {
+  // Guard against a stale ref (source part deleted or reordered after this
+  // one) so the Select still renders a valid value.
+  const sourceRef =
+    movement.weightPctSourcePartTempRef &&
+    earlierLoadParts.some(
+      (p) => p.tempId === movement.weightPctSourcePartTempRef
+    )
+      ? movement.weightPctSourcePartTempRef
+      : "";
+
+  return (
+    <div className="space-y-1.5">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Percentage</Label>
+          <div className="relative">
+            <Input
+              type="number"
+              min={0}
+              step="1"
+              value={movement.prescribedWeightPct}
+              onChange={(e) =>
+                onUpdate({ prescribedWeightPct: e.target.value })
+              }
+              placeholder="e.g. 60"
+              className="h-7 pr-6 text-xs"
+            />
+            <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+              %
+            </span>
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Of part</Label>
+          <Select
+            value={sourceRef}
+            onValueChange={(v) =>
+              onUpdate({ weightPctSourcePartTempRef: v })
+            }
+          >
+            <SelectTrigger className="h-7 text-xs">
+              {/* Base UI's SelectValue renders the raw value (the part
+                  tempId) unless given a formatter — map it to the label. */}
+              <SelectValue placeholder="Pick a part">
+                {(value) =>
+                  earlierLoadParts.find((p) => p.tempId === value)?.label ??
+                  "Pick a part"
+                }
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {earlierLoadParts.map((p) => (
+                <SelectItem key={p.tempId} value={p.tempId}>
+                  {p.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        The working weight is calculated from the athlete&apos;s logged max
+        on that part when they enter their score.
+      </p>
     </div>
   );
 }

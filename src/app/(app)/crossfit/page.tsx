@@ -87,6 +87,13 @@ function generateTempId() {
 }
 
 function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
+  // Pre-generate a tempId per part so weight_pct movements can map their
+  // source-part DB id back to a builder tempRef (the builder works in
+  // tempIds; the save path resolves them back to real ids).
+  const partTempIds = w.parts.map(() => generateTempId());
+  const tempIdByDbPartId = new Map(
+    w.parts.map((p, i) => [p.id, partTempIds[i]])
+  );
   return {
     title: w.title ?? "",
     description: w.description ?? "",
@@ -99,7 +106,7 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
       w.vestWeightFemaleLb != null ? String(w.vestWeightFemaleLb) : "",
     isPartner: !!w.isPartner,
     partnerCount: w.partnerCount != null ? String(w.partnerCount) : "",
-    parts: w.parts.map((p): WorkoutBuilderPart => {
+    parts: w.parts.map((p, partIdx): WorkoutBuilderPart => {
       const blocks = (p.blocks ?? []).map((b) => ({
         tempId: generateTempId(),
         id: b.id,
@@ -110,7 +117,7 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
         blocks.map((b) => [b.id ?? "", b.tempId])
       );
       return {
-        tempId: generateTempId(),
+        tempId: partTempIds[partIdx],
         id: p.id,
         label: p.label ?? "",
         workoutType: p.workoutType,
@@ -206,6 +213,17 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
               m.prescribedWeightFemaleBwMultiplier != null
                 ? String(m.prescribedWeightFemaleBwMultiplier)
                 : "",
+            // weight_pct — re-anchor the source-part DB id to its builder
+            // tempId so the picker resolves and the toggle starts on.
+            prescribedWeightPct:
+              m.prescribedWeightPct != null
+                ? String(m.prescribedWeightPct)
+                : "",
+            useWeightPct: m.prescribedWeightPctSourcePartId != null,
+            weightPctSourcePartTempRef: m.prescribedWeightPctSourcePartId
+              ? tempIdByDbPartId.get(m.prescribedWeightPctSourcePartId) ??
+                null
+              : null,
             tempo: m.tempo ?? "",
             isMaxReps: !!m.isMaxReps,
             isSideCadence: !!m.isSideCadence,
@@ -576,14 +594,12 @@ function CrossfitPageBody() {
     const part = scoringWorkout.parts.find((p) => p.id === partId);
     if (!part) return;
 
-    try {
-      if (part.score?.id) {
-        await updateScore.mutateAsync({ scoreId: part.score.id, score });
-      } else {
-        await logScore.mutateAsync(score);
-      }
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Failed to save score");
+    // Errors propagate to ScoreEntry's handleSubmit, which surfaces them in
+    // the dialog and keeps it open so the failed part can be retried.
+    if (part.score?.id) {
+      await updateScore.mutateAsync({ scoreId: part.score.id, score });
+    } else {
+      await logScore.mutateAsync(score);
     }
   };
 

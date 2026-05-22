@@ -179,6 +179,7 @@ export function ProgrammingDayCard({
               </Label>
               <Select
                 value={newKind}
+                items={WORKOUT_SECTION_KIND_LABELS}
                 onValueChange={(v) => setNewKind(v as WorkoutSectionKind)}
               >
                 <SelectTrigger className="h-8 w-full">
@@ -406,6 +407,7 @@ function SectionRow({ communityId, section, onMutated }: SectionRowProps) {
           <Label className="text-[10px] text-muted-foreground">Kind</Label>
           <Select
             value={kind}
+            items={WORKOUT_SECTION_KIND_LABELS}
             onValueChange={(v) => setKind(v as WorkoutSectionKind)}
           >
             <SelectTrigger className="h-8">
