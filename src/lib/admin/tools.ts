@@ -70,9 +70,10 @@ export interface AdminTool {
   icon: LucideIcon;
   group: AdminGroup;
   // When true, only super admins (users.is_admin) see this tool. Otherwise
-  // any gym admin/coach can see it too. Movements, benchmarks, and recovery
-  // movements are intentionally open to gym staff so coaches can curate
-  // their library without going through a super admin.
+  // any gym admin/coach can see it too. Movements, benchmarks, recovery
+  // movements, and feature flags are intentionally open to gym staff —
+  // for feature flags the page itself shows a limited, gym-scoped view to
+  // non-super admins (see /admin/feature-flags/page.tsx).
   superOnly: boolean;
 }
 
@@ -80,10 +81,10 @@ export const ADMIN_TOOLS: AdminTool[] = [
   {
     slug: "feature-flags",
     label: "Feature flags",
-    description: "Toggle features per gym (gym_programming, classes, etc.)",
+    description: "Enable or disable gym features",
     icon: Flag,
     group: "platform",
-    superOnly: true,
+    superOnly: false,
   },
   {
     slug: "movements",

@@ -46,6 +46,10 @@ export const users = pgTable("users", {
   // mode (no gym selected). FK declared in the SQL migration (not here)
   // to avoid a circular type dependency between `users` and `communities`.
   activeCommunityId: uuid("active_community_id"),
+  // CrossFit page view choice: 'gym' (gym programming) or 'personal'. Null
+  // means no explicit choice yet — the client defaults to 'gym'. Persisted
+  // here so the preference survives app reinstalls and syncs across devices.
+  crossfitView: text("crossfit_view"),
   // PR 3 §3.1 — extended profile fields. All optional. `dateOfBirth`
   // unlocks the birthday auto-post path (§3.8) once populated.
   dateOfBirth: date("date_of_birth"),
@@ -296,6 +300,12 @@ export const featureFlags = pgTable("feature_flags", {
   defaultValue: jsonb("default_value").notNull(),
   isPerGym: boolean("is_per_gym").default(false).notNull(),
   isPerUser: boolean("is_per_user").default(false).notNull(),
+  // When true, an active gym admin/coach can toggle this flag for their own
+  // gym from the limited /admin/feature-flags view. When false, only super
+  // admins can change it.
+  isGymAdminConfigurable: boolean("is_gym_admin_configurable")
+    .default(false)
+    .notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

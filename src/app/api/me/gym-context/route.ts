@@ -29,6 +29,7 @@ export async function GET() {
       name: users.name,
       isAdmin: users.isAdmin,
       activeCommunityId: users.activeCommunityId,
+      crossfitView: users.crossfitView,
     })
     .from(users)
     .where(eq(users.id, sessionUser.id))
@@ -88,6 +89,12 @@ export async function GET() {
       email: userRow.email,
       name: userRow.name,
       isSuperAdmin,
+      // Normalise to the known union so the client type stays honest;
+      // anything unexpected falls back to null ("no choice → default").
+      crossfitView:
+        userRow.crossfitView === "gym" || userRow.crossfitView === "personal"
+          ? userRow.crossfitView
+          : null,
     },
     activeCommunityId,
     memberships: memberships.map((m) => ({

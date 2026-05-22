@@ -27,12 +27,17 @@ export interface GymMembership {
   joinedAt: string;
 }
 
+/** CrossFit page view: gym programming vs the user's personal list. */
+export type CrossfitView = "gym" | "personal";
+
 export interface GymContext {
   user: {
     id: string;
     email: string;
     name: string;
     isSuperAdmin: boolean;
+    /** Persisted CrossFit view choice; null = no choice yet (defaults to gym). */
+    crossfitView: CrossfitView | null;
   };
   activeCommunityId: string | null;
   memberships: GymMembership[];
@@ -93,6 +98,47 @@ export function useSetActiveCommunity() {
       // Workout queries are keyed by activeCommunityId — refetch all of
       // them so the CrossFit page reflects the new gym immediately.
       qc.invalidateQueries({ queryKey: ["workouts"] });
+    },
+  });
+}
+
+/**
+ * Persists the CrossFit page view choice ("gym" vs "personal") on the user
+ * row. Optimistically patches the cached gym-context so the toggle flips
+ * instantly — the CrossFit page derives its view (and workout scope)
+ * straight from that cache.
+ */
+export function useSetCrossfitView() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (view: CrossfitView) => {
+      const res = await fetch("/api/me/crossfit-view", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ view }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || "Failed to save view preference");
+      }
+      return view;
+    },
+    onMutate: async (view) => {
+      await qc.cancelQueries({ queryKey: ["gym-context"] });
+      const previous = qc.getQueryData<GymContext>(["gym-context"]);
+      if (previous) {
+        qc.setQueryData<GymContext>(["gym-context"], {
+          ...previous,
+          user: { ...previous.user, crossfitView: view },
+        });
+      }
+      return { previous };
+    },
+    onError: (_err, _view, ctx) => {
+      if (ctx?.previous) qc.setQueryData(["gym-context"], ctx.previous);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["gym-context"] });
     },
   });
 }
