@@ -669,6 +669,12 @@ export function ScoreEntry({
       // left in state (from a prior toggle), but keep setEntries — those
       // are the canonical record of what was lifted on for_load parts.
       const includeScalingDetails = st.division === "scaled";
+      // For a complex, the per-set load lives only on the lead movement —
+      // guard against stale per-movement entries from an earlier log.
+      const isComplexPart = part.structure === "complex";
+      const complexAnchorId = isComplexPart
+        ? part.movements.find((m) => m.metricType !== "duration")?.id
+        : undefined;
       const scalings: MovementScaling[] = part.movements.map((mov) => {
         const scaling = st.movementScalings[mov.movementId] ?? {};
         const setEntries: SetEntry[] = (st.setEntriesMap[mov.id] ?? [])
@@ -713,7 +719,11 @@ export function ScoreEntry({
           substitutionMovementId: includeScalingDetails
             ? scaling.substitutionMovementId
             : undefined,
-          setEntries: setEntries.length > 0 ? setEntries : undefined,
+          setEntries:
+            setEntries.length > 0 &&
+            (!isComplexPart || mov.id === complexAnchorId)
+              ? setEntries
+              : undefined,
           actualDurationSeconds: movWasScaled
             ? (durSec ?? undefined)
             : undefined,
@@ -972,6 +982,88 @@ export function ScoreEntry({
         const loadMovements = activePart.movements.filter(
           (m) => m.metricType !== "duration"
         );
+
+        // A complex is one barbell — the load doesn't change between
+        // movements, so there's a single weight per *set*, not per movement.
+        // We render one set-weight row and store it against the lead movement
+        // (`anchor`), which the per-movement save/score path picks up
+        // unchanged (the other movements simply carry no set entries).
+        if (activePart.structure === "complex" && loadMovements.length > 0) {
+          const anchor = loadMovements[0];
+          const sets = setCountForLoad(
+            activePart.rounds,
+            anchor.prescribedReps
+          );
+          const drafts = state.setEntriesMap[anchor.id] ?? [];
+          const displayEntries: SetEntry[] = Array.from(
+            { length: sets },
+            (_, i) => {
+              const w = drafts[i] ? parseFloat(drafts[i].weight) : NaN;
+              return Number.isFinite(w) && w > 0 ? { weight: w } : { weight: 0 };
+            }
+          );
+          return (
+            <div className="space-y-2 rounded-lg border border-border/50 bg-muted/20 p-3">
+              <Label className="text-xs font-medium">
+                Set weights
+                <span className="ml-1 font-normal text-muted-foreground">
+                  · one weight per set — the bar doesn&apos;t come down
+                </span>
+              </Label>
+              <div
+                className="grid gap-1.5"
+                style={{
+                  gridTemplateColumns: `repeat(${Math.min(sets, 5)}, minmax(0, 1fr))`,
+                }}
+              >
+                {Array.from({ length: sets }, (_, i) => {
+                  const draft = drafts[i];
+                  return (
+                    <div key={i} className="space-y-1">
+                      <Input
+                        type="number"
+                        value={draft?.weight ?? ""}
+                        onChange={(e) =>
+                          updateSetEntry(
+                            activePart.id,
+                            anchor.id,
+                            i,
+                            "weight",
+                            e.target.value
+                          )
+                        }
+                        placeholder={`Set ${i + 1}`}
+                        className="h-8 text-xs font-mono text-center"
+                        aria-label={`Set ${i + 1} weight`}
+                      />
+                      <Input
+                        type="number"
+                        min={1}
+                        max={10}
+                        step="0.5"
+                        value={draft?.rpe ?? ""}
+                        onChange={(e) =>
+                          updateSetEntry(
+                            activePart.id,
+                            anchor.id,
+                            i,
+                            "rpe",
+                            e.target.value
+                          )
+                        }
+                        placeholder="RPE"
+                        className="h-6 text-[10px] font-mono text-center text-muted-foreground"
+                        aria-label={`Set ${i + 1} RPE`}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              <SetWeightBreakdown entries={displayEntries} />
+            </div>
+          );
+        }
+
         return (
           <div className="space-y-4">
             {/* Per-movement set weights — the canonical data. Each movement

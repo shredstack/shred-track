@@ -176,7 +176,9 @@ function ScoreRow({
         <AmrapScoreBreakdown part={part} score={s} />
       )}
 
-      {/* Per-set breakdown for for_load parts */}
+      {/* Per-set breakdown for for_load parts. A complex logs one weight per
+          set (stored against the lead movement), so drop the per-movement
+          label and the e1RM estimate — neither applies to a complex. */}
       {part.workoutType === "for_load" &&
         s.movementDetails &&
         s.movementDetails
@@ -187,22 +189,30 @@ function ScoreRow({
             const mov = part.movements.find(
               (m) => m.id === d.workoutMovementId
             );
+            const isComplex = part.structure === "complex";
             return (
               <div
                 key={d.workoutMovementId}
                 className="space-y-0.5 pl-2 text-xs"
               >
-                {mov && (
+                {mov && !isComplex && (
                   <span className="text-[10px] text-muted-foreground">
                     {mov.movementName}
                   </span>
                 )}
                 <SetWeightBreakdown
                   entries={d.setEntries!}
-                  repsPerSet={(() => {
-                    const scheme = mov?.prescribedReps || part.repScheme;
-                    return scheme ? parseRepsPerSet(scheme) : undefined;
-                  })()}
+                  repsPerSet={
+                    isComplex
+                      ? undefined
+                      : (() => {
+                          const scheme =
+                            mov?.prescribedReps || part.repScheme;
+                          return scheme
+                            ? parseRepsPerSet(scheme)
+                            : undefined;
+                        })()
+                  }
                 />
               </div>
             );

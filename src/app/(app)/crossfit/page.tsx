@@ -34,11 +34,14 @@ import {
   type CreatePartInput,
   type WorkoutScopeFilter,
 } from "@/hooks/useWorkouts";
-import { useActiveMembership, useGymContext } from "@/hooks/useGymContext";
+import {
+  useActiveMembership,
+  useGymContext,
+  useSetCrossfitView,
+} from "@/hooks/useGymContext";
 import { builderPartToPayload } from "@/lib/crossfit/builder-payload";
 import { formatSecondsAsClock } from "@/lib/crossfit/duration-parser";
 import { useMovements, useCreateMovement } from "@/hooks/useMovements";
-import { useStickyTab } from "@/hooks/useStickyTab";
 import type {
   WorkoutBuilderForm,
   WorkoutBuilderPart,
@@ -284,18 +287,20 @@ function CrossfitPageBody() {
     // We only consume on mount — subsequent navigation is local state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // When the user has an active gym, default to the gym programming view.
-  // The toggle lets coaches/members flip to their personal-only list, and
-  // their pick is persisted across refreshes (per-page).
-  const [storedView, setView] = useStickyTab<CrossfitView>("crossfit");
-  const view: CrossfitView = storedView ?? "gym";
-
   const dateStr = toDateString(selectedDate);
   const { data: gymContext, isPending: gymContextPending } = useGymContext();
   const activeMembership = useActiveMembership();
   const userId = gymContext?.user.id ?? null;
   const isCoach = !!activeMembership && (activeMembership.isAdmin || activeMembership.isCoach);
   const isSuperAdmin = !!gymContext?.user.isSuperAdmin;
+
+  // CrossFit view choice — "Gym programming" vs "My personal". Persisted on
+  // the user row (see useSetCrossfitView) so it survives app reinstalls and
+  // syncs across devices. Null (no choice made yet) defaults to the gym
+  // programming view when the user belongs to a gym.
+  const view: CrossfitView = gymContext?.user.crossfitView ?? "gym";
+  const setCrossfitView = useSetCrossfitView();
+
   const inGymMode = view === "gym" && !!activeMembership;
 
   const scope: WorkoutScopeFilter = useMemo(() => {
@@ -623,7 +628,7 @@ function CrossfitPageBody() {
       {activeMembership && (
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setView("gym")}
+            onClick={() => setCrossfitView.mutate("gym")}
             className={`flex-1 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
               view === "gym"
                 ? "border-primary bg-primary/10 text-primary"
@@ -633,7 +638,7 @@ function CrossfitPageBody() {
             Gym programming
           </button>
           <button
-            onClick={() => setView("personal")}
+            onClick={() => setCrossfitView.mutate("personal")}
             className={`flex-1 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
               view === "personal"
                 ? "border-primary bg-primary/10 text-primary"
@@ -684,7 +689,7 @@ function CrossfitPageBody() {
           <button
             type="button"
             className="underline underline-offset-2 hover:text-foreground"
-            onClick={() => setView("personal")}
+            onClick={() => setCrossfitView.mutate("personal")}
           >
             My personal
           </button>{" "}

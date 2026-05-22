@@ -106,6 +106,7 @@ export async function getFlagAdminMatrix(): Promise<{
     defaultValue: FlagValue;
     isPerGym: boolean;
     isPerUser: boolean;
+    isGymAdminConfigurable: boolean;
   }>;
   overrides: Record<string, Record<string, FlagValue>>; // communityId → flagKey → value
 }> {
@@ -116,6 +117,7 @@ export async function getFlagAdminMatrix(): Promise<{
       defaultValue: featureFlags.defaultValue,
       isPerGym: featureFlags.isPerGym,
       isPerUser: featureFlags.isPerUser,
+      isGymAdminConfigurable: featureFlags.isGymAdminConfigurable,
     })
     .from(featureFlags);
 
@@ -134,6 +136,67 @@ export async function getFlagAdminMatrix(): Promise<{
   }
 
   return { flags: flagRows, overrides };
+}
+
+/**
+ * Limited flag view for a single gym, used by gym admins/coaches. Returns
+ * only flags marked `isGymAdminConfigurable` plus that gym's current
+ * overrides — never any other gym's data.
+ */
+export async function getGymAdminFlagView(communityId: string): Promise<{
+  flags: Array<{
+    key: string;
+    description: string | null;
+    defaultValue: FlagValue;
+    isPerGym: boolean;
+    isPerUser: boolean;
+    isGymAdminConfigurable: boolean;
+  }>;
+  overrides: Record<string, FlagValue>; // flagKey → value, for this gym only
+}> {
+  const flags = await db
+    .select({
+      key: featureFlags.key,
+      description: featureFlags.description,
+      defaultValue: featureFlags.defaultValue,
+      isPerGym: featureFlags.isPerGym,
+      isPerUser: featureFlags.isPerUser,
+      isGymAdminConfigurable: featureFlags.isGymAdminConfigurable,
+    })
+    .from(featureFlags)
+    .where(eq(featureFlags.isGymAdminConfigurable, true))
+    .orderBy(featureFlags.key);
+
+  const overrideRows = await db
+    .select({
+      flagKey: communityFeatureOverrides.flagKey,
+      value: communityFeatureOverrides.value,
+    })
+    .from(communityFeatureOverrides)
+    .where(eq(communityFeatureOverrides.communityId, communityId));
+
+  const overrides: Record<string, FlagValue> = {};
+  for (const row of overrideRows) overrides[row.flagKey] = row.value;
+
+  return { flags, overrides };
+}
+
+/**
+ * Returns a flag's gating booleans, or null if the key is unknown. Used by
+ * the API to decide whether a gym admin is allowed to change a given flag.
+ */
+export async function getFlagGate(
+  key: string
+): Promise<{ isPerGym: boolean; isGymAdminConfigurable: boolean } | null> {
+  const [row] = await db
+    .select({
+      isPerGym: featureFlags.isPerGym,
+      isGymAdminConfigurable: featureFlags.isGymAdminConfigurable,
+    })
+    .from(featureFlags)
+    .where(eq(featureFlags.key, key))
+    .limit(1);
+  return row ?? null;
 }
 
 /** Set or unset a community override. Pass `value: null` to clear. */

@@ -28,7 +28,7 @@ export default async function AdminPage() {
         <p className="text-sm text-muted-foreground">
           {access.isSuperAdmin
             ? "Tools for managing canonical data and user access"
-            : "Curate the shared movement and benchmark libraries"}
+            : "Curate shared libraries and manage your gym's features"}
         </p>
       </div>
 
