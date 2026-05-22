@@ -12,13 +12,20 @@ function getDb() {
     // session pooler. `prepare: false` is REQUIRED there: transaction-mode
     // pooling cannot carry prepared statements across statements.
     //
-    // Do NOT set `max: 1`. Capping each serverless instance to a single
-    // connection serialized every query onto it; because a page render fans
-    // out many concurrent queries, the lone connection could stall and hang
-    // the whole request until Vercel's 300s timeout. The postgres.js default
-    // pool is the known-good behavior — the transaction pooler is built to
-    // absorb it.
-    const client = postgres(process.env.DATABASE_URL!, { prepare: false });
+    // `idle_timeout` closes a connection 20s after its last use, so a warm-but-
+    // idle serverless instance releases its pooler client slots between
+    // requests instead of hoarding them.
+    //
+    // `max` is intentionally left at the postgres.js default (10). Do NOT set
+    // `max: 1`: that serialized every query of a request onto one connection,
+    // so a single stalled query hung the whole request until Vercel's 300s
+    // timeout. 10 gives ample headroom; the transaction pooler absorbs the
+    // per-request fan-out and `idle_timeout` keeps idle instances from
+    // accumulating slots.
+    const client = postgres(process.env.DATABASE_URL!, {
+      prepare: false,
+      idle_timeout: 20,
+    });
     _db = drizzle(client, { schema });
   }
   return _db;
