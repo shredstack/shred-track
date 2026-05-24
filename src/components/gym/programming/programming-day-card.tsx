@@ -34,9 +34,19 @@ import {
   WORKOUT_SECTION_KIND_LABELS,
   type WorkoutSectionKind,
 } from "@/db/schema";
-import { SmartBuilder } from "@/components/crossfit/smart-builder";
-import { builderPartToPayload } from "@/lib/crossfit/builder-payload";
-import type { WorkoutBuilderForm } from "@/types/crossfit";
+import { AddWorkoutTabs } from "@/components/crossfit/add-workout-tabs";
+import {
+  benchmarkPartToBuilderPart,
+  builderPartToPayload,
+} from "@/lib/crossfit/builder-payload";
+import { resolveParsedToCreatePart } from "@/lib/crossfit/resolve-parsed-movements";
+import { useMovements, useCreateMovement } from "@/hooks/useMovements";
+import type {
+  BenchmarkWorkout,
+  ParsedWorkout,
+  WorkoutBuilderForm,
+} from "@/types/crossfit";
+import type { CreatePartInput } from "@/hooks/useWorkouts";
 import { WorkoutPreviewDialog } from "./workout-preview-dialog";
 
 interface SectionWire {
@@ -225,25 +235,37 @@ function SectionRow({ communityId, section, onMutated }: SectionRowProps) {
   const [builderSaving, setBuilderSaving] = useState(false);
   const [builderError, setBuilderError] = useState<string | null>(null);
 
-  const handleBuilderSave = useCallback(
-    async (form: WorkoutBuilderForm) => {
-      setBuilderError(null);
-      const parts = form.parts
-        .map(builderPartToPayload)
-        .filter((p): p is NonNullable<ReturnType<typeof builderPartToPayload>> => p !== null);
-      if (parts.length === 0) {
+  // Library + auto-create are needed by the Paste tab to resolve movement
+  // names to ids. React Query caches both per-component, so calling these
+  // hooks here doesn't refetch when multiple rows mount.
+  const { data: movementLibrary = [] } = useMovements();
+  const createMovement = useCreateMovement();
+
+  // Single write path used by all three tabs. Section title gets
+  // overwritten only when the caller passes one (e.g. Smart Builder
+  // title, parsed workout title, benchmark name) — passing `null`
+  // explicitly clears the title.
+  const saveSectionContent = useCallback(
+    async (input: {
+      parts: CreatePartInput[];
+      title?: string | null;
+      successMessage?: string;
+    }) => {
+      if (input.parts.length === 0) {
         setBuilderError("Add at least one part with movements.");
         return;
       }
+      setBuilderError(null);
       setBuilderSaving(true);
       try {
-        // Forward the Smart Builder title onto the section so members see
-        // the WOD name (e.g. "Cindy") next to the WOD pill. Only send
-        // when non-empty so we don't clobber a title typed in the inline
-        // section editor.
-        const trimmedTitle = form.title?.trim() ?? "";
-        const payload: { parts: typeof parts; title?: string } = { parts };
-        if (trimmedTitle) payload.title = trimmedTitle;
+        const payload: {
+          parts: CreatePartInput[];
+          title?: string | null;
+        } = { parts: input.parts };
+        if (input.title !== undefined) {
+          const trimmed = input.title?.trim();
+          payload.title = trimmed ? trimmed : null;
+        }
         const res = await fetch(
           `/api/gym/${communityId}/programming/sections/${section.id}/content`,
           {
@@ -256,7 +278,7 @@ function SectionRow({ communityId, section, onMutated }: SectionRowProps) {
           const data = await res.json().catch(() => null);
           throw new Error(data?.error ?? "Failed to save");
         }
-        toast.success("Content saved");
+        toast.success(input.successMessage ?? "Content saved");
         setBuilderOpen(false);
         onMutated();
       } catch (err) {
@@ -268,6 +290,62 @@ function SectionRow({ communityId, section, onMutated }: SectionRowProps) {
       }
     },
     [communityId, section.id, onMutated]
+  );
+
+  const handleBuilderSave = useCallback(
+    async (form: WorkoutBuilderForm) => {
+      const parts = form.parts
+        .map(builderPartToPayload)
+        .filter((p): p is CreatePartInput => p !== null);
+      // Forward the Smart Builder title onto the section so members see
+      // the WOD name (e.g. "Cindy") next to the WOD pill. Only forward
+      // when non-empty — passing undefined preserves the section's
+      // current title (an admin may have typed one in the inline editor).
+      const trimmedTitle = form.title?.trim() ?? "";
+      await saveSectionContent({
+        parts,
+        title: trimmedTitle ? trimmedTitle : undefined,
+      });
+    },
+    [saveSectionContent]
+  );
+
+  const handleParserSave = useCallback(
+    async (parsed: ParsedWorkout) => {
+      const resolved = await resolveParsedToCreatePart(parsed, {
+        movementLibrary,
+        createMovement: (input) => createMovement.mutateAsync(input),
+      });
+      if (!resolved) {
+        setBuilderError(
+          "Couldn't resolve any movements. Try the Smart Builder."
+        );
+        return;
+      }
+      await saveSectionContent({
+        parts: [resolved.part],
+        title: parsed.title ?? undefined,
+      });
+    },
+    [movementLibrary, createMovement, saveSectionContent]
+  );
+
+  const handleBenchmarkSave = useCallback(
+    async (benchmark: BenchmarkWorkout) => {
+      // Run the benchmark's parts through the same form→payload pipeline
+      // the user-facing benchmark form uses, so section content matches
+      // what users see when they pick the same benchmark from the
+      // CrossFit tab.
+      const parts = benchmark.parts
+        .map((p) => builderPartToPayload(benchmarkPartToBuilderPart(p)))
+        .filter((p): p is CreatePartInput => p !== null);
+      await saveSectionContent({
+        parts,
+        title: benchmark.name,
+        successMessage: `Added ${benchmark.name}`,
+      });
+    },
+    [saveSectionContent]
   );
 
   async function save() {
@@ -389,10 +467,18 @@ function SectionRow({ communityId, section, onMutated }: SectionRowProps) {
                 Saving…
               </div>
             ) : null}
-            <SmartBuilder
-              onSave={handleBuilderSave}
+            <AddWorkoutTabs
+              onSaveFromBuilder={handleBuilderSave}
+              onSaveFromParser={handleParserSave}
+              onSaveFromBenchmark={handleBenchmarkSave}
               onCancel={() => setBuilderOpen(false)}
-              saveLabel="Save content"
+              builderSaveLabel="Save content"
+              parserSaveLabel="Save content"
+              benchmarkSubmitLabel="Add to section"
+              isBenchmarkSubmitting={builderSaving}
+              lockedDate
+              hidePartner
+              hideVest
             />
           </DialogContent>
         </Dialog>

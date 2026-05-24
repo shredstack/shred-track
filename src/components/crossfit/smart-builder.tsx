@@ -44,6 +44,15 @@ interface SmartBuilderProps {
   // workouts so "Add Workout" while viewing a non-today date saves to the
   // date the user is looking at, not today.
   defaultWorkoutDate?: string;
+  // Hide the date input — used when the parent fixes the date (e.g.
+  // programming a section for a specific day).
+  hideDateInput?: boolean;
+  // Hide the partner toggle — used when partner/solo is decided by the
+  // athlete at scoring time, not when programming.
+  hidePartner?: boolean;
+  // Hide the vest requirements block — same rationale as hidePartner for
+  // gym programming.
+  hideVest?: boolean;
 }
 
 type Step = "build" | "review";
@@ -244,6 +253,9 @@ export function SmartBuilder({
   initialForm,
   saveLabel,
   defaultWorkoutDate,
+  hideDateInput,
+  hidePartner,
+  hideVest,
 }: SmartBuilderProps) {
   const [step, setStep] = useState<Step>("build");
   const [form, setForm] = useState<WorkoutBuilderForm>(
@@ -569,34 +581,40 @@ export function SmartBuilder({
           </div>
 
           {/* Date */}
-          <WorkoutDateInput
-            id="sb-date"
-            label="Date"
-            value={form.workoutDate}
-            onChange={(value) =>
-              setForm((prev) => ({ ...prev, workoutDate: value }))
-            }
-          />
+          {!hideDateInput && (
+            <WorkoutDateInput
+              id="sb-date"
+              label="Date"
+              value={form.workoutDate}
+              onChange={(value) =>
+                setForm((prev) => ({ ...prev, workoutDate: value }))
+              }
+            />
+          )}
 
           {/* Workout requirements (vest) */}
-          <VestRequirements
-            requiresVest={!!form.requiresVest}
-            vestWeightMaleLb={form.vestWeightMaleLb ?? ""}
-            vestWeightFemaleLb={form.vestWeightFemaleLb ?? ""}
-            onChange={(updates) =>
-              setForm((prev) => ({ ...prev, ...updates }))
-            }
-          />
+          {!hideVest && (
+            <VestRequirements
+              requiresVest={!!form.requiresVest}
+              vestWeightMaleLb={form.vestWeightMaleLb ?? ""}
+              vestWeightFemaleLb={form.vestWeightFemaleLb ?? ""}
+              onChange={(updates) =>
+                setForm((prev) => ({ ...prev, ...updates }))
+              }
+            />
+          )}
 
           {/* Partner / team workout. Description carries the split
               strategy — we don't try to model "tag your partner" yet. */}
-          <PartnerWorkoutToggle
-            isPartner={!!form.isPartner}
-            partnerCount={form.partnerCount ?? ""}
-            onChange={(updates) =>
-              setForm((prev) => ({ ...prev, ...updates }))
-            }
-          />
+          {!hidePartner && (
+            <PartnerWorkoutToggle
+              isPartner={!!form.isPartner}
+              partnerCount={form.partnerCount ?? ""}
+              onChange={(updates) =>
+                setForm((prev) => ({ ...prev, ...updates }))
+              }
+            />
+          )}
 
           {/* Notes */}
           <div className="space-y-2">

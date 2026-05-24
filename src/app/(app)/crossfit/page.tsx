@@ -4,15 +4,13 @@ import { Suspense, useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Plus, ClipboardPaste, Wrench, Zap, Trophy, Loader2, Search, Sparkles } from "lucide-react";
+import { Plus, Zap, Trophy, Loader2, Search, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { WorkoutCard } from "@/components/crossfit/workout-card";
 import { SmartBuilder } from "@/components/crossfit/smart-builder";
-import { WorkoutParser } from "@/components/crossfit/workout-parser";
-import { BenchmarkPicker } from "@/components/crossfit/benchmark-picker";
+import { AddWorkoutTabs } from "@/components/crossfit/add-workout-tabs";
 import { ScoreEntry } from "@/components/crossfit/score-entry";
 import { LeaderboardSheet } from "@/components/crossfit/leaderboard-sheet";
 import { DateNavigator } from "@/components/shared/date-navigator";
@@ -42,15 +40,16 @@ import {
 import { builderPartToPayload } from "@/lib/crossfit/builder-payload";
 import { formatSecondsAsClock } from "@/lib/crossfit/duration-parser";
 import { useMovements, useCreateMovement } from "@/hooks/useMovements";
+import { useCreateWorkoutFromBenchmark } from "@/hooks/useBenchmarks";
+import { resolveParsedToCreatePart } from "@/lib/crossfit/resolve-parsed-movements";
 import type {
   WorkoutBuilderForm,
   WorkoutBuilderPart,
   WorkoutBuilderMovement,
   WorkoutDisplay,
   ParsedWorkout,
-  ParsedMovement,
   ScoreInput,
-  MovementOption,
+  BenchmarkWorkout,
 } from "@/types/crossfit";
 
 // Local (not UTC) YYYY-MM-DD. `.toISOString()` yields a UTC date, which
@@ -361,6 +360,7 @@ function CrossfitPageBody() {
   const logScore = useLogScore();
   const updateScore = useUpdateScore();
   const createMovement = useCreateMovement();
+  const createWorkoutFromBenchmark = useCreateWorkoutFromBenchmark();
   const moveWorkoutToGym = useMoveWorkoutToGym();
 
   // Temporary helper: lets the gym admin move a personal workout into the
@@ -450,26 +450,10 @@ function CrossfitPageBody() {
   // Save — Paste/Parser flow
   // ============================================
   //
-  // The parser returns movements with canonical names (not IDs). Resolve each
-  // name against the live movement library; auto-create missing ones as
-  // user-scoped custom movements so the save always succeeds.
-
-  const resolveMovementId = async (
-    parsed: ParsedMovement
-  ): Promise<MovementOption | null> => {
-    const targetName = (parsed.matchedCanonicalName || parsed.name).trim();
-    if (!targetName) return null;
-    const match = movementLibrary.find(
-      (m) => m.canonicalName.toLowerCase() === targetName.toLowerCase()
-    );
-    if (match) return match;
-    // Not in the library — create a user-owned custom movement.
-    try {
-      return await createMovement.mutateAsync({ canonicalName: targetName });
-    } catch {
-      return null;
-    }
-  };
+  // The parser returns movements with canonical names (not IDs). The
+  // shared resolver matches them against the live movement library and
+  // auto-creates missing ones as user-scoped custom movements so the save
+  // always succeeds.
 
   const handleSaveFromParser = async (
     parsed: ParsedWorkout,
@@ -478,15 +462,11 @@ function CrossfitPageBody() {
   ) => {
     setSaveError(null);
 
-    const resolved = await Promise.all(
-      parsed.movements.map(async (m) => ({
-        parsed: m,
-        movement: await resolveMovementId(m),
-      }))
-    );
-
-    const usable = resolved.filter((r) => r.movement !== null);
-    if (usable.length === 0) {
+    const resolved = await resolveParsedToCreatePart(parsed, {
+      movementLibrary,
+      createMovement: (input) => createMovement.mutateAsync(input),
+    });
+    if (!resolved) {
       setSaveError("Couldn't resolve any movements. Try the Smart Builder.");
       return;
     }
@@ -499,32 +479,42 @@ function CrossfitPageBody() {
         communityId: inGymMode && isCoach ? activeMembership!.communityId : null,
         isPartner: options.isPartner,
         partnerCount: options.partnerCount ?? undefined,
-        parts: [
-          {
-            workoutType: parsed.workoutType,
-            timeCapSeconds: parsed.timeCapSeconds,
-            amrapDurationSeconds: parsed.amrapDurationSeconds,
-            repScheme: parsed.repScheme,
-            movements: usable.map((r, i) => ({
-              movementId: r.movement!.id,
-              orderIndex: i,
-              // For cal/distance movements, the parser populates dedicated
-              // fields and leaves `reps` empty so we don't double-write
-              // "21 Cal" into prescribedReps for a calorie-typed movement.
-              prescribedReps: r.parsed.reps,
-              prescribedWeightMale: r.parsed.weightMale,
-              prescribedWeightFemale: r.parsed.weightFemale,
-              prescribedCaloriesMale: r.parsed.caloriesMale,
-              prescribedCaloriesFemale: r.parsed.caloriesFemale,
-              prescribedDistanceMale: r.parsed.distanceMaleMeters,
-              prescribedDistanceFemale: r.parsed.distanceFemaleMeters,
-            })),
-          },
-        ],
+        parts: [resolved.part],
       });
       setShowAddWorkout(false);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Failed to save workout");
+    }
+  };
+
+  // ============================================
+  // Save — Benchmark flow
+  // ============================================
+  //
+  // The picker hands back the selected benchmark + the user's date/partner
+  // overrides; the server expands the benchmark into a real workout for
+  // the user (or for the gym when communityId is set).
+
+  const handleSaveFromBenchmark = async (
+    benchmark: BenchmarkWorkout,
+    workoutDate: string,
+    options: { isPartner: boolean; partnerCount: number | null }
+  ) => {
+    setSaveError(null);
+    try {
+      await createWorkoutFromBenchmark.mutateAsync({
+        benchmarkWorkoutId: benchmark.id,
+        workoutDate: workoutDate || dateStr,
+        communityId:
+          inGymMode && isCoach ? activeMembership!.communityId : undefined,
+        isPartner: options.isPartner,
+        partnerCount: options.partnerCount ?? undefined,
+      });
+      setShowAddWorkout(false);
+    } catch (err) {
+      setSaveError(
+        err instanceof Error ? err.message : "Failed to add benchmark"
+      );
     }
   };
 
@@ -872,45 +862,14 @@ function CrossfitPageBody() {
           <DialogHeader>
             <DialogTitle>Add Workout</DialogTitle>
           </DialogHeader>
-          <Tabs defaultValue="build">
-            <TabsList className="w-full">
-              <TabsTrigger value="paste" className="flex-1 gap-1.5">
-                <ClipboardPaste className="h-3.5 w-3.5" />
-                Paste
-              </TabsTrigger>
-              <TabsTrigger value="build" className="flex-1 gap-1.5">
-                <Wrench className="h-3.5 w-3.5" />
-                Smart Builder
-              </TabsTrigger>
-              <TabsTrigger value="benchmark" className="flex-1 gap-1.5">
-                <Trophy className="h-3.5 w-3.5" />
-                Benchmark
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="paste" className="mt-4">
-              <WorkoutParser
-                onSave={handleSaveFromParser}
-                onCancel={() => setShowAddWorkout(false)}
-                defaultWorkoutDate={dateStr}
-              />
-            </TabsContent>
-            <TabsContent value="build" className="mt-4">
-              <SmartBuilder
-                defaultWorkoutDate={dateStr}
-                onSave={handleSaveFromBuilder}
-                onCancel={() => setShowAddWorkout(false)}
-              />
-            </TabsContent>
-            <TabsContent value="benchmark" className="mt-4">
-              <BenchmarkPicker
-                onWorkoutCreated={() => setShowAddWorkout(false)}
-                workoutDate={dateStr}
-                communityId={
-                  inGymMode && isCoach ? activeMembership!.communityId : null
-                }
-              />
-            </TabsContent>
-          </Tabs>
+          <AddWorkoutTabs
+            defaultWorkoutDate={dateStr}
+            onSaveFromBuilder={handleSaveFromBuilder}
+            onSaveFromParser={handleSaveFromParser}
+            onSaveFromBenchmark={handleSaveFromBenchmark}
+            onCancel={() => setShowAddWorkout(false)}
+            isBenchmarkSubmitting={createWorkoutFromBenchmark.isPending}
+          />
         </DialogContent>
       </Dialog>
 
