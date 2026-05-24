@@ -98,6 +98,14 @@ interface BenchmarkPreviewProps {
   onBack: () => void;
   isLoading?: boolean;
   defaultWorkoutDate?: string;
+  // Label for the primary action button (default "Add Workout").
+  submitLabel?: string;
+  // Hide the date input — used when the parent fixes the date (e.g.
+  // programming a section for a specific day).
+  hideDateInput?: boolean;
+  // Hide the partner toggle — used when partner/solo is decided by the
+  // athlete at scoring time, not when programming the workout.
+  hidePartner?: boolean;
 }
 
 export function BenchmarkPreview({
@@ -106,6 +114,9 @@ export function BenchmarkPreview({
   onBack,
   isLoading,
   defaultWorkoutDate,
+  submitLabel,
+  hideDateInput,
+  hidePartner,
 }: BenchmarkPreviewProps) {
   const [workoutDate, setWorkoutDate] = useState(
     defaultWorkoutDate || localTodayString()
@@ -212,35 +223,41 @@ export function BenchmarkPreview({
 
       {/* Date picker + partner override + Add button */}
       <div className="space-y-3">
-        <WorkoutDateInput
-          id="bp-date"
-          value={workoutDate}
-          onChange={setWorkoutDate}
-        />
+        {!hideDateInput && (
+          <WorkoutDateInput
+            id="bp-date"
+            value={workoutDate}
+            onChange={setWorkoutDate}
+          />
+        )}
 
-        <PartnerWorkoutToggle
-          isPartner={isPartner}
-          partnerCount={partnerCount}
-          onChange={(updates) => {
-            if (updates.isPartner !== undefined) setIsPartner(updates.isPartner);
-            if (updates.partnerCount !== undefined)
-              setPartnerCount(updates.partnerCount);
-          }}
-        />
+        {!hidePartner && (
+          <PartnerWorkoutToggle
+            isPartner={isPartner}
+            partnerCount={partnerCount}
+            onChange={(updates) => {
+              if (updates.isPartner !== undefined) setIsPartner(updates.isPartner);
+              if (updates.partnerCount !== undefined)
+                setPartnerCount(updates.partnerCount);
+            }}
+          />
+        )}
 
         <Button
           className="w-full"
           onClick={() =>
             onAdd(benchmark.id, workoutDate, {
-              isPartner,
+              isPartner: hidePartner ? false : isPartner,
               partnerCount:
-                isPartner && partnerCount ? parseInt(partnerCount, 10) : null,
+                !hidePartner && isPartner && partnerCount
+                  ? parseInt(partnerCount, 10)
+                  : null,
             })
           }
           disabled={isLoading}
         >
           <Plus className="size-4" />
-          {isLoading ? "Adding..." : "Add Workout"}
+          {isLoading ? "Adding..." : submitLabel ?? "Add Workout"}
         </Button>
       </div>
     </div>

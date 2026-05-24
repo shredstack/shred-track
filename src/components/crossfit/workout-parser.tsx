@@ -51,6 +51,14 @@ interface WorkoutParserProps {
   ) => void;
   onCancel?: () => void;
   defaultWorkoutDate?: string;
+  // Hide the date input — used when the parent fixes the date (e.g.
+  // programming a section for a specific day).
+  hideDateInput?: boolean;
+  // Hide the partner toggle — used when partner/solo is decided by the
+  // athlete at scoring time, not when programming the workout.
+  hidePartner?: boolean;
+  // Label for the primary save action (default "Save Workout").
+  saveLabel?: string;
 }
 
 // ============================================
@@ -90,6 +98,9 @@ export function WorkoutParser({
   onSave,
   onCancel,
   defaultWorkoutDate,
+  hideDateInput,
+  hidePartner,
+  saveLabel,
 }: WorkoutParserProps) {
   const [rawText, setRawText] = useState("");
   const [parsed, setParsed] = useState<ParsedWorkout | null>(null);
@@ -154,9 +165,11 @@ export function WorkoutParser({
   const handleSave = () => {
     if (parsed) {
       onSave?.(parsed, workoutDate, {
-        isPartner,
+        isPartner: hidePartner ? false : isPartner,
         partnerCount:
-          isPartner && partnerCount ? parseInt(partnerCount, 10) : null,
+          !hidePartner && isPartner && partnerCount
+            ? parseInt(partnerCount, 10)
+            : null,
       });
     }
   };
@@ -239,11 +252,13 @@ Time Cap: 10 min`}
       </div>
 
       {/* Date */}
-      <WorkoutDateInput
-        id="wp-date"
-        value={workoutDate}
-        onChange={setWorkoutDate}
-      />
+      {!hideDateInput && (
+        <WorkoutDateInput
+          id="wp-date"
+          value={workoutDate}
+          onChange={setWorkoutDate}
+        />
+      )}
 
       {/* Workout Type */}
       <div className="space-y-2">
@@ -487,15 +502,17 @@ Time Cap: 10 min`}
 
       <Separator />
 
-      <PartnerWorkoutToggle
-        isPartner={isPartner}
-        partnerCount={partnerCount}
-        onChange={(updates) => {
-          if (updates.isPartner !== undefined) setIsPartner(updates.isPartner);
-          if (updates.partnerCount !== undefined)
-            setPartnerCount(updates.partnerCount);
-        }}
-      />
+      {!hidePartner && (
+        <PartnerWorkoutToggle
+          isPartner={isPartner}
+          partnerCount={partnerCount}
+          onChange={(updates) => {
+            if (updates.isPartner !== undefined) setIsPartner(updates.isPartner);
+            if (updates.partnerCount !== undefined)
+              setPartnerCount(updates.partnerCount);
+          }}
+        />
+      )}
 
       {/* Raw Text Reference */}
       <details className="text-xs">
@@ -511,7 +528,7 @@ Time Cap: 10 min`}
       <div className="flex gap-2">
         <Button onClick={handleSave} className="flex-1">
           <Save className="size-4" />
-          Save Workout
+          {saveLabel ?? "Save Workout"}
         </Button>
         {onCancel && (
           <Button variant="outline" onClick={onCancel}>

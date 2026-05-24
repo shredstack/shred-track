@@ -17,13 +17,34 @@ import {
 } from "@/types/crossfit";
 
 interface BenchmarkPickerProps {
-  onWorkoutCreated: () => void;
   workoutDate?: string;
-  // When set, the created workout is written into this gym so all members
-  // see it (gym programming). Null/undefined keeps it personal. The parent
-  // is responsible for only passing this when the user is a coach/admin
-  // viewing the gym tab — the API will reject it otherwise.
+  // Default mode (no `onAdd`): pressing "Add Workout" creates a workout
+  // for the user via /api/workouts. `onWorkoutCreated` is the success
+  // callback and `communityId` writes it into a gym (only valid when the
+  // viewer is a coach/admin; the API rejects it otherwise).
+  onWorkoutCreated?: () => void;
   communityId?: string | null;
+  // Override mode (`onAdd` provided): the picker emits the selected
+  // benchmark + options instead of calling its own mutation. The parent
+  // owns saving (e.g. writing to a programming section). `onWorkoutCreated`
+  // and `communityId` are ignored in this mode.
+  onAdd?: (
+    benchmark: BenchmarkWorkout,
+    workoutDate: string,
+    options: { isPartner: boolean; partnerCount: number | null }
+  ) => Promise<void> | void;
+  // External loading state for the Add button when the parent owns the
+  // submit. Ignored in default mode (the picker tracks its own mutation).
+  isSubmitting?: boolean;
+  // Label for the primary Add button (default "Add Workout").
+  submitLabel?: string;
+  // When true, hide the workout-date input (parent provides the date and
+  // the field would just confuse — e.g. programming has a fixed day).
+  hideDateInput?: boolean;
+  // When true, hide the partner toggle (e.g. programming sections —
+  // partner mode is a per-athlete scoring decision, not a programmed
+  // attribute).
+  hidePartner?: boolean;
 }
 
 type View = "list" | "preview" | "create";
@@ -49,6 +70,11 @@ export function BenchmarkPicker({
   onWorkoutCreated,
   workoutDate,
   communityId,
+  onAdd,
+  isSubmitting,
+  submitLabel,
+  hideDateInput,
+  hidePartner,
 }: BenchmarkPickerProps) {
   const [view, setView] = useState<View>("list");
   const [search, setSearch] = useState("");
@@ -74,11 +100,17 @@ export function BenchmarkPicker({
   }, []);
 
   const handleAddWorkout = useCallback(
-    (
+    async (
       benchmarkId: string,
       date: string,
       options: { isPartner: boolean; partnerCount: number | null }
     ) => {
+      if (onAdd) {
+        const benchmark = selectedBenchmark;
+        if (!benchmark || benchmark.id !== benchmarkId) return;
+        await onAdd(benchmark, date, options);
+        return;
+      }
       createWorkout.mutate(
         {
           benchmarkWorkoutId: benchmarkId,
@@ -87,10 +119,10 @@ export function BenchmarkPicker({
           isPartner: options.isPartner,
           partnerCount: options.partnerCount ?? undefined,
         },
-        { onSuccess: () => onWorkoutCreated() }
+        { onSuccess: () => onWorkoutCreated?.() }
       );
     },
-    [createWorkout, onWorkoutCreated, communityId]
+    [createWorkout, onWorkoutCreated, communityId, onAdd, selectedBenchmark]
   );
 
   const handleCreateBenchmark = useCallback(
@@ -119,8 +151,11 @@ export function BenchmarkPicker({
         benchmark={selectedBenchmark}
         onAdd={handleAddWorkout}
         onBack={() => setView("list")}
-        isLoading={createWorkout.isPending}
+        isLoading={onAdd ? !!isSubmitting : createWorkout.isPending}
         defaultWorkoutDate={workoutDate}
+        submitLabel={submitLabel}
+        hideDateInput={hideDateInput}
+        hidePartner={hidePartner}
       />
     );
   }
