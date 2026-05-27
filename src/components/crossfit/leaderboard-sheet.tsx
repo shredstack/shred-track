@@ -17,6 +17,13 @@ interface LeaderboardSheetProps {
    *  sheet keeping its own copy. */
   commentScoreId: string | null;
   onCommentScoreIdChange: (id: string | null) => void;
+  /** Optional scope: when set, the sheet only renders parts whose id is
+   *  in this list (used by per-section leaderboards on programmed
+   *  workouts). When null/undefined, all workout parts show. */
+  scopePartIds?: string[] | null;
+  /** Optional override for the sheet title when scoped to a section
+   *  (e.g. "Pre-skill · Deadlift Build-up"). Falls back to workout.title. */
+  scopeTitle?: string | null;
 }
 
 // Per-part display label for the tab strip / single-part header. Priority:
@@ -41,18 +48,22 @@ export function LeaderboardSheet({
   onOpenChange,
   commentScoreId,
   onCommentScoreIdChange,
+  scopePartIds,
+  scopeTitle,
 }: LeaderboardSheetProps) {
   const workoutId = workout?.id ?? null;
 
   // Parts ordered for the tab strip. Multi-part workouts get a tab per part;
-  // single-part workouts render the leaderboard without a tab strip.
-  const parts = useMemo(
-    () =>
-      [...(workout?.parts ?? [])].sort(
-        (a, b) => a.orderIndex - b.orderIndex
-      ),
-    [workout]
-  );
+  // single-part workouts render the leaderboard without a tab strip. When
+  // `scopePartIds` is provided, narrow to just that section's parts.
+  const parts = useMemo(() => {
+    const all = [...(workout?.parts ?? [])].sort(
+      (a, b) => a.orderIndex - b.orderIndex
+    );
+    if (!scopePartIds || scopePartIds.length === 0) return all;
+    const allowed = new Set(scopePartIds);
+    return all.filter((p) => allowed.has(p.id));
+  }, [workout, scopePartIds]);
 
   // Map part id → owning section title (when the workout has typed
   // sections). Used by partTabLabel so tabs read "WOD" / "Strength"
@@ -148,7 +159,7 @@ export function LeaderboardSheet({
     <LeaderboardShell
       open={open}
       onOpenChange={onOpenChange}
-      title={workout?.title ?? "Leaderboard"}
+      title={scopeTitle?.trim() || workout?.title || "Leaderboard"}
       subtitle={headerSubtitle}
       headerExtra={headerExtra}
     >

@@ -60,6 +60,9 @@ export async function POST(
     workoutDate?: string;
     kind?: string;
     title?: string | null;
+    // Freeform prescription text. Lets warm-up / stretching placeholders
+    // be turned into real sections in one POST instead of POST + PATCH.
+    body?: string | null;
     position?: number;
     isScored?: boolean;
     scoreType?: string | null;
@@ -170,6 +173,7 @@ export async function POST(
       subKind: body!.subKind ?? null,
       position,
       title: body!.title ?? null,
+      body: body!.body ?? null,
       isScored: !!body!.isScored,
       scoreType: (body!.scoreType as WorkoutSectionScoreType | null) ?? null,
       reviewedAt: new Date(),
