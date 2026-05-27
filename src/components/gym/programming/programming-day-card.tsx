@@ -391,9 +391,10 @@ export function ProgrammingDayCard({
     }
     setDeletingDay(true);
     try {
-      const res = await fetch(`/api/workouts/${workout.id}`, {
-        method: "DELETE",
-      });
+      const res = await fetch(
+        `/api/workouts/${workout.id}?programmingOnly=1`,
+        { method: "DELETE" }
+      );
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.error ?? "Failed to delete day");

@@ -37,6 +37,23 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  // Confirm the release belongs to this gym before mutating anything.
+  // Without this, a stale/wrong release id would return ok: true while
+  // affecting zero rows, masking client bugs.
+  const [release] = await db
+    .select({ id: programmingReleases.id })
+    .from(programmingReleases)
+    .where(
+      and(
+        eq(programmingReleases.id, releaseId),
+        eq(programmingReleases.communityId, communityId)
+      )
+    )
+    .limit(1);
+  if (!release) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
   await db.transaction(async (tx) => {
     await tx
       .update(programmingReleases)
@@ -46,12 +63,7 @@ export async function POST(
         publishedBy: null,
         updatedAt: new Date(),
       })
-      .where(
-        and(
-          eq(programmingReleases.id, releaseId),
-          eq(programmingReleases.communityId, communityId)
-        )
-      );
+      .where(eq(programmingReleases.id, releaseId));
 
     await tx
       .update(workouts)

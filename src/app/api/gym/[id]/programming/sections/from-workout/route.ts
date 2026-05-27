@@ -14,6 +14,8 @@ import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   WORKOUT_SECTION_KINDS,
+  classInstances,
+  gymPosts,
   programmingReleases,
   scores,
   workoutMovements,
@@ -265,6 +267,19 @@ export async function POST(
             and(eq(workouts.id, destWorkoutId), isNull(workouts.title))
           );
       }
+
+      // class_instances.workout_id and gym_posts.workout_id reference
+      // workouts with no ON DELETE rule. Null them out before deleting the
+      // source shell so a manual workout that's been scheduled to a class
+      // or posted to the feed can still be moved into programming.
+      await tx
+        .update(classInstances)
+        .set({ workoutId: null })
+        .where(eq(classInstances.workoutId, source.id));
+      await tx
+        .update(gymPosts)
+        .set({ workoutId: null })
+        .where(eq(gymPosts.workoutId, source.id));
 
       // Finally delete the source workout shell.
       await tx.delete(workouts).where(eq(workouts.id, source.id));

@@ -918,6 +918,12 @@ export async function DELETE(
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
+  // When called from the programming admin, the client passes
+  // ?programmingOnly=1 so a wrong/stale id can't silently delete a manual
+  // workout. Without this guard, the endpoint deletes any workout the
+  // caller can edit — including ad-hoc WODs sharing the same date.
+  const programmingOnly =
+    req.nextUrl.searchParams.get("programmingOnly") === "1";
 
   const access = await getWorkoutAccess(user.id, id);
   if (!access.exists) {
@@ -928,6 +934,20 @@ export async function DELETE(
       { error: "You don't have permission to delete this workout" },
       { status: 403 }
     );
+  }
+
+  if (programmingOnly) {
+    const [row] = await db
+      .select({ programmingReleaseId: workouts.programmingReleaseId })
+      .from(workouts)
+      .where(eq(workouts.id, id))
+      .limit(1);
+    if (!row?.programmingReleaseId) {
+      return NextResponse.json(
+        { error: "Workout is not part of programming" },
+        { status: 400 }
+      );
+    }
   }
 
   try {
