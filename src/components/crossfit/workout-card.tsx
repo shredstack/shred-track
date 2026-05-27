@@ -64,7 +64,7 @@ function isRestMovement(mov: WorkoutMovementDisplay): boolean {
 
 interface WorkoutCardProps {
   workout: WorkoutDisplay;
-  onLogScore?: (workoutId: string) => void;
+  onLogScore?: (workoutId: string, sectionId?: string) => void;
   onDelete?: (workoutId: string) => Promise<void> | void;
   onEdit?: (workoutId: string) => void;
   onViewLeaderboard?: (workoutId: string) => void;
@@ -378,7 +378,7 @@ function ComplexMovementLine({
   );
 }
 
-function PartSection({
+export function PartSection({
   part,
   index,
   showLabel,
@@ -712,6 +712,20 @@ export function WorkoutCard({
                 const sectionParts = section.partIds
                   .map((pid) => parts.find((p) => p.id === pid))
                   .filter((p): p is (typeof parts)[number] => !!p);
+                // Show Log Score for any section with Smart-Builder
+                // parts. We don't gate on section.isScored because the
+                // programming admin doesn't expose that toggle today —
+                // every published section ships with is_scored=false,
+                // which would hide the button everywhere. Track-injected
+                // free-form sections render their own input via
+                // TrackDayScoreInput inside the block.
+                const sectionHasParts = sectionParts.length > 0;
+                const sectionHasScore = sectionParts.some((p) => p.score);
+                const showLogScore =
+                  sectionHasParts && !section.sourceTrackId && !!onLogScore;
+                const handleSectionLogScore = showLogScore
+                  ? () => onLogScore?.(workout.id, section.id)
+                  : undefined;
                 if (sectionParts.length === 0) {
                   return (
                     <WorkoutSectionBlock
@@ -730,6 +744,9 @@ export function WorkoutCard({
                     key={section.id}
                     section={section}
                     onViewTrackDayLeaderboard={onViewTrackDayLeaderboard}
+                    onLogScore={handleSectionLogScore}
+                    sectionHasScore={sectionHasScore}
+                    sectionIsMultiPart={sectionParts.length > 1}
                   >
                     {sectionParts.map((part, idx) => (
                       <div key={part.id} className="space-y-3">
@@ -784,25 +801,27 @@ export function WorkoutCard({
       </CardContent>
 
       <CardFooter className="gap-2">
-        {hasAnyScore ? (
-          <Button
-            variant="outline"
-            size="sm"
-            className="flex-1 border-white/[0.08]"
-            onClick={() => onLogScore?.(workout.id)}
-          >
-            <Trophy className="size-3.5" />
-            {multiPart ? "Edit Scores" : "Edit Score"}
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            className="flex-1"
-            onClick={() => onLogScore?.(workout.id)}
-          >
-            <Flame className="size-3.5" />
-            {multiPart ? "Log Scores" : "Log Score"}
-          </Button>
+        {!hasSections && (
+          hasAnyScore ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 border-white/[0.08]"
+              onClick={() => onLogScore?.(workout.id)}
+            >
+              <Trophy className="size-3.5" />
+              {multiPart ? "Edit Scores" : "Edit Score"}
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              className="flex-1"
+              onClick={() => onLogScore?.(workout.id)}
+            >
+              <Flame className="size-3.5" />
+              {multiPart ? "Log Scores" : "Log Score"}
+            </Button>
+          )
         )}
         {onViewLeaderboard && (
           <Button

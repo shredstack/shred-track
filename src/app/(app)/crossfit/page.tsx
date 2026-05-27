@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { WorkoutCard } from "@/components/crossfit/workout-card";
+import { ProgrammedWorkoutDay } from "@/components/crossfit/programmed-workout-day";
 import { SmartBuilder } from "@/components/crossfit/smart-builder";
 import { AddWorkoutTabs } from "@/components/crossfit/add-workout-tabs";
 import { ScoreEntry } from "@/components/crossfit/score-entry";
@@ -20,6 +21,7 @@ import { TrackDayScoreInput } from "@/components/crossfit/track-day-score-input"
 import { TrackDayLeaderboardSheet } from "@/components/crossfit/track-day-leaderboard-sheet";
 import { useMyTrackDays } from "@/hooks/useTracks";
 import { useIsFeatureOn } from "@/hooks/useFeatureFlag";
+import { WORKOUT_SECTION_KIND_LABELS } from "@/db/schema";
 import { useHasMounted } from "@/hooks/useHasMounted";
 import {
   useWorkoutsByDate,
@@ -275,7 +277,16 @@ function CrossfitPageBody() {
   const [showAddWorkout, setShowAddWorkout] = useState(false);
   const [editingWorkoutId, setEditingWorkoutId] = useState<string | null>(null);
   const [scoringWorkoutId, setScoringWorkoutId] = useState<string | null>(null);
+  // When set, the score modal scopes to a single section's parts instead
+  // of the full workout. Null = legacy "Log Scores" footer button (all
+  // parts at once); set = per-section "Log Score" button on a sectioned
+  // workout (only that section's parts).
+  const [scoringSectionId, setScoringSectionId] = useState<string | null>(null);
   const [leaderboardWorkoutId, setLeaderboardWorkoutId] = useState<string | null>(null);
+  // Section-scoped leaderboard (mirrors scoringSectionId). Null = full
+  // workout (legacy non-sectioned). Set = filter leaderboard to that
+  // section's parts only.
+  const [leaderboardSectionId, setLeaderboardSectionId] = useState<string | null>(null);
   // Standalone track-day cards (monthly challenges / custom tracks) open a
   // separate leaderboard sheet — their scoring lives in track_day_scores
   // rather than the `scores` table the workout leaderboard reads.
@@ -393,6 +404,50 @@ function CrossfitPageBody() {
     () => workouts.find((w) => w.id === scoringWorkoutId) ?? null,
     [workouts, scoringWorkoutId]
   );
+
+  // When scoped to a section, narrow the modal to that section's parts
+  // and use the section's label as the modal title so athletes see
+  // "Pre-skill" instead of the full workout title (which usually echoes
+  // the WOD). Falls back to the full workout when scoringSectionId is
+  // null (legacy non-sectioned workouts or a future "edit all" flow).
+  const scoringSection = useMemo(() => {
+    if (!scoringWorkout || !scoringSectionId) return null;
+    return (
+      scoringWorkout.sections?.find((s) => s.id === scoringSectionId) ?? null
+    );
+  }, [scoringWorkout, scoringSectionId]);
+
+  const scoringParts = useMemo(() => {
+    if (!scoringWorkout) return [];
+    if (!scoringSection) return scoringWorkout.parts;
+    const ids = new Set(scoringSection.partIds);
+    return scoringWorkout.parts.filter((p) => ids.has(p.id));
+  }, [scoringWorkout, scoringSection]);
+
+  const scoringModalTitle = useMemo(() => {
+    if (!scoringWorkout) return undefined;
+    if (!scoringSection) return scoringWorkout.title;
+    const kindLabel =
+      WORKOUT_SECTION_KIND_LABELS[scoringSection.kind] ?? "Section";
+    return scoringSection.title?.trim()
+      ? `${kindLabel} · ${scoringSection.title.trim()}`
+      : kindLabel;
+  }, [scoringWorkout, scoringSection]);
+
+  // Leaderboard scope mirrors the scoring scope — when the user opens a
+  // leaderboard from a section card, we filter the sheet to just that
+  // section's parts and label the header with the section name.
+  const leaderboardScope = useMemo(() => {
+    if (!leaderboardWorkoutId || !leaderboardSectionId) return null;
+    const w = workouts.find((x) => x.id === leaderboardWorkoutId);
+    const s = w?.sections?.find((x) => x.id === leaderboardSectionId);
+    if (!s) return null;
+    const kindLabel = WORKOUT_SECTION_KIND_LABELS[s.kind] ?? "Section";
+    const title = s.title?.trim()
+      ? `${kindLabel} · ${s.title.trim()}`
+      : kindLabel;
+    return { partIds: s.partIds, title };
+  }, [leaderboardWorkoutId, leaderboardSectionId, workouts]);
 
   const editingWorkout = useMemo(
     () => workouts.find((w) => w.id === editingWorkoutId) ?? null,
@@ -731,11 +786,62 @@ function CrossfitPageBody() {
             const isPersonalAndOwn =
               workout.communityId == null && workout.createdBy === userId;
             const showMoveToGym = canMovePersonalToGym && isPersonalAndOwn;
+            const isSectioned = (workout.sections?.length ?? 0) > 0;
+            // Programming-published workouts get the flat per-section
+            // layout. Personal / legacy non-sectioned workouts keep the
+            // single-card layout below.
+            if (isSectioned) {
+              return (
+                <ProgrammedWorkoutDay
+                  key={workout.id}
+                  workout={workout}
+                  onLogScore={(workoutId, sectionId) => {
+                    setScoringSectionId(sectionId);
+                    setScoringWorkoutId(workoutId);
+                  }}
+                  onViewLeaderboard={
+                    inGymMode && workout.communityId
+                      ? (workoutId, sectionId) => {
+                          setLeaderboardSectionId(sectionId);
+                          setLeaderboardWorkoutId(workoutId);
+                        }
+                      : undefined
+                  }
+                  onViewTrackDayLeaderboard={
+                    inGymMode && workout.communityId
+                      ? (trackDayId, title) =>
+                          setTrackLeaderboard({
+                            trackDayId,
+                            title,
+                            subtitle: null,
+                          })
+                      : undefined
+                  }
+                  onEditInProgramming={
+                    editable
+                      ? () => {
+                          /* link rendered via Link inside the kebab */
+                        }
+                      : undefined
+                  }
+                  onDelete={editable ? handleDeleteWorkout : undefined}
+                  onMoveToGym={showMoveToGym ? handleMoveToGym : undefined}
+                  moveToGymName={
+                    showMoveToGym
+                      ? activeMembership?.communityName
+                      : undefined
+                  }
+                />
+              );
+            }
             return (
               <WorkoutCard
                 key={workout.id}
                 workout={workout}
-                onLogScore={() => setScoringWorkoutId(workout.id)}
+                onLogScore={(_workoutId, sectionId) => {
+                  setScoringSectionId(sectionId ?? null);
+                  setScoringWorkoutId(workout.id);
+                }}
                 onEdit={
                   editable
                     ? () => {
@@ -877,11 +983,14 @@ function CrossfitPageBody() {
         <ScoreEntry
           open
           onOpenChange={(open) => {
-            if (!open) setScoringWorkoutId(null);
+            if (!open) {
+              setScoringWorkoutId(null);
+              setScoringSectionId(null);
+            }
           }}
           workoutId={scoringWorkout.id}
-          workoutTitle={scoringWorkout.title}
-          parts={scoringWorkout.parts}
+          workoutTitle={scoringModalTitle}
+          parts={scoringParts}
           workout={scoringWorkout}
           onSubmit={handlePartScoreSubmit}
           communityId={scoringWorkout.communityId ?? null}
@@ -894,9 +1003,12 @@ function CrossfitPageBody() {
         }
         commentScoreId={deepLinkScoreCommentId}
         onCommentScoreIdChange={setDeepLinkScoreCommentId}
+        scopePartIds={leaderboardScope?.partIds ?? null}
+        scopeTitle={leaderboardScope?.title ?? null}
         onOpenChange={(open) => {
           if (!open) {
             setLeaderboardWorkoutId(null);
+            setLeaderboardSectionId(null);
             setDeepLinkScoreCommentId(null);
           }
         }}

@@ -1845,6 +1845,10 @@ export const workoutSections = pgTable(
     // section the coach wants to write longhand instead of composing via
     // Smart Builder. Smart Builder output still lands in workoutParts.
     body: text("body"),
+    // Coach-authored notes that travel with the section. Mirrors the
+    // Smart Builder's "Notes (optional)" field; for non-sectioned
+    // workouts the equivalent lives on workouts.notes.
+    notes: text("notes"),
     isScored: boolean("is_scored").default(false).notNull(),
     scoreType: text("score_type"), // 'time' | 'rounds' | 'reps' | 'weight' | 'no_score'
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),

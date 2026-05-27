@@ -38,6 +38,7 @@ async function loadSection(sectionId: string, communityId: string) {
       body: workoutSections.body,
       isScored: workoutSections.isScored,
       title: workoutSections.title,
+      notes: workoutSections.notes,
       kind: workoutSections.kind,
       gymOk: workouts.communityId,
     })
@@ -132,6 +133,7 @@ export async function GET(
       kind: section.kind,
       title: section.title,
       body: section.body,
+      notes: section.notes,
     },
     parts: parts.map((p) => ({
       ...p,
@@ -161,6 +163,7 @@ export async function PUT(
     body?: string | null;
     parts?: PartInput[];
     title?: string | null;
+    notes?: string | null;
   } | null;
   if (!body) {
     return NextResponse.json({ error: "Body required" }, { status: 400 });
@@ -187,6 +190,21 @@ export async function PUT(
         .update(workoutSections)
         .set({
           title: nextTitle,
+          reviewedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(workoutSections.id, sectionId));
+    }
+
+    if (body.notes !== undefined) {
+      const nextNotes =
+        typeof body.notes === "string" && body.notes.trim()
+          ? body.notes
+          : null;
+      await tx
+        .update(workoutSections)
+        .set({
+          notes: nextNotes,
           reviewedAt: new Date(),
           updatedAt: new Date(),
         })

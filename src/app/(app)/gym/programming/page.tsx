@@ -1,6 +1,9 @@
 // /gym/programming
 //
-// Lands the coach on the upcoming Monday of their gym-local timezone.
+// Lands the coach on NEXT week's Monday (gym-local timezone). Coaches
+// program ahead — typically by Sunday for the week starting the next
+// Monday — so this default skips the "click forward" step. Use the
+// week nav arrows to jump to the current or any other week.
 // Server-redirects to /gym/programming/<weekStart>. The detailed week
 // editor lives at the child route.
 
@@ -11,8 +14,9 @@ import { communities, users } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { resolveGymTimezone } from "@/lib/timezone";
 
-function mondayOfThisWeekInTz(tz: string): string {
-  // Pull today's date in the gym tz, then walk back to Monday.
+function mondayOfNextWeekInTz(tz: string): string {
+  // Pull today's date in the gym tz, walk back to this week's Monday,
+  // then jump 7 days forward to land on next week's Monday.
   const fmt = new Intl.DateTimeFormat("en-US", {
     timeZone: tz,
     year: "numeric",
@@ -32,7 +36,7 @@ function mondayOfThisWeekInTz(tz: string): string {
   // Walk back to Monday (Mon=1; offset = weekdayIndex - 1, with Sun → -1 → +6).
   const offset = (weekdayIndex - 1 + 7) % 7;
   const today = new Date(`${y}-${m}-${d}T00:00:00Z`);
-  today.setUTCDate(today.getUTCDate() - offset);
+  today.setUTCDate(today.getUTCDate() - offset + 7);
   return today.toISOString().slice(0, 10);
 }
 
@@ -54,6 +58,6 @@ export default async function ProgrammingIndexPage() {
     .limit(1);
 
   const tz = resolveGymTimezone(gym?.gymTimezone);
-  const weekStart = mondayOfThisWeekInTz(tz);
+  const weekStart = mondayOfNextWeekInTz(tz);
   redirect(`/gym/programming/${weekStart}`);
 }

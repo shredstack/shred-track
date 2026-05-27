@@ -199,11 +199,16 @@ export async function POST(
       let position = reviewedSectionIds.size; // append after preserved sections
       for (const section of day.sections) {
         if (reviewedKinds.has(section.kind)) continue;
+        // The parser populates `body` with the raw section text. Persist it
+        // so freeform sections (warm-ups, stretching) survive the paste —
+        // otherwise the coach has to retype text that was already on screen.
+        const trimmedBody = section.body?.trim() ?? "";
         await tx.insert(workoutSections).values({
           workoutId,
           kind: section.kind,
           position,
           title: section.title,
+          body: trimmedBody || null,
           isScored: section.isScored,
           scoreType: section.scoreType ?? null,
         });

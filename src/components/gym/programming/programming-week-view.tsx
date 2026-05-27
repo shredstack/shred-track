@@ -1,26 +1,78 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   ClipboardList,
   ClipboardPaste,
   FileText,
   Loader2,
   Plus,
+  RotateCcw,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { WORKOUT_SECTION_KIND_LABELS, type WorkoutSectionKind } from "@/db/schema";
 import { ProgrammingDayCard } from "./programming-day-card";
+import { ProgrammingWeekHeader } from "./programming-week-header";
 import { CapPasteDialog } from "./cap-paste-dialog";
 import { GymToolHeader } from "@/components/gym/gym-tool-header";
+
+// Per-movement wire shape. Carries enough prescription data for the inline
+// admin preview to render the same content the athlete will see (without a
+// separate per-workout round trip). Everything is the raw DB shape — the
+// preview component formats it via lib/crossfit/prescription.
+interface MovementWire {
+  id: string;
+  movementName: string;
+  metricType: string;
+  orderIndex: number;
+  workoutBlockId: string | null;
+  prescribedReps: string | null;
+  prescribedWeightMale: string | null;
+  prescribedWeightFemale: string | null;
+  prescribedCaloriesMale: string | null;
+  prescribedCaloriesFemale: string | null;
+  prescribedDistanceMale: string | null;
+  prescribedDistanceFemale: string | null;
+  prescribedDurationSecondsMale: number | null;
+  prescribedDurationSecondsFemale: number | null;
+  prescribedHeightInches: string | null;
+  prescribedHeightInchesMale: string | null;
+  prescribedHeightInchesFemale: string | null;
+  prescribedWeightMaleBwMultiplier: string | null;
+  prescribedWeightFemaleBwMultiplier: string | null;
+  prescribedWeightPct: string | null;
+  tempo: string | null;
+  isMaxReps: boolean;
+  isSideCadence: boolean;
+  equipmentCount: number | null;
+}
+
+interface PartWire {
+  id: string;
+  label: string | null;
+  orderIndex: number;
+  notes: string | null;
+  workoutType: string;
+  timeCapSeconds: number | null;
+  amrapDurationSeconds: number | null;
+  emomIntervalSeconds: number | null;
+  intervalWorkSeconds: number | null;
+  intervalRestSeconds: number | null;
+  intervalRounds: unknown;
+  sideCadenceIntervalSeconds: number | null;
+  sideCadenceOpenEnded: boolean;
+  repScheme: string | null;
+  rounds: number | null;
+  structure: string | null;
+  blocks: { id: string; orderIndex: number; title: string }[];
+  movements: MovementWire[];
+}
 
 interface SectionWire {
   id: string;
@@ -33,7 +85,7 @@ interface SectionWire {
   scoreType: string | null;
   reviewedAt: string | null;
   sourceTrackId: string | null;
-  parts: { id: string; label: string | null; orderIndex: number; notes: string | null }[];
+  parts: PartWire[];
 }
 
 interface WorkoutWire {
@@ -45,7 +97,7 @@ interface WorkoutWire {
   programmingReleaseId: string | null;
   reviewedAt: string | null;
   sections: SectionWire[];
-  partsWithoutSection: { id: string; label: string | null; orderIndex: number; notes: string | null }[];
+  partsWithoutSection: PartWire[];
 }
 
 interface WeekData {
@@ -65,16 +117,6 @@ function addDays(iso: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function formatDayLabel(iso: string): string {
-  const d = new Date(iso + "T00:00:00Z");
-  return d.toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
-}
-
 interface Props {
   communityId: string;
   gymName: string;
@@ -86,12 +128,15 @@ interface Props {
 export function ProgrammingWeekView({
   communityId,
   gymName,
+  gymTimezone,
   weekStart,
   capPasteEnabled,
 }: Props) {
   const qc = useQueryClient();
   const [pasteOpen, setPasteOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [unpublishing, setUnpublishing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const { data, isLoading } = useQuery<WeekData>({
     queryKey: ["gym", communityId, "programming", weekStart],
@@ -104,21 +149,41 @@ export function ProgrammingWeekView({
     },
   });
 
+  // Programmed workouts (tied to this release) live in one bucket;
+  // manual workouts (added from the CrossFit tab, no
+  // programming_release_id) live in another. Showing them separately in
+  // the day card lets the coach see both without one silently shadowing
+  // the other in a Map lookup.
   const days = useMemo(() => {
-    const map = new Map<string, WorkoutWire>();
-    for (const w of data?.workouts ?? []) map.set(w.workoutDate, w);
+    const programmed = new Map<string, WorkoutWire>();
+    const manual = new Map<string, WorkoutWire[]>();
+    for (const w of data?.workouts ?? []) {
+      if (w.programmingReleaseId) {
+        programmed.set(w.workoutDate, w);
+      } else {
+        const list = manual.get(w.workoutDate) ?? [];
+        list.push(w);
+        manual.set(w.workoutDate, list);
+      }
+    }
     return Array.from({ length: 7 }, (_, i) => {
       const date = addDays(weekStart, i);
-      return { date, workout: map.get(date) ?? null };
+      return {
+        date,
+        workout: programmed.get(date) ?? null,
+        manualWorkouts: manual.get(date) ?? [],
+      };
     });
   }, [data, weekStart]);
-
-  const prevWeek = addDays(weekStart, -7);
-  const nextWeek = addDays(weekStart, 7);
 
   const onSectionMutate = useCallback(() => {
     qc.invalidateQueries({
       queryKey: ["gym", communityId, "programming", weekStart],
+    });
+    // Also refresh the nav strip — creating or deleting a release flips
+    // the current week's status and changes the next-empty-week pointers.
+    qc.invalidateQueries({
+      queryKey: ["gym", communityId, "programming-nav", weekStart],
     });
   }, [qc, communityId, weekStart]);
 
@@ -146,29 +211,85 @@ export function ProgrammingWeekView({
     }
   }
 
+  async function unpublish() {
+    if (!data?.release) return;
+    if (
+      !confirm(
+        "Unpublish this week? Members will stop seeing it, but the workouts and sections stay so you can edit and republish."
+      )
+    ) {
+      return;
+    }
+    setUnpublishing(true);
+    try {
+      const res = await fetch(
+        `/api/gym/${communityId}/programming/${data.release.id}/unpublish`,
+        { method: "POST" }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "Failed to unpublish");
+      }
+      toast.success("Unpublished. Members no longer see this week.");
+      onSectionMutate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setUnpublishing(false);
+    }
+  }
+
+  async function deleteRelease() {
+    if (!data?.release) return;
+    if (
+      !confirm(
+        "Delete this entire week's programming? Manual workouts added from the CrossFit tab will be kept. This cannot be undone."
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      const res = await fetch(
+        `/api/gym/${communityId}/programming/${data.release.id}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "Failed to delete");
+      }
+      toast.success("Programming for this week was deleted.");
+      onSectionMutate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  // Map the loaded release to the simpler `WeekStatus` tri-state the
+  // new week header understands. Treat the absence of a release row as
+  // "empty" — the coach hasn't touched this week yet.
+  const currentStatus: "published" | "draft" | "empty" = data?.release
+    ? data.release.status === "published"
+      ? "published"
+      : "draft"
+    : "empty";
+
   return (
     <div className="space-y-3">
       <GymToolHeader
         icon={ClipboardList}
         label="Programming"
-        description={`${gymName} — week of ${formatDayLabel(weekStart)}`}
+        description={gymName}
       />
-      <div className="flex items-center justify-end gap-1">
-        <Link
-          href={`/gym/programming/${prevWeek}`}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border hover:bg-muted/30"
-          aria-label="Previous week"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </Link>
-        <Link
-          href={`/gym/programming/${nextWeek}`}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border hover:bg-muted/30"
-          aria-label="Next week"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </Link>
-      </div>
+
+      <ProgrammingWeekHeader
+        communityId={communityId}
+        gymTimezone={gymTimezone}
+        weekStart={weekStart}
+        currentStatus={currentStatus}
+      />
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
@@ -176,22 +297,6 @@ export function ProgrammingWeekView({
             <FileText className="h-4 w-4" />
             Release
           </CardTitle>
-          {data?.release ? (
-            <span
-              className={
-                "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase " +
-                (data.release.status === "published"
-                  ? "bg-emerald-500/15 text-emerald-400"
-                  : "bg-amber-500/15 text-amber-400")
-              }
-            >
-              {data.release.status}
-            </span>
-          ) : (
-            <span className="rounded-full bg-muted/30 px-2 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground">
-              Not yet drafted
-            </span>
-          )}
         </CardHeader>
         <CardContent className="space-y-2">
           {data?.release?.status === "published" && (
@@ -211,29 +316,52 @@ export function ProgrammingWeekView({
                 Paste CAP week
               </Button>
             ) : null}
-            <Button
-              size="sm"
-              onClick={publish}
-              disabled={
-                publishing ||
-                !data?.release ||
-                data.release.status === "published"
-              }
-              title={
-                data?.release?.status === "published"
-                  ? "Already published — edits to sections publish automatically."
-                  : undefined
-              }
-            >
-              {publishing ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-              )}
-              {data?.release?.status === "published"
-                ? "Published"
-                : "Publish week"}
-            </Button>
+            {data?.release?.status === "published" ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={unpublish}
+                disabled={unpublishing}
+                title="Hide this week from members. Workouts and sections are kept so you can edit and republish."
+              >
+                {unpublishing ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Unpublish
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                onClick={publish}
+                disabled={publishing || !data?.release}
+              >
+                {publishing ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Publish week
+              </Button>
+            )}
+            {data?.release ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={deleteRelease}
+                disabled={deleting}
+                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                title="Delete this week's programming. Manual workouts from the CrossFit tab are kept."
+              >
+                {deleting ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Delete week
+              </Button>
+            ) : null}
           </div>
         </CardContent>
       </Card>
@@ -250,6 +378,7 @@ export function ProgrammingWeekView({
               communityId={communityId}
               date={d.date}
               workout={d.workout}
+              manualWorkouts={d.manualWorkouts}
               onMutated={onSectionMutate}
             />
           ))}

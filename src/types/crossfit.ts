@@ -501,6 +501,10 @@ export interface WorkoutSectionDisplay {
   /** Freeform prescription text — used for sections without Smart Builder
    *  parts (warm-ups, stretching, etc.). Rendered above the parts list. */
   body?: string | null;
+  /** Coach-authored notes captured via the Smart Builder's "Notes" field
+   *  when the section was composed in the programming admin. Rendered
+   *  beneath the parts list. */
+  notes?: string | null;
   isScored: boolean;
   scoreType: WorkoutSectionScoreTypeDisplay | null;
   /** Ordered list of workout_part IDs that belong to this section.

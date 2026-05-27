@@ -11,6 +11,8 @@ import {
   users,
   communities,
   workoutSections,
+  classInstances,
+  gymPosts,
 } from "@/db/schema";
 import { eq, and, inArray, notInArray } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
@@ -342,6 +344,8 @@ export async function GET(
       kind: workoutSections.kind,
       position: workoutSections.position,
       title: workoutSections.title,
+      body: workoutSections.body,
+      notes: workoutSections.notes,
       isScored: workoutSections.isScored,
       scoreType: workoutSections.scoreType,
     })
@@ -378,6 +382,8 @@ export async function GET(
       kind: s.kind,
       position: s.position,
       title: s.title,
+      body: s.body,
+      notes: s.notes,
       isScored: s.isScored,
       scoreType: s.scoreType,
       partIds: partIdsBySection.get(s.id) ?? [],
@@ -928,7 +934,10 @@ export async function DELETE(
     // score_movement_details.workout_movement_id has no ON DELETE clause
     // (defaults to NO ACTION). Cascade order from a single DELETE on workouts
     // can leave that constraint violated, so we explicitly drop the dependent
-    // rows first inside a transaction.
+    // rows first inside a transaction. class_instances.workout_id and
+    // gym_posts.workout_id are also non-cascading — null them out so a
+    // programmed workout that's been referenced from the schedule or feed
+    // can still be deleted.
     await db.transaction(async (tx) => {
       const wmIds = await tx
         .select({ id: workoutMovements.id })
@@ -945,6 +954,15 @@ export async function DELETE(
             )
           );
       }
+
+      await tx
+        .update(classInstances)
+        .set({ workoutId: null })
+        .where(eq(classInstances.workoutId, id));
+      await tx
+        .update(gymPosts)
+        .set({ workoutId: null })
+        .where(eq(gymPosts.workoutId, id));
 
       await tx.delete(workouts).where(eq(workouts.id, id));
     });
