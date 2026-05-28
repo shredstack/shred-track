@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
   communityMemberships,
+  crossfitWorkoutParts,
   familyMembers,
   scores,
   scoreMovementDetails,
   workouts,
-  workoutParts,
+  workoutSessions,
 } from "@/db/schema";
 import { and, eq, desc, asc } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
@@ -37,12 +38,16 @@ interface MovementDetailInput {
 }
 
 interface ScorePostBody {
+  // In the unified schema `workoutId` is the workout_sessions.id (the
+  // session.id that GET returns post-cutover). The field name is preserved
+  // for client backwards-compat; it stops being a `workouts.id` once the
+  // legacy table is dropped. `workoutPartId` is a crossfit_workout_parts.id.
   workoutId?: string;
   workoutPartId?: string;
   // Dependents (family_memberships): account holder logging on behalf
   // of a dependent. When set, the row's user_id is the dependent's id
   // (must be a family_members.dependent_user_id of the caller in the
-  // workout's gym). When null, the row's user_id is the caller.
+  // session's gym). When null, the row's user_id is the caller.
   forUserId?: string;
   division: "rx" | "scaled" | "rx_plus";
   timeSeconds?: number;
@@ -107,63 +112,86 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(rows);
 }
 
-// POST /api/scores — log a score against a workout part
+// POST /api/scores — log a score against a workout session + template part.
+//
+// Unified-schema cutover: `workoutId` in the body resolves to a
+// `workout_sessions.id`; `workoutPartId` resolves to a
+// `crossfit_workout_parts.id`. Legacy clients that only send `workoutId`
+// auto-resolve to the session's template's first part. The score row
+// itself is written with `workoutSessionId` + `crossfitWorkoutPartId`
+// populated and the legacy `workoutId` / `workoutPartId` columns left
+// null (a separate migration drops the NOT NULL on the legacy column).
 export async function POST(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = (await req.json()) as ScorePostBody;
-  const { workoutId: rawWorkoutId, workoutPartId: rawPartId, division } = body;
+  const { workoutId: rawSessionId, workoutPartId: rawPartId, division } = body;
 
   if (!division) {
     return NextResponse.json({ error: "division is required" }, { status: 400 });
   }
 
-  // Resolve workoutId + workoutPartId. A legacy client that sends only
-  // workoutId gets auto-resolved to that workout's first part (pre-multi-part
-  // workouts always have exactly one part).
-  let workoutId = rawWorkoutId;
-  let workoutPartId = rawPartId;
+  // Resolve sessionId + part-id (now a crossfit_workout_parts.id). A
+  // legacy client that sends only sessionId gets auto-resolved to the
+  // session's template's first part.
+  let workoutSessionId = rawSessionId;
+  let crossfitWorkoutPartId = rawPartId;
 
-  if (!workoutPartId) {
-    if (!workoutId) {
+  if (!crossfitWorkoutPartId) {
+    if (!workoutSessionId) {
       return NextResponse.json(
         { error: "workoutPartId or workoutId is required" },
         { status: 400 }
       );
     }
+    const [session] = await db
+      .select({ crossfitWorkoutId: workoutSessions.crossfitWorkoutId })
+      .from(workoutSessions)
+      .where(eq(workoutSessions.id, workoutSessionId))
+      .limit(1);
+    if (!session?.crossfitWorkoutId) {
+      return NextResponse.json(
+        { error: "Session has no template (warm-up / stretching cannot be scored)" },
+        { status: 400 }
+      );
+    }
     const [firstPart] = await db
-      .select({ id: workoutParts.id, workoutId: workoutParts.workoutId })
-      .from(workoutParts)
-      .where(eq(workoutParts.workoutId, workoutId))
-      .orderBy(asc(workoutParts.orderIndex))
+      .select({ id: crossfitWorkoutParts.id })
+      .from(crossfitWorkoutParts)
+      .where(eq(crossfitWorkoutParts.crossfitWorkoutId, session.crossfitWorkoutId))
+      .orderBy(asc(crossfitWorkoutParts.orderIndex))
       .limit(1);
     if (!firstPart) {
-      return NextResponse.json({ error: "Workout has no parts" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Template has no parts" },
+        { status: 400 }
+      );
     }
-    workoutPartId = firstPart.id;
-  } else if (!workoutId) {
-    const [part] = await db
-      .select({ workoutId: workoutParts.workoutId })
-      .from(workoutParts)
-      .where(eq(workoutParts.id, workoutPartId))
-      .limit(1);
-    if (!part) {
-      return NextResponse.json({ error: "Part not found" }, { status: 404 });
-    }
-    workoutId = part.workoutId;
+    crossfitWorkoutPartId = firstPart.id;
+  } else if (!workoutSessionId) {
+    // A part id was supplied but no session id. The part belongs to a
+    // template; we need the SESSION the athlete logged this score against,
+    // not just the template. Without a session context (e.g. a benchmark
+    // score with no day attached) we can't write a valid row — that's an
+    // unsupported flow in the unified schema (every score is tied to a
+    // dated session). Return a clear error.
+    return NextResponse.json(
+      { error: "workoutId (session id) is required" },
+      { status: 400 }
+    );
   }
 
   // Resolve effective user_id. "Log for" override (spec §8) lets an
   // account holder log scores on behalf of a dependent in the same gym.
   let effectiveUserId = user.id;
   if (body.forUserId && body.forUserId !== user.id) {
-    const [w] = await db
-      .select({ communityId: workouts.communityId })
-      .from(workouts)
-      .where(eq(workouts.id, workoutId!))
+    const [s] = await db
+      .select({ communityId: workoutSessions.communityId })
+      .from(workoutSessions)
+      .where(eq(workoutSessions.id, workoutSessionId!))
       .limit(1);
-    if (!w?.communityId) {
+    if (!s?.communityId) {
       return NextResponse.json(
         { error: "Can only log for a dependent in a gym workout" },
         { status: 400 }
@@ -176,7 +204,7 @@ export async function POST(req: NextRequest) {
         and(
           eq(familyMembers.accountHolderUserId, user.id),
           eq(familyMembers.dependentUserId, body.forUserId),
-          eq(familyMembers.communityId, w.communityId)
+          eq(familyMembers.communityId, s.communityId)
         )
       )
       .limit(1);
@@ -194,7 +222,7 @@ export async function POST(req: NextRequest) {
       .from(communityMemberships)
       .where(
         and(
-          eq(communityMemberships.communityId, w.communityId),
+          eq(communityMemberships.communityId, s.communityId),
           eq(communityMemberships.userId, user.id),
           eq(communityMemberships.isActive, true)
         )
@@ -243,15 +271,17 @@ export async function POST(req: NextRequest) {
     if (w != null) movementWeights.set(d.workoutMovementId, w);
   }
 
-  // Compute the personalized calorie estimate before opening the transaction.
-  // Worth noting: this issues a handful of read queries (parts, movements,
-  // paces, user, community pref). All reads — safe outside the tx.
+  // Compute the personalized calorie estimate before opening the
+  // transaction. computeScoreEstimate still reads from the legacy tables
+  // in commit #5; it'll be cut over to the unified schema in commit #6.
+  // Until then, new sessions/templates won't resolve and the estimator
+  // returns null — caught and ignored below.
   let calorieEstimate: Awaited<ReturnType<typeof computeScoreEstimate>> | null =
     null;
   try {
     calorieEstimate = await computeScoreEstimate({
-      workoutId: workoutId!,
-      workoutPartId,
+      workoutId: workoutSessionId!,
+      workoutPartId: crossfitWorkoutPartId,
       userId: effectiveUserId,
       movementWeights,
       score: {
@@ -283,8 +313,10 @@ export async function POST(req: NextRequest) {
       const [inserted] = await tx
         .insert(scores)
         .values({
-          workoutId: workoutId!,
-          workoutPartId,
+          // Legacy columns left null on the unified-schema write path —
+          // see migration 20260528180000 which dropped the NOT NULL.
+          workoutSessionId: workoutSessionId!,
+          crossfitWorkoutPartId,
           userId: effectiveUserId,
           division,
           timeSeconds: body.timeSeconds ?? null,

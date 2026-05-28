@@ -96,19 +96,25 @@ export async function PUT(
     if (w != null) movementWeights.set(d.workoutMovementId, w);
   }
 
+  // Skip the recompute when this row was written under the unified schema
+  // (legacy `workoutId` is null) — the estimator's reader cuts over to
+  // workoutSessionId in commit #6, and until then it can't resolve a new
+  // row's prescription.
   let calorieEstimate: Awaited<ReturnType<typeof computeScoreEstimate>> | null =
     null;
-  try {
-    calorieEstimate = await computeScoreEstimate({
-      scoreId: id,
-      workoutId: existing.workoutId,
-      workoutPartId: existing.workoutPartId,
-      userId: user.id,
-      score: mergedScore,
-      movementWeights: movementWeights.size > 0 ? movementWeights : undefined,
-    });
-  } catch (err) {
-    console.error("[calories] estimator failed for score PUT", err);
+  if (existing.workoutId) {
+    try {
+      calorieEstimate = await computeScoreEstimate({
+        scoreId: id,
+        workoutId: existing.workoutId,
+        workoutPartId: existing.workoutPartId,
+        userId: user.id,
+        score: mergedScore,
+        movementWeights: movementWeights.size > 0 ? movementWeights : undefined,
+      });
+    } catch (err) {
+      console.error("[calories] estimator failed for score PUT", err);
+    }
   }
 
   const updated = await db.transaction(async (tx) => {

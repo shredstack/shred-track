@@ -3,11 +3,12 @@ import { db } from "@/db";
 import { scores } from "@/db/schema";
 import { eq, ne, and, sql, countDistinct } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
-import { getWorkoutAccess } from "@/lib/authz/workout";
+import { getSessionAccess } from "@/lib/authz/workout";
 
 // GET /api/workouts/[id]/delete-impact
-// Returns counts of scores that would be cascade-deleted if this workout is
+// Returns counts of scores that would be cascade-deleted if this session is
 // deleted, so the UI can warn before destroying other athletes' data.
+// `id` is a workout_sessions.id post-cutover.
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -17,7 +18,7 @@ export async function GET(
 
   const { id } = await params;
 
-  const access = await getWorkoutAccess(user.id, id);
+  const access = await getSessionAccess(user.id, id);
   if (!access.exists) {
     return NextResponse.json({ error: "Workout not found" }, { status: 404 });
   }
@@ -34,12 +35,12 @@ export async function GET(
       uniqueAthletes: countDistinct(scores.userId),
     })
     .from(scores)
-    .where(eq(scores.workoutId, id));
+    .where(eq(scores.workoutSessionId, id));
 
   const [othersRow] = await db
     .select({ count: countDistinct(scores.userId) })
     .from(scores)
-    .where(and(eq(scores.workoutId, id), ne(scores.userId, user.id)));
+    .where(and(eq(scores.workoutSessionId, id), ne(scores.userId, user.id)));
 
   return NextResponse.json({
     totalScores: totals?.totalScores ?? 0,

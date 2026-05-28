@@ -148,7 +148,9 @@ export type BenchmarkTrendRow = {
 
 export type VolumeTrendRow = {
   scoreId: string;
-  workoutId: string;
+  // Nullable post-cutover — unified-schema score rows leave workout_id null.
+  // The unified read path lands in commit #6.
+  workoutId: string | null;
   workoutDate: string;
   timeSeconds: number | null;
   timeCapSeconds: number | null;
@@ -663,6 +665,9 @@ export function computeVolumeTrendsFromRows(
   for (const r of rows) {
     const week = weekStartIso(r.workoutDate);
     if (!buckets.has(week)) continue; // outside window
+    // Skip unified-schema rows that lack a legacy workoutId; commit #6's
+    // trend reader carries the session/template id through.
+    if (!r.workoutId) continue;
 
     let acc = byWorkout.get(r.workoutId);
     if (!acc) {

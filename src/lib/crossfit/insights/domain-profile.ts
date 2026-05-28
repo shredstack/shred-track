@@ -92,7 +92,8 @@ export type DomainProfile = {
 // without depending on the DB.
 export type DomainProfileRow = {
   scoreId: string;
-  workoutId: string;
+  // Nullable post-cutover — unified-schema score rows leave workout_id null.
+  workoutId: string | null;
   workoutDate: string;
   workoutType: string;
   workoutRepScheme: string | null;
@@ -210,6 +211,9 @@ function aggregate(rows: DomainProfileRow[]): WindowAgg {
 
   for (const r of rows) {
     const domain = bucketFor(r.movementCategory, r.movementIsWeighted);
+    // Skip rows that lack a legacy workoutId (unified-schema writes);
+    // commit #6's reader carries the session/template id forward.
+    if (!r.workoutId) continue;
     agg.workoutIdsByDomain.get(domain)!.add(r.workoutId);
     const totals = agg.totalsByDomain.get(domain)!;
     totals.total += 1;

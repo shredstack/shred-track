@@ -233,7 +233,9 @@ export interface BenchmarkBestScore {
 
 export interface BenchmarkAttempt {
   scoreId: string;
-  workoutId: string;
+  // Nullable post-cutover — unified-schema score rows leave workout_id null.
+  // The benchmark-history reader cuts over to workoutSessionId in commit #6.
+  workoutId: string | null;
   workoutDate: string;
   division: string;
   timeSeconds: number | null;

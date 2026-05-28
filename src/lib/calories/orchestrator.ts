@@ -214,6 +214,11 @@ export async function recomputeScoreEstimate(scoreId: string): Promise<void> {
     .limit(1);
 
   if (!row) return;
+  // Legacy-tree recompute: bail when the row was written post-cutover (it
+  // carries `workout_session_id` / `crossfit_workout_part_id` but no legacy
+  // workoutId). The unified-schema recompute path lands with the rest of
+  // the calorie reader cutover in commit #6.
+  if (!row.workoutId) return;
 
   // Rebuild the per-movement working weights from the persisted detail rows
   // so a recompute reproduces the load-relative modifier.

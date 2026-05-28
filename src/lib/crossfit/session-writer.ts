@@ -84,9 +84,15 @@ function validateInput(input: CreateSessionInput): void {
       throw new Error(`workout_sessions: kind=${kind} requires a non-empty body`);
     }
   } else {
-    if (!input.crossfitWorkoutId) {
+    // Structured kinds need EITHER a template OR a body. The gym admin
+    // flow creates empty sections and fills the prescription later; until
+    // a Smart Builder PUT lands, the body acts as the placeholder. The
+    // DB CHECK enforces the same shape.
+    const hasTemplate = !!input.crossfitWorkoutId;
+    const hasBody = !!(input.body && input.body.trim() !== "");
+    if (!hasTemplate && !hasBody) {
       throw new Error(
-        `workout_sessions: kind=${kind} requires a crossfitWorkoutId`
+        `workout_sessions: kind=${kind} requires either a crossfitWorkoutId or a non-empty body`
       );
     }
   }

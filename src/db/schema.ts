@@ -582,12 +582,14 @@ export const scores = pgTable(
   "scores",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    workoutId: uuid("workout_id").notNull().references(() => workouts.id, { onDelete: "cascade" }),
+    // Legacy FK columns. New writes (post write-cutover) leave these null
+    // and populate `workoutSessionId` / `crossfitWorkoutPartId` instead.
+    // The drop migration retires these once every reader is on the
+    // unified schema.
+    workoutId: uuid("workout_id").references(() => workouts.id, { onDelete: "cascade" }),
     workoutPartId: uuid("workout_part_id").references(() => workoutParts.id, { onDelete: "cascade" }),
-    // Unified-schema FKs. Populated by the backfill; new writes set these
-    // alongside the legacy columns during the cutover. After the legacy
-    // drop migration these become the only FK columns (and `workoutId` is
-    // renamed to `workoutSessionId`).
+    // Unified-schema FKs. The write cutover populates these; the legacy
+    // columns above stay null on new rows.
     workoutSessionId: uuid("workout_session_id"),
     crossfitWorkoutPartId: uuid("crossfit_workout_part_id"),
     userId: uuid("user_id").notNull().references(() => users.id),

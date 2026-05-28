@@ -18,7 +18,11 @@ import { canViewGym, isSuperAdmin } from "./community";
 export interface ScoreContext {
   scoreId: string;
   userId: string;
-  workoutId: string;
+  // Nullable post-cutover — unified-schema score rows leave the legacy
+  // workout_id column null. Authz still works because new rows ALSO carry
+  // workoutSessionId; this loader stays on the legacy path through commit
+  // #5 and gets cut over in #6 alongside the rest of the read layer.
+  workoutId: string | null;
   workoutPartId: string | null;
   communityId: string | null;
 }

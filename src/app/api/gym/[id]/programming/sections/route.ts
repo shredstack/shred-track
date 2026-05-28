@@ -1,44 +1,104 @@
-// POST   /api/gym/[id]/programming/sections          — create a section on a workout
+// POST   /api/gym/[id]/programming/sections          — create a section on a day
 // PATCH  /api/gym/[id]/programming/sections          — update an existing section
-// DELETE /api/gym/[id]/programming/sections?id=…     — remove a section (parts + scores cascade)
+// DELETE /api/gym/[id]/programming/sections?id=…     — remove a section
 //
-// Coach/admin only. Stamps reviewed_at on the section whenever a PATCH
-// touches user-edited fields so the CAP re-paste guard skips it.
+// In the unified schema a "section" IS a `workout_sessions` row scoped by
+// (community_id, workout_date, position). Coach/admin only. Stamps
+// `reviewed_at` whenever a PATCH touches user-edited fields so the CAP
+// re-paste guard skips it.
 
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  WORKOUT_SECTION_KINDS,
-  WORKOUT_SECTION_SCORE_TYPES,
+  WORKOUT_SESSION_KINDS,
+  WORKOUT_SESSION_SCORE_TYPES,
   programmingReleases,
-  workoutParts,
-  workoutSections,
-  workouts,
-  type WorkoutSectionKind,
-  type WorkoutSectionScoreType,
+  workoutSessions,
+  type WorkoutSessionKind,
+  type WorkoutSessionScoreType,
+  FREEFORM_SESSION_KINDS,
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canManageGym } from "@/lib/authz/community";
+import {
+  createSession,
+  nextPositionForDay,
+  updateSession,
+} from "@/lib/crossfit/session-writer";
 
-function isValidKind(v: unknown): v is WorkoutSectionKind {
-  return typeof v === "string" && (WORKOUT_SECTION_KINDS as readonly string[]).includes(v);
+function isValidKind(v: unknown): v is WorkoutSessionKind {
+  return (
+    typeof v === "string" &&
+    (WORKOUT_SESSION_KINDS as readonly string[]).includes(v)
+  );
 }
-function isValidScoreType(v: unknown): v is WorkoutSectionScoreType | null {
+function isValidScoreType(
+  v: unknown
+): v is WorkoutSessionScoreType | null | undefined {
   if (v === null || v === undefined) return true;
   return (
     typeof v === "string" &&
-    (WORKOUT_SECTION_SCORE_TYPES as readonly string[]).includes(v)
+    (WORKOUT_SESSION_SCORE_TYPES as readonly string[]).includes(v)
   );
 }
 
-async function workoutBelongsToGym(workoutId: string, communityId: string) {
-  const [w] = await db
-    .select({ id: workouts.id })
-    .from(workouts)
-    .where(and(eq(workouts.id, workoutId), eq(workouts.communityId, communityId)))
+function isFreeformKind(kind: WorkoutSessionKind): boolean {
+  return (FREEFORM_SESSION_KINDS as readonly string[]).includes(kind);
+}
+
+async function sessionBelongsToGym(sessionId: string, communityId: string) {
+  const [s] = await db
+    .select({ id: workoutSessions.id })
+    .from(workoutSessions)
+    .where(
+      and(
+        eq(workoutSessions.id, sessionId),
+        eq(workoutSessions.communityId, communityId)
+      )
+    )
     .limit(1);
-  return !!w;
+  return !!s;
+}
+
+function mondayOf(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  const dow = (d.getUTCDay() + 6) % 7; // Mon=0
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d.toISOString().slice(0, 10);
+}
+
+// Resolve (or create) the draft release covering the given date, so every
+// programmed session lives inside a release. Mirrors the upsert the old
+// route did against the legacy workouts table — releases themselves are
+// unchanged by the cutover.
+async function resolveDraftReleaseId(
+  tx: typeof db,
+  communityId: string,
+  workoutDate: string
+): Promise<string> {
+  const monday = mondayOf(workoutDate);
+  const [release] = await tx
+    .select({ id: programmingReleases.id })
+    .from(programmingReleases)
+    .where(
+      and(
+        eq(programmingReleases.communityId, communityId),
+        eq(programmingReleases.weekStart, monday)
+      )
+    )
+    .limit(1);
+  if (release) return release.id;
+  const [created] = await tx
+    .insert(programmingReleases)
+    .values({
+      communityId,
+      weekStart: monday,
+      status: "draft",
+      source: "manual",
+    })
+    .returning({ id: programmingReleases.id });
+  return created.id;
 }
 
 export async function POST(
@@ -53,15 +113,14 @@ export async function POST(
   }
 
   const body = (await req.json().catch(() => null)) as {
+    // workoutDate is now the primary identifier — sections live on a
+    // (community_id, workout_date) tuple in the unified schema. The legacy
+    // `workoutId` field is no longer needed; we keep accepting it on the
+    // wire to avoid breaking clients but ignore it server-side.
     workoutId?: string;
-    // When workoutId is omitted, callers can pass workoutDate to have the
-    // route create the day's workout on demand. Lets coaches add sections
-    // to an otherwise-empty day without first running a CAP paste.
     workoutDate?: string;
     kind?: string;
     title?: string | null;
-    // Freeform prescription text. Lets warm-up / stretching placeholders
-    // be turned into real sections in one POST instead of POST + PATCH.
     body?: string | null;
     position?: number;
     isScored?: boolean;
@@ -77,117 +136,64 @@ export async function POST(
   if (!isValidScoreType(body?.scoreType ?? null)) {
     return NextResponse.json({ error: "Invalid scoreType" }, { status: 400 });
   }
-
-  // Resolve or create the parent workout for this section.
-  let workoutId = body?.workoutId ?? null;
-  if (workoutId) {
-    if (!(await workoutBelongsToGym(workoutId, communityId))) {
-      return NextResponse.json(
-        { error: "Workout not in this gym" },
-        { status: 404 }
-      );
-    }
-  } else {
-    const workoutDate = body?.workoutDate;
-    if (!workoutDate || !/^\d{4}-\d{2}-\d{2}$/.test(workoutDate)) {
-      return NextResponse.json(
-        { error: "workoutId or a valid workoutDate (YYYY-MM-DD) is required" },
-        { status: 400 }
-      );
-    }
-    workoutId = await db.transaction(async (tx) => {
-      // Only reuse a workout if it already belongs to a programmed release.
-      // Legacy WODs (no programmingReleaseId) stay separate so adding a new
-      // programmed day never absorbs a coach's ad-hoc WOD title/body.
-      const [existing] = await tx
-        .select({ id: workouts.id })
-        .from(workouts)
-        .where(
-          and(
-            eq(workouts.communityId, communityId),
-            eq(workouts.workoutDate, workoutDate),
-            isNotNull(workouts.programmingReleaseId)
-          )
-        )
-        .limit(1);
-      if (existing) return existing.id;
-      // Find or create the draft release covering this date (week-start =
-      // Monday of the date's week). Sections always live inside a release.
-      const monday = mondayOf(workoutDate);
-      let releaseId: string;
-      const [release] = await tx
-        .select({ id: programmingReleases.id })
-        .from(programmingReleases)
-        .where(
-          and(
-            eq(programmingReleases.communityId, communityId),
-            eq(programmingReleases.weekStart, monday)
-          )
-        )
-        .limit(1);
-      if (release) {
-        releaseId = release.id;
-      } else {
-        const [r] = await tx
-          .insert(programmingReleases)
-          .values({
-            communityId,
-            weekStart: monday,
-            status: "draft",
-            source: "manual",
-          })
-          .returning({ id: programmingReleases.id });
-        releaseId = r.id;
-      }
-      const [w] = await tx
-        .insert(workouts)
-        .values({
-          createdBy: user.id,
-          communityId,
-          workoutDate,
-          workoutType: "other",
-          programmingReleaseId: releaseId,
-          published: false,
-          source: "manual",
-        })
-        .returning({ id: workouts.id });
-      return w.id;
-    });
+  const workoutDate = body?.workoutDate;
+  if (!workoutDate || !/^\d{4}-\d{2}-\d{2}$/.test(workoutDate)) {
+    return NextResponse.json(
+      { error: "workoutDate (YYYY-MM-DD) is required" },
+      { status: 400 }
+    );
   }
 
-  // Compute the next position if none provided.
-  let position = body!.position;
-  if (position === undefined) {
-    const existing = await db
-      .select({ position: workoutSections.position })
-      .from(workoutSections)
-      .where(eq(workoutSections.workoutId, workoutId!));
-    position = existing.reduce((max, s) => Math.max(max, s.position + 1), 0);
-  }
+  const kind = body!.kind!;
+  const freeform = isFreeformKind(kind);
 
-  const [created] = await db
-    .insert(workoutSections)
-    .values({
-      workoutId: workoutId!,
-      kind: body!.kind!,
+  // Freeform kinds must carry a body — the DB CHECK enforces this but a
+  // 400 here gives a friendlier message than the generic constraint
+  // error. Structured kinds may be created empty (no body, no template);
+  // an immediate content PUT supplies the prescription. Until the PUT
+  // arrives we drop a placeholder body so the row clears the CHECK.
+  if (freeform && !(body?.body && body.body.trim().length > 0)) {
+    return NextResponse.json(
+      { error: `${kind} sections require a body` },
+      { status: 400 }
+    );
+  }
+  const initialBody = freeform
+    ? body!.body!
+    : body?.body && body.body.trim().length > 0
+      ? body.body
+      : "(empty)";
+
+  const result = await db.transaction(async (tx) => {
+    const releaseId = await resolveDraftReleaseId(
+      tx as unknown as typeof db,
+      communityId,
+      workoutDate
+    );
+    const position =
+      body?.position !== undefined
+        ? body.position
+        : await nextPositionForDay(tx, { communityId, workoutDate });
+    return createSession(tx, {
+      crossfitWorkoutId: null,
+      body: initialBody,
+      kind,
+      communityId,
+      workoutDate,
       subKind: body!.subKind ?? null,
       position,
       title: body!.title ?? null,
-      body: body!.body ?? null,
       isScored: !!body!.isScored,
-      scoreType: (body!.scoreType as WorkoutSectionScoreType | null) ?? null,
+      scoreType:
+        (body!.scoreType as WorkoutSessionScoreType | null | undefined) ??
+        null,
+      source: "manual",
+      programmingReleaseId: releaseId,
       reviewedAt: new Date(),
-    })
-    .returning();
+    });
+  });
 
-  return NextResponse.json(created);
-}
-
-function mondayOf(iso: string): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  const dow = (d.getUTCDay() + 6) % 7; // Mon=0
-  d.setUTCDate(d.getUTCDate() - dow);
-  return d.toISOString().slice(0, 10);
+  return NextResponse.json(result);
 }
 
 export async function PATCH(
@@ -216,51 +222,43 @@ export async function PATCH(
     return NextResponse.json({ error: "id is required" }, { status: 400 });
   }
 
-  // Verify the section's workout belongs to this gym.
-  const [section] = await db
-    .select({
-      id: workoutSections.id,
-      workoutId: workoutSections.workoutId,
-    })
-    .from(workoutSections)
-    .where(eq(workoutSections.id, body.id))
-    .limit(1);
-  if (!section) {
-    return NextResponse.json({ error: "Section not found" }, { status: 404 });
-  }
-  if (!(await workoutBelongsToGym(section.workoutId, communityId))) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!(await sessionBelongsToGym(body.id, communityId))) {
+    return NextResponse.json(
+      { error: "Section not found in this gym" },
+      { status: 404 }
+    );
   }
 
-  const updates: Partial<typeof workoutSections.$inferInsert> = {
+  // Spec mapping: legacy `workout_sections.notes` (coach-authored
+  // section-specific guidance) is now `workout_sessions.coach_notes`. We
+  // accept the legacy field name from clients during the transition; the
+  // schema column is `coachNotes`.
+  const patch: Record<string, unknown> = {
     reviewedAt: new Date(),
-    updatedAt: new Date(),
   };
   if (body.kind !== undefined) {
     if (!isValidKind(body.kind)) {
       return NextResponse.json({ error: "Invalid kind" }, { status: 400 });
     }
-    updates.kind = body.kind;
+    patch.kind = body.kind;
   }
-  if (body.title !== undefined) updates.title = body.title;
-  if (body.body !== undefined) updates.body = body.body;
-  if (body.notes !== undefined) updates.notes = body.notes;
-  if (body.position !== undefined) updates.position = body.position;
-  if (body.isScored !== undefined) updates.isScored = body.isScored;
-  if (body.subKind !== undefined) updates.subKind = body.subKind;
+  if (body.title !== undefined) patch.title = body.title;
+  if (body.body !== undefined) patch.body = body.body;
+  if (body.notes !== undefined) patch.coachNotes = body.notes;
+  if (body.position !== undefined) patch.position = body.position;
+  if (body.isScored !== undefined) patch.isScored = body.isScored;
+  if (body.subKind !== undefined) patch.subKind = body.subKind;
   if (body.scoreType !== undefined) {
     if (!isValidScoreType(body.scoreType)) {
       return NextResponse.json({ error: "Invalid scoreType" }, { status: 400 });
     }
-    updates.scoreType = (body.scoreType as WorkoutSectionScoreType | null) ?? null;
+    patch.scoreType =
+      (body.scoreType as WorkoutSessionScoreType | null) ?? null;
   }
 
-  const [updated] = await db
-    .update(workoutSections)
-    .set(updates)
-    .where(eq(workoutSections.id, body.id))
-    .returning();
-
+  const updated = await db.transaction(async (tx) =>
+    updateSession(tx, body.id!, patch)
+  );
   return NextResponse.json(updated);
 }
 
@@ -280,27 +278,16 @@ export async function DELETE(
   if (!id) {
     return NextResponse.json({ error: "id is required" }, { status: 400 });
   }
-
-  const [section] = await db
-    .select({ id: workoutSections.id, workoutId: workoutSections.workoutId })
-    .from(workoutSections)
-    .where(eq(workoutSections.id, id))
-    .limit(1);
-  if (!section) return NextResponse.json({ ok: true });
-  if (!(await workoutBelongsToGym(section.workoutId, communityId))) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!(await sessionBelongsToGym(id, communityId))) {
+    return NextResponse.json({ ok: true });
   }
 
-  await db.transaction(async (tx) => {
-    // Delete the section's parts so athletes don't see them as a
-    // title-less "Other" card after the section disappears. Cascading
-    // FKs on workout_blocks, workout_movements, and scores clean up the
-    // dependent rows.
-    await tx
-      .delete(workoutParts)
-      .where(eq(workoutParts.workoutSectionId, id));
-    await tx.delete(workoutSections).where(eq(workoutSections.id, id));
-  });
+  // The session's scores cascade-delete via FK. The template stays
+  // (intentional — other sessions may still reference it; orphan-clean
+  // is deferred to a later commit).
+  await db
+    .delete(workoutSessions)
+    .where(eq(workoutSessions.id, id));
 
   return NextResponse.json({ ok: true });
 }

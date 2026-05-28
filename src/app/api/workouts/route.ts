@@ -5,15 +5,12 @@ import {
   workoutParts,
   workoutBlocks,
   workoutMovements,
-  benchmarkWorkouts,
-  benchmarkWorkoutParts,
-  benchmarkWorkoutBlocks,
-  benchmarkWorkoutMovements,
   movements,
   scores,
   scoreMovementDetails,
   communityMemberships,
   communities,
+  crossfitWorkouts,
   workoutSections,
   users,
   programmingTrackDays,
@@ -21,90 +18,29 @@ import {
 } from "@/db/schema";
 import { eq, desc, and, inArray, gte, lte, or, ilike, isNull } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
-import { canCreateWorkoutInGym, getWorkoutAccess } from "@/lib/authz/workout";
+import { canCreateWorkoutInGym } from "@/lib/authz/workout";
 import { canViewGym } from "@/lib/authz/community";
 import type { WorkoutType } from "@/types/crossfit";
-import {
-  parseRepScheme,
-  type RepSchemeParsed,
-} from "@/lib/crossfit/rep-scheme-parser";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
-import { parseDurationToSeconds } from "@/lib/crossfit/duration-parser";
+import {
+  upsertTemplate,
+  type TemplatePartInput,
+  type TemplatePartMovementInput,
+  type UpsertTemplateScope,
+} from "@/lib/crossfit/upsert-template";
+import { createSession } from "@/lib/crossfit/session-writer";
 import { inferWeightliftingBenchmark } from "@/lib/crossfit/weightlifting-benchmarks";
 import { inngest } from "@/inngest/client";
 
 // ============================================
-// Types
+// Request body shape
 // ============================================
-
-interface PartMovementInput {
-  movementId: string;
-  orderIndex?: number;
-  prescribedReps?: string;
-  prescribedWeightMale?: number | string;
-  prescribedWeightFemale?: number | string;
-  prescribedCaloriesMale?: number | string;
-  prescribedCaloriesFemale?: number | string;
-  prescribedDistanceMale?: number | string;
-  prescribedDistanceFemale?: number | string;
-  // Hint flag from the builder. When true and the parsed shape comes back
-  // as a closed arithmetic sequence, the server promotes it to an open
-  // ladder before persisting. See rep-scheme-parser for the rules.
-  promoteSequenceToLadder?: boolean;
-  equipmentCount?: number;
-  rxStandard?: string;
-  notes?: string;
-  // PushPress Parity: free text from the builder (parsed here) or a
-  // pre-parsed seconds value from API integrations.
-  prescribedDurationSecondsMale?: number | string;
-  prescribedDurationSecondsFemale?: number | string;
-  prescribedHeightInches?: number | string;
-  prescribedHeightInchesMale?: number | string;
-  prescribedHeightInchesFemale?: number | string;
-  prescribedWeightMaleBwMultiplier?: number | string;
-  prescribedWeightFemaleBwMultiplier?: number | string;
-  // weight_pct Rx — the percentage and the builder tempId of the earlier
-  // for_load part it anchors to (resolved to a real id at insert time).
-  prescribedWeightPct?: number | string;
-  weightPctSourcePartTempRef?: string | null;
-  tempo?: string;
-  isMaxReps?: boolean;
-  isSideCadence?: boolean;
-  // Block membership. `blockId` is the round-tripped DB id (edit flow);
-  // `blockTempRef` references a PartBlockInput.tempRef for newly-created
-  // blocks. The route resolves to a real workout_block id post-insert.
-  blockId?: string | null;
-  blockTempRef?: string | null;
-}
-
-interface PartBlockInput {
-  id?: string;
-  tempRef?: string;
-  title: string;
-  orderIndex?: number;
-}
-
-interface PartInput {
-  // Builder tempId for this part. Resolved to a real id so later parts'
-  // weight_pct movements can anchor to it.
-  tempRef?: string;
-  label?: string;
-  workoutType: WorkoutType;
-  timeCapSeconds?: number;
-  amrapDurationSeconds?: number;
-  emomIntervalSeconds?: number;
-  intervalWorkSeconds?: number | string;
-  intervalRestSeconds?: number | string;
-  intervalRounds?: { workSeconds: number | string; restSeconds: number | string }[];
-  sideCadenceIntervalSeconds?: number | string;
-  sideCadenceOpenEnded?: boolean;
-  repScheme?: string;
-  rounds?: number;
-  structure?: string;
-  notes?: string;
-  movements: PartMovementInput[];
-  blocks?: PartBlockInput[];
-}
+//
+// The `parts[]` shape (and its movement/block sub-shapes) is the same as
+// `TemplatePartInput` from `@/lib/crossfit/upsert-template` — see that
+// module for the canonical type definitions. We re-export the input alias
+// here so the legacy flat-shape normalizer below can name it.
+type PartInput = TemplatePartInput;
 
 // GET /api/workouts — list workouts.
 // Supports filters:
@@ -642,7 +578,27 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(result);
 }
 
-// POST /api/workouts — create a workout
+// POST /api/workouts — create a workout (session + template) on the
+// unified-schema tables. Every path here ends in:
+//   1. An `upsertTemplate` call that resolves a `crossfit_workouts` row
+//      (deduped by content fingerprint within scope), or a direct lookup of
+//      an existing benchmark template.
+//   2. A `createSession` call that produces a `workout_sessions` row
+//      pointing at that template (kind = 'wod', position = 0).
+//
+// Body shapes accepted (all-or-nothing per request):
+//   • Benchmark fast-path:        { benchmarkWorkoutId, workoutDate, communityId? }
+//                                  benchmarkWorkoutId is a crossfit_workouts.id
+//                                  with is_benchmark = true.
+//   • Smart Builder (parts[]):    { parts: [...], title, description?, ... }
+//   • Weightlifting attempt:      Falls through the parts path; the auto-link
+//                                  inference routes the session at the
+//                                  canonical weightlifting template when the
+//                                  prescription qualifies.
+//
+// Response: the new `workout_sessions` row, augmented with `crossfitWorkoutId`
+// + `isNewTemplate`. The `id` field is the session id — that's the same handle
+// the GET / DELETE endpoints will use post-cutover.
 export async function POST(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -651,7 +607,6 @@ export async function POST(req: NextRequest) {
   const {
     title,
     description,
-    rawText,
     workoutDate,
     communityId,
     published,
@@ -692,616 +647,204 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  if (!workoutDate) {
+    return NextResponse.json(
+      { error: "workoutDate is required" },
+      { status: 400 }
+    );
+  }
+
+  const scope: UpsertTemplateScope = targetCommunityId
+    ? { kind: "community", communityId: targetCommunityId }
+    : { kind: "personal", userId: user.id };
+
   // ============================================
-  // Benchmark fast path — single part copied from benchmark
+  // Benchmark fast-path — session points directly at the canonical template
   // ============================================
+  //
+  // The benchmarkWorkoutId in the request body is a `crossfit_workouts.id`
+  // with `is_benchmark = true`. We don't copy parts/movements — sessions
+  // share the template. The override fields (`isPartner`, `requiresVest`,
+  // etc.) on the body are ignored here; in the unified schema those live
+  // on the template, so changing them would either mutate the canonical
+  // template (bad) or require a fork (deferred to commit #8). The picker
+  // already surfaces the canonical metadata, so an athlete picking Murph
+  // gets Murph's vest config without having to re-send it.
 
   if (benchmarkWorkoutId) {
-    const [benchmark] = await db
-      .select()
-      .from(benchmarkWorkouts)
-      .where(eq(benchmarkWorkouts.id, benchmarkWorkoutId))
+    const [tmpl] = await db
+      .select({
+        id: crossfitWorkouts.id,
+        isBenchmark: crossfitWorkouts.isBenchmark,
+        weightliftingMovementId: crossfitWorkouts.weightliftingMovementId,
+      })
+      .from(crossfitWorkouts)
+      .where(eq(crossfitWorkouts.id, benchmarkWorkoutId))
       .limit(1);
 
-    if (!benchmark) {
-      return NextResponse.json({ error: "Benchmark not found" }, { status: 404 });
+    if (!tmpl) {
+      return NextResponse.json(
+        { error: "Benchmark not found" },
+        { status: 404 }
+      );
+    }
+    if (!tmpl.isBenchmark) {
+      return NextResponse.json(
+        { error: "Template is not a benchmark" },
+        { status: 400 }
+      );
     }
 
     // Weightlifting benchmarks are stat-tracker anchors, not workouts to
-    // copy from — their movements have no prescribedReps and the part has
-    // no repScheme. When the client supplies `parts` alongside a
-    // weightlifting benchmarkWorkoutId, taking the fast-path would silently
-    // discard the user's typed rep scheme and weights. Fall through to the
-    // user-data path instead; the post-insert `inferWeightliftingBenchmark`
-    // call re-attaches the benchmark link. When the client sends no parts
-    // (legacy benchmark-picker flow), keep the fast-path so we don't break
-    // existing callers — empty is the expected outcome there.
+    // pick directly — when the client supplies `parts` alongside a
+    // weightlifting benchmark id, the user's typed rep/weight is the
+    // prescription. Fall through to the parts path; the auto-link
+    // inference there relinks the session to this canonical template.
     const hasParts =
-      Array.isArray(body.parts) && body.parts.length > 0;
-    if (benchmark.weightliftingMovementId && hasParts) {
-      // no-op — drop into the normal path below
-    } else {
-
-    // Multi-part benchmark support — when the benchmark has explicit
-    // parts (newer / Drew-style), copy each part to the new workout. The
-    // legacy single-part path is preserved as a fallback for benchmarks
-    // that haven't been migrated to parts.
-    const bmParts = await db
-      .select()
-      .from(benchmarkWorkoutParts)
-      .where(eq(benchmarkWorkoutParts.benchmarkWorkoutId, benchmarkWorkoutId))
-      .orderBy(benchmarkWorkoutParts.orderIndex);
-
-    const bmBlocks =
-      bmParts.length > 0
-        ? await db
-            .select()
-            .from(benchmarkWorkoutBlocks)
-            .where(
-              inArray(
-                benchmarkWorkoutBlocks.benchmarkWorkoutPartId,
-                bmParts.map((p) => p.id)
-              )
-            )
-            .orderBy(benchmarkWorkoutBlocks.orderIndex)
-        : [];
-
-    const bmMovements = await db
-      .select({
-        movementId: benchmarkWorkoutMovements.movementId,
-        orderIndex: benchmarkWorkoutMovements.orderIndex,
-        benchmarkWorkoutPartId: benchmarkWorkoutMovements.benchmarkWorkoutPartId,
-        benchmarkWorkoutBlockId:
-          benchmarkWorkoutMovements.benchmarkWorkoutBlockId,
-        prescribedReps: benchmarkWorkoutMovements.prescribedReps,
-        prescribedWeightMale: benchmarkWorkoutMovements.prescribedWeightMale,
-        prescribedWeightFemale: benchmarkWorkoutMovements.prescribedWeightFemale,
-        prescribedCaloriesMale:
-          benchmarkWorkoutMovements.prescribedCaloriesMale,
-        prescribedCaloriesFemale:
-          benchmarkWorkoutMovements.prescribedCaloriesFemale,
-        prescribedDistanceMale:
-          benchmarkWorkoutMovements.prescribedDistanceMale,
-        prescribedDistanceFemale:
-          benchmarkWorkoutMovements.prescribedDistanceFemale,
-        prescribedDurationSecondsMale:
-          benchmarkWorkoutMovements.prescribedDurationSecondsMale,
-        prescribedDurationSecondsFemale:
-          benchmarkWorkoutMovements.prescribedDurationSecondsFemale,
-        prescribedHeightInches:
-          benchmarkWorkoutMovements.prescribedHeightInches,
-        prescribedHeightInchesMale:
-          benchmarkWorkoutMovements.prescribedHeightInchesMale,
-        prescribedHeightInchesFemale:
-          benchmarkWorkoutMovements.prescribedHeightInchesFemale,
-        prescribedWeightMaleBwMultiplier:
-          benchmarkWorkoutMovements.prescribedWeightMaleBwMultiplier,
-        prescribedWeightFemaleBwMultiplier:
-          benchmarkWorkoutMovements.prescribedWeightFemaleBwMultiplier,
-        tempo: benchmarkWorkoutMovements.tempo,
-        isMaxReps: benchmarkWorkoutMovements.isMaxReps,
-        isSideCadence: benchmarkWorkoutMovements.isSideCadence,
-        equipmentCount: benchmarkWorkoutMovements.equipmentCount,
-        rxStandard: benchmarkWorkoutMovements.rxStandard,
-        notes: benchmarkWorkoutMovements.notes,
-      })
-      .from(benchmarkWorkoutMovements)
-      .where(eq(benchmarkWorkoutMovements.benchmarkWorkoutId, benchmarkWorkoutId))
-      .orderBy(benchmarkWorkoutMovements.orderIndex);
-
-    if (!workoutDate) {
-      return NextResponse.json({ error: "workoutDate is required" }, { status: 400 });
-    }
-
-    const result = await db.transaction(async (tx) => {
-      const [workout] = await tx
-        .insert(workouts)
-        .values({
-          createdBy: user.id,
+      Array.isArray(body.parts) && (body.parts as unknown[]).length > 0;
+    if (!(tmpl.weightliftingMovementId && hasParts)) {
+      const session = await db.transaction(async (tx) => {
+        return createSession(tx, {
+          crossfitWorkoutId: tmpl.id,
+          userId: targetCommunityId ? null : user.id,
           communityId: targetCommunityId,
-          title: benchmark.name,
-          description: benchmark.description,
-          workoutType: benchmark.workoutType,
-          timeCapSeconds: benchmark.timeCapSeconds,
-          amrapDurationSeconds: benchmark.amrapDurationSeconds,
-          repScheme: benchmark.repScheme,
           workoutDate,
-          // Gym workouts default to published — the UI has no draft flow yet,
-          // so a coach who programs a workout for the gym means for athletes
-          // (and their watches) to see it. Personal workouts stay unpublished
-          // by default since the flag is meaningless there.
+          kind: "wod",
+          position: 0,
+          isScored: true,
+          source: source || "benchmark",
           published: published ?? targetCommunityId !== null,
-          source: "benchmark",
-          benchmarkWorkoutId,
-          // Inherit vest prescription from the benchmark.
-          requiresVest: !!benchmark.requiresVest,
-          vestWeightMaleLb: benchmark.vestWeightMaleLb ?? null,
-          vestWeightFemaleLb: benchmark.vestWeightFemaleLb ?? null,
-          // Body overrides win when explicitly provided so callers can mark
-          // a non-partner benchmark (or unmark one) at workout-creation time.
-          // Falls back to the benchmark's own flag when the body is silent.
-          isPartner:
-            isPartner !== undefined ? !!isPartner : !!benchmark.isPartner,
-          partnerCount:
-            isPartner !== undefined
-              ? toIntOrNull(partnerCount)
-              : benchmark.partnerCount ?? null,
-        })
-        .returning();
+        });
+      });
 
-      // Either copy each benchmark part 1:1, or fall back to a single
-      // synthetic part on legacy single-part benchmarks.
-      const partsToInsert =
-        bmParts.length > 0
-          ? bmParts.map((bp) => ({
-              workoutId: workout.id,
-              orderIndex: bp.orderIndex,
-              label: bp.label,
-              workoutType: bp.workoutType,
-              timeCapSeconds: bp.timeCapSeconds,
-              amrapDurationSeconds: bp.amrapDurationSeconds,
-              emomIntervalSeconds: bp.emomIntervalSeconds,
-              repScheme: bp.repScheme,
-              rounds: bp.rounds,
-              structure: bp.structure,
-              intervalWorkSeconds: bp.intervalWorkSeconds,
-              intervalRestSeconds: bp.intervalRestSeconds,
-              intervalRounds: bp.intervalRounds,
-              sideCadenceIntervalSeconds: bp.sideCadenceIntervalSeconds,
-              sideCadenceOpenEnded: bp.sideCadenceOpenEnded,
-              notes: bp.notes,
-              // Carry the source part id so we can wire movements back to
-              // the right part below.
-              sourceBenchmarkPartId: bp.id,
-            }))
-          : [
-              {
-                workoutId: workout.id,
-                orderIndex: 0,
-                label: null,
-                workoutType: benchmark.workoutType,
-                timeCapSeconds: benchmark.timeCapSeconds,
-                amrapDurationSeconds: benchmark.amrapDurationSeconds,
-                emomIntervalSeconds: null,
-                repScheme: benchmark.repScheme,
-                rounds: null,
-                structure: null,
-                intervalWorkSeconds: null,
-                intervalRestSeconds: null,
-                intervalRounds: null,
-                sideCadenceIntervalSeconds: null,
-                sideCadenceOpenEnded: false,
-                notes: null,
-                sourceBenchmarkPartId: null as string | null,
-              },
-            ];
-
-      const benchmarkPartIdToWorkoutPartId = new Map<string, string>();
-      let firstWorkoutPartId: string | null = null;
-      for (const p of partsToInsert) {
-        const { sourceBenchmarkPartId, ...insertValues } = p;
-        const [insertedPart] = await tx
-          .insert(workoutParts)
-          .values(insertValues)
-          .returning();
-        if (firstWorkoutPartId == null) firstWorkoutPartId = insertedPart.id;
-        if (sourceBenchmarkPartId) {
-          benchmarkPartIdToWorkoutPartId.set(
-            sourceBenchmarkPartId,
-            insertedPart.id
-          );
-        }
-      }
-
-      // Copy benchmark blocks to workout_blocks. Build a map from
-      // benchmarkBlockId to the new workoutBlockId so movements can be
-      // stamped with the right pointer below.
-      const benchmarkBlockIdToWorkoutBlockId = new Map<string, string>();
-      if (bmBlocks.length > 0) {
-        const blocksToInsert = bmBlocks
-          .map((b) => {
-            const workoutPartId = benchmarkPartIdToWorkoutPartId.get(
-              b.benchmarkWorkoutPartId
-            );
-            if (!workoutPartId) return null;
-            return {
-              source: b,
-              values: {
-                workoutPartId,
-                orderIndex: b.orderIndex,
-                title: b.title,
-              },
-            };
-          })
-          .filter(<T,>(x: T | null): x is T => x !== null);
-        if (blocksToInsert.length > 0) {
-          const inserted = await tx
-            .insert(workoutBlocks)
-            .values(blocksToInsert.map((b) => b.values))
-            .returning({ id: workoutBlocks.id });
-          for (let k = 0; k < inserted.length; k++) {
-            benchmarkBlockIdToWorkoutBlockId.set(
-              blocksToInsert[k].source.id,
-              inserted[k].id
-            );
-          }
-        }
-      }
-
-      if (bmMovements.length > 0) {
-        await tx.insert(workoutMovements).values(
-          bmMovements.map((m) => {
-            const partId = m.benchmarkWorkoutPartId
-              ? benchmarkPartIdToWorkoutPartId.get(m.benchmarkWorkoutPartId) ??
-                firstWorkoutPartId!
-              : firstWorkoutPartId!;
-            const workoutBlockId = m.benchmarkWorkoutBlockId
-              ? benchmarkBlockIdToWorkoutBlockId.get(
-                  m.benchmarkWorkoutBlockId
-                ) ?? null
-              : null;
-            return {
-              workoutId: workout.id,
-              workoutPartId: partId,
-              workoutBlockId,
-              movementId: m.movementId,
-              orderIndex: m.orderIndex,
-              prescribedReps: m.prescribedReps,
-              prescribedWeightMale: m.prescribedWeightMale,
-              prescribedWeightFemale: m.prescribedWeightFemale,
-              prescribedCaloriesMale: m.prescribedCaloriesMale,
-              prescribedCaloriesFemale: m.prescribedCaloriesFemale,
-              prescribedDistanceMale: m.prescribedDistanceMale,
-              prescribedDistanceFemale: m.prescribedDistanceFemale,
-              prescribedDurationSecondsMale: m.prescribedDurationSecondsMale,
-              prescribedDurationSecondsFemale:
-                m.prescribedDurationSecondsFemale,
-              prescribedHeightInches: m.prescribedHeightInches,
-              prescribedHeightInchesMale: m.prescribedHeightInchesMale,
-              prescribedHeightInchesFemale: m.prescribedHeightInchesFemale,
-              prescribedWeightMaleBwMultiplier:
-                m.prescribedWeightMaleBwMultiplier,
-              prescribedWeightFemaleBwMultiplier:
-                m.prescribedWeightFemaleBwMultiplier,
-              tempo: m.tempo,
-              isMaxReps: m.isMaxReps,
-              isSideCadence: m.isSideCadence,
-              equipmentCount: m.equipmentCount,
-              // Parse benchmark rep schemes too — benchmarks like "Cindy"
-              // (5-10-15 ladder territory) get the same structured shape as
-              // user-built workouts.
-              repSchemeParsed: parseAndPromote(m.prescribedReps, false),
-              rxStandard: m.rxStandard,
-              notes: m.notes,
-            };
-          })
-        );
-      }
-
-      return workout;
-    });
-
-    await fireCalorieEstimate(result.id);
-    return NextResponse.json(result, { status: 201 });
-    } // end else (non-weightlifting benchmark fast-path)
+      await fireCalorieEstimate(tmpl.id);
+      return NextResponse.json(
+        { ...session, crossfitWorkoutId: tmpl.id, isNewTemplate: false },
+        { status: 201 }
+      );
+    }
   }
 
   // ============================================
-  // Parts path
+  // Parts path — upsert a template, then create a session pointing at it
   // ============================================
-  //
-  // Accept either the new `parts[]` shape or the legacy flat shape
-  // (workoutType + movements at the top level). Legacy submissions get
-  // wrapped into a single part.
 
   const parts: PartInput[] = normalizeParts(body);
 
   if (parts.length === 0) {
-    return NextResponse.json({ error: "At least one part with movements is required" }, { status: 400 });
-  }
-  if (!workoutDate) {
-    return NextResponse.json({ error: "workoutDate is required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "At least one part with movements is required" },
+      { status: 400 }
+    );
   }
 
   const firstPart = parts[0];
 
+  // Weightlifting auto-link: detect the qualifying shape BEFORE upserting
+  // so the session lands directly on the canonical benchmark template (no
+  // orphan personal template). Skipped when the caller supplied an explicit
+  // `source` — that signals user intent that overrides inference.
+  let autoLinkedTemplateId: string | null = null;
+  if (!source && !benchmarkWorkoutId) {
+    const autoLink = await inferWeightliftingBenchmark(
+      db,
+      parts.map((p) => ({
+        workoutType: p.workoutType,
+        repScheme: p.repScheme ?? null,
+        movementIds: p.movements.map((m) => m.movementId),
+        movementPrescribedReps: p.movements.map((m) => m.prescribedReps ?? null),
+      }))
+    );
+    if (autoLink) autoLinkedTemplateId = autoLink.templateId;
+  }
+
   const result = await db.transaction(async (tx) => {
-    const [workout] = await tx
-      .insert(workouts)
-      .values({
-        createdBy: user.id,
-        communityId: communityId || null,
-        title: title || null,
-        description: description || null,
-        rawText: rawText || null,
-        // Legacy columns mirror the first part for read-compat.
+    let templateId: string;
+    let isNewTemplate = false;
+
+    if (autoLinkedTemplateId) {
+      // Reuse the canonical weightlifting benchmark template — the
+      // athlete's actual weight will live on the score, not the template.
+      templateId = autoLinkedTemplateId;
+    } else {
+      const upsertResult = await upsertTemplate(tx, {
+        title: deriveTitle(title, firstPart),
+        description: description ?? null,
+        scope,
         workoutType: firstPart.workoutType,
-        timeCapSeconds: firstPart.timeCapSeconds || null,
-        amrapDurationSeconds: firstPart.amrapDurationSeconds || null,
-        repScheme: firstPart.repScheme || null,
+        timeCapSeconds: firstPart.timeCapSeconds ?? null,
+        amrapDurationSeconds: firstPart.amrapDurationSeconds ?? null,
+        repScheme: firstPart.repScheme ?? null,
         rounds: firstPart.rounds ?? null,
-        workoutDate,
-        // See benchmark path above for the rationale on this default.
-        published: published ?? !!communityId,
-        source: source || "manual",
         requiresVest: !!requiresVest,
-        vestWeightMaleLb: toNumericOrNull(vestWeightMaleLb),
-        vestWeightFemaleLb: toNumericOrNull(vestWeightFemaleLb),
+        vestWeightMaleLb: vestWeightMaleLb ?? null,
+        vestWeightFemaleLb: vestWeightFemaleLb ?? null,
         isPartner: !!isPartner,
-        partnerCount: toIntOrNull(partnerCount),
-      })
-      .returning();
-
-    // tempRef → real part id. Parts insert in order, so a later part's
-    // weight_pct movement always finds its (earlier) source part here.
-    const partTempRefToId = new Map<string, string>();
-
-    for (let i = 0; i < parts.length; i++) {
-      const p = parts[i];
-
-      if (p.workoutType === "intervals") {
-        const normalizedRounds = normalizeIntervalRounds(p.intervalRounds);
-        if (!normalizedRounds) {
-          const work = toDurationSecondsOrNull(p.intervalWorkSeconds);
-          const rest = toDurationSecondsOrNull(p.intervalRestSeconds);
-          if (!p.rounds || work == null || rest == null) {
-            throw new Error(
-              "Intervals parts require rounds plus either intervalWorkSeconds/Rest or a per-round intervalRounds array"
-            );
-          }
-        }
-      }
-
-      const [part] = await tx
-        .insert(workoutParts)
-        .values({
-          workoutId: workout.id,
-          orderIndex: i,
-          label: p.label || null,
-          workoutType: p.workoutType,
-          timeCapSeconds: p.timeCapSeconds || null,
-          amrapDurationSeconds: p.amrapDurationSeconds || null,
-          emomIntervalSeconds: p.emomIntervalSeconds || null,
-          intervalWorkSeconds: toDurationSecondsOrNull(p.intervalWorkSeconds),
-          intervalRestSeconds: toDurationSecondsOrNull(p.intervalRestSeconds),
-          intervalRounds: normalizeIntervalRounds(p.intervalRounds),
-          sideCadenceIntervalSeconds: toDurationSecondsOrNull(
-            p.sideCadenceIntervalSeconds
-          ),
-          sideCadenceOpenEnded: !!p.sideCadenceOpenEnded,
-          repScheme: p.repScheme || null,
-          rounds: p.rounds ?? null,
-          structure: p.structure || null,
-          notes: p.notes || null,
-        })
-        .returning();
-
-      if (p.tempRef) partTempRefToId.set(p.tempRef, part.id);
-
-      const blockTempRefToId = new Map<string, string>();
-      if (Array.isArray(p.blocks) && p.blocks.length > 0) {
-        const blocksToInsert = p.blocks
-          .map((b, k) => ({
-            input: b,
-            values: {
-              workoutPartId: part.id,
-              orderIndex: b.orderIndex ?? k,
-              title: b.title?.toString().trim() ?? "",
-            },
-          }))
-          .filter((entry) => entry.values.title.length > 0);
-        if (blocksToInsert.length > 0) {
-          const inserted = await tx
-            .insert(workoutBlocks)
-            .values(blocksToInsert.map((entry) => entry.values))
-            .returning({ id: workoutBlocks.id });
-          for (let k = 0; k < inserted.length; k++) {
-            const tempRef = blocksToInsert[k].input.tempRef;
-            if (tempRef) blockTempRefToId.set(tempRef, inserted[k].id);
-          }
-        }
-      }
-
-      if (p.movements.length > 0) {
-        await tx.insert(workoutMovements).values(
-          p.movements.map((m, j) => ({
-            workoutId: workout.id,
-            workoutPartId: part.id,
-            workoutBlockId: m.blockTempRef
-              ? blockTempRefToId.get(m.blockTempRef) ?? null
-              : m.blockId ?? null,
-            movementId: m.movementId,
-            orderIndex: m.orderIndex ?? j,
-            prescribedReps: m.prescribedReps || null,
-            prescribedWeightMale: m.prescribedWeightMale?.toString() || null,
-            prescribedWeightFemale: m.prescribedWeightFemale?.toString() || null,
-            prescribedCaloriesMale: toTextOrNull(m.prescribedCaloriesMale),
-            prescribedCaloriesFemale: toTextOrNull(m.prescribedCaloriesFemale),
-            prescribedDistanceMale: toTextOrNull(m.prescribedDistanceMale),
-            prescribedDistanceFemale: toTextOrNull(m.prescribedDistanceFemale),
-            prescribedDurationSecondsMale: toDurationSecondsOrNull(
-              m.prescribedDurationSecondsMale
-            ),
-            prescribedDurationSecondsFemale: toDurationSecondsOrNull(
-              m.prescribedDurationSecondsFemale
-            ),
-            prescribedHeightInches: toNumericOrNull(m.prescribedHeightInches),
-            prescribedHeightInchesMale: toNumericOrNull(
-              m.prescribedHeightInchesMale
-            ),
-            prescribedHeightInchesFemale: toNumericOrNull(
-              m.prescribedHeightInchesFemale
-            ),
-            prescribedWeightMaleBwMultiplier: toNumericOrNull(
-              m.prescribedWeightMaleBwMultiplier
-            ),
-            prescribedWeightFemaleBwMultiplier: toNumericOrNull(
-              m.prescribedWeightFemaleBwMultiplier
-            ),
-            prescribedWeightPct: toNumericOrNull(m.prescribedWeightPct),
-            prescribedWeightPctSourcePartId: m.weightPctSourcePartTempRef
-              ? partTempRefToId.get(m.weightPctSourcePartTempRef) ?? null
-              : null,
-            tempo: m.tempo?.trim() || null,
-            isMaxReps: !!m.isMaxReps,
-            isSideCadence: !!m.isSideCadence,
-            // Server is the single source of truth for the parsed shape —
-            // we ignore any client-provided value to avoid drift if the
-            // parser changes.
-            repSchemeParsed: parseAndPromote(
-              m.prescribedReps,
-              m.promoteSequenceToLadder ?? false
-            ),
-            equipmentCount: m.equipmentCount ?? null,
-            rxStandard: m.rxStandard || null,
-            notes: m.notes || null,
-          }))
-        );
-      }
+        partnerCount: partnerCount ?? null,
+        parts,
+      });
+      templateId = upsertResult.templateId;
+      isNewTemplate = upsertResult.isNew;
     }
 
-    // Auto-link single-movement for_load workouts at rep targets {1,2,3,5}
-    // to the matching weightlifting benchmark, so the score shows up under
-    // the right rep-max tab without the athlete having to remember to add
-    // the benchmark first. Skipped when the client supplied an explicit
-    // benchmarkWorkoutId (handled in the fast path above) or an explicit
-    // source — those signal user intent that overrides inference.
-    if (!source) {
-      const autoLink = await inferWeightliftingBenchmark(
-        tx,
-        parts.map((p) => ({
-          workoutType: p.workoutType,
-          repScheme: p.repScheme,
-          movementIds: p.movements.map((m) => m.movementId),
-          movementPrescribedReps: p.movements.map((m) => m.prescribedReps),
-        }))
-      );
-      if (autoLink) {
-        await tx
-          .update(workouts)
-          .set({
-            benchmarkWorkoutId: autoLink.benchmarkId,
-            source: "benchmark_inferred",
-          })
-          .where(eq(workouts.id, workout.id));
-        workout.benchmarkWorkoutId = autoLink.benchmarkId;
-        workout.source = "benchmark_inferred";
-      }
-    }
+    const session = await createSession(tx, {
+      crossfitWorkoutId: templateId,
+      userId: targetCommunityId ? null : user.id,
+      communityId: targetCommunityId,
+      workoutDate,
+      kind: "wod",
+      position: 0,
+      isScored: true,
+      source:
+        source || (autoLinkedTemplateId ? "benchmark_inferred" : "manual"),
+      published: published ?? targetCommunityId !== null,
+    });
 
-    return workout;
+    return { session, templateId, isNewTemplate };
   });
 
-  await fireCalorieEstimate(result.id);
-  return NextResponse.json(result, { status: 201 });
+  await fireCalorieEstimate(result.templateId);
+  return NextResponse.json(
+    {
+      ...result.session,
+      crossfitWorkoutId: result.templateId,
+      isNewTemplate: result.isNewTemplate,
+    },
+    { status: 201 }
+  );
 }
 
-/**
- * Fire-and-forget Inngest event so the workout's template-level calorie
- * estimate is computed asynchronously. Failing to send must not break the
- * workout creation — the estimate can always be backfilled later via the
- * admin recompute endpoint.
- */
-async function fireCalorieEstimate(workoutId: string): Promise<void> {
+// Pick a non-empty title for the template. Templates require a NOT NULL
+// title; if the client didn't send one, fall back to the first part's label
+// or a generic placeholder so the row writes successfully. Cosmetic only —
+// excluded from the content fingerprint, so the title choice never affects
+// dedup behavior.
+function deriveTitle(
+  title: unknown,
+  firstPart: TemplatePartInput
+): string {
+  const candidate = typeof title === "string" ? title.trim() : "";
+  if (candidate) return candidate;
+  const partLabel = firstPart.label?.trim();
+  if (partLabel) return partLabel;
+  return "Untitled workout";
+}
+
+// Fire-and-forget Inngest event so the template-level calorie estimate is
+// computed asynchronously. Failing to send must not break the workout
+// creation — the estimate can always be backfilled later. The event data
+// key stays `workoutId` for now to avoid breaking pending Inngest payloads;
+// the value is a `crossfit_workouts.id` post-cutover, and the compute
+// function will be updated to read from the unified schema in commit #6.
+async function fireCalorieEstimate(crossfitWorkoutId: string): Promise<void> {
   try {
     await inngest.send({
       name: "workouts/calories.compute",
-      data: { workoutId },
+      data: { workoutId: crossfitWorkoutId },
     });
   } catch (err) {
     console.error("[calories] failed to dispatch compute event", err);
   }
-}
-
-// ============================================
-// Helpers
-// ============================================
-
-function toIntOrNull(value: number | string | undefined | null): number | null {
-  if (value == null || value === "") return null;
-  const n = typeof value === "number" ? value : parseInt(value, 10);
-  if (!Number.isFinite(n) || n < 0) return null;
-  return n;
-}
-
-// Text/scheme columns (calories, distance) accept either a scalar or a
-// rep-scheme string ("21", "75-50-25"). We trim and reject empty.
-function toTextOrNull(
-  value: number | string | undefined | null
-): string | null {
-  if (value == null) return null;
-  const s = String(value).trim();
-  return s === "" ? null : s;
-}
-
-// Accepts seconds-as-number or a free-text duration ("1:30", ":30", "90s",
-// "1m30s"). Returns null when unparseable. Used for the new
-// prescribedDuration* fields and intervalWork/Rest seconds.
-function toDurationSecondsOrNull(
-  value: number | string | undefined | null
-): number | null {
-  if (value == null || value === "") return null;
-  if (typeof value === "number") {
-    return Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
-  }
-  return parseDurationToSeconds(value);
-}
-
-function normalizeIntervalRounds(
-  rounds:
-    | { workSeconds: number | string; restSeconds: number | string }[]
-    | null
-    | undefined
-): { workSeconds: number; restSeconds: number }[] | null {
-  if (!Array.isArray(rounds) || rounds.length === 0) return null;
-  const out: { workSeconds: number; restSeconds: number }[] = [];
-  for (const r of rounds) {
-    const w = toDurationSecondsOrNull(r.workSeconds);
-    const rest = toDurationSecondsOrNull(r.restSeconds);
-    if (w == null || rest == null) return null;
-    out.push({ workSeconds: w, restSeconds: rest });
-  }
-  return out;
-}
-
-// String → numeric (for height inches, BW multipliers).
-function toNumericOrNull(
-  value: number | string | undefined | null
-): string | null {
-  if (value == null || value === "") return null;
-  const n = typeof value === "number" ? value : parseFloat(value);
-  if (!Number.isFinite(n) || n < 0) return null;
-  return String(n);
-}
-
-// Parse + apply the "Continue as ladder?" promotion the builder may have
-// requested. Returns null when the input doesn't parse — the score logger
-// degrades cleanly to today's behavior in that case.
-function parseAndPromote(
-  reps: string | null | undefined,
-  promote: boolean
-): RepSchemeParsed | null {
-  const parsed = parseRepScheme(reps ?? null);
-  if (!parsed) return null;
-  if (
-    promote &&
-    parsed.kind === "sequence" &&
-    parsed.reps.length >= 3
-  ) {
-    const step = parsed.reps[1] - parsed.reps[0];
-    if (step <= 0) return parsed;
-    let ok = true;
-    for (let i = 2; i < parsed.reps.length; i++) {
-      if (parsed.reps[i] - parsed.reps[i - 1] !== step) {
-        ok = false;
-        break;
-      }
-    }
-    if (ok) {
-      return { kind: "ladder", start: parsed.reps[0], step, openEnded: true };
-    }
-  }
-  return parsed;
 }
 
 // ============================================
@@ -1315,7 +858,9 @@ function normalizeParts(body: Record<string, unknown>): PartInput[] {
     );
   }
 
-  // Legacy: flat { workoutType, movements, ... }
+  // Legacy: flat { workoutType, movements, ... }. Wrapped into a single
+  // part. The duration/numeric coercions land later inside `upsertTemplate`
+  // — we just shuttle the raw inputs through here.
   if (body.workoutType && Array.isArray(body.movements)) {
     return [
       {
@@ -1324,10 +869,11 @@ function normalizeParts(body: Record<string, unknown>): PartInput[] {
         amrapDurationSeconds: body.amrapDurationSeconds as number | undefined,
         repScheme: body.repScheme as string | undefined,
         rounds: body.rounds as number | undefined,
-        movements: body.movements as PartMovementInput[],
+        movements: body.movements as TemplatePartMovementInput[],
       },
     ];
   }
 
   return [];
 }
+

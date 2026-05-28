@@ -94,7 +94,10 @@ export async function GET(req: NextRequest) {
       )
       .orderBy(desc(scores.createdAt));
     for (const s of userScores) {
-      // First (most recent) score wins thanks to the desc order.
+      // First (most recent) score wins thanks to the desc order. Skip
+      // unified-schema rows (workoutId null) — they're keyed by
+      // workoutSessionId, picked up by the unified reader in commit #6.
+      if (!s.workoutId) continue;
       if (!scoresByWorkoutId.has(s.workoutId)) {
         scoresByWorkoutId.set(s.workoutId, s.id);
       }
