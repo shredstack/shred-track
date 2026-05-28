@@ -11,9 +11,10 @@ import { db } from "@/db";
 import {
   scores,
   scoreMovementDetails,
-  workoutMovements,
-  workoutParts,
-  workouts,
+  crossfitWorkoutMovements,
+  crossfitWorkoutParts,
+  crossfitWorkouts,
+  workoutSessions,
   movements,
 } from "@/db/schema";
 import { and, eq, gte } from "drizzle-orm";
@@ -72,11 +73,11 @@ type RawSetRow = {
   is1rmApplicable: boolean;
   scoreId: string;
   workoutDate: string; // YYYY-MM-DD
-  // Workout type — `workoutType` is the legacy workout-level value;
-  // `partWorkoutType` is the (more reliable) per-part value for the
-  // structured-workout era. Reps live across three levels too: the
-  // movement's `prescribedReps` is most specific, then the part's
-  // `partRepScheme`, then the legacy workout-level `workoutRepScheme`.
+  // Workout type — `workoutType` is the template-level summary;
+  // `partWorkoutType` is the (more reliable) per-part value. Reps live
+  // across three levels too: the movement's `prescribedReps` is most
+  // specific, then the part's `partRepScheme`, then the template-level
+  // `workoutRepScheme`.
   workoutType: string;
   partWorkoutType: string | null;
   workoutRepScheme: string | null;
@@ -146,30 +147,40 @@ async function fetchSetData(
       movementName: movements.canonicalName,
       is1rmApplicable: movements.is1rmApplicable,
       scoreId: scores.id,
-      workoutDate: workouts.workoutDate,
-      workoutType: workouts.workoutType,
-      partWorkoutType: workoutParts.workoutType,
-      workoutRepScheme: workouts.repScheme,
-      partRepScheme: workoutParts.repScheme,
-      movementPrescribedReps: workoutMovements.prescribedReps,
+      workoutDate: workoutSessions.workoutDate,
+      workoutType: crossfitWorkouts.workoutType,
+      partWorkoutType: crossfitWorkoutParts.workoutType,
+      workoutRepScheme: crossfitWorkouts.repScheme,
+      partRepScheme: crossfitWorkoutParts.repScheme,
+      movementPrescribedReps: crossfitWorkoutMovements.prescribedReps,
       actualWeight: scoreMovementDetails.actualWeight,
       setEntries: scoreMovementDetails.setEntries,
     })
     .from(scoreMovementDetails)
     .innerJoin(scores, eq(scores.id, scoreMovementDetails.scoreId))
     .innerJoin(
-      workoutMovements,
-      eq(workoutMovements.id, scoreMovementDetails.workoutMovementId)
+      crossfitWorkoutMovements,
+      eq(
+        crossfitWorkoutMovements.id,
+        scoreMovementDetails.crossfitWorkoutMovementId
+      )
     )
-    // Part is optional: legacy flat workouts have no workout_parts row.
-    .leftJoin(workoutParts, eq(workoutParts.id, workoutMovements.workoutPartId))
-    .innerJoin(workouts, eq(workouts.id, scores.workoutId))
-    .innerJoin(movements, eq(movements.id, workoutMovements.movementId))
+    // Part FK is NOT NULL in the unified schema; inner join is safe.
+    .innerJoin(
+      crossfitWorkoutParts,
+      eq(crossfitWorkoutParts.id, crossfitWorkoutMovements.crossfitWorkoutPartId)
+    )
+    .innerJoin(workoutSessions, eq(workoutSessions.id, scores.workoutSessionId))
+    .innerJoin(
+      crossfitWorkouts,
+      eq(crossfitWorkouts.id, workoutSessions.crossfitWorkoutId)
+    )
+    .innerJoin(movements, eq(movements.id, crossfitWorkoutMovements.movementId))
     .where(
       and(
         eq(scores.userId, userId),
         eq(movements.is1rmApplicable, true),
-        gte(workouts.workoutDate, since)
+        gte(workoutSessions.workoutDate, since)
       )
     );
 

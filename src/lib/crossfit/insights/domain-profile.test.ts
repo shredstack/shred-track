@@ -21,7 +21,7 @@ function row(partial: Partial<DomainProfileRow>): DomainProfileRow {
   nextRowId += 1;
   return {
     scoreId: partial.scoreId ?? `score-${nextRowId}`,
-    workoutId: partial.workoutId ?? `workout-${nextRowId}`,
+    workoutSessionId: partial.workoutSessionId ?? `session-${nextRowId}`,
     workoutDate: partial.workoutDate ?? isoDaysAgo(10),
     workoutType: partial.workoutType ?? "for_time",
     workoutRepScheme: partial.workoutRepScheme ?? null,
@@ -117,9 +117,9 @@ describe("computeDomainProfileFromRows", () => {
   it("counts each workout once per domain regardless of movement count", () => {
     // Same workout, three barbell movements → volumeScore = 1.
     const rows = [
-      row({ workoutId: "w1", scoreId: "s1", workoutDate: isoDaysAgo(20), movementId: "m1", movementCategory: "barbell" }),
-      row({ workoutId: "w1", scoreId: "s1", workoutDate: isoDaysAgo(20), movementId: "m2", movementCategory: "barbell" }),
-      row({ workoutId: "w1", scoreId: "s1", workoutDate: isoDaysAgo(20), movementId: "m3", movementCategory: "barbell" }),
+      row({ workoutSessionId: "w1", scoreId: "s1", workoutDate: isoDaysAgo(20), movementId: "m1", movementCategory: "barbell" }),
+      row({ workoutSessionId: "w1", scoreId: "s1", workoutDate: isoDaysAgo(20), movementId: "m2", movementCategory: "barbell" }),
+      row({ workoutSessionId: "w1", scoreId: "s1", workoutDate: isoDaysAgo(20), movementId: "m3", movementCategory: "barbell" }),
     ];
     const profile = computeDomainProfileFromRows(rows, { now: NOW });
     const wl = findDomain(profile, "weightlifting");
@@ -129,10 +129,10 @@ describe("computeDomainProfileFromRows", () => {
 
   it("computes scaling rate as scaled / total instances per domain", () => {
     const rows = [
-      row({ wasRx: true, movementCategory: "gymnastics", movementIsWeighted: false, workoutDate: isoDaysAgo(10), workoutId: "w1", scoreId: "s1", movementId: "m1" }),
-      row({ wasRx: false, movementCategory: "gymnastics", movementIsWeighted: false, workoutDate: isoDaysAgo(10), workoutId: "w1", scoreId: "s1", movementId: "m2" }),
-      row({ wasRx: false, movementCategory: "gymnastics", movementIsWeighted: false, workoutDate: isoDaysAgo(15), workoutId: "w2", scoreId: "s2", movementId: "m1" }),
-      row({ wasRx: false, movementCategory: "gymnastics", movementIsWeighted: false, workoutDate: isoDaysAgo(20), workoutId: "w3", scoreId: "s3", movementId: "m1" }),
+      row({ wasRx: true, movementCategory: "gymnastics", movementIsWeighted: false, workoutDate: isoDaysAgo(10), workoutSessionId: "w1", scoreId: "s1", movementId: "m1" }),
+      row({ wasRx: false, movementCategory: "gymnastics", movementIsWeighted: false, workoutDate: isoDaysAgo(10), workoutSessionId: "w1", scoreId: "s1", movementId: "m2" }),
+      row({ wasRx: false, movementCategory: "gymnastics", movementIsWeighted: false, workoutDate: isoDaysAgo(15), workoutSessionId: "w2", scoreId: "s2", movementId: "m1" }),
+      row({ wasRx: false, movementCategory: "gymnastics", movementIsWeighted: false, workoutDate: isoDaysAgo(20), workoutSessionId: "w3", scoreId: "s3", movementId: "m1" }),
     ];
     const profile = computeDomainProfileFromRows(rows, { now: NOW });
     const gym = findDomain(profile, "gymnastics");
@@ -144,12 +144,12 @@ describe("computeDomainProfileFromRows", () => {
   it("computes relative emphasis as volumeScore / sum across domains", () => {
     const rows = [
       // 2 weightlifting workouts
-      row({ movementCategory: "barbell", workoutId: "w1", scoreId: "s1", workoutDate: isoDaysAgo(10) }),
-      row({ movementCategory: "barbell", workoutId: "w2", scoreId: "s2", workoutDate: isoDaysAgo(15) }),
+      row({ movementCategory: "barbell", workoutSessionId: "w1", scoreId: "s1", workoutDate: isoDaysAgo(10) }),
+      row({ movementCategory: "barbell", workoutSessionId: "w2", scoreId: "s2", workoutDate: isoDaysAgo(15) }),
       // 1 gymnastics workout
-      row({ movementCategory: "gymnastics", movementIsWeighted: false, workoutId: "w3", scoreId: "s3", workoutDate: isoDaysAgo(20) }),
+      row({ movementCategory: "gymnastics", movementIsWeighted: false, workoutSessionId: "w3", scoreId: "s3", workoutDate: isoDaysAgo(20) }),
       // 1 mono workout
-      row({ movementCategory: "monostructural", movementIsWeighted: false, workoutId: "w4", scoreId: "s4", workoutDate: isoDaysAgo(25) }),
+      row({ movementCategory: "monostructural", movementIsWeighted: false, workoutSessionId: "w4", scoreId: "s4", workoutDate: isoDaysAgo(25) }),
     ];
     const profile = computeDomainProfileFromRows(rows, { now: NOW });
     expect(findDomain(profile, "weightlifting").relativeEmphasis).toBeCloseTo(0.5);
@@ -161,8 +161,8 @@ describe("computeDomainProfileFromRows", () => {
   it("excludes domains with zero movement instances from strong/weak ranking", () => {
     // Athlete who only logs gymnastics — should be strong, not weak.
     const rows = [
-      row({ movementCategory: "gymnastics", movementIsWeighted: false, workoutId: "w1", scoreId: "s1", workoutDate: isoDaysAgo(10), wasRx: true }),
-      row({ movementCategory: "gymnastics", movementIsWeighted: false, workoutId: "w2", scoreId: "s2", workoutDate: isoDaysAgo(20), wasRx: true }),
+      row({ movementCategory: "gymnastics", movementIsWeighted: false, workoutSessionId: "w1", scoreId: "s1", workoutDate: isoDaysAgo(10), wasRx: true }),
+      row({ movementCategory: "gymnastics", movementIsWeighted: false, workoutSessionId: "w2", scoreId: "s2", workoutDate: isoDaysAgo(20), wasRx: true }),
     ];
     const profile = computeDomainProfileFromRows(rows, { now: NOW });
     expect(profile.strongDomain).toBe("gymnastics");
@@ -175,11 +175,11 @@ describe("computeDomainProfileFromRows", () => {
     // Gymnastics: 1 workout, all scaled (scalingRate=1)
     // Mono: 1 workout, all RX
     const rows = [
-      row({ movementCategory: "barbell", workoutId: "w1", scoreId: "s1", workoutDate: isoDaysAgo(10), wasRx: true }),
-      row({ movementCategory: "barbell", workoutId: "w2", scoreId: "s2", workoutDate: isoDaysAgo(15), wasRx: true }),
-      row({ movementCategory: "barbell", workoutId: "w3", scoreId: "s3", workoutDate: isoDaysAgo(20), wasRx: true }),
-      row({ movementCategory: "gymnastics", movementIsWeighted: false, workoutId: "w4", scoreId: "s4", workoutDate: isoDaysAgo(25), wasRx: false }),
-      row({ movementCategory: "monostructural", movementIsWeighted: false, workoutId: "w5", scoreId: "s5", workoutDate: isoDaysAgo(30), wasRx: true }),
+      row({ movementCategory: "barbell", workoutSessionId: "w1", scoreId: "s1", workoutDate: isoDaysAgo(10), wasRx: true }),
+      row({ movementCategory: "barbell", workoutSessionId: "w2", scoreId: "s2", workoutDate: isoDaysAgo(15), wasRx: true }),
+      row({ movementCategory: "barbell", workoutSessionId: "w3", scoreId: "s3", workoutDate: isoDaysAgo(20), wasRx: true }),
+      row({ movementCategory: "gymnastics", movementIsWeighted: false, workoutSessionId: "w4", scoreId: "s4", workoutDate: isoDaysAgo(25), wasRx: false }),
+      row({ movementCategory: "monostructural", movementIsWeighted: false, workoutSessionId: "w5", scoreId: "s5", workoutDate: isoDaysAgo(30), wasRx: true }),
     ];
     const profile = computeDomainProfileFromRows(rows, { now: NOW });
     expect(profile.strongDomain).toBe("weightlifting");
@@ -189,11 +189,11 @@ describe("computeDomainProfileFromRows", () => {
   it("partitions current vs prior windows at the 90-day boundary", () => {
     const rows = [
       // current window
-      row({ movementCategory: "barbell", workoutId: "w1", scoreId: "s1", workoutDate: isoDaysAgo(10) }),
-      row({ movementCategory: "barbell", workoutId: "w2", scoreId: "s2", workoutDate: isoDaysAgo(80) }),
+      row({ movementCategory: "barbell", workoutSessionId: "w1", scoreId: "s1", workoutDate: isoDaysAgo(10) }),
+      row({ movementCategory: "barbell", workoutSessionId: "w2", scoreId: "s2", workoutDate: isoDaysAgo(80) }),
       // prior window
-      row({ movementCategory: "barbell", workoutId: "w3", scoreId: "s3", workoutDate: isoDaysAgo(120) }),
-      row({ movementCategory: "barbell", workoutId: "w4", scoreId: "s4", workoutDate: isoDaysAgo(170) }),
+      row({ movementCategory: "barbell", workoutSessionId: "w3", scoreId: "s3", workoutDate: isoDaysAgo(120) }),
+      row({ movementCategory: "barbell", workoutSessionId: "w4", scoreId: "s4", workoutDate: isoDaysAgo(170) }),
     ];
     const profile = computeDomainProfileFromRows(rows, { now: NOW });
     const wl = findDomain(profile, "weightlifting");
@@ -204,12 +204,12 @@ describe("computeDomainProfileFromRows", () => {
   it("reports volume progression direction & magnitude", () => {
     const rows = [
       // 4 in current, 2 in prior → up ~100%
-      row({ movementCategory: "barbell", workoutId: "wc1", scoreId: "sc1", workoutDate: isoDaysAgo(10) }),
-      row({ movementCategory: "barbell", workoutId: "wc2", scoreId: "sc2", workoutDate: isoDaysAgo(20) }),
-      row({ movementCategory: "barbell", workoutId: "wc3", scoreId: "sc3", workoutDate: isoDaysAgo(40) }),
-      row({ movementCategory: "barbell", workoutId: "wc4", scoreId: "sc4", workoutDate: isoDaysAgo(80) }),
-      row({ movementCategory: "barbell", workoutId: "wp1", scoreId: "sp1", workoutDate: isoDaysAgo(120) }),
-      row({ movementCategory: "barbell", workoutId: "wp2", scoreId: "sp2", workoutDate: isoDaysAgo(170) }),
+      row({ movementCategory: "barbell", workoutSessionId: "wc1", scoreId: "sc1", workoutDate: isoDaysAgo(10) }),
+      row({ movementCategory: "barbell", workoutSessionId: "wc2", scoreId: "sc2", workoutDate: isoDaysAgo(20) }),
+      row({ movementCategory: "barbell", workoutSessionId: "wc3", scoreId: "sc3", workoutDate: isoDaysAgo(40) }),
+      row({ movementCategory: "barbell", workoutSessionId: "wc4", scoreId: "sc4", workoutDate: isoDaysAgo(80) }),
+      row({ movementCategory: "barbell", workoutSessionId: "wp1", scoreId: "sp1", workoutDate: isoDaysAgo(120) }),
+      row({ movementCategory: "barbell", workoutSessionId: "wp2", scoreId: "sp2", workoutDate: isoDaysAgo(170) }),
     ];
     const profile = computeDomainProfileFromRows(rows, { now: NOW });
     const wl = findDomain(profile, "weightlifting");
@@ -232,7 +232,7 @@ describe("computeDomainProfileFromRows", () => {
       row({
         movementCategory: "gymnastics",
         movementIsWeighted: false,
-        workoutId: `${isCurrent ? "wc" : "wp"}${i}`,
+        workoutSessionId: `${isCurrent ? "wc" : "wp"}${i}`,
         scoreId: `${isCurrent ? "sc" : "sp"}${i}`,
         movementId: `m${i}`,
         workoutDate: isoDaysAgo(isCurrent ? 10 + i * 5 : 110 + i * 5),
@@ -268,7 +268,7 @@ describe("computeDomainProfileFromRows", () => {
         movementId: "mA",
         movementCategory: "barbell",
         movementIs1rmApplicable: true,
-        workoutId: "w1",
+        workoutSessionId: "w1",
         scoreId: "s1",
         workoutDate: isoDaysAgo(20),
         setEntries: setsCurrent,
@@ -277,7 +277,7 @@ describe("computeDomainProfileFromRows", () => {
         movementId: "mA",
         movementCategory: "barbell",
         movementIs1rmApplicable: true,
-        workoutId: "w2",
+        workoutSessionId: "w2",
         scoreId: "s2",
         workoutDate: isoDaysAgo(150),
         setEntries: setsPrior,
@@ -298,7 +298,7 @@ describe("computeDomainProfileFromRows", () => {
         movementId: "mA",
         movementCategory: "barbell",
         movementIs1rmApplicable: true,
-        workoutId: "w1",
+        workoutSessionId: "w1",
         scoreId: "s1",
         workoutDate: isoDaysAgo(20),
         setEntries: [{ weight: 250, reps: 5 }],
@@ -307,7 +307,7 @@ describe("computeDomainProfileFromRows", () => {
         movementId: "mB",
         movementCategory: "barbell",
         movementIs1rmApplicable: true,
-        workoutId: "w2",
+        workoutSessionId: "w2",
         scoreId: "s2",
         workoutDate: isoDaysAgo(150),
         setEntries: [{ weight: 200, reps: 5 }],
@@ -320,8 +320,8 @@ describe("computeDomainProfileFromRows", () => {
 
   it("suppresses scaling_rate progression when both windows have <4 combined instances", () => {
     const rows = [
-      row({ movementCategory: "barbell", workoutId: "w1", scoreId: "s1", workoutDate: isoDaysAgo(10), wasRx: true }),
-      row({ movementCategory: "barbell", workoutId: "w2", scoreId: "s2", workoutDate: isoDaysAgo(120), wasRx: false }),
+      row({ movementCategory: "barbell", workoutSessionId: "w1", scoreId: "s1", workoutDate: isoDaysAgo(10), wasRx: true }),
+      row({ movementCategory: "barbell", workoutSessionId: "w2", scoreId: "s2", workoutDate: isoDaysAgo(120), wasRx: false }),
     ];
     const profile = computeDomainProfileFromRows(rows, { now: NOW });
     const wl = findDomain(profile, "weightlifting");
