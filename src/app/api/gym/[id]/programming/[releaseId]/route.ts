@@ -1,17 +1,17 @@
 // DELETE /api/gym/[id]/programming/[releaseId]
 //
-// Wipes a programming release entirely: removes every workout tied to
-// the release (and its sections, parts, scores via cascade) plus the
-// release row itself. Manual workouts on those same dates (workouts
-// without a programming_release_id) are NOT touched.
+// Wipes a programming release entirely: removes every session tied to
+// the release (and its scores via cascade) plus the release row itself.
+// Manual sessions on those same dates (sessions without a
+// programming_release_id) are NOT touched.
 //
 // Use case: coach published the wrong week and wants to start over,
 // without disturbing any ad-hoc WODs an athlete or another coach added
 // from the CrossFit tab.
 //
-// Two FK references into workouts (class_instances.workout_id,
-// gym_posts.workout_id) have no ON DELETE rule, so we null them out
-// inside the same transaction before deleting the workouts.
+// Two cross-domain references (class_instances.workout_session_id,
+// gym_posts.workout_session_id) have no ON DELETE rule, so we null them
+// out inside the same transaction before deleting the sessions.
 
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq, inArray } from "drizzle-orm";
@@ -21,7 +21,7 @@ import {
   gymPosts,
   notifications,
   programmingReleases,
-  workouts,
+  workoutSessions,
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canManageGym } from "@/lib/authz/community";
@@ -54,25 +54,27 @@ export async function DELETE(
   }
 
   await db.transaction(async (tx) => {
-    const programmedWorkouts = await tx
-      .select({ id: workouts.id })
-      .from(workouts)
-      .where(eq(workouts.programmingReleaseId, releaseId));
-    const ids = programmedWorkouts.map((w) => w.id);
+    const programmedSessions = await tx
+      .select({ id: workoutSessions.id })
+      .from(workoutSessions)
+      .where(eq(workoutSessions.programmingReleaseId, releaseId));
+    const ids = programmedSessions.map((s) => s.id);
 
     if (ids.length) {
-      // Null the non-cascading references first so the workouts delete
+      // Null the non-cascading references first so the sessions delete
       // doesn't trip an FK constraint.
       await tx
         .update(classInstances)
-        .set({ workoutId: null })
-        .where(inArray(classInstances.workoutId, ids));
+        .set({ workoutSessionId: null })
+        .where(inArray(classInstances.workoutSessionId, ids));
       await tx
         .update(gymPosts)
-        .set({ workoutId: null })
-        .where(inArray(gymPosts.workoutId, ids));
+        .set({ workoutSessionId: null })
+        .where(inArray(gymPosts.workoutSessionId, ids));
 
-      await tx.delete(workouts).where(inArray(workouts.id, ids));
+      await tx
+        .delete(workoutSessions)
+        .where(inArray(workoutSessions.id, ids));
     }
 
     // Drop any workout_published notifications fired by a prior publish,

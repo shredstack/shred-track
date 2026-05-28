@@ -3,7 +3,7 @@ import { inngest } from "../client";
 import { db } from "@/db";
 import {
   scores,
-  workouts,
+  workoutSessions,
   scoreComments,
   notifications,
   notificationPreferences,
@@ -52,12 +52,15 @@ export const notifyCommentCreated = inngest.createFunction(
       const [row] = await db
         .select({
           ownerId: scores.userId,
-          workoutId: scores.workoutId,
-          workoutPartId: scores.workoutPartId,
-          communityId: workouts.communityId,
+          workoutSessionId: scores.workoutSessionId,
+          crossfitWorkoutPartId: scores.crossfitWorkoutPartId,
+          communityId: workoutSessions.communityId,
         })
         .from(scores)
-        .innerJoin(workouts, eq(workouts.id, scores.workoutId))
+        .innerJoin(
+          workoutSessions,
+          eq(workoutSessions.id, scores.workoutSessionId)
+        )
         .where(eq(scores.id, scoreId))
         .limit(1);
       return row ?? null;
@@ -147,8 +150,8 @@ export const notifyCommentCreated = inngest.createFunction(
             kind: i.kind,
             scoreId,
             commentId,
-            workoutId: ctx.workoutId,
-            workoutPartId: ctx.workoutPartId,
+            workoutSessionId: ctx.workoutSessionId,
+            crossfitWorkoutPartId: ctx.crossfitWorkoutPartId,
             communityId: ctx.communityId,
           }))
         )
@@ -188,12 +191,15 @@ export const notifyCommentMentioned = inngest.createFunction(
       const [row] = await db
         .select({
           ownerId: scores.userId,
-          workoutId: scores.workoutId,
-          workoutPartId: scores.workoutPartId,
-          communityId: workouts.communityId,
+          workoutSessionId: scores.workoutSessionId,
+          crossfitWorkoutPartId: scores.crossfitWorkoutPartId,
+          communityId: workoutSessions.communityId,
         })
         .from(scores)
-        .innerJoin(workouts, eq(workouts.id, scores.workoutId))
+        .innerJoin(
+          workoutSessions,
+          eq(workoutSessions.id, scores.workoutSessionId)
+        )
         .where(eq(scores.id, scoreId))
         .limit(1);
       return row ?? null;
@@ -237,8 +243,8 @@ export const notifyCommentMentioned = inngest.createFunction(
             kind: "score_mention" as const,
             scoreId,
             commentId,
-            workoutId: ctx.workoutId,
-            workoutPartId: ctx.workoutPartId,
+            workoutSessionId: ctx.workoutSessionId,
+            crossfitWorkoutPartId: ctx.crossfitWorkoutPartId,
             communityId: ctx.communityId,
           }))
         )

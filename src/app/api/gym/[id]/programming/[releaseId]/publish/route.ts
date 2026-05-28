@@ -2,8 +2,8 @@
 //
 // Flips a draft release to published. Coach/admin only (spec uses
 // canPublishProgramming alias; we delegate to canManageGym for v1).
-// Also flips workouts.published=true for every workout tied to the
-// release so the member-facing CrossFit GET returns them.
+// Also flips workout_sessions.published=true for every session tied to
+// the release so the member-facing CrossFit GET returns them.
 //
 // PR 2 §2.4: walks active inline tracks overlapping the week and injects
 // per-day workout_sections.
@@ -13,7 +13,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   programmingReleases,
-  workouts,
+  workoutSessions,
   communityMemberships,
   notifications,
 } from "@/db/schema";
@@ -54,9 +54,9 @@ export async function POST(
     weekStart = rel?.weekStart ?? null;
 
     await tx
-      .update(workouts)
+      .update(workoutSessions)
       .set({ published: true, updatedAt: new Date() })
-      .where(eq(workouts.programmingReleaseId, releaseId));
+      .where(eq(workoutSessions.programmingReleaseId, releaseId));
   });
 
   // Inline track injection happens outside the transaction (it has its own

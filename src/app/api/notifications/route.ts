@@ -5,12 +5,13 @@ import {
   classInstances,
   classSchedules,
   communities,
+  crossfitWorkouts,
   gymPosts,
   notifications,
   programmingReleases,
   scoreComments,
   users,
-  workouts,
+  workoutSessions,
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { parseMentionsFromBody } from "@/lib/social/mentions";
@@ -49,7 +50,9 @@ export async function GET(req: NextRequest) {
       scoreId: notifications.scoreId,
       commentId: notifications.commentId,
       workoutId: notifications.workoutId,
+      workoutSessionId: notifications.workoutSessionId,
       workoutPartId: notifications.workoutPartId,
+      crossfitWorkoutPartId: notifications.crossfitWorkoutPartId,
       programmingReleaseId: notifications.programmingReleaseId,
       gymPostId: notifications.gymPostId,
       classInstanceId: notifications.classInstanceId,
@@ -57,8 +60,11 @@ export async function GET(req: NextRequest) {
       actorId: notifications.actorId,
       actorName: actor.name,
       actorImage: actor.image,
-      workoutTitle: workouts.title,
-      workoutDate: workouts.workoutDate,
+      // Session title override wins, fall back to template title. The
+      // wire field stays `workoutTitle` for client backwards-compat.
+      workoutTitle: crossfitWorkouts.title,
+      sessionTitle: workoutSessions.title,
+      workoutDate: workoutSessions.workoutDate,
       releaseWeekStart: programmingReleases.weekStart,
       commentBody: scoreComments.body,
       commentHasAttachment: sql<boolean>`${scoreComments.attachmentProvider} IS NOT NULL`,
@@ -70,7 +76,14 @@ export async function GET(req: NextRequest) {
     })
     .from(notifications)
     .leftJoin(actor, eq(actor.id, notifications.actorId))
-    .leftJoin(workouts, eq(workouts.id, notifications.workoutId))
+    .leftJoin(
+      workoutSessions,
+      eq(workoutSessions.id, notifications.workoutSessionId)
+    )
+    .leftJoin(
+      crossfitWorkouts,
+      eq(crossfitWorkouts.id, workoutSessions.crossfitWorkoutId)
+    )
     .leftJoin(
       programmingReleases,
       eq(programmingReleases.id, notifications.programmingReleaseId)
@@ -143,10 +156,13 @@ export async function GET(req: NextRequest) {
       kind: r.kind as NotificationKind,
       actorName: r.actorName ?? null,
       actorImage: r.actorImage ?? null,
-      workoutTitle: r.workoutTitle ?? "",
+      workoutTitle: r.sessionTitle ?? r.workoutTitle ?? "",
       workoutDate: r.workoutDate ?? null,
-      workoutId: r.workoutId ?? null,
-      workoutPartId: r.workoutPartId ?? null,
+      // Wire-field name kept; carries workout_sessions.id when present
+      // (new rows), falls back to the legacy workouts.id for un-backfilled
+      // older notifications.
+      workoutId: r.workoutSessionId ?? r.workoutId ?? null,
+      workoutPartId: r.crossfitWorkoutPartId ?? r.workoutPartId ?? null,
       programmingReleaseId: r.programmingReleaseId ?? null,
       releaseWeekStart: r.releaseWeekStart ?? null,
       scoreId: r.scoreId ?? null,

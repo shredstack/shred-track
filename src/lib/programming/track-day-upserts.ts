@@ -9,14 +9,16 @@ import { db } from "@/db";
 import {
   programmingTrackDays,
   programmingTracks,
-  workouts,
+  workoutSessions,
 } from "@/db/schema";
 import type { TrackDayUpsertInput } from "@/types/programming-tracks";
 
 export interface TrackDayUpsert {
   date: string; // YYYY-MM-DD
   body?: string | null;
-  workoutId?: string | null;
+  // Unified-schema link. `workout_sessions.id`. The legacy column on
+  // programming_track_days (`workout_id`) is retired in the drop migration.
+  workoutSessionId?: string | null;
   isScored?: boolean;
   scoreType?: string | null;
   // Structured prescribed amount (e.g. 40 for "40 sit-ups"). Drives the
@@ -43,16 +45,16 @@ export async function upsertTrackDay(
   trackId: string;
   date: string;
   body: string | null;
-  workoutId: string | null;
+  workoutSessionId: string | null;
   isScored: boolean;
   scoreType: string | null;
 }> {
   const executor = tx ?? db;
 
-  // Ownership check: the linked workout must belong to the track's
-  // community. We re-query the track each time the workoutId is set so
-  // a stale client can't sneak a foreign workout into a track row.
-  if (input.workoutId) {
+  // Ownership check: the linked session must belong to the track's
+  // community. We re-query the track each time a sessionId is supplied so
+  // a stale client can't sneak a foreign session into a track row.
+  if (input.workoutSessionId) {
     const [track] = await executor
       .select({ communityId: programmingTracks.communityId })
       .from(programmingTracks)
@@ -60,14 +62,16 @@ export async function upsertTrackDay(
       .limit(1);
     if (!track) throw new Error("Track not found");
 
-    const [w] = await executor
-      .select({ communityId: workouts.communityId })
-      .from(workouts)
-      .where(eq(workouts.id, input.workoutId))
+    const [s] = await executor
+      .select({ communityId: workoutSessions.communityId })
+      .from(workoutSessions)
+      .where(eq(workoutSessions.id, input.workoutSessionId))
       .limit(1);
-    if (!w) throw new Error("Linked workout not found");
-    if (w.communityId !== track.communityId) {
-      throw new Error("Workout does not belong to this track's gym");
+    if (!s) throw new Error("Linked workout session not found");
+    if (s.communityId !== track.communityId) {
+      throw new Error(
+        "Workout session does not belong to this track's gym"
+      );
     }
   }
 
@@ -86,7 +90,9 @@ export async function upsertTrackDay(
     const current = existing[0];
     const patch: Record<string, unknown> = {};
     if (input.body !== undefined) patch.body = input.body;
-    if (input.workoutId !== undefined) patch.workoutId = input.workoutId;
+    if (input.workoutSessionId !== undefined) {
+      patch.workoutSessionId = input.workoutSessionId;
+    }
     if (input.isScored !== undefined) patch.isScored = input.isScored;
     if (input.scoreType !== undefined) patch.scoreType = input.scoreType;
     if (input.prescribedValue !== undefined) {
@@ -110,7 +116,7 @@ export async function upsertTrackDay(
       trackId,
       date: input.date,
       body: input.body ?? null,
-      workoutId: input.workoutId ?? null,
+      workoutSessionId: input.workoutSessionId ?? null,
       isScored: input.isScored ?? true,
       scoreType: input.scoreType ?? null,
       prescribedValue:
@@ -153,6 +159,7 @@ export async function bulkUpsertTrackDays(
     // caller explicitly opted into overwriting them.
     if (existing && !options.overwriteReviewed) {
       const looksReviewed =
+        existing.workoutSessionId != null ||
         existing.workoutId != null ||
         (existing.body != null && existing.body.trim().length > 0);
       if (looksReviewed) {
@@ -181,11 +188,14 @@ export function validateTrackDayUpsertInput(
     }
     result.body = b.body as string | null;
   }
-  if (b.workoutId !== undefined) {
-    if (b.workoutId !== null && typeof b.workoutId !== "string") {
-      throw new Error("workoutId must be string or null");
+  if (b.workoutSessionId !== undefined) {
+    if (
+      b.workoutSessionId !== null &&
+      typeof b.workoutSessionId !== "string"
+    ) {
+      throw new Error("workoutSessionId must be string or null");
     }
-    result.workoutId = b.workoutId as string | null;
+    result.workoutSessionId = b.workoutSessionId as string | null;
   }
   if (b.isScored !== undefined) {
     if (typeof b.isScored !== "boolean") {

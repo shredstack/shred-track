@@ -3,7 +3,7 @@ import { inngest } from "../client";
 import { db } from "@/db";
 import {
   scores,
-  workouts,
+  workoutSessions,
   notifications,
   notificationPreferences,
 } from "@/db/schema";
@@ -32,12 +32,15 @@ export const notifyReactionCreated = inngest.createFunction(
       const [row] = await db
         .select({
           ownerId: scores.userId,
-          workoutId: scores.workoutId,
-          workoutPartId: scores.workoutPartId,
-          communityId: workouts.communityId,
+          workoutSessionId: scores.workoutSessionId,
+          crossfitWorkoutPartId: scores.crossfitWorkoutPartId,
+          communityId: workoutSessions.communityId,
         })
         .from(scores)
-        .innerJoin(workouts, eq(workouts.id, scores.workoutId))
+        .innerJoin(
+          workoutSessions,
+          eq(workoutSessions.id, scores.workoutSessionId)
+        )
         .where(eq(scores.id, scoreId))
         .limit(1);
       return row ?? null;
@@ -72,8 +75,8 @@ export const notifyReactionCreated = inngest.createFunction(
           kind: "score_reaction",
           scoreId,
           reactionId,
-          workoutId: ctx.workoutId,
-          workoutPartId: ctx.workoutPartId,
+          workoutSessionId: ctx.workoutSessionId,
+          crossfitWorkoutPartId: ctx.crossfitWorkoutPartId,
           communityId: ctx.communityId,
         })
         .returning({ id: notifications.id });

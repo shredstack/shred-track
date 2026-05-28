@@ -3,10 +3,10 @@ import { db } from "@/db";
 import {
   communityMemberships,
   crossfitWorkoutParts,
+  crossfitWorkouts,
   familyMembers,
   scores,
   scoreMovementDetails,
-  workouts,
   workoutSessions,
 } from "@/db/schema";
 import { and, eq, desc, asc } from "drizzle-orm";
@@ -71,6 +71,12 @@ interface ScorePostBody {
 }
 
 // GET /api/scores — list user's scores
+//
+// `?workoutId=X` filters to a single session's scores. Post-cutover the
+// param is a workout_sessions.id (the field name is preserved for client
+// backwards-compat). The no-param list joins through workout_sessions +
+// crossfit_workouts for the title/type/date columns the history feed
+// shows.
 export async function GET(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -81,13 +87,15 @@ export async function GET(req: NextRequest) {
     ? await db
         .select()
         .from(scores)
-        .where(eq(scores.workoutId, workoutId))
+        .where(eq(scores.workoutSessionId, workoutId))
         .orderBy(desc(scores.createdAt))
     : await db
         .select({
           id: scores.id,
-          workoutId: scores.workoutId,
-          workoutPartId: scores.workoutPartId,
+          // Wire-field name kept as `workoutId` for client backwards-compat;
+          // post-cutover this carries the workout_sessions.id.
+          workoutId: scores.workoutSessionId,
+          workoutPartId: scores.crossfitWorkoutPartId,
           division: scores.division,
           timeSeconds: scores.timeSeconds,
           rounds: scores.rounds,
@@ -99,17 +107,37 @@ export async function GET(req: NextRequest) {
           notes: scores.notes,
           rpe: scores.rpe,
           createdAt: scores.createdAt,
-          workoutTitle: workouts.title,
-          workoutType: workouts.workoutType,
-          workoutDate: workouts.workoutDate,
+          // Session title override wins, fall back to template title.
+          workoutTitle: crossfitWorkouts.title,
+          sessionTitle: workoutSessions.title,
+          workoutType: crossfitWorkouts.workoutType,
+          workoutDate: workoutSessions.workoutDate,
         })
         .from(scores)
-        .innerJoin(workouts, eq(workouts.id, scores.workoutId))
+        .innerJoin(
+          workoutSessions,
+          eq(workoutSessions.id, scores.workoutSessionId)
+        )
+        .innerJoin(
+          crossfitWorkouts,
+          eq(crossfitWorkouts.id, workoutSessions.crossfitWorkoutId)
+        )
         .where(eq(scores.userId, user.id))
         .orderBy(desc(scores.createdAt))
         .limit(50);
 
-  return NextResponse.json(rows);
+  // Collapse the session-title override into the workoutTitle the client
+  // expects.
+  const shaped = Array.isArray(rows)
+    ? rows.map((r) => {
+        if ("sessionTitle" in r) {
+          const { sessionTitle, workoutTitle, ...rest } = r;
+          return { ...rest, workoutTitle: sessionTitle ?? workoutTitle };
+        }
+        return r;
+      })
+    : rows;
+  return NextResponse.json(shaped);
 }
 
 // POST /api/scores — log a score against a workout session + template part.

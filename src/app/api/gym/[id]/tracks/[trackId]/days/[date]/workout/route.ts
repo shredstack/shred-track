@@ -1,20 +1,33 @@
 // POST /api/gym/[id]/tracks/[trackId]/days/[date]/workout
 //
-// Creates a new workouts row (linked to the gym + dated to the track day)
-// and links it from the track day. Re-uses Smart Builder payload shape
-// (`builderPartToPayload()` output). Returns `{ workoutId, trackDayId }`.
+// Creates a programmed-day workout for a gym track. Unified schema:
+//   1. upsertTemplate (community-scoped) — fingerprint-matches an
+//      existing community template or creates a new one.
+//   2. createSession — writes a workout_sessions row tied to the gym +
+//      date + source track.
+//   3. upsertTrackDay — wires the day to the session via
+//      workout_sessions.id.
+//
+// Returns `{ workoutId, trackDayId }`. `workoutId` is the session.id —
+// the field name is preserved because the client treats it as an opaque
+// identifier (it's what subsequent reads/writes against the workout
+// detail page key on).
 
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { programmingTracks, workouts } from "@/db/schema";
+import { programmingTracks } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canManageGym } from "@/lib/authz/community";
 import {
-  insertWorkoutParts,
-  type PartInput,
-} from "@/lib/crossfit/insert-workout-parts";
+  upsertTemplate,
+  type TemplatePartInput,
+} from "@/lib/crossfit/upsert-template";
+import { createSession } from "@/lib/crossfit/session-writer";
 import { upsertTrackDay } from "@/lib/programming/track-day-upserts";
+import type {
+  WorkoutSessionScoreType,
+} from "@/db/schema";
 
 function isIsoDate(s: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
@@ -55,9 +68,9 @@ export async function POST(
   const body = (await req.json().catch(() => null)) as {
     title?: string | null;
     description?: string | null;
-    parts?: PartInput[];
+    parts?: TemplatePartInput[];
     isScored?: boolean;
-    scoreType?: string | null;
+    scoreType?: WorkoutSessionScoreType | null;
     requiresVest?: boolean;
     vestWeightMaleLb?: number | string | null;
     vestWeightFemaleLb?: number | string | null;
@@ -73,54 +86,50 @@ export async function POST(
 
   const result = await db.transaction(async (tx) => {
     const firstPart = body.parts![0];
-    const [w] = await tx
-      .insert(workouts)
-      .values({
-        createdBy: user.id,
-        communityId,
-        title: body.title || null,
-        description: body.description || null,
-        workoutType: firstPart.workoutType,
-        timeCapSeconds: firstPart.timeCapSeconds || null,
-        amrapDurationSeconds: firstPart.amrapDurationSeconds || null,
-        repScheme: firstPart.repScheme || null,
-        rounds: firstPart.rounds ?? null,
-        workoutDate: date,
-        published: true,
-        source: "manual",
-        requiresVest: !!body.requiresVest,
-        vestWeightMaleLb:
-          body.vestWeightMaleLb != null
-            ? String(body.vestWeightMaleLb)
-            : null,
-        vestWeightFemaleLb:
-          body.vestWeightFemaleLb != null
-            ? String(body.vestWeightFemaleLb)
-            : null,
-        isPartner: !!body.isPartner,
-        partnerCount: body.partnerCount ?? null,
-      })
-      .returning();
-
-    await insertWorkoutParts(tx, {
-      workoutId: w.id,
+    const upsertResult = await upsertTemplate(tx, {
+      title:
+        (typeof body.title === "string" && body.title.trim()) ||
+        firstPart.label?.trim() ||
+        "Untitled workout",
+      description: body.description ?? null,
+      scope: { kind: "community", communityId },
+      workoutType: firstPart.workoutType,
+      timeCapSeconds: firstPart.timeCapSeconds ?? null,
+      amrapDurationSeconds: firstPart.amrapDurationSeconds ?? null,
+      repScheme: firstPart.repScheme ?? null,
+      rounds: firstPart.rounds ?? null,
+      requiresVest: !!body.requiresVest,
+      vestWeightMaleLb: body.vestWeightMaleLb ?? null,
+      vestWeightFemaleLb: body.vestWeightFemaleLb ?? null,
+      isPartner: !!body.isPartner,
+      partnerCount: body.partnerCount ?? null,
       parts: body.parts!,
+    });
+
+    const session = await createSession(tx, {
+      crossfitWorkoutId: upsertResult.templateId,
+      communityId,
+      workoutDate: date,
+      kind: "wod",
+      source: "manual",
+      sourceTrackId: trackId,
+      published: true,
+      isScored: body.isScored ?? true,
+      scoreType: body.scoreType ?? null,
     });
 
     const day = await upsertTrackDay(
       trackId,
       {
         date,
-        workoutId: w.id,
-        // body stays as-is (let the coach use the free-text tab if they
-        // want extra notes alongside structured parts).
+        workoutSessionId: session.id,
         isScored: body.isScored ?? true,
         scoreType: body.scoreType ?? null,
       },
       tx
     );
 
-    return { workoutId: w.id, trackDayId: day.id };
+    return { workoutId: session.id, trackDayId: day.id };
   });
 
   return NextResponse.json(result, { status: 201 });
