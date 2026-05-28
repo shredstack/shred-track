@@ -13,12 +13,11 @@
 
 import { db } from "@/db";
 import {
-  scores,
-  scoreMovementDetails,
-  workoutMovements,
-  workoutParts,
-  workouts,
+  crossfitWorkoutMovements,
+  crossfitWorkoutParts,
   movements,
+  scoreMovementDetails,
+  scores,
 } from "@/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { normalizeSetEntries, maxWeight } from "@/lib/crossfit/set-entries";
@@ -80,27 +79,34 @@ export async function loadUserOneRepMaxes(
 
   const rows = await db
     .select({
-      movementId: workoutMovements.movementId,
-      partRepScheme: workoutParts.repScheme,
-      movementRepSchemeParsed: workoutMovements.repSchemeParsed,
+      movementId: crossfitWorkoutMovements.movementId,
+      partRepScheme: crossfitWorkoutParts.repScheme,
+      movementRepSchemeParsed: crossfitWorkoutMovements.repSchemeParsed,
       actualWeight: scoreMovementDetails.actualWeight,
       setEntries: scoreMovementDetails.setEntries,
     })
     .from(scoreMovementDetails)
     .innerJoin(scores, eq(scores.id, scoreMovementDetails.scoreId))
     .innerJoin(
-      workoutMovements,
-      eq(workoutMovements.id, scoreMovementDetails.workoutMovementId)
+      crossfitWorkoutMovements,
+      eq(
+        crossfitWorkoutMovements.id,
+        scoreMovementDetails.crossfitWorkoutMovementId
+      )
     )
-    .innerJoin(workoutParts, eq(workoutParts.id, workoutMovements.workoutPartId))
-    .innerJoin(workouts, eq(workouts.id, scores.workoutId))
-    .innerJoin(movements, eq(movements.id, workoutMovements.movementId))
+    .innerJoin(
+      crossfitWorkoutParts,
+      eq(crossfitWorkoutParts.id, crossfitWorkoutMovements.crossfitWorkoutPartId)
+    )
+    .innerJoin(movements, eq(movements.id, crossfitWorkoutMovements.movementId))
     .where(
       and(
         eq(scores.userId, userId),
         eq(movements.is1rmApplicable, true),
-        inArray(workoutMovements.movementId, movementIds),
-        inArray(workouts.workoutType, ["for_load", "max_effort"])
+        inArray(crossfitWorkoutMovements.movementId, movementIds),
+        // Only for_load parts (max_effort exists at the template level as
+        // workoutType but parts always pivot through for_load in practice).
+        inArray(crossfitWorkoutParts.workoutType, ["for_load", "max_effort"])
       )
     );
 

@@ -1,27 +1,38 @@
+// GET /api/workouts/[id]/leaderboard
+//
+// Returns Record<crossfitWorkoutPartId, LeaderboardEntry[]> for every
+// part of the workout, scoped to active members of the gym. Personal
+// sessions return 403.
+//
+// Unified-schema: `id` is a workout_sessions.id. The session points at a
+// template; we pull leaderboard entries for every score whose
+// workoutSessionId is in the SAME day's session set (so a member who
+// logged the same Murph independently still shows up alongside the gym
+// programming card's scores). The legacy reader only looked at scores
+// against the single workout row; the new shape includes any session
+// referencing the same template on the same date.
+
 import { NextRequest, NextResponse } from "next/server";
-import { aliasedTable, and, eq, sql, inArray } from "drizzle-orm";
+import { aliasedTable, and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  workoutParts,
+  communityMemberships,
+  crossfitWorkoutMovements,
+  crossfitWorkoutParts,
+  movements,
+  scoreMovementDetails,
+  scoreReactions,
   scores,
   users,
-  scoreReactions,
-  communityMemberships,
-  scoreMovementDetails,
-  workoutMovements,
-  movements,
+  workoutSessions,
 } from "@/db/schema";
-
-const substitutionMovements = aliasedTable(movements, "subs");
 import { getSessionUser } from "@/lib/session";
-import { getWorkoutAccess } from "@/lib/authz/workout";
+import { getSessionAccess } from "@/lib/authz/workout";
 import { formatBestScore } from "@/lib/crossfit/benchmark-stats";
 import type { LeaderboardEntry, WorkoutType } from "@/types/crossfit";
 
-// Sort value for the leaderboard. The Leaderboard component sorts by
-// `sortValue` per the workout type — for_time wants ascending, everything
-// else descending. We pre-compute one number per row so the client only
-// has to sort numbers.
+const substitutionMovements = aliasedTable(movements, "subs");
+
 function computeSortValue(
   workoutType: WorkoutType,
   row: {
@@ -38,7 +49,6 @@ function computeSortValue(
       return row.timeSeconds ?? Number.POSITIVE_INFINITY;
     case "amrap": {
       if (row.totalReps != null) return row.totalReps;
-      // Synthetic ranking: rounds dominate, remainder breaks ties.
       return (row.rounds ?? 0) * 1000 + (row.remainderReps ?? 0);
     }
     case "for_load":
@@ -53,11 +63,6 @@ function computeSortValue(
   }
 }
 
-// GET /api/workouts/[id]/leaderboard
-//
-// Returns `Record<workoutPartId, LeaderboardEntry[]>` for every part of
-// the workout, scoped to active members of the workout's gym. Personal
-// workouts return 403 (out of scope for v1 per spec).
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -65,46 +70,78 @@ export async function GET(
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { id: workoutId } = await params;
+  const { id: sessionId } = await params;
 
-  const access = await getWorkoutAccess(user.id, workoutId);
+  const access = await getSessionAccess(user.id, sessionId);
   if (!access.exists) {
     return NextResponse.json({ error: "Workout not found" }, { status: 404 });
   }
   if (!access.canRead) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  if (!access.isGymWorkout || !access.communityId) {
+  if (!access.isGymSession || !access.communityId) {
     return NextResponse.json(
       { error: "Leaderboards are only available for gym workouts" },
       { status: 403 }
     );
   }
 
-  const parts = await db
+  // Resolve the session's template id; if there's no template (freeform
+  // session), there can't be parts to score against.
+  const [s] = await db
     .select({
-      id: workoutParts.id,
-      workoutType: workoutParts.workoutType,
+      crossfitWorkoutId: workoutSessions.crossfitWorkoutId,
+      workoutDate: workoutSessions.workoutDate,
     })
-    .from(workoutParts)
-    .where(eq(workoutParts.workoutId, workoutId))
-    .orderBy(workoutParts.orderIndex);
-
-  if (parts.length === 0) {
+    .from(workoutSessions)
+    .where(eq(workoutSessions.id, sessionId))
+    .limit(1);
+  if (!s?.crossfitWorkoutId) {
     return NextResponse.json({ parts: {} });
   }
 
+  // Pull the template's parts. Leaderboard buckets keyed by part id.
+  const parts = await db
+    .select({
+      id: crossfitWorkoutParts.id,
+      workoutType: crossfitWorkoutParts.workoutType,
+    })
+    .from(crossfitWorkoutParts)
+    .where(eq(crossfitWorkoutParts.crossfitWorkoutId, s.crossfitWorkoutId))
+    .orderBy(crossfitWorkoutParts.orderIndex);
+  if (parts.length === 0) {
+    return NextResponse.json({ parts: {} });
+  }
   const partTypeById = new Map<string, WorkoutType>(
     parts.map((p) => [p.id, p.workoutType as WorkoutType])
   );
+  const partIds = parts.map((p) => p.id);
 
-  // Raw score rows for every part of this workout. We re-filter by active
-  // membership below so a deactivated member's stale score is hidden even
-  // if RLS would otherwise let it through (defense in depth).
+  // Sessions to include in the leaderboard: the gym-day session (this
+  // one) plus any session for the same gym + date referencing the same
+  // template. The shape collapses members' personal logs of the same
+  // gym WOD into the same scoreboard.
+  const peerSessions = await db
+    .select({ id: workoutSessions.id })
+    .from(workoutSessions)
+    .where(
+      and(
+        eq(workoutSessions.communityId, access.communityId),
+        eq(workoutSessions.workoutDate, s.workoutDate),
+        eq(workoutSessions.crossfitWorkoutId, s.crossfitWorkoutId)
+      )
+    );
+  const sessionIds = peerSessions.map((p) => p.id);
+  if (sessionIds.length === 0) {
+    const empty: Record<string, LeaderboardEntry[]> = {};
+    for (const p of parts) empty[p.id] = [];
+    return NextResponse.json({ parts: empty });
+  }
+
   const rows = await db
     .select({
       scoreId: scores.id,
-      workoutPartId: scores.workoutPartId,
+      crossfitWorkoutPartId: scores.crossfitWorkoutPartId,
       userId: scores.userId,
       userName: users.name,
       userUsername: users.username,
@@ -129,11 +166,10 @@ export async function GET(
     })
     .from(scores)
     .innerJoin(users, eq(users.id, scores.userId))
-    .innerJoin(workoutParts, eq(workoutParts.id, scores.workoutPartId))
     .where(
       and(
-        eq(workoutParts.workoutId, workoutId),
-        // Dependents spec §3.6: shadow users never appear on leaderboards.
+        inArray(scores.workoutSessionId, sessionIds),
+        inArray(scores.crossfitWorkoutPartId, partIds),
         eq(users.isShadow, false)
       )
     );
@@ -144,9 +180,8 @@ export async function GET(
     return NextResponse.json({ parts: empty });
   }
 
-  // Re-filter: only scores from currently active members of the gym
-  // count. Stops a deactivated member's old score from haunting today's
-  // leaderboard.
+  // Active membership filter — stops deactivated members' scores from
+  // haunting the leaderboard.
   const activeMembers = await db
     .select({ userId: communityMemberships.userId })
     .from(communityMemberships)
@@ -157,10 +192,9 @@ export async function GET(
       )
     );
   const activeIds = new Set(activeMembers.map((m) => m.userId));
-
   const liveRows = rows.filter((r) => activeIds.has(r.userId));
 
-  // Scaling details — load once for the surviving rows and pivot by scoreId.
+  // Scaling details — join through crossfit_workout_movements now.
   const scoreIds = liveRows.map((r) => r.scoreId);
   type ScalingDetail = {
     scoreId: string;
@@ -177,7 +211,7 @@ export async function GET(
     scalingDetails = await db
       .select({
         scoreId: scoreMovementDetails.scoreId,
-        workoutMovementId: scoreMovementDetails.workoutMovementId,
+        workoutMovementId: crossfitWorkoutMovements.id,
         movementName: movements.canonicalName,
         wasRx: scoreMovementDetails.wasRx,
         actualWeight: scoreMovementDetails.actualWeight,
@@ -187,13 +221,22 @@ export async function GET(
       })
       .from(scoreMovementDetails)
       .innerJoin(
-        workoutMovements,
-        eq(workoutMovements.id, scoreMovementDetails.workoutMovementId)
+        crossfitWorkoutMovements,
+        eq(
+          crossfitWorkoutMovements.id,
+          scoreMovementDetails.crossfitWorkoutMovementId
+        )
       )
-      .innerJoin(movements, eq(movements.id, workoutMovements.movementId))
+      .innerJoin(
+        movements,
+        eq(movements.id, crossfitWorkoutMovements.movementId)
+      )
       .leftJoin(
         substitutionMovements,
-        eq(substitutionMovements.id, scoreMovementDetails.substitutionMovementId)
+        eq(
+          substitutionMovements.id,
+          scoreMovementDetails.substitutionMovementId
+        )
       )
       .where(inArray(scoreMovementDetails.scoreId, scoreIds));
   }
@@ -220,7 +263,7 @@ export async function GET(
   for (const p of parts) result[p.id] = [];
 
   for (const row of liveRows) {
-    const partId = row.workoutPartId;
+    const partId = row.crossfitWorkoutPartId;
     if (!partId) continue;
     const workoutType = partTypeById.get(partId);
     if (!workoutType) continue;
@@ -230,7 +273,7 @@ export async function GET(
 
     const displayScore = formatBestScore(workoutType, {
       scoreId: row.scoreId,
-      workoutId,
+      workoutId: sessionId,
       workoutDate: "",
       division: row.division,
       timeSeconds: row.timeSeconds,
