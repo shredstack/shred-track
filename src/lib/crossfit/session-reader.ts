@@ -499,8 +499,12 @@ export async function readSessionWorkouts(
                 movementDetails: (detailsByScore.get(score.id) ?? []).map(
                   (d) => {
                     const entries = normalizeSetEntries(d.setEntries);
+                    // Unified FK column drives the client wire shape;
+                    // fall back to the legacy column for pre-cutover rows.
+                    const movementRowId =
+                      d.crossfitWorkoutMovementId ?? d.workoutMovementId;
                     return {
-                      workoutMovementId: d.workoutMovementId,
+                      workoutMovementId: movementRowId ?? "",
                       wasRx: d.wasRx,
                       actualWeight: d.actualWeight
                         ? Number(d.actualWeight)

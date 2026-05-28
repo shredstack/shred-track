@@ -354,7 +354,11 @@ export async function POST(req: NextRequest) {
             .filter((d) => d.workoutMovementId)
             .map((d) => ({
               scoreId: inserted.id,
-              workoutMovementId: d.workoutMovementId,
+              // The client now sends a crossfit_workout_movements.id in the
+              // `workoutMovementId` slot (the GET response field name didn't
+              // change). Route it to the unified-schema column; legacy
+              // column stays null on the new write path.
+              crossfitWorkoutMovementId: d.workoutMovementId,
               wasRx: d.wasRx ?? true,
               actualWeight: d.actualWeight != null ? d.actualWeight.toString() : null,
               actualReps: d.actualReps ?? null,

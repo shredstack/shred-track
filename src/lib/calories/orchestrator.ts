@@ -233,7 +233,12 @@ export async function recomputeScoreEstimate(scoreId: string): Promise<void> {
   const movementWeights = new Map<string, number>();
   for (const d of details) {
     const w = workingWeightFromSetData(d.actualWeight, d.setEntries);
-    if (w != null) movementWeights.set(d.workoutMovementId, w);
+    // workoutMovementId is nullable for unified-schema rows; skip them
+    // here — the unified recompute path lands with the rest of the
+    // calorie reader cutover in a follow-up commit.
+    if (w != null && d.workoutMovementId) {
+      movementWeights.set(d.workoutMovementId, w);
+    }
   }
 
   const result = await computeScoreEstimate({

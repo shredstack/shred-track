@@ -1,27 +1,25 @@
+// GET /api/crossfit/wod/today
+//
+// Returns workout sessions scheduled for today (or for ?date=YYYY-MM-DD) —
+// both the caller's personal sessions and published sessions from any gym
+// they belong to. Used by the native + Watch "Today" tab.
+//
+// Unified-schema: one row per matching session (not per day). The Watch's
+// `loggedByUser` indicator joins scores via workoutSessionId.
+
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
-  workouts,
-  communityMemberships,
   communities,
+  communityMemberships,
+  crossfitWorkouts,
   scores,
+  workoutSessions,
 } from "@/db/schema";
-import { eq, and, or, inArray, isNull, desc } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 
-// GET /api/crossfit/wod/today
-//
-// Returns workouts scheduled for today (or for ?date=YYYY-MM-DD) — both the
-// caller's personal workouts and published WODs from any gym they belong to.
-// Used by the native + Watch "Today" tab.
-//
-// Response shape: { date, workouts: [{ id, title, description, ..., community }] }
-// `community` is null for personal workouts.
-//
-// If nothing is scheduled for today, returns `{ date, workouts: [] }`.
-
 function parseDateParam(input: string | null): string {
-  // Returns YYYY-MM-DD (UTC-anchored to today's local date if no param).
   if (input && /^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
   const now = new Date();
   const y = now.getFullYear();
@@ -38,68 +36,67 @@ export async function GET(req: NextRequest) {
 
   const date = parseDateParam(req.nextUrl.searchParams.get("date"));
 
-  // 1. Communities the user is an active member of. Inactive memberships
-  // (left the gym, removed) shouldn't see that gym's programming.
   const memberships = await db
     .select({ communityId: communityMemberships.communityId })
     .from(communityMemberships)
     .where(
       and(
         eq(communityMemberships.userId, user.id),
-        eq(communityMemberships.isActive, true),
-      ),
+        eq(communityMemberships.isActive, true)
+      )
     );
-
   const communityIds = memberships.map((m) => m.communityId);
 
-  // 2. Workouts for today — personal (createdBy=user, no community) plus
-  // published gym workouts from any community the user belongs to. The
-  // `published` filter only applies to gym workouts; personal workouts
-  // default to published=false and shouldn't be hidden from their author.
+  // Personal sessions for the user OR published gym sessions from any
+  // gym they belong to.
   const personalCond = and(
-    eq(workouts.createdBy, user.id),
-    isNull(workouts.communityId),
+    eq(workoutSessions.userId, user.id),
+    isNull(workoutSessions.communityId)
   );
   const gymCond =
     communityIds.length > 0
       ? and(
-          inArray(workouts.communityId, communityIds),
-          eq(workouts.published, true),
+          inArray(workoutSessions.communityId, communityIds),
+          eq(workoutSessions.published, true)
         )
       : undefined;
   const scopeCond = gymCond ? or(personalCond, gymCond) : personalCond;
 
   const rows = await db
     .select({
-      workout: workouts,
+      session: workoutSessions,
+      template: crossfitWorkouts,
       community: communities,
     })
-    .from(workouts)
-    .leftJoin(communities, eq(workouts.communityId, communities.id))
-    .where(and(eq(workouts.workoutDate, date), scopeCond));
+    .from(workoutSessions)
+    .leftJoin(
+      crossfitWorkouts,
+      eq(crossfitWorkouts.id, workoutSessions.crossfitWorkoutId)
+    )
+    .leftJoin(communities, eq(workoutSessions.communityId, communities.id))
+    .where(and(eq(workoutSessions.workoutDate, date), scopeCond))
+    .orderBy(asc(workoutSessions.position));
 
-  // 3. Per-user logged state — map workoutId → most-recent score for the user.
-  // Used by the Watch's "logged ✓" indicator and the midday nudge suppression.
-  const workoutIds = rows.map((r) => r.workout.id);
-  const scoresByWorkoutId = new Map<string, string>();
-  if (workoutIds.length > 0) {
+  const sessionIds = rows.map((r) => r.session.id);
+  const loggedScoreBySessionId = new Map<string, string>();
+  if (sessionIds.length > 0) {
     const userScores = await db
-      .select({ id: scores.id, workoutId: scores.workoutId })
+      .select({
+        id: scores.id,
+        workoutSessionId: scores.workoutSessionId,
+      })
       .from(scores)
       .where(
         and(
           eq(scores.userId, user.id),
-          inArray(scores.workoutId, workoutIds),
-        ),
+          inArray(scores.workoutSessionId, sessionIds)
+        )
       )
       .orderBy(desc(scores.createdAt));
     for (const s of userScores) {
-      // First (most recent) score wins thanks to the desc order. Skip
-      // unified-schema rows (workoutId null) — they're keyed by
-      // workoutSessionId, picked up by the unified reader in commit #6.
-      if (!s.workoutId) continue;
-      if (!scoresByWorkoutId.has(s.workoutId)) {
-        scoresByWorkoutId.set(s.workoutId, s.id);
+      if (!s.workoutSessionId) continue;
+      if (!loggedScoreBySessionId.has(s.workoutSessionId)) {
+        loggedScoreBySessionId.set(s.workoutSessionId, s.id);
       }
     }
   }
@@ -107,18 +104,19 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     date,
     workouts: rows.map((r) => {
-      const loggedScoreId = scoresByWorkoutId.get(r.workout.id) ?? null;
+      const loggedScoreId =
+        loggedScoreBySessionId.get(r.session.id) ?? null;
       return {
-        id: r.workout.id,
-        title: r.workout.title,
-        description: r.workout.description,
-        rawText: r.workout.rawText,
-        workoutType: r.workout.workoutType,
-        timeCapSeconds: r.workout.timeCapSeconds,
-        amrapDurationSeconds: r.workout.amrapDurationSeconds,
-        repScheme: r.workout.repScheme,
-        rounds: r.workout.rounds,
-        workoutDate: r.workout.workoutDate,
+        id: r.session.id,
+        title: r.session.title ?? r.template?.title ?? null,
+        description: r.template?.description ?? null,
+        rawText: null,
+        workoutType: r.template?.workoutType ?? null,
+        timeCapSeconds: r.template?.timeCapSeconds ?? null,
+        amrapDurationSeconds: r.template?.amrapDurationSeconds ?? null,
+        repScheme: r.template?.repScheme ?? null,
+        rounds: r.template?.rounds ?? null,
+        workoutDate: r.session.workoutDate,
         community: r.community
           ? { id: r.community.id, name: r.community.name }
           : null,

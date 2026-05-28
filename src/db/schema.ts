@@ -698,7 +698,14 @@ export type NewCommunityCaloriePreferences =
 export const scoreMovementDetails = pgTable("score_movement_details", {
   id: uuid("id").defaultRandom().primaryKey(),
   scoreId: uuid("score_id").notNull().references(() => scores.id, { onDelete: "cascade" }),
-  workoutMovementId: uuid("workout_movement_id").notNull(),
+  // Legacy FK to workout_movements.id. New writes (post-cutover) leave this
+  // null and populate `crossfitWorkoutMovementId` instead.
+  workoutMovementId: uuid("workout_movement_id"),
+  // Unified-schema FK to crossfit_workout_movements.id.
+  crossfitWorkoutMovementId: uuid("crossfit_workout_movement_id").references(
+    () => crossfitWorkoutMovements.id,
+    { onDelete: "cascade" }
+  ),
   wasRx: boolean("was_rx").default(true).notNull(),
   actualWeight: numeric("actual_weight"),
   actualReps: text("actual_reps"),

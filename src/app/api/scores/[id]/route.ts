@@ -177,7 +177,9 @@ export async function PUT(
             .filter((d) => d.workoutMovementId)
             .map((d) => ({
               scoreId: id,
-              workoutMovementId: d.workoutMovementId,
+              // Unified-schema column. Client sends crossfit_workout_movements.id
+              // in the `workoutMovementId` slot post-cutover.
+              crossfitWorkoutMovementId: d.workoutMovementId,
               wasRx: d.wasRx ?? true,
               actualWeight: d.actualWeight != null ? d.actualWeight.toString() : null,
               actualReps: d.actualReps ?? null,
