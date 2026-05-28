@@ -9,6 +9,7 @@ import {
   type TemplatePartInput,
   type UpsertTemplateScope,
 } from "@/lib/crossfit/upsert-template";
+import { forkOrEditTemplate } from "@/lib/crossfit/fork-template";
 import { updateSession } from "@/lib/crossfit/session-writer";
 import { readSessionWorkouts } from "@/lib/crossfit/session-reader";
 import { inngest } from "@/inngest/client";
@@ -57,16 +58,16 @@ export async function GET(
 //   • Metadata-only PATCH — updates session-level fields (workoutDate,
 //     published, kind, title-override, coachNotes). Template-level fields
 //     (description, vest, partner, partnerCount) are intentionally NOT
-//     mutable here for v1; mutating shared/system templates needs the
-//     fork-on-edit logic that lands in a later commit. A metadata-only
-//     patch silently ignores those fields rather than failing the request,
-//     so existing callers keep working — when they next send `parts[]`,
-//     the new fields propagate through `upsertTemplate` and into a (forked
-//     or matched) template.
-//   • Prescription PATCH — re-runs `upsertTemplate` with the new parts;
-//     the session is relinked to whatever template id the upsert resolves.
-//     This is functionally "matched_existing" plus "create-new"; the full
-//     fork-on-edit logic (with in-place edit when safe) wires in commit #8.
+//     mutable here; mutating them propagates through the fork-on-edit path
+//     when the next `parts[]` PATCH lands.
+//   • Prescription PATCH — routes through `forkOrEditTemplate` so a shared
+//     template stays intact (a new template is forked off it; the original
+//     keeps its scores). When the original is safe to mutate (no other
+//     sessions and no scores), the helper edits in place. When the
+//     original is a system template (Fran et al.), the route makes a
+//     scoped fork in the session's scope instead — system rows are never
+//     mutated. When the session had no template (freeform → structured),
+//     a plain upsert kicks off.
 type UpdatePartInput = TemplatePartInput;
 
 // PUT /api/workouts/[id] — update a workout session and (when the
@@ -189,18 +190,20 @@ export async function PUT(
     // Inherit the existing template's title/description when the patch
     // doesn't override them — same as the legacy `body.title ?? existing.title`
     // fallback. Pulled inside the tx so the read is consistent with the write.
+    // Also pull `isSystem` so we can route around the fork helper's guard.
     const [currentTemplate] = session.crossfitWorkoutId
       ? await tx
           .select({
             title: crossfitWorkouts.title,
             description: crossfitWorkouts.description,
+            isSystem: crossfitWorkouts.isSystem,
           })
           .from(crossfitWorkouts)
           .where(eq(crossfitWorkouts.id, session.crossfitWorkoutId))
           .limit(1)
       : [undefined];
 
-    const upsertResult = await upsertTemplate(tx, {
+    const nextTemplate = {
       title: deriveTitle(body.title, currentTemplate?.title, firstPart),
       description:
         body.description !== undefined
@@ -225,12 +228,43 @@ export async function PUT(
       partnerCount:
         body.partnerCount !== undefined ? body.partnerCount : null,
       parts: incomingParts,
-    });
+    } as const;
+
+    // Route by template state:
+    //   • No current template (freeform → structured) → plain upsert.
+    //   • Current template is system (Fran et al.) → scoped fork via
+    //     upsertTemplate; the system row stays untouched.
+    //   • Otherwise → forkOrEditTemplate, which matches an existing scope
+    //     template by fingerprint OR edits in place when safe OR forks.
+    type Mode = "matched_existing" | "edited_in_place" | "forked" | "upsert";
+    let templateId: string;
+    let isNew: boolean;
+    let mode: Mode;
+    if (!session.crossfitWorkoutId) {
+      const r = await upsertTemplate(tx, nextTemplate);
+      templateId = r.templateId;
+      isNew = r.isNew;
+      mode = "upsert";
+    } else if (currentTemplate?.isSystem) {
+      const r = await upsertTemplate(tx, nextTemplate);
+      templateId = r.templateId;
+      isNew = r.isNew;
+      mode = "forked";
+    } else {
+      const r = await forkOrEditTemplate(tx, {
+        originalTemplateId: session.crossfitWorkoutId,
+        next: nextTemplate,
+        triggeringSessionId: id,
+      });
+      templateId = r.templateId;
+      isNew = r.isNew;
+      mode = r.mode;
+    }
 
     // Relink the session if the resolved template id differs.
     const sessionPatch: Record<string, unknown> = {};
-    if (upsertResult.templateId !== session.crossfitWorkoutId) {
-      sessionPatch.crossfitWorkoutId = upsertResult.templateId;
+    if (templateId !== session.crossfitWorkoutId) {
+      sessionPatch.crossfitWorkoutId = templateId;
     }
     if (typeof body.workoutDate === "string" && body.workoutDate.trim()) {
       sessionPatch.workoutDate = body.workoutDate;
@@ -244,8 +278,9 @@ export async function PUT(
         : session;
     return {
       session: updated,
-      crossfitWorkoutId: upsertResult.templateId,
-      isNewTemplate: upsertResult.isNew,
+      crossfitWorkoutId: templateId,
+      isNewTemplate: isNew,
+      mode,
     };
   });
 
@@ -263,6 +298,7 @@ export async function PUT(
     ...result.session,
     crossfitWorkoutId: result.crossfitWorkoutId,
     isNewTemplate: result.isNewTemplate,
+    templateWriteMode: result.mode,
   });
 }
 

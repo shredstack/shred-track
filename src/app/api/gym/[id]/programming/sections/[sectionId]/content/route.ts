@@ -10,12 +10,15 @@
 //     requiresVest?, vestWeightMaleLb?, vestWeightFemaleLb? }
 //
 // In the unified schema there is no "section" table — sections ARE
-// workout_sessions rows. When `parts` is supplied, the route runs
-// upsertTemplate (community-scoped) and relinks the session to the
-// resolved template. When `benchmarkWorkoutId` is supplied the session
-// relinks to that benchmark template directly (no per-day copy of the
-// prescription). Freeform sessions (warm-up, stretching) keep their
-// body-only shape.
+// workout_sessions rows. When `parts` is supplied, the route routes
+// through `forkOrEditTemplate` (community-scoped) so a shared community
+// template stays intact when only this section's prescription changed —
+// a new template is forked off it; the original keeps its scores. The
+// helper edits in place when safe (no other sessions, no scores), and
+// system templates get a scoped fork via `upsertTemplate` instead. When
+// `benchmarkWorkoutId` is supplied the session relinks to that benchmark
+// template directly (no per-day copy of the prescription). Freeform
+// sessions (warm-up, stretching) keep their body-only shape.
 
 import { NextRequest, NextResponse } from "next/server";
 import { asc, eq, inArray } from "drizzle-orm";
@@ -34,6 +37,7 @@ import {
   upsertTemplate,
   type TemplatePartInput,
 } from "@/lib/crossfit/upsert-template";
+import { forkOrEditTemplate } from "@/lib/crossfit/fork-template";
 import { updateSession } from "@/lib/crossfit/session-writer";
 import { inngest } from "@/inngest/client";
 
@@ -247,7 +251,15 @@ export async function PUT(
       }
     }
 
-    // ----- Smart Builder parts: upsert a new template, relink -----
+    // ----- Smart Builder parts: route through the fork-on-edit helper -----
+    //   • No current template (freeform → structured) → plain upsert.
+    //   • Current template is a system row (Fran et al.) → scoped fork via
+    //     upsertTemplate; the system row stays untouched.
+    //   • Benchmark-link patch above this block already changed
+    //     sessionPatch.crossfitWorkoutId — re-read so the fork decision is
+    //     based on the target template, not the about-to-be-replaced one.
+    //   • Otherwise → forkOrEditTemplate; matches an existing community
+    //     template by fingerprint, edits in place when safe, or forks.
     if (Array.isArray(body.parts) && body.parts.length > 0) {
       const validParts = body.parts.filter(
         (p) => p && p.workoutType && Array.isArray(p.movements)
@@ -256,13 +268,13 @@ export async function PUT(
         throw new Error("parts is empty after validation");
       }
       const firstPart = validParts[0];
-      const upsertResult = await upsertTemplate(tx, {
+      const nextTemplate = {
         title:
           (typeof body.title === "string" && body.title.trim()) ||
           firstPart.label?.trim() ||
           "Untitled section",
         description: body.description ?? null,
-        scope: { kind: "community", communityId },
+        scope: { kind: "community", communityId } as const,
         workoutType: firstPart.workoutType,
         timeCapSeconds: firstPart.timeCapSeconds ?? null,
         amrapDurationSeconds: firstPart.amrapDurationSeconds ?? null,
@@ -281,8 +293,42 @@ export async function PUT(
         partnerCount:
           body.partnerCount !== undefined ? body.partnerCount : null,
         parts: validParts,
-      });
-      sessionPatch.crossfitWorkoutId = upsertResult.templateId;
+      };
+
+      // Determine the "original" template id for fork purposes. The
+      // benchmark fast-path above may have just set sessionPatch.crossfitWorkoutId
+      // to a benchmark template — that's the *target* of a relink, not an
+      // edit, so we use the section's pre-PUT template id as the fork
+      // origin if no benchmark relink happened.
+      const originalTemplateId =
+        sessionPatch.crossfitWorkoutId === undefined
+          ? section.crossfitWorkoutId
+          : (sessionPatch.crossfitWorkoutId as string | null);
+
+      let resolvedTemplateId: string;
+      if (!originalTemplateId) {
+        const r = await upsertTemplate(tx, nextTemplate);
+        resolvedTemplateId = r.templateId;
+      } else {
+        const [orig] = await tx
+          .select({ isSystem: crossfitWorkouts.isSystem })
+          .from(crossfitWorkouts)
+          .where(eq(crossfitWorkouts.id, originalTemplateId))
+          .limit(1);
+        if (orig?.isSystem) {
+          const r = await upsertTemplate(tx, nextTemplate);
+          resolvedTemplateId = r.templateId;
+        } else {
+          const r = await forkOrEditTemplate(tx, {
+            originalTemplateId,
+            next: nextTemplate,
+            triggeringSessionId: sectionId,
+          });
+          resolvedTemplateId = r.templateId;
+        }
+      }
+
+      sessionPatch.crossfitWorkoutId = resolvedTemplateId;
       sessionPatch.body = null;
     }
 
