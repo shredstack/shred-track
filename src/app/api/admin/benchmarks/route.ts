@@ -1,44 +1,113 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
-  benchmarkWorkouts,
+  crossfitWorkoutMovements,
+  crossfitWorkoutParts,
+  crossfitWorkouts,
+  movements,
 } from "@/db/schema";
-import { asc } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import { getAdminAccess } from "@/lib/admin/access";
-import {
-  assembleBenchmarkParts,
-  fetchBenchmarkPartsAndMovements,
-  type BenchmarkPartInput,
-} from "@/lib/crossfit/benchmark-parts";
+import { type BenchmarkPartInput } from "@/lib/crossfit/benchmark-parts";
 import {
   upsertTemplate,
   type TemplatePartInput,
 } from "@/lib/crossfit/upsert-template";
 
-// GET /api/admin/benchmarks — list all benchmarks (includes system).
-// Open to super admins and to gym coaches/admins so they can curate.
+// GET /api/admin/benchmarks — list every benchmark template (includes
+// system). Open to super admins + gym coaches/admins for curation.
 export async function GET(_req: NextRequest) {
   const access = await getAdminAccess();
   if (!access) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const rows = await db
     .select()
-    .from(benchmarkWorkouts)
-    .orderBy(asc(benchmarkWorkouts.name));
+    .from(crossfitWorkouts)
+    .where(eq(crossfitWorkouts.isBenchmark, true))
+    .orderBy(asc(crossfitWorkouts.title));
 
   const benchmarkIds = rows.map((r) => r.id);
-  const { partsByBenchmark, movementsByBenchmark, blocksByPart } =
-    await fetchBenchmarkPartsAndMovements(benchmarkIds);
+  const partRows = benchmarkIds.length
+    ? await db
+        .select()
+        .from(crossfitWorkoutParts)
+        .where(inArray(crossfitWorkoutParts.crossfitWorkoutId, benchmarkIds))
+        .orderBy(crossfitWorkoutParts.orderIndex)
+    : [];
+  const movementRows = benchmarkIds.length
+    ? await db
+        .select({
+          id: crossfitWorkoutMovements.id,
+          crossfitWorkoutId: crossfitWorkoutMovements.crossfitWorkoutId,
+          crossfitWorkoutPartId: crossfitWorkoutMovements.crossfitWorkoutPartId,
+          movementId: crossfitWorkoutMovements.movementId,
+          orderIndex: crossfitWorkoutMovements.orderIndex,
+          prescribedReps: crossfitWorkoutMovements.prescribedReps,
+          prescribedWeightMale: crossfitWorkoutMovements.prescribedWeightMale,
+          prescribedWeightFemale: crossfitWorkoutMovements.prescribedWeightFemale,
+          movementName: movements.canonicalName,
+        })
+        .from(crossfitWorkoutMovements)
+        .innerJoin(movements, eq(movements.id, crossfitWorkoutMovements.movementId))
+        .where(inArray(crossfitWorkoutMovements.crossfitWorkoutId, benchmarkIds))
+        .orderBy(crossfitWorkoutMovements.orderIndex)
+    : [];
+
+  const partsByBenchmark = new Map<string, typeof partRows>();
+  for (const p of partRows) {
+    const list = partsByBenchmark.get(p.crossfitWorkoutId) ?? [];
+    list.push(p);
+    partsByBenchmark.set(p.crossfitWorkoutId, list);
+  }
+  const movementsByPart = new Map<string, typeof movementRows>();
+  for (const m of movementRows) {
+    const list = movementsByPart.get(m.crossfitWorkoutPartId) ?? [];
+    list.push(m);
+    movementsByPart.set(m.crossfitWorkoutPartId, list);
+  }
 
   const result = rows.map((bw) => {
-    const { parts, flatMovements } = assembleBenchmarkParts(
-      bw,
-      partsByBenchmark.get(bw.id) ?? [],
-      movementsByBenchmark.get(bw.id) ?? [],
-      blocksByPart
-    );
+    const parts = (partsByBenchmark.get(bw.id) ?? []).map((p) => ({
+      id: p.id,
+      orderIndex: p.orderIndex,
+      label: p.label,
+      workoutType: p.workoutType,
+      timeCapSeconds: p.timeCapSeconds,
+      amrapDurationSeconds: p.amrapDurationSeconds,
+      emomIntervalSeconds: p.emomIntervalSeconds,
+      repScheme: p.repScheme,
+      rounds: p.rounds,
+      structure: p.structure,
+      notes: p.notes,
+      movements: (movementsByPart.get(p.id) ?? []).map((m) => ({
+        id: m.id,
+        movementId: m.movementId,
+        movementName: m.movementName,
+        orderIndex: m.orderIndex,
+        prescribedReps: m.prescribedReps,
+        prescribedWeightMale:
+          m.prescribedWeightMale != null
+            ? Number(m.prescribedWeightMale)
+            : null,
+        prescribedWeightFemale:
+          m.prescribedWeightFemale != null
+            ? Number(m.prescribedWeightFemale)
+            : null,
+      })),
+      blocks: [],
+    }));
     return {
-      ...bw,
+      id: bw.id,
+      name: bw.title,
+      description: bw.description,
+      workoutType: bw.workoutType,
+      category: bw.category,
+      timeCapSeconds: bw.timeCapSeconds,
+      amrapDurationSeconds: bw.amrapDurationSeconds,
+      repScheme: bw.repScheme,
+      isSystem: bw.isSystem,
+      createdBy: bw.createdBy,
+      communityId: bw.communityId,
       requiresVest: bw.requiresVest,
       vestWeightMaleLb:
         bw.vestWeightMaleLb != null ? Number(bw.vestWeightMaleLb) : null,
@@ -46,7 +115,7 @@ export async function GET(_req: NextRequest) {
         bw.vestWeightFemaleLb != null ? Number(bw.vestWeightFemaleLb) : null,
       isPartner: bw.isPartner,
       partnerCount: bw.partnerCount,
-      movements: flatMovements,
+      weightliftingMovementId: bw.weightliftingMovementId,
       parts,
     };
   });
