@@ -13,8 +13,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
   communities,
-  workoutSections,
-  workouts,
+  workoutSessions,
   type WorkoutSectionKind,
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
@@ -43,29 +42,26 @@ async function loadForDate(
   communityId: string,
   date: string
 ): Promise<SectionForDisplay[]> {
-  const [workout] = await db
-    .select({ id: workouts.id })
-    .from(workouts)
+  // Unified-schema: sections ARE workout_sessions. Pull every published
+  // session for the gym + date.
+  const sectionRows = await db
+    .select({
+      id: workoutSessions.id,
+      kind: workoutSessions.kind,
+      position: workoutSessions.position,
+      title: workoutSessions.title,
+    })
+    .from(workoutSessions)
     .where(
       and(
-        eq(workouts.communityId, communityId),
-        eq(workouts.workoutDate, date),
-        eq(workouts.published, true)
+        eq(workoutSessions.communityId, communityId),
+        eq(workoutSessions.workoutDate, date),
+        eq(workoutSessions.published, true)
       )
     )
-    .limit(1);
-  if (!workout) return [];
-
-  const sectionRows = await db
-    .select()
-    .from(workoutSections)
-    .where(eq(workoutSections.workoutId, workout.id))
-    .orderBy(asc(workoutSections.position));
+    .orderBy(asc(workoutSessions.position));
   if (sectionRows.length === 0) return [];
 
-  // For v1 the TV shows the section title (and the kind label as a
-  // fallback). Full prescription rendering on the TV is a polish item —
-  // member-facing CrossFit tab carries the rich version.
   return sectionRows.map((s) => ({
     id: s.id,
     kind: s.kind as WorkoutSectionKind,
