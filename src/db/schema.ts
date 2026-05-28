@@ -584,6 +584,12 @@ export const scores = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     workoutId: uuid("workout_id").notNull().references(() => workouts.id, { onDelete: "cascade" }),
     workoutPartId: uuid("workout_part_id").references(() => workoutParts.id, { onDelete: "cascade" }),
+    // Unified-schema FKs. Populated by the backfill; new writes set these
+    // alongside the legacy columns during the cutover. After the legacy
+    // drop migration these become the only FK columns (and `workoutId` is
+    // renamed to `workoutSessionId`).
+    workoutSessionId: uuid("workout_session_id"),
+    crossfitWorkoutPartId: uuid("crossfit_workout_part_id"),
     userId: uuid("user_id").notNull().references(() => users.id),
     division: text("division").notNull(), // 'rx' | 'scaled' | 'rx_plus'
     timeSeconds: integer("time_seconds"),
@@ -869,6 +875,317 @@ export const benchmarkWorkoutMovements = pgTable("benchmark_workout_movements", 
   rxStandard: text("rx_standard"),
   notes: text("notes"),
 });
+
+// ============================================
+// CrossFit: Unified workout templates (NEW)
+// ============================================
+//
+// `crossfit_workouts` is the canonical template — one row per distinct
+// workout prescription. `workout_sessions` is the per-(date, athlete | gym,
+// position) instance. Templates are deduplicated by content_fingerprint
+// within scope.
+//
+// See claude_code_instructions/crossfit_improvements/unified_crossfit_workout_template_spec.md.
+
+export const crossfitWorkouts = pgTable(
+  "crossfit_workouts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    title: text("title").notNull(),
+    description: text("description"),
+    category: text("category"),
+    isBenchmark: boolean("is_benchmark").default(false).notNull(),
+    isSystem: boolean("is_system").default(false).notNull(),
+    weightliftingMovementId: uuid("weightlifting_movement_id").references(
+      () => movements.id,
+      { onDelete: "cascade" }
+    ),
+    // Scope. System templates have both null; non-system have exactly one set.
+    createdBy: uuid("created_by").references(() => users.id),
+    communityId: uuid("community_id").references(() => communities.id, {
+      onDelete: "cascade",
+    }),
+    contentFingerprint: text("content_fingerprint").notNull(),
+    // Self-FK declared in SQL to avoid Drizzle type-cycle issues.
+    forkedFromCrossfitWorkoutId: uuid("forked_from_crossfit_workout_id"),
+    workoutType: text("workout_type").notNull(),
+    timeCapSeconds: integer("time_cap_seconds"),
+    amrapDurationSeconds: integer("amrap_duration_seconds"),
+    repScheme: text("rep_scheme"),
+    rounds: integer("rounds"),
+    requiresVest: boolean("requires_vest").default(false).notNull(),
+    vestWeightMaleLb: numeric("vest_weight_male_lb"),
+    vestWeightFemaleLb: numeric("vest_weight_female_lb"),
+    isPartner: boolean("is_partner").default(false).notNull(),
+    partnerCount: integer("partner_count"),
+    coachNotes: text("coach_notes"),
+    estimatedKcalLow: integer("estimated_kcal_low"),
+    estimatedKcalHigh: integer("estimated_kcal_high"),
+    estimatedKcalMethod: text("estimated_kcal_method"),
+    estimatedKcalConfidence: text("estimated_kcal_confidence"),
+    estimatedKcalComputedAt: timestamp("estimated_kcal_computed_at", {
+      withTimezone: true,
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("crossfit_workouts_user_fp_unique")
+      .on(table.createdBy, table.contentFingerprint, table.isBenchmark)
+      .where(sql`created_by is not null`),
+    uniqueIndex("crossfit_workouts_community_fp_unique")
+      .on(table.communityId, table.contentFingerprint, table.isBenchmark)
+      .where(sql`community_id is not null`),
+    index("crossfit_workouts_benchmark_idx")
+      .on(table.isBenchmark)
+      .where(sql`is_benchmark = true`),
+    index("crossfit_workouts_community_idx")
+      .on(table.communityId)
+      .where(sql`community_id is not null`),
+    index("crossfit_workouts_created_by_idx")
+      .on(table.createdBy)
+      .where(sql`created_by is not null`),
+    index("crossfit_workouts_category_idx")
+      .on(table.category)
+      .where(sql`category is not null`),
+    index("crossfit_workouts_weightlifting_movement_idx")
+      .on(table.weightliftingMovementId)
+      .where(sql`weightlifting_movement_id is not null`),
+  ]
+);
+
+export const crossfitWorkoutParts = pgTable(
+  "crossfit_workout_parts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    crossfitWorkoutId: uuid("crossfit_workout_id")
+      .notNull()
+      .references(() => crossfitWorkouts.id, { onDelete: "cascade" }),
+    orderIndex: integer("order_index").notNull(),
+    label: text("label"),
+    workoutType: text("workout_type").notNull(),
+    timeCapSeconds: integer("time_cap_seconds"),
+    amrapDurationSeconds: integer("amrap_duration_seconds"),
+    emomIntervalSeconds: integer("emom_interval_seconds"),
+    repScheme: text("rep_scheme"),
+    rounds: integer("rounds"),
+    structure: text("structure"),
+    intervalWorkSeconds: integer("interval_work_seconds"),
+    intervalRestSeconds: integer("interval_rest_seconds"),
+    intervalRounds: jsonb("interval_rounds"),
+    sideCadenceIntervalSeconds: integer("side_cadence_interval_seconds"),
+    sideCadenceOpenEnded: boolean("side_cadence_open_ended")
+      .default(false)
+      .notNull(),
+    notes: text("notes"),
+    estimatedKcalLow: integer("estimated_kcal_low"),
+    estimatedKcalHigh: integer("estimated_kcal_high"),
+    estimatedKcalConfidence: text("estimated_kcal_confidence"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("crossfit_workout_parts_workout_order_unique").on(
+      table.crossfitWorkoutId,
+      table.orderIndex
+    ),
+    index("crossfit_workout_parts_workout_idx").on(table.crossfitWorkoutId),
+  ]
+);
+
+export const crossfitWorkoutBlocks = pgTable(
+  "crossfit_workout_blocks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    crossfitWorkoutPartId: uuid("crossfit_workout_part_id")
+      .notNull()
+      .references(() => crossfitWorkoutParts.id, { onDelete: "cascade" }),
+    orderIndex: integer("order_index").notNull(),
+    title: text("title").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("crossfit_workout_blocks_part_order_unique").on(
+      table.crossfitWorkoutPartId,
+      table.orderIndex
+    ),
+    index("crossfit_workout_blocks_part_idx").on(table.crossfitWorkoutPartId),
+  ]
+);
+
+export const crossfitWorkoutMovements = pgTable(
+  "crossfit_workout_movements",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    crossfitWorkoutId: uuid("crossfit_workout_id")
+      .notNull()
+      .references(() => crossfitWorkouts.id, { onDelete: "cascade" }),
+    crossfitWorkoutPartId: uuid("crossfit_workout_part_id")
+      .notNull()
+      .references(() => crossfitWorkoutParts.id, { onDelete: "cascade" }),
+    crossfitWorkoutBlockId: uuid("crossfit_workout_block_id").references(
+      () => crossfitWorkoutBlocks.id,
+      { onDelete: "set null" }
+    ),
+    movementId: uuid("movement_id")
+      .notNull()
+      .references(() => movements.id),
+    orderIndex: integer("order_index").notNull(),
+    prescribedReps: text("prescribed_reps"),
+    prescribedWeightMale: numeric("prescribed_weight_male"),
+    prescribedWeightFemale: numeric("prescribed_weight_female"),
+    prescribedCaloriesMale: text("prescribed_calories_male"),
+    prescribedCaloriesFemale: text("prescribed_calories_female"),
+    prescribedDistanceMale: text("prescribed_distance_male"),
+    prescribedDistanceFemale: text("prescribed_distance_female"),
+    prescribedDurationSecondsMale: integer("prescribed_duration_seconds_male"),
+    prescribedDurationSecondsFemale: integer(
+      "prescribed_duration_seconds_female"
+    ),
+    prescribedHeightInches: numeric("prescribed_height_inches"),
+    prescribedHeightInchesMale: numeric("prescribed_height_inches_male"),
+    prescribedHeightInchesFemale: numeric("prescribed_height_inches_female"),
+    prescribedWeightMaleBwMultiplier: numeric(
+      "prescribed_weight_male_bw_multiplier"
+    ),
+    prescribedWeightFemaleBwMultiplier: numeric(
+      "prescribed_weight_female_bw_multiplier"
+    ),
+    prescribedWeightPct: numeric("prescribed_weight_pct"),
+    prescribedWeightPctSourcePartId: uuid(
+      "prescribed_weight_pct_source_part_id"
+    ).references(() => crossfitWorkoutParts.id, { onDelete: "set null" }),
+    tempo: text("tempo"),
+    isMaxReps: boolean("is_max_reps").default(false).notNull(),
+    isSideCadence: boolean("is_side_cadence").default(false).notNull(),
+    repSchemeParsed: jsonb("rep_scheme_parsed"),
+    equipmentCount: integer("equipment_count"),
+    rxStandard: text("rx_standard"),
+    notes: text("notes"),
+  },
+  (table) => [
+    index("crossfit_workout_movements_workout_idx").on(table.crossfitWorkoutId),
+    index("crossfit_workout_movements_part_idx").on(table.crossfitWorkoutPartId),
+    index("crossfit_workout_movements_movement_idx").on(table.movementId),
+  ]
+);
+
+export const workoutSessions = pgTable(
+  "workout_sessions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    crossfitWorkoutId: uuid("crossfit_workout_id").references(
+      () => crossfitWorkouts.id,
+      { onDelete: "restrict" }
+    ),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    communityId: uuid("community_id").references(() => communities.id, {
+      onDelete: "cascade",
+    }),
+    workoutDate: date("workout_date").notNull(),
+    kind: text("kind").default("wod").notNull(),
+    subKind: text("sub_kind"),
+    position: integer("position").default(0).notNull(),
+    title: text("title"),
+    body: text("body"),
+    isScored: boolean("is_scored").default(false).notNull(),
+    scoreType: text("score_type"),
+    coachNotes: text("coach_notes"),
+    source: text("source").default("manual").notNull(),
+    // FK declared in SQL to avoid the circular type dep with programmingReleases.
+    programmingReleaseId: uuid("programming_release_id"),
+    sourceTrackId: uuid("source_track_id"),
+    published: boolean("published").default(false).notNull(),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    estimatedKcalLow: integer("estimated_kcal_low"),
+    estimatedKcalHigh: integer("estimated_kcal_high"),
+    estimatedKcalConfidence: text("estimated_kcal_confidence"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("workout_sessions_user_date_idx")
+      .on(table.userId, sql`workout_date desc`)
+      .where(sql`user_id is not null`),
+    index("workout_sessions_community_date_idx")
+      .on(table.communityId, sql`workout_date desc`)
+      .where(sql`community_id is not null`),
+    index("workout_sessions_template_idx")
+      .on(table.crossfitWorkoutId)
+      .where(sql`crossfit_workout_id is not null`),
+    index("workout_sessions_day_order_idx")
+      .on(table.communityId, table.workoutDate, table.position)
+      .where(sql`community_id is not null`),
+    index("workout_sessions_programming_release_idx")
+      .on(table.programmingReleaseId)
+      .where(sql`programming_release_id is not null`),
+    index("workout_sessions_source_track_idx")
+      .on(table.sourceTrackId)
+      .where(sql`source_track_id is not null`),
+  ]
+);
+
+export type CrossfitWorkout = typeof crossfitWorkouts.$inferSelect;
+export type NewCrossfitWorkout = typeof crossfitWorkouts.$inferInsert;
+export type CrossfitWorkoutPart = typeof crossfitWorkoutParts.$inferSelect;
+export type NewCrossfitWorkoutPart = typeof crossfitWorkoutParts.$inferInsert;
+export type CrossfitWorkoutBlock = typeof crossfitWorkoutBlocks.$inferSelect;
+export type NewCrossfitWorkoutBlock = typeof crossfitWorkoutBlocks.$inferInsert;
+export type CrossfitWorkoutMovement =
+  typeof crossfitWorkoutMovements.$inferSelect;
+export type NewCrossfitWorkoutMovement =
+  typeof crossfitWorkoutMovements.$inferInsert;
+export type WorkoutSession = typeof workoutSessions.$inferSelect;
+export type NewWorkoutSession = typeof workoutSessions.$inferInsert;
+
+// Valid session kinds (mirrors the CHECK constraint in the migration).
+export const WORKOUT_SESSION_KINDS = [
+  "warm_up",
+  "pre_skill",
+  "wod",
+  "post_skill",
+  "stretching",
+  "at_home",
+  "monthly_challenge",
+  "custom",
+] as const;
+export type WorkoutSessionKind = (typeof WORKOUT_SESSION_KINDS)[number];
+
+// Kinds that hold freeform text rather than a template.
+export const FREEFORM_SESSION_KINDS = ["warm_up", "stretching"] as const;
+export type FreeformSessionKind = (typeof FREEFORM_SESSION_KINDS)[number];
+
+export const WORKOUT_SESSION_KIND_LABELS: Record<WorkoutSessionKind, string> = {
+  warm_up: "Warm-up",
+  pre_skill: "Pre-skill",
+  wod: "WOD",
+  post_skill: "Post-skill",
+  stretching: "Stretching",
+  at_home: "At-home",
+  monthly_challenge: "Monthly challenge",
+  custom: "Custom",
+};
+
+export const WORKOUT_SESSION_SCORE_TYPES = [
+  "time",
+  "rounds",
+  "reps",
+  "weight",
+  "no_score",
+] as const;
+export type WorkoutSessionScoreType =
+  (typeof WORKOUT_SESSION_SCORE_TYPES)[number];
 
 // ============================================
 // HYROX: Profile & Assessments
@@ -1707,6 +2024,9 @@ export const notifications = pgTable("notifications", {
   // Denormalized routing context (avoids 3 joins on every render).
   workoutId: uuid("workout_id").references(() => workouts.id, { onDelete: "cascade" }),
   workoutPartId: uuid("workout_part_id").references(() => workoutParts.id, { onDelete: "cascade" }),
+  // Unified-schema FKs (populated by the backfill; new writes set these).
+  workoutSessionId: uuid("workout_session_id"),
+  crossfitWorkoutPartId: uuid("crossfit_workout_part_id"),
   // For workout_published kind: one row per (release × recipient) instead
   // of one per (workout × recipient). Lets the inbox render
   // "Programming dropped — week of <Monday>" from the release row.
@@ -1935,6 +2255,8 @@ export const programmingTrackDays = pgTable(
     // section. Standalone tracks may leave this null and surface their own
     // log-result CTA.
     workoutId: uuid("workout_id").references(() => workouts.id, { onDelete: "set null" }),
+    // Unified-schema FK (populated by the backfill; new writes set this).
+    workoutSessionId: uuid("workout_session_id"),
     body: text("body"),
     isScored: boolean("is_scored").default(true).notNull(),
     scoreType: text("score_type"),
@@ -2051,6 +2373,8 @@ export const classInstances = pgTable("class_instances", {
   status: text("status").default("scheduled").notNull(), // 'scheduled' | 'cancelled' | 'completed'
   cancellationReason: text("cancellation_reason"),
   workoutId: uuid("workout_id").references(() => workouts.id),
+  // Unified-schema FK (populated by the backfill; new writes set this).
+  workoutSessionId: uuid("workout_session_id"),
   kind: text("kind").default("class").notNull(), // 'class' | 'event'
   eventTitle: text("event_title"),
   // PR 3 §3.3 — event creator surfaces these on the schedule card.
@@ -2118,6 +2442,8 @@ export const gymPosts = pgTable(
     status: text("status").default("published").notNull(),
     body: text("body"),
     workoutId: uuid("workout_id").references(() => workouts.id),
+    // Unified-schema FK (populated by the backfill; new writes set this).
+    workoutSessionId: uuid("workout_session_id"),
     workoutDate: date("workout_date"),
     mentionedUserIds: uuid("mentioned_user_ids")
       .array()
