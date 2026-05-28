@@ -272,31 +272,38 @@ export async function POST(req: NextRequest) {
   }
 
   // Compute the personalized calorie estimate before opening the
-  // transaction. computeScoreEstimate still reads from the legacy tables
-  // in commit #5; it'll be cut over to the unified schema in commit #6.
-  // Until then, new sessions/templates won't resolve and the estimator
-  // returns null — caught and ignored below.
+  // transaction. Resolve the session's template id — the estimator reads
+  // from crossfit_workout_parts keyed by templateId, not the session.
+  const [sessionForTemplate] = workoutSessionId
+    ? await db
+        .select({ crossfitWorkoutId: workoutSessions.crossfitWorkoutId })
+        .from(workoutSessions)
+        .where(eq(workoutSessions.id, workoutSessionId))
+        .limit(1)
+    : [undefined];
+
   let calorieEstimate: Awaited<ReturnType<typeof computeScoreEstimate>> | null =
     null;
-  try {
-    calorieEstimate = await computeScoreEstimate({
-      workoutId: workoutSessionId!,
-      workoutPartId: crossfitWorkoutPartId,
-      userId: effectiveUserId,
-      movementWeights,
-      score: {
-        timeSeconds: body.timeSeconds ?? null,
-        hitTimeCap: body.hitTimeCap ?? false,
-        woreVest: body.woreVest ?? null,
-        vestWeightLb: body.vestWeightLb ?? null,
-        rpe: body.rpe ?? null,
-        startedAt,
-        endedAt,
-      },
-    });
-  } catch (err) {
-    // Never block score save on estimator failure. Log and continue.
-    console.error("[calories] estimator failed for score POST", err);
+  if (sessionForTemplate?.crossfitWorkoutId) {
+    try {
+      calorieEstimate = await computeScoreEstimate({
+        workoutId: sessionForTemplate.crossfitWorkoutId,
+        workoutPartId: crossfitWorkoutPartId,
+        userId: effectiveUserId,
+        movementWeights,
+        score: {
+          timeSeconds: body.timeSeconds ?? null,
+          hitTimeCap: body.hitTimeCap ?? false,
+          woreVest: body.woreVest ?? null,
+          vestWeightLb: body.vestWeightLb ?? null,
+          rpe: body.rpe ?? null,
+          startedAt,
+          endedAt,
+        },
+      });
+    } catch (err) {
+      console.error("[calories] estimator failed for score POST", err);
+    }
   }
 
   const durationSeconds = (() => {

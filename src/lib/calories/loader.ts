@@ -8,8 +8,8 @@
 
 import { db } from "@/db";
 import {
-  workoutParts,
-  workoutMovements,
+  crossfitWorkoutMovements,
+  crossfitWorkoutParts,
   movements,
   userMovementPaces,
 } from "@/db/schema";
@@ -55,14 +55,15 @@ function gendered<T extends string | number | null>(
 }
 
 export interface LoadInput {
+  /** A `crossfit_workouts.id` post-cutover. */
   workoutId: string;
   /** Optional: when provided, prefer this user's observed paces and 1RMs. */
   userId?: string | null;
   gender?: string | null;
   /**
-   * Actual logged working weight (lb) keyed by `workout_movements.id`, taken
-   * from the score being saved. Combined with the user's estimated 1RM it
-   * yields the load-relative MET modifier. Absent → no load scaling.
+   * Actual logged working weight (lb) keyed by `crossfit_workout_movements.id`,
+   * taken from the score being saved. Combined with the user's estimated 1RM
+   * it yields the load-relative MET modifier. Absent → no load scaling.
    */
   actualWeightByWorkoutMovementId?: Map<string, number>;
 }
@@ -72,20 +73,20 @@ export async function loadEstimatorPartsForWorkout(
 ): Promise<CaloriePartInput[]> {
   const parts = await db
     .select()
-    .from(workoutParts)
-    .where(eq(workoutParts.workoutId, input.workoutId));
+    .from(crossfitWorkoutParts)
+    .where(eq(crossfitWorkoutParts.crossfitWorkoutId, input.workoutId));
 
   if (parts.length === 0) return [];
 
   const partIds = parts.map((p) => p.id);
   const wms = await db
     .select({
-      wm: workoutMovements,
+      wm: crossfitWorkoutMovements,
       mv: movements,
     })
-    .from(workoutMovements)
-    .innerJoin(movements, eq(movements.id, workoutMovements.movementId))
-    .where(inArray(workoutMovements.workoutPartId, partIds));
+    .from(crossfitWorkoutMovements)
+    .innerJoin(movements, eq(movements.id, crossfitWorkoutMovements.movementId))
+    .where(inArray(crossfitWorkoutMovements.crossfitWorkoutPartId, partIds));
 
   const movementIds = Array.from(new Set(wms.map((r) => r.mv.id)));
   const paces = input.userId && movementIds.length > 0
@@ -130,7 +131,7 @@ export async function loadEstimatorPartsForWorkout(
   }
 
   return parts.map((part) => {
-    const partMovs = wms.filter((r) => r.wm.workoutPartId === part.id);
+    const partMovs = wms.filter((r) => r.wm.crossfitWorkoutPartId === part.id);
     const movs: CaloriePartMovement[] = partMovs.map((row) => {
       const mv: CalorieMovement = {
         id: row.mv.id,

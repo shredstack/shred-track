@@ -14,14 +14,14 @@ import {
   classRegistrations,
   classSchedules,
   communities,
+  crossfitWorkouts,
   gymPosts,
   programmingTrackDays,
   programmingTrackParticipations,
   programmingTracks,
   scores,
   users,
-  workouts,
-  workoutSections,
+  workoutSessions,
 } from "@/db/schema";
 import { isFlagOn } from "@/lib/feature-flags";
 import {
@@ -226,38 +226,42 @@ export async function fetchTodaysWorkout(
 ): Promise<TodaysWorkoutCardData | null> {
   try {
     const today = todayInTz(gymTimezone);
-    const [w] = await db
+    // Prefer a WOD-kind session; fall back to position 0 if none. The
+    // session.id stands in for the legacy workouts.id (day-level handle).
+    const [s] = await db
       .select({
-        id: workouts.id,
-        title: workouts.title,
-        description: workouts.description,
+        id: workoutSessions.id,
+        sessionTitle: workoutSessions.title,
+        templateTitle: crossfitWorkouts.title,
+        templateDescription: crossfitWorkouts.description,
+        kind: workoutSessions.kind,
       })
-      .from(workouts)
+      .from(workoutSessions)
+      .leftJoin(
+        crossfitWorkouts,
+        eq(crossfitWorkouts.id, workoutSessions.crossfitWorkoutId)
+      )
       .where(
         and(
-          eq(workouts.communityId, communityId),
-          eq(workouts.workoutDate, today),
-          eq(workouts.published, true)
+          eq(workoutSessions.communityId, communityId),
+          eq(workoutSessions.workoutDate, today),
+          eq(workoutSessions.published, true)
         )
       )
-      .orderBy(desc(workouts.updatedAt))
-      .limit(1);
-    if (!w) return null;
-    // Compose a one-line summary from the first WOD section title or
-    // workout description.
-    let summary: string | null = w.description ? w.description.slice(0, 100) : null;
-    const [wodSection] = await db
-      .select({ title: workoutSections.title })
-      .from(workoutSections)
-      .where(
-        and(
-          eq(workoutSections.workoutId, w.id),
-          eq(workoutSections.kind, "wod")
-        )
+      .orderBy(
+        desc(eq(workoutSessions.kind, "wod")),
+        asc(workoutSessions.position)
       )
       .limit(1);
-    if (wodSection?.title) summary = wodSection.title;
-    return { workoutId: w.id, title: w.title ?? null, summary };
+    if (!s) return null;
+    const summary = s.templateDescription
+      ? s.templateDescription.slice(0, 100)
+      : s.templateTitle ?? null;
+    return {
+      workoutId: s.id,
+      title: s.sessionTitle ?? s.templateTitle ?? null,
+      summary,
+    };
   } catch (e) {
     logFetcherError("fetchTodaysWorkout", e);
     return null;
