@@ -77,6 +77,22 @@ export function ProgrammedWorkoutDay({
   const usedPartIds = new Set(sections.flatMap((s) => s.partIds));
   const orphanParts = parts.filter((p) => !usedPartIds.has(p.id));
 
+  // Workout-level metadata (description, partner, vest) describes the
+  // *scored* part of the day — not the warm-up or stretching that book-end
+  // it. Attach the chips/blurb to the section that owns the WOD: prefer the
+  // section tagged with a benchmark, fall back to the first WOD-kind
+  // section, then any scored section. When nothing matches (rare: a day
+  // with only warm-up / stretching) we drop the metadata silently since
+  // there's no scored context to hang it off of.
+  const ownerSectionId =
+    sections.find((s) => !!s.benchmarkWorkoutId)?.id ??
+    sections.find((s) => s.kind === "wod")?.id ??
+    sections.find((s) => s.isScored)?.id ??
+    null;
+  const hasOwnerMetadata =
+    !!ownerSectionId &&
+    (!!workout.description || workout.isPartner || workout.requiresVest);
+
   return (
     <div className="space-y-3">
       {/* Day header strip — slim, non-Card. Carries gym branding,
@@ -158,37 +174,6 @@ export function ProgrammedWorkoutDay({
         ) : null}
       </div>
 
-      {/* Workout-level metadata that applies across all sections — vest
-          / partner requirements show as a thin chip strip above the
-          section cards. */}
-      {(workout.requiresVest || workout.isPartner) && (
-        <div className="flex flex-wrap items-center gap-3 px-1">
-          {workout.requiresVest && (
-            <div className="flex items-center gap-1.5 text-[11px] text-amber-300/90">
-              <Shield className="size-3.5" />
-              <span>
-                {workout.vestWeightMaleLb || workout.vestWeightFemaleLb
-                  ? `${workout.vestWeightMaleLb ?? "?"}/${
-                      workout.vestWeightFemaleLb ?? "?"
-                    } lb vest required`
-                  : "Weighted vest required"}
-              </span>
-            </div>
-          )}
-          {workout.isPartner && (
-            <div className="flex items-center gap-1.5 text-[11px] text-cyan-300/90">
-              <Users className="size-3.5" />
-              <span>
-                Partner workout
-                {workout.partnerCount && workout.partnerCount > 2
-                  ? ` (${workout.partnerCount}-person team)`
-                  : ""}
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* One standalone card per section. */}
       {sections.map((section) => {
         const sectionParts = section.partIds
@@ -205,6 +190,7 @@ export function ProgrammedWorkoutDay({
           sectionHasParts && !section.sourceTrackId && !!onLogScore;
         const showSectionLeaderboard =
           showSectionScoring && !!onViewLeaderboard && !!workout.communityId;
+        const isOwnerSection = hasOwnerMetadata && section.id === ownerSectionId;
         return (
           <WorkoutSectionBlock
             key={section.id}
@@ -224,6 +210,39 @@ export function ProgrammedWorkoutDay({
             sectionHasScore={sectionHasScore}
             sectionIsMultiPart={sectionParts.length > 1}
           >
+            {isOwnerSection && workout.description && (
+              <p className="whitespace-pre-wrap text-sm italic leading-relaxed text-muted-foreground">
+                {workout.description}
+              </p>
+            )}
+            {isOwnerSection &&
+              (workout.requiresVest || workout.isPartner) && (
+                <div className="flex flex-wrap items-center gap-3">
+                  {workout.requiresVest && (
+                    <div className="flex items-center gap-1.5 text-[11px] text-amber-300/90">
+                      <Shield className="size-3.5" />
+                      <span>
+                        {workout.vestWeightMaleLb || workout.vestWeightFemaleLb
+                          ? `${workout.vestWeightMaleLb ?? "?"}/${
+                              workout.vestWeightFemaleLb ?? "?"
+                            } lb vest required`
+                          : "Weighted vest required"}
+                      </span>
+                    </div>
+                  )}
+                  {workout.isPartner && (
+                    <div className="flex items-center gap-1.5 text-[11px] text-cyan-300/90">
+                      <Users className="size-3.5" />
+                      <span>
+                        Partner workout
+                        {workout.partnerCount && workout.partnerCount > 2
+                          ? ` (${workout.partnerCount}-person team)`
+                          : ""}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
             {sectionHasParts
               ? sectionParts.map((part, idx) => (
                   <div key={part.id} className="space-y-3">

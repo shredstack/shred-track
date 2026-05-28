@@ -11,6 +11,7 @@ import {
   workouts,
   workoutMovements,
   workoutParts,
+  workoutSections,
 } from "@/db/schema";
 import { eq, and, or, ilike, inArray, isNull } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
@@ -115,11 +116,19 @@ export async function GET(req: NextRequest) {
   >();
 
   if (includeStats && benchmarkIds.length > 0) {
+    // Scores can link to a benchmark via two routes:
+    //   - workouts.benchmark_workout_id (personal workout = 1:1 with a benchmark)
+    //   - workout_sections.benchmark_workout_id (a section inside a gym
+    //     programming class day = the benchmark)
+    // Select both columns; the section-level wins for bucketing when both
+    // are set (would only happen if a personal workout somehow ended up
+    // with sections, which doesn't occur today).
     const scoreRows = await db
       .select({
         scoreId: scores.id,
         workoutId: scores.workoutId,
-        benchmarkWorkoutId: workouts.benchmarkWorkoutId,
+        workoutBenchmarkId: workouts.benchmarkWorkoutId,
+        sectionBenchmarkId: workoutSections.benchmarkWorkoutId,
         workoutType: workouts.workoutType,
         workoutDate: workouts.workoutDate,
         division: scores.division,
@@ -134,16 +143,24 @@ export async function GET(req: NextRequest) {
       })
       .from(scores)
       .innerJoin(workouts, eq(workouts.id, scores.workoutId))
+      .leftJoin(workoutParts, eq(workoutParts.id, scores.workoutPartId))
+      .leftJoin(
+        workoutSections,
+        eq(workoutSections.id, workoutParts.workoutSectionId)
+      )
       .where(
         and(
           eq(scores.userId, user.id),
-          inArray(workouts.benchmarkWorkoutId, benchmarkIds)
+          or(
+            inArray(workouts.benchmarkWorkoutId, benchmarkIds),
+            inArray(workoutSections.benchmarkWorkoutId, benchmarkIds)
+          )
         )
       );
 
     const grouped = new Map<string, ScoreRow[]>();
     for (const r of scoreRows) {
-      const bid = r.benchmarkWorkoutId;
+      const bid = r.sectionBenchmarkId ?? r.workoutBenchmarkId;
       if (!bid) continue;
       const list = grouped.get(bid) ?? [];
       list.push({

@@ -94,6 +94,13 @@ export function WorkoutSectionBlock({
   const kindClass = isStandalone
     ? "text-xs font-bold uppercase tracking-wider text-primary"
     : "text-xs font-bold uppercase tracking-wider text-primary";
+  // Sections with movement-level parts (Smart-Builder WODs / skill work)
+  // get their prescription from the parts themselves — any freeform body
+  // text on those sections is supplementary, so we push it (and notes) to
+  // the bottom as "coach notes". Sections without parts (warm-up,
+  // stretching) keep body at the top because that *is* the prescription.
+  const showFreeformAtTop = !!body && !hasParts;
+  const trailingBody = !!body && hasParts ? body : null;
   return (
     <section className={containerClass}>
       <header className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -102,17 +109,29 @@ export function WorkoutSectionBlock({
           <span className={titleClass}>{customTitle}</span>
         ) : null}
       </header>
-      {body ? (
+      {showFreeformAtTop ? (
         <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
           {body}
         </p>
       ) : null}
-      {notes ? (
-        <p className="whitespace-pre-wrap text-sm italic leading-relaxed text-muted-foreground">
-          {notes}
-        </p>
-      ) : null}
       <div className="space-y-3">{children}</div>
+      {(trailingBody || notes) && (
+        <div className="space-y-1.5 rounded-md border border-border/40 bg-muted/10 px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80">
+            Coach notes
+          </p>
+          {trailingBody ? (
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
+              {trailingBody}
+            </p>
+          ) : null}
+          {notes ? (
+            <p className="whitespace-pre-wrap text-sm italic leading-relaxed text-muted-foreground">
+              {notes}
+            </p>
+          ) : null}
+        </div>
+      )}
       {onLogScore || onViewLeaderboard ? (
         <div className="flex flex-wrap gap-2">
           {onLogScore ? (

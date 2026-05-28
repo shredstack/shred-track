@@ -1851,6 +1851,17 @@ export const workoutSections = pgTable(
     notes: text("notes"),
     isScored: boolean("is_scored").default(false).notNull(),
     scoreType: text("score_type"), // 'time' | 'rounds' | 'reps' | 'weight' | 'no_score'
+    // When this section's content came from the Benchmark tab (or was
+    // backfilled by title match), this points at the benchmark. The legacy
+    // workouts.benchmark_workout_id is still the source of truth for
+    // personal /crossfit workouts that are themselves 1:1 with a benchmark;
+    // this column is the gym-programming equivalent where benchmarks live
+    // inside a section of a larger class day. Benchmark history / stats
+    // queries OR over both fields.
+    benchmarkWorkoutId: uuid("benchmark_workout_id").references(
+      () => benchmarkWorkouts.id,
+      { onDelete: "set null" }
+    ),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
     sourceTrackId: uuid("source_track_id").references(
       () => programmingTracks.id

@@ -1,12 +1,12 @@
 // POST   /api/gym/[id]/programming/sections          — create a section on a workout
 // PATCH  /api/gym/[id]/programming/sections          — update an existing section
-// DELETE /api/gym/[id]/programming/sections?id=…     — remove a section (parts get null'd)
+// DELETE /api/gym/[id]/programming/sections?id=…     — remove a section (parts + scores cascade)
 //
 // Coach/admin only. Stamps reviewed_at on the section whenever a PATCH
 // touches user-edited fields so the CAP re-paste guard skips it.
 
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   WORKOUT_SECTION_KINDS,
@@ -206,6 +206,7 @@ export async function PATCH(
     kind?: string;
     title?: string | null;
     body?: string | null;
+    notes?: string | null;
     position?: number;
     isScored?: boolean;
     scoreType?: string | null;
@@ -243,6 +244,7 @@ export async function PATCH(
   }
   if (body.title !== undefined) updates.title = body.title;
   if (body.body !== undefined) updates.body = body.body;
+  if (body.notes !== undefined) updates.notes = body.notes;
   if (body.position !== undefined) updates.position = body.position;
   if (body.isScored !== undefined) updates.isScored = body.isScored;
   if (body.subKind !== undefined) updates.subKind = body.subKind;
@@ -290,11 +292,13 @@ export async function DELETE(
   }
 
   await db.transaction(async (tx) => {
-    // Detach parts so they survive section deletion.
+    // Delete the section's parts so athletes don't see them as a
+    // title-less "Other" card after the section disappears. Cascading
+    // FKs on workout_blocks, workout_movements, and scores clean up the
+    // dependent rows.
     await tx
-      .update(workoutParts)
-      .set({ workoutSectionId: null })
-      .where(inArray(workoutParts.workoutSectionId, [id]));
+      .delete(workoutParts)
+      .where(eq(workoutParts.workoutSectionId, id));
     await tx.delete(workoutSections).where(eq(workoutSections.id, id));
   });
 

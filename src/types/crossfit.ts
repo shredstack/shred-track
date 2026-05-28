@@ -523,6 +523,11 @@ export interface WorkoutSectionDisplay {
    *  auto-fill the rollup when the athlete taps "Mark done" without
    *  entering a number. Null on rest days / unconfigured tracks. */
   trackPrescribedValue?: number | null;
+  /** Set when the section was composed from a named benchmark (Laura,
+   *  Murph, etc.). Used by the athlete view to attach the workout-level
+   *  description / partner / vest chips to the right section rather
+   *  than the day header. */
+  benchmarkWorkoutId?: string | null;
 }
 
 export interface WorkoutDisplay {

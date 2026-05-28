@@ -17,11 +17,13 @@ import {
   scores,
   scoreMovementDetails,
   workoutMovements,
+  workoutParts,
+  workoutSections,
   workouts,
   movements,
   benchmarkWorkouts,
 } from "@/db/schema";
-import { and, eq, gte, isNotNull } from "drizzle-orm";
+import { and, eq, gte, isNotNull, or, sql } from "drizzle-orm";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
 import { estimatedOneRmForSet, parseRepScheme } from "./predicted-1rm";
 import type { SetEntry } from "@/types/crossfit";
@@ -372,6 +374,13 @@ async function fetchBenchmarkRows(
 ): Promise<BenchmarkTrendRow[]> {
   const since = toIsoDate(daysAgoFrom(new Date(), windowDays));
 
+  // A score is "against a benchmark" when EITHER:
+  //   - workouts.benchmark_workout_id is set (personal /crossfit flow)
+  //   - the score's part lives in a workout_sections row whose
+  //     benchmark_workout_id is set (gym programming flow)
+  // We LEFT JOIN parts → sections (both FKs are nullable) and then INNER
+  // JOIN benchmark_workouts on COALESCE(section, workout) — the inner join
+  // implicitly drops scores that aren't tagged on either side.
   const rows = await db
     .select({
       scoreId: scores.id,
@@ -390,14 +399,22 @@ async function fetchBenchmarkRows(
     })
     .from(scores)
     .innerJoin(workouts, eq(workouts.id, scores.workoutId))
+    .leftJoin(workoutParts, eq(workoutParts.id, scores.workoutPartId))
+    .leftJoin(
+      workoutSections,
+      eq(workoutSections.id, workoutParts.workoutSectionId)
+    )
     .innerJoin(
       benchmarkWorkouts,
-      eq(benchmarkWorkouts.id, workouts.benchmarkWorkoutId)
+      sql`${benchmarkWorkouts.id} = COALESCE(${workoutSections.benchmarkWorkoutId}, ${workouts.benchmarkWorkoutId})`
     )
     .where(
       and(
         eq(scores.userId, userId),
-        isNotNull(workouts.benchmarkWorkoutId),
+        or(
+          isNotNull(workouts.benchmarkWorkoutId),
+          isNotNull(workoutSections.benchmarkWorkoutId)
+        ),
         gte(workouts.workoutDate, since)
       )
     );

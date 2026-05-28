@@ -10,7 +10,7 @@
 // Coach/admin only.
 
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   WORKOUT_SECTION_KINDS,
@@ -80,12 +80,25 @@ export async function POST(
   // Confirm the source workout belongs to this gym and is a manual workout
   // (no programming release). Refuse to move workouts that are already
   // part of a release — those are already in programming.
+  //
+  // Also pull benchmark + partner + vest metadata: benchmark-tagged manual
+  // adds carry their description / partner / vest flags on the workout row
+  // (set by POST /api/workouts' fast path). The move needs to forward
+  // them to the destination so the section reads identically to one
+  // composed via the programming admin's Benchmark tab.
   const [source] = await db
     .select({
       id: workouts.id,
       title: workouts.title,
+      description: workouts.description,
       workoutDate: workouts.workoutDate,
       programmingReleaseId: workouts.programmingReleaseId,
+      benchmarkWorkoutId: workouts.benchmarkWorkoutId,
+      isPartner: workouts.isPartner,
+      partnerCount: workouts.partnerCount,
+      requiresVest: workouts.requiresVest,
+      vestWeightMaleLb: workouts.vestWeightMaleLb,
+      vestWeightFemaleLb: workouts.vestWeightFemaleLb,
     })
     .from(workouts)
     .where(
@@ -187,7 +200,12 @@ export async function POST(
       );
 
       // Create the new section. Use the source workout's title so the
-      // section header shows something meaningful (e.g. "Cindy").
+      // section header shows something meaningful (e.g. "Cindy"). Carry
+      // the benchmark link over so athlete scores logged against this
+      // section still roll up into the benchmark's history / trends, and
+      // so ProgrammedWorkoutDay attaches the description / partner / vest
+      // chips to this section (same owner-selection logic as a section
+      // composed via the programming admin's Benchmark tab).
       const [newSection] = await tx
         .insert(workoutSections)
         .values({
@@ -195,6 +213,7 @@ export async function POST(
           kind,
           position: nextPosition,
           title: source.title?.trim() ? source.title : null,
+          benchmarkWorkoutId: source.benchmarkWorkoutId,
           reviewedAt: new Date(),
         })
         .returning();
@@ -257,15 +276,69 @@ export async function POST(
       // with the workout below. Parts have already been reparented so this
       // only drops the empty section shells.
 
-      // If the destination workout has no title yet, lift the source
-      // workout's title onto it so the day card reads naturally.
-      if (source.title?.trim()) {
+      // Lift workout-level metadata from the source onto the destination,
+      // but only into fields still at their default. Mirrors the same
+      // "don't clobber a coach's prior customization" rule the backfill
+      // snippet uses. Title goes the same way as the rest. We never
+      // downgrade a true partner/vest flag to false — only flip false to
+      // true when the source asks for it.
+      const [dest] = await tx
+        .select({
+          title: workouts.title,
+          description: workouts.description,
+          isPartner: workouts.isPartner,
+          partnerCount: workouts.partnerCount,
+          requiresVest: workouts.requiresVest,
+          vestWeightMaleLb: workouts.vestWeightMaleLb,
+          vestWeightFemaleLb: workouts.vestWeightFemaleLb,
+        })
+        .from(workouts)
+        .where(eq(workouts.id, destWorkoutId))
+        .limit(1);
+      const patch: Record<string, unknown> = {};
+      if (dest && !dest.title && source.title?.trim()) {
+        patch.title = source.title;
+      }
+      if (dest && dest.description == null && source.description != null) {
+        patch.description = source.description;
+      }
+      if (dest && dest.isPartner === false && source.isPartner === true) {
+        patch.isPartner = true;
+      }
+      if (
+        dest &&
+        dest.partnerCount == null &&
+        source.partnerCount != null
+      ) {
+        patch.partnerCount = source.partnerCount;
+      }
+      if (
+        dest &&
+        dest.requiresVest === false &&
+        source.requiresVest === true
+      ) {
+        patch.requiresVest = true;
+      }
+      if (
+        dest &&
+        dest.vestWeightMaleLb == null &&
+        source.vestWeightMaleLb != null
+      ) {
+        patch.vestWeightMaleLb = source.vestWeightMaleLb;
+      }
+      if (
+        dest &&
+        dest.vestWeightFemaleLb == null &&
+        source.vestWeightFemaleLb != null
+      ) {
+        patch.vestWeightFemaleLb = source.vestWeightFemaleLb;
+      }
+      if (Object.keys(patch).length > 0) {
+        patch.updatedAt = new Date();
         await tx
           .update(workouts)
-          .set({ title: source.title })
-          .where(
-            and(eq(workouts.id, destWorkoutId), isNull(workouts.title))
-          );
+          .set(patch)
+          .where(eq(workouts.id, destWorkoutId));
       }
 
       // class_instances.workout_id and gym_posts.workout_id reference

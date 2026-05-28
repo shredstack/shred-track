@@ -164,6 +164,17 @@ export async function PUT(
     parts?: PartInput[];
     title?: string | null;
     notes?: string | null;
+    benchmarkWorkoutId?: string | null;
+    // Workout-level fields the Benchmark tab forwards so the section's
+    // parent workout row carries the same metadata a CrossFit-tab
+    // benchmark add would set. Sending undefined preserves the existing
+    // value; sending an explicit value (including null/false) overwrites.
+    description?: string | null;
+    isPartner?: boolean;
+    partnerCount?: number | null;
+    requiresVest?: boolean;
+    vestWeightMaleLb?: number | string | null;
+    vestWeightFemaleLb?: number | string | null;
   } | null;
   if (!body) {
     return NextResponse.json({ error: "Body required" }, { status: 400 });
@@ -209,6 +220,76 @@ export async function PUT(
           updatedAt: new Date(),
         })
         .where(eq(workoutSections.id, sectionId));
+    }
+
+    if (body.benchmarkWorkoutId !== undefined) {
+      // Caller is explicitly setting or clearing the benchmark link. Smart
+      // Builder edits omit this field (preserves the existing link); the
+      // Benchmark tab passes a uuid; passing null clears the link.
+      const nextLink =
+        typeof body.benchmarkWorkoutId === "string" &&
+        body.benchmarkWorkoutId.length > 0
+          ? body.benchmarkWorkoutId
+          : null;
+      await tx
+        .update(workoutSections)
+        .set({
+          benchmarkWorkoutId: nextLink,
+          reviewedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(workoutSections.id, sectionId));
+    }
+
+    // Workout-level metadata. The Benchmark tab forwards these so the
+    // parent workout matches what `POST /api/workouts` (the CrossFit-tab
+    // fast path) writes when adding the same benchmark — so the athlete
+    // card renders the description / partner chip / vest chip the same
+    // way regardless of which path the WOD came in through.
+    const workoutPatch: Record<string, unknown> = {};
+    if (body.description !== undefined) {
+      const trimmed =
+        typeof body.description === "string" ? body.description.trim() : "";
+      workoutPatch.description = trimmed ? body.description : null;
+    }
+    if (body.isPartner !== undefined) {
+      workoutPatch.isPartner = !!body.isPartner;
+      // partnerCount only makes sense with isPartner=true; clear it when
+      // the caller flips partner off.
+      if (!body.isPartner) workoutPatch.partnerCount = null;
+    }
+    if (body.partnerCount !== undefined) {
+      const n =
+        typeof body.partnerCount === "number"
+          ? body.partnerCount
+          : body.partnerCount === null
+            ? null
+            : Number(body.partnerCount);
+      workoutPatch.partnerCount =
+        typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null;
+    }
+    if (body.requiresVest !== undefined) {
+      workoutPatch.requiresVest = !!body.requiresVest;
+    }
+    if (body.vestWeightMaleLb !== undefined) {
+      workoutPatch.vestWeightMaleLb =
+        body.vestWeightMaleLb === null || body.vestWeightMaleLb === ""
+          ? null
+          : String(body.vestWeightMaleLb);
+    }
+    if (body.vestWeightFemaleLb !== undefined) {
+      workoutPatch.vestWeightFemaleLb =
+        body.vestWeightFemaleLb === null || body.vestWeightFemaleLb === ""
+          ? null
+          : String(body.vestWeightFemaleLb);
+    }
+    if (Object.keys(workoutPatch).length > 0) {
+      workoutPatch.reviewedAt = new Date();
+      workoutPatch.updatedAt = new Date();
+      await tx
+        .update(workouts)
+        .set(workoutPatch)
+        .where(eq(workouts.id, section.workoutId));
     }
 
     if (Array.isArray(body.parts)) {

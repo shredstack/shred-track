@@ -6,9 +6,10 @@ import {
   scores,
   workoutMovements,
   workoutParts,
+  workoutSections,
   workouts,
 } from "@/db/schema";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, or } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { pickBestScore, type ScoreRow } from "@/lib/crossfit/benchmark-stats";
 import {
@@ -59,7 +60,13 @@ export async function GET(
     return weightliftingHistory(user.id, bw.id, bw.name, bw.workoutType, bw.weightliftingMovementId);
   }
 
-  // Legacy flat-history path.
+  // History pulls from two sources:
+  //   - workouts.benchmark_workout_id (personal /crossfit: whole workout = Fran)
+  //   - workout_sections.benchmark_workout_id (gym programming: the WOD
+  //     section of a class day is tagged as Fran)
+  // LEFT JOINs because scores.workout_part_id and workout_parts.workout_section_id
+  // are both nullable (legacy flat workouts have no parts; personal parts have
+  // no section).
   const rows = await db
     .select({
       scoreId: scores.id,
@@ -78,8 +85,19 @@ export async function GET(
     })
     .from(scores)
     .innerJoin(workouts, eq(workouts.id, scores.workoutId))
+    .leftJoin(workoutParts, eq(workoutParts.id, scores.workoutPartId))
+    .leftJoin(
+      workoutSections,
+      eq(workoutSections.id, workoutParts.workoutSectionId)
+    )
     .where(
-      and(eq(scores.userId, user.id), eq(workouts.benchmarkWorkoutId, id))
+      and(
+        eq(scores.userId, user.id),
+        or(
+          eq(workouts.benchmarkWorkoutId, id),
+          eq(workoutSections.benchmarkWorkoutId, id)
+        )
+      )
     )
     .orderBy(desc(workouts.workoutDate), desc(scores.createdAt));
 

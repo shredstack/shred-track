@@ -635,9 +635,18 @@ function SectionRow({
   onMutated,
   dragListeners,
 }: SectionRowProps) {
-  const [editing, setEditing] = useState(false);
-  const [kind, setKind] = useState<WorkoutSectionKind>(section.kind);
-  const [title, setTitle] = useState(section.title ?? "");
+  // For non-freeform sections (WOD, skill work) we deliberately don't
+  // expose a body textarea — the prescription comes from Smart Builder /
+  // Paste / Benchmark, and "free text" should go into the coach Notes
+  // field so it renders in the dedicated "Coach notes" block at the
+  // bottom of the section card. Warm-up / stretching keep the legacy
+  // freeform body editor via FreeformSectionRow.
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notesText, setNotesText] = useState(section.notes ?? "");
+  // Body legacy: some sections were saved with prescription text in
+  // `body` before this editor existed. We surface it in the notes editor
+  // so a coach can either keep it (and it'll continue to render in Coach
+  // notes) or paste it into the Notes field and clear the body.
   const [bodyText, setBodyText] = useState(section.body ?? "");
   const [saving, setSaving] = useState(false);
   const [builderOpen, setBuilderOpen] = useState(false);
@@ -653,12 +662,28 @@ function SectionRow({
   // Single write path used by all three tabs. Section title gets
   // overwritten only when the caller passes one (e.g. Smart Builder
   // title, parsed workout title, benchmark name) — passing `null`
-  // explicitly clears the title.
+  // explicitly clears the title. Same shape for benchmarkWorkoutId:
+  // omitted = preserve existing link (so Smart Builder edits to a
+  // benchmark-tagged section don't drop the tag), null = clear it,
+  // string = set/replace.
+  //
+  // Workout-level fields (description, isPartner, partnerCount,
+  // requiresVest, vestWeight*) are forwarded only by the Benchmark tab so
+  // the parent workout row matches what POST /api/workouts writes when the
+  // same benchmark is added from the CrossFit tab. Sending undefined
+  // preserves the existing value.
   const saveSectionContent = useCallback(
     async (input: {
       parts: CreatePartInput[];
       title?: string | null;
       notes?: string | null;
+      benchmarkWorkoutId?: string | null;
+      description?: string | null;
+      isPartner?: boolean;
+      partnerCount?: number | null;
+      requiresVest?: boolean;
+      vestWeightMaleLb?: number | string | null;
+      vestWeightFemaleLb?: number | string | null;
       successMessage?: string;
     }) => {
       if (input.parts.length === 0) {
@@ -672,6 +697,13 @@ function SectionRow({
           parts: CreatePartInput[];
           title?: string | null;
           notes?: string | null;
+          benchmarkWorkoutId?: string | null;
+          description?: string | null;
+          isPartner?: boolean;
+          partnerCount?: number | null;
+          requiresVest?: boolean;
+          vestWeightMaleLb?: number | string | null;
+          vestWeightFemaleLb?: number | string | null;
         } = { parts: input.parts };
         if (input.title !== undefined) {
           const trimmed = input.title?.trim();
@@ -681,6 +713,21 @@ function SectionRow({
           const trimmed = input.notes?.trim();
           payload.notes = trimmed ? input.notes : null;
         }
+        if (input.benchmarkWorkoutId !== undefined) {
+          payload.benchmarkWorkoutId = input.benchmarkWorkoutId;
+        }
+        if (input.description !== undefined) {
+          payload.description = input.description;
+        }
+        if (input.isPartner !== undefined) payload.isPartner = input.isPartner;
+        if (input.partnerCount !== undefined)
+          payload.partnerCount = input.partnerCount;
+        if (input.requiresVest !== undefined)
+          payload.requiresVest = input.requiresVest;
+        if (input.vestWeightMaleLb !== undefined)
+          payload.vestWeightMaleLb = input.vestWeightMaleLb;
+        if (input.vestWeightFemaleLb !== undefined)
+          payload.vestWeightFemaleLb = input.vestWeightFemaleLb;
         const res = await fetch(
           `/api/gym/${communityId}/programming/sections/${section.id}/content`,
           {
@@ -720,17 +767,33 @@ function SectionRow({
       // Smart Builder's "Notes" field lives on `form.description`. Always
       // forward (including empty) so clearing the field in the UI clears
       // it on the section.
+      const partnerCountNum =
+        form.partnerCount && form.partnerCount.trim()
+          ? Number(form.partnerCount)
+          : null;
       await saveSectionContent({
         parts,
         title: trimmedTitle ? trimmedTitle : undefined,
         notes: form.description ?? "",
+        isPartner: !!form.isPartner,
+        partnerCount:
+          form.isPartner &&
+          typeof partnerCountNum === "number" &&
+          Number.isFinite(partnerCountNum) &&
+          partnerCountNum > 0
+            ? partnerCountNum
+            : null,
       });
     },
     [saveSectionContent]
   );
 
   const handleParserSave = useCallback(
-    async (parsed: ParsedWorkout) => {
+    async (
+      parsed: ParsedWorkout,
+      _workoutDate: string,
+      options: { isPartner: boolean; partnerCount: number | null }
+    ) => {
       const resolved = await resolveParsedToCreatePart(parsed, {
         movementLibrary,
         createMovement: (input) => createMovement.mutateAsync(input),
@@ -745,13 +808,19 @@ function SectionRow({
         parts: [resolved.part],
         title: parsed.title ?? undefined,
         notes: parsed.description ?? "",
+        isPartner: options.isPartner,
+        partnerCount: options.partnerCount,
       });
     },
     [movementLibrary, createMovement, saveSectionContent]
   );
 
   const handleBenchmarkSave = useCallback(
-    async (benchmark: BenchmarkWorkout) => {
+    async (
+      benchmark: BenchmarkWorkout,
+      _workoutDate: string,
+      options: { isPartner: boolean; partnerCount: number | null }
+    ) => {
       // Run the benchmark's parts through the same form→payload pipeline
       // the user-facing benchmark form uses, so section content matches
       // what users see when they pick the same benchmark from the
@@ -762,14 +831,29 @@ function SectionRow({
       await saveSectionContent({
         parts,
         title: benchmark.name,
-        notes: benchmark.description ?? "",
+        // Description lives on the parent workout (mirrors the CrossFit-tab
+        // fast path) — explicitly clear notes so we don't double-render
+        // the blurb on sections that previously stashed it here.
+        notes: "",
+        // Tag the section with the benchmark so athletes' scores roll up
+        // into the benchmark's history / trends / stats.
+        benchmarkWorkoutId: benchmark.id,
+        // Mirror POST /api/workouts: copy benchmark metadata to the parent
+        // workout so ProgrammedWorkoutDay can render description, partner
+        // chip, and vest chip identically to the CrossFit-tab card.
+        description: benchmark.description ?? null,
+        isPartner: options.isPartner,
+        partnerCount: options.partnerCount,
+        requiresVest: !!benchmark.requiresVest,
+        vestWeightMaleLb: benchmark.vestWeightMaleLb ?? null,
+        vestWeightFemaleLb: benchmark.vestWeightFemaleLb ?? null,
         successMessage: `Added ${benchmark.name}`,
       });
     },
     [saveSectionContent]
   );
 
-  async function save() {
+  async function saveNotes() {
     setSaving(true);
     try {
       const res = await fetch(
@@ -779,9 +863,8 @@ function SectionRow({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             id: section.id,
-            kind,
-            title: title || null,
-            body: bodyText || null,
+            notes: notesText.trim() ? notesText : null,
+            body: bodyText.trim() ? bodyText : null,
           }),
         }
       );
@@ -789,8 +872,8 @@ function SectionRow({
         const body = await res.json().catch(() => null);
         throw new Error(body?.error ?? "Failed to save");
       }
-      toast.success("Saved");
-      setEditing(false);
+      toast.success("Notes saved");
+      setNotesOpen(false);
       onMutated();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
@@ -800,7 +883,12 @@ function SectionRow({
   }
 
   async function remove() {
-    if (!confirm("Delete this section? Parts will be moved out of the section.")) return;
+    if (
+      !confirm(
+        "Delete this section? Its content and any athlete scores logged against it will be removed. This cannot be undone."
+      )
+    )
+      return;
     try {
       const res = await fetch(
         `/api/gym/${communityId}/programming/sections?id=${section.id}`,
@@ -817,175 +905,181 @@ function SectionRow({
     }
   }
 
-  // Warm-up / stretching routing now happens in SortableSectionRow, which
+  // Warm-up / stretching routing happens in SortableSectionRow, which
   // selects FreeformSectionRow vs SectionRow before either is rendered.
+  // SectionRow here is for scored kinds (WOD, skill work, custom, etc.)
+  // where prescription content always flows through Smart Builder /
+  // Paste / Benchmark — never raw body text.
 
-  if (!editing) {
-    const hasContent =
-      section.parts.length > 0 || !!section.body?.trim();
-    return (
-      <>
-        <div className="flex items-start justify-between gap-2 rounded-md border border-border/60 bg-muted/10 px-2.5 py-2">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <DragHandle listeners={dragListeners} />
-              <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-primary">
-                {WORKOUT_SECTION_KIND_LABELS[section.kind]}
+  const hasContent = section.parts.length > 0 || !!section.body?.trim();
+  const hasCoachNotes =
+    !!section.notes?.trim() || !!section.body?.trim();
+  return (
+    <>
+      <div className="flex items-start justify-between gap-2 rounded-md border border-border/60 bg-muted/10 px-2.5 py-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <DragHandle listeners={dragListeners} />
+            <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-primary">
+              {WORKOUT_SECTION_KIND_LABELS[section.kind]}
+            </span>
+            {section.title ? (
+              <span className="ml-1 truncate text-xs font-semibold text-foreground">
+                {section.title}
               </span>
-              {section.title ? (
-                <span className="ml-1 truncate text-xs text-muted-foreground">
-                  {section.title}
-                </span>
-              ) : null}
-            </div>
-            {section.body?.trim() ? (
-              <p className="mt-1.5 whitespace-pre-wrap text-[11px] text-muted-foreground line-clamp-3">
-                {section.body}
-              </p>
             ) : null}
-            {section.notes?.trim() ? (
-              <p className="mt-1.5 whitespace-pre-wrap text-[11px] italic text-muted-foreground/80 line-clamp-3">
-                {section.notes}
-              </p>
-            ) : null}
-            {section.parts.length > 0 ? (
-              <SectionPartsPreview parts={section.parts} />
-            ) : null}
-            <div className="mt-1 text-[11px] text-muted-foreground">
-              {section.parts.length === 0 && !section.body?.trim()
-                ? "Empty — add content"
-                : `${section.parts.length} ${
-                    section.parts.length === 1 ? "part" : "parts"
-                  }${section.reviewedAt ? " · reviewed" : ""}`}
-            </div>
           </div>
-          <div className="flex flex-col gap-1">
+          {section.parts.length > 0 ? (
+            <SectionPartsPreview parts={section.parts} />
+          ) : null}
+          {section.body?.trim() ? (
+            <p className="mt-1.5 whitespace-pre-wrap text-[11px] text-muted-foreground line-clamp-3">
+              {section.body}
+            </p>
+          ) : null}
+          {section.notes?.trim() ? (
+            <p className="mt-1.5 whitespace-pre-wrap text-[11px] italic text-muted-foreground/80 line-clamp-3">
+              {section.notes}
+            </p>
+          ) : null}
+          <div className="mt-1 text-[11px] text-muted-foreground">
+            {section.parts.length === 0 && !section.body?.trim()
+              ? "Empty — click Build to add a WOD, benchmark, or pasted workout"
+              : `${section.parts.length} ${
+                  section.parts.length === 1 ? "part" : "parts"
+                }${section.reviewedAt ? " · reviewed" : ""}`}
+          </div>
+        </div>
+        <div className="flex flex-col gap-1">
+          <Button
+            size="sm"
+            variant={hasContent ? "ghost" : "default"}
+            onClick={() => {
+              setBuilderError(null);
+              setBuilderOpen(true);
+            }}
+            className="gap-1.5"
+            title="Compose movements with the Smart Builder, Paste, or pick a Benchmark"
+          >
+            <Wrench className="h-3.5 w-3.5" />
+            Build
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setNotesText(section.notes ?? "");
+              setBodyText(section.body ?? "");
+              setNotesOpen(true);
+            }}
+            title={
+              hasCoachNotes
+                ? "Edit coach notes"
+                : "Add coach notes (e.g. scaling, partner strategy)"
+            }
+          >
+            {hasCoachNotes ? "Notes" : "Add notes"}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={remove}>
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
+
+      <Dialog open={builderOpen} onOpenChange={setBuilderOpen}>
+        <DialogContent className="max-h-[90vh] w-[min(96vw,42rem)] max-w-none overflow-x-hidden overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              Build {WORKOUT_SECTION_KIND_LABELS[section.kind]} content
+            </DialogTitle>
+          </DialogHeader>
+          {builderError ? (
+            <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {builderError}
+            </p>
+          ) : null}
+          {builderSaving ? (
+            <div className="flex items-center justify-center py-4 text-xs text-muted-foreground">
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              Saving…
+            </div>
+          ) : null}
+          <AddWorkoutTabs
+            onSaveFromBuilder={handleBuilderSave}
+            onSaveFromParser={handleParserSave}
+            onSaveFromBenchmark={handleBenchmarkSave}
+            onCancel={() => setBuilderOpen(false)}
+            builderSaveLabel="Save content"
+            parserSaveLabel="Save content"
+            benchmarkSubmitLabel="Add to section"
+            isBenchmarkSubmitting={builderSaving}
+            lockedDate
+            hideVest
+          />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={notesOpen} onOpenChange={setNotesOpen}>
+        <DialogContent className="w-[min(96vw,32rem)]">
+          <DialogHeader>
+            <DialogTitle>Coach notes</DialogTitle>
+          </DialogHeader>
+          <p className="text-[11px] text-muted-foreground">
+            Notes show under the WOD on the athlete card. Use them for
+            scaling cues, partner strategy (&ldquo;One partner works at a
+            time&rdquo;), or anything you&apos;d say at the whiteboard
+            before the clock starts.
+          </p>
+          <div className="space-y-1">
+            <Label className="text-[10px] text-muted-foreground">
+              Notes for athletes
+            </Label>
+            <Textarea
+              rows={4}
+              value={notesText}
+              onChange={(e) => setNotesText(e.target.value)}
+              placeholder="One partner works at a time. Partition reps as needed."
+              className="text-xs"
+              autoFocus
+            />
+          </div>
+          {section.body?.trim() ? (
+            <div className="space-y-1">
+              <Label className="text-[10px] text-muted-foreground">
+                Legacy freeform text (clear or move into Notes)
+              </Label>
+              <Textarea
+                rows={3}
+                value={bodyText}
+                onChange={(e) => setBodyText(e.target.value)}
+                className="text-xs"
+              />
+              <p className="text-[10px] text-muted-foreground/80">
+                This field was used by the old Edit dialog. Clear it once
+                you&apos;ve moved the content into Notes above.
+              </p>
+            </div>
+          ) : null}
+          <div className="flex justify-end gap-2 pt-1">
             <Button
               size="sm"
-              variant={hasContent ? "ghost" : "default"}
-              onClick={() => {
-                setBuilderError(null);
-                setBuilderOpen(true);
-              }}
-              className="gap-1.5"
-              title="Compose movements with the Smart Builder"
+              variant="ghost"
+              onClick={() => setNotesOpen(false)}
+              disabled={saving}
             >
-              <Wrench className="h-3.5 w-3.5" />
-              Build
+              Cancel
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
-              Edit
-            </Button>
-            <Button size="sm" variant="ghost" onClick={remove}>
-              <Trash2 className="h-3.5 w-3.5" />
+            <Button size="sm" onClick={saveNotes} disabled={saving}>
+              {saving ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                "Save notes"
+              )}
             </Button>
           </div>
-        </div>
-
-        <Dialog open={builderOpen} onOpenChange={setBuilderOpen}>
-          <DialogContent className="max-h-[90vh] w-[min(96vw,42rem)] max-w-none overflow-x-hidden overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>
-                Build {WORKOUT_SECTION_KIND_LABELS[section.kind]} content
-              </DialogTitle>
-            </DialogHeader>
-            {builderError ? (
-              <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                {builderError}
-              </p>
-            ) : null}
-            {builderSaving ? (
-              <div className="flex items-center justify-center py-4 text-xs text-muted-foreground">
-                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                Saving…
-              </div>
-            ) : null}
-            <AddWorkoutTabs
-              onSaveFromBuilder={handleBuilderSave}
-              onSaveFromParser={handleParserSave}
-              onSaveFromBenchmark={handleBenchmarkSave}
-              onCancel={() => setBuilderOpen(false)}
-              builderSaveLabel="Save content"
-              parserSaveLabel="Save content"
-              benchmarkSubmitLabel="Add to section"
-              isBenchmarkSubmitting={builderSaving}
-              lockedDate
-              hidePartner
-              hideVest
-            />
-          </DialogContent>
-        </Dialog>
-      </>
-    );
-  }
-
-  return (
-    <div className="space-y-2 rounded-md border border-primary/40 bg-primary/[0.04] px-2.5 py-2">
-      <div className="grid grid-cols-2 gap-2">
-        <div className="space-y-1">
-          <Label className="text-[10px] text-muted-foreground">Kind</Label>
-          <Select
-            value={kind}
-            items={WORKOUT_SECTION_KIND_LABELS}
-            onValueChange={(v) => setKind(v as WorkoutSectionKind)}
-          >
-            <SelectTrigger className="h-8">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {WORKOUT_SECTION_KINDS.map((k) => (
-                <SelectItem key={k} value={k}>
-                  {WORKOUT_SECTION_KIND_LABELS[k]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1">
-          <Label className="text-[10px] text-muted-foreground">Title (optional)</Label>
-          <Input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="h-8"
-            placeholder="Snatch Skill"
-          />
-        </div>
-      </div>
-      <div className="space-y-1">
-        <Label className="text-[10px] text-muted-foreground">
-          Prescription (freeform — for warm-ups, stretching, etc.)
-        </Label>
-        <Textarea
-          rows={3}
-          value={bodyText}
-          onChange={(e) => setBodyText(e.target.value)}
-          placeholder="3 rounds: 10 air squats, 10 push-ups, 200m row"
-          className="text-xs"
-        />
-        <p className="text-[10px] text-muted-foreground">
-          Use this for sections that don&apos;t need movement-level scoring.
-          For scored WODs and skill work, click <strong>Build</strong> to
-          open the Smart Builder.
-        </p>
-      </div>
-      <p className="rounded-md border border-border/60 bg-muted/20 px-2 py-1.5 text-[10px] text-muted-foreground">
-        Scoring is configured per-part in the Smart Builder. Click{" "}
-        <strong>Build</strong> from the section row to set score types.
-      </p>
-      <div className="flex justify-end gap-2 pt-1">
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => setEditing(false)}
-          disabled={saving}
-        >
-          Cancel
-        </Button>
-        <Button size="sm" onClick={save} disabled={saving}>
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
-        </Button>
-      </div>
-    </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

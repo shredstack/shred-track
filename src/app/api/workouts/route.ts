@@ -336,6 +336,7 @@ export async function GET(req: NextRequest) {
       isScored: workoutSections.isScored,
       scoreType: workoutSections.scoreType,
       sourceTrackId: workoutSections.sourceTrackId,
+      benchmarkWorkoutId: workoutSections.benchmarkWorkoutId,
     })
     .from(workoutSections)
     .where(inArray(workoutSections.workoutId, workoutIds))
@@ -498,6 +499,7 @@ export async function GET(req: NextRequest) {
         trackDayId: td?.trackDayId ?? null,
         trackScoringConfig: td?.scoringConfig ?? null,
         trackPrescribedValue: td?.prescribedValue ?? null,
+        benchmarkWorkoutId: s.benchmarkWorkoutId ?? null,
       };
     }),
     parts: (partsByWorkout.get(w.id) ?? []).map((p) => {
