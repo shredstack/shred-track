@@ -135,6 +135,7 @@ interface SectionWire {
   position: number;
   title: string | null;
   body?: string | null;
+  notes?: string | null;
   isScored: boolean;
   scoreType: string | null;
   reviewedAt: string | null;
@@ -840,6 +841,11 @@ function SectionRow({
             {section.body?.trim() ? (
               <p className="mt-1.5 whitespace-pre-wrap text-[11px] text-muted-foreground line-clamp-3">
                 {section.body}
+              </p>
+            ) : null}
+            {section.notes?.trim() ? (
+              <p className="mt-1.5 whitespace-pre-wrap text-[11px] italic text-muted-foreground/80 line-clamp-3">
+                {section.notes}
               </p>
             ) : null}
             {section.parts.length > 0 ? (

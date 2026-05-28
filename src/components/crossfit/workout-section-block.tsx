@@ -107,17 +107,12 @@ export function WorkoutSectionBlock({
           {body}
         </p>
       ) : null}
-      <div className="space-y-3">{children}</div>
       {notes ? (
-        <div className="rounded-md border border-amber-500/20 bg-amber-500/[0.04] px-3 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-400/80">
-            Coach notes
-          </p>
-          <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-foreground/85">
-            {notes}
-          </p>
-        </div>
+        <p className="whitespace-pre-wrap text-sm italic leading-relaxed text-muted-foreground">
+          {notes}
+        </p>
       ) : null}
+      <div className="space-y-3">{children}</div>
       {onLogScore || onViewLeaderboard ? (
         <div className="flex flex-wrap gap-2">
           {onLogScore ? (

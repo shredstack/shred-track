@@ -292,6 +292,7 @@ export async function GET(
         position: s.position,
         title: s.title,
         body: s.body,
+        notes: s.notes,
         isScored: s.isScored,
         scoreType: s.scoreType,
         reviewedAt: s.reviewedAt,
