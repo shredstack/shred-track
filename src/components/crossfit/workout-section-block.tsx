@@ -116,17 +116,17 @@ export function WorkoutSectionBlock({
       ) : null}
       <div className="space-y-3">{children}</div>
       {(trailingBody || notes) && (
-        <div className="space-y-1.5 rounded-md border border-border/40 bg-muted/10 px-3 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80">
+        <div className="space-y-1.5 rounded-md border border-amber-500/20 bg-amber-500/[0.04] px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-400/80">
             Coach notes
           </p>
           {trailingBody ? (
-            <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/85">
               {trailingBody}
             </p>
           ) : null}
           {notes ? (
-            <p className="whitespace-pre-wrap text-sm italic leading-relaxed text-muted-foreground">
+            <p className="whitespace-pre-wrap text-sm italic leading-relaxed text-foreground/75">
               {notes}
             </p>
           ) : null}

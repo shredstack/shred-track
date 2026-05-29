@@ -28,6 +28,7 @@ import {
 import { computeWorkoutFingerprint } from "@/lib/crossfit/fingerprint";
 import { buildFingerprintInput } from "@/lib/crossfit/upsert-template";
 import type { DB } from "@/db";
+import type { SetEntry } from "@/types/crossfit";
 
 // A Drizzle transaction object has the same query surface as the db client
 // for our purposes (select/insert/update/delete). Helpers accept either.
@@ -283,6 +284,53 @@ export interface RepTargetScore {
   workoutDate: string;
   weightLbs: number | null;
   repTarget: RepMaxTarget;
+}
+
+/**
+ * Classify per-set entries on a single (score, movement) pair into rep-max
+ * buckets and return the heaviest weight per target. A ladder workout like
+ * 3-3-2-2-1-1-1 contributes to 1RM, 2RM, AND 3RM from one score; a uniform
+ * piece like "5x5" contributes only to 5RM. When per-set entries are
+ * present, each entry's own `reps` wins; otherwise we fall back to the
+ * prescription's uniform reps. When no entries exist at all (legacy logs
+ * without per-set data), classify the score's summary weight by the
+ * prescription.
+ */
+export function classifyRepMaxSets(input: {
+  setEntries: SetEntry[];
+  scoreWeightLbs: number | null;
+  actualWeight: number | null;
+  movementPrescribedReps: string | null;
+  partRepScheme: string | null;
+}): Map<RepMaxTarget, number> {
+  const prescriptionTarget = inferRepMaxTarget(
+    input.movementPrescribedReps ?? input.partRepScheme ?? null
+  );
+
+  const bestPerTarget = new Map<RepMaxTarget, number>();
+
+  if (input.setEntries.length > 0) {
+    for (const e of input.setEntries) {
+      let target: RepMaxTarget | null = null;
+      if (e.reps != null && REP_MAX_SET.has(e.reps)) {
+        target = e.reps as RepMaxTarget;
+      } else if (e.reps == null && prescriptionTarget != null) {
+        target = prescriptionTarget;
+      }
+      if (target == null) continue;
+      if (!Number.isFinite(e.weight) || e.weight <= 0) continue;
+      const cur = bestPerTarget.get(target);
+      if (cur == null || e.weight > cur) bestPerTarget.set(target, e.weight);
+    }
+    return bestPerTarget;
+  }
+
+  if (prescriptionTarget == null) return bestPerTarget;
+  const weight = input.scoreWeightLbs ?? input.actualWeight ?? null;
+  if (weight == null || !Number.isFinite(weight) || weight <= 0)
+    return bestPerTarget;
+  bestPerTarget.set(prescriptionTarget, weight);
+  return bestPerTarget;
 }
 
 /**

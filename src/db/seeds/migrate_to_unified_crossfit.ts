@@ -35,7 +35,7 @@ config({ path: ".env.local" });
 
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { sql, eq, and, isNotNull } from "drizzle-orm";
+import { sql, eq, and, isNotNull, inArray } from "drizzle-orm";
 import { fileURLToPath } from "url";
 
 import * as schema from "../schema";
@@ -51,6 +51,7 @@ import {
   gymPosts,
   notifications,
   programmingTrackDays,
+  scoreMovementDetails,
   scores,
   workoutBlocks,
   workoutMovements,
@@ -86,50 +87,69 @@ export async function run(): Promise<void> {
     }
 
     const unmigratedCount = await countUnmigratedWorkouts(db);
-    if (unmigratedCount === 0) {
-      console.log("[migrate_to_unified_crossfit] every workout already mapped — skip");
+    const orphanSmdCount = await countOrphanedScoreMovementDetails(db);
+    if (unmigratedCount === 0 && orphanSmdCount === 0) {
+      console.log(
+        "[migrate_to_unified_crossfit] every workout already mapped and no SMD orphans — skip"
+      );
       return;
     }
-    console.log(
-      `[migrate_to_unified_crossfit] backfilling ${unmigratedCount} unmigrated workouts`
-    );
+    if (unmigratedCount > 0) {
+      console.log(
+        `[migrate_to_unified_crossfit] backfilling ${unmigratedCount} unmigrated workouts`
+      );
+    }
+    if (orphanSmdCount > 0) {
+      console.log(
+        `[migrate_to_unified_crossfit] re-FKing ${orphanSmdCount} orphaned score_movement_details`
+      );
+    }
 
     const preScoreCount = await countScores(db);
 
     await db.transaction(async (tx) => {
-      const { benchmarkTemplateMap, benchmarkPartMap } =
-        await backfillBenchmarkTemplates(tx);
-      console.log(
-        `  → backfilled ${benchmarkTemplateMap.size} benchmark templates`
-      );
+      // Workout / session / score backfill only runs when there's something
+      // to do. The score_movement_details re-FK runs unconditionally because
+      // it's idempotent against an empty orphan set and self-heals rows that
+      // slipped through earlier runs.
+      if (unmigratedCount > 0) {
+        const { benchmarkTemplateMap, benchmarkPartMap } =
+          await backfillBenchmarkTemplates(tx);
+        console.log(
+          `  → backfilled ${benchmarkTemplateMap.size} benchmark templates`
+        );
 
-      const { workoutTemplateMap, workoutPartMap } = await backfillWorkoutTemplates(
-        tx,
-        { benchmarkTemplateMap, benchmarkPartMap }
-      );
-      console.log(
-        `  → mapped ${workoutTemplateMap.size} workouts to templates`
-      );
+        const { workoutTemplateMap, workoutPartMap } =
+          await backfillWorkoutTemplates(tx, {
+            benchmarkTemplateMap,
+            benchmarkPartMap,
+          });
+        console.log(
+          `  → mapped ${workoutTemplateMap.size} workouts to templates`
+        );
 
-      const { workoutSessionMap, sectionSessionMap } =
-        await backfillSessionsFromWorkouts(tx, {
-          workoutTemplateMap,
-          benchmarkTemplateMap,
+        const { workoutSessionMap, sectionSessionMap } =
+          await backfillSessionsFromWorkouts(tx, {
+            workoutTemplateMap,
+            benchmarkTemplateMap,
+            workoutPartMap,
+          });
+        console.log(
+          `  → created sessions: ${workoutSessionMap.size} workout-level + ${sectionSessionMap.size} section-level`
+        );
+
+        await reFKScores(tx, {
+          workoutSessionMap,
+          sectionSessionMap,
           workoutPartMap,
         });
-      console.log(
-        `  → created sessions: ${workoutSessionMap.size} workout-level + ${sectionSessionMap.size} section-level`
-      );
+        console.log("  → re-FK'd scores");
 
-      await reFKScores(tx, {
-        workoutSessionMap,
-        sectionSessionMap,
-        workoutPartMap,
-      });
-      console.log("  → re-FK'd scores");
+        await reFKCrossDomain(tx, { workoutSessionMap });
+        console.log("  → re-FK'd cross-domain references");
+      }
 
-      await reFKCrossDomain(tx, { workoutSessionMap });
-      console.log("  → re-FK'd cross-domain references");
+      await reFKScoreMovementDetails(tx);
 
       await runVerifyAssertions(tx, { preScoreCount });
       console.log("  → verify assertions passed");
@@ -173,6 +193,27 @@ async function countUnmigratedWorkouts(db: Tx): Promise<number> {
 async function countScores(db: Tx): Promise<number> {
   const [row] = await db.select({ c: sql<number>`count(*)::int` }).from(scores);
   return Number(row?.c ?? 0);
+}
+
+// Count score_movement_details rows that the unified-schema cutover left
+// stranded: legacy FK populated, unified FK null, AND the score is anchored
+// to a non-null crossfit_workout_part_id so the lookup actually has a
+// template to resolve against. SMD rows attached to scores whose part lived
+// on a freeform section (warm_up / stretching) are deliberately excluded —
+// those sessions never got a template, so there is no
+// crossfit_workout_movement to map onto. See the orphanedPartFK exemption
+// in runVerifyAssertions for the matching rule on scores.
+async function countOrphanedScoreMovementDetails(db: Tx): Promise<number> {
+  const result = await db.execute(sql`
+    select count(*)::int as count
+    from score_movement_details smd
+    join scores s on s.id = smd.score_id
+    where smd.crossfit_workout_movement_id is null
+      and smd.workout_movement_id is not null
+      and s.crossfit_workout_part_id is not null
+  `);
+  const row = result?.[0] ?? result?.rows?.[0];
+  return Number(row?.count ?? 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1393,6 +1434,110 @@ async function reFKScores(
 }
 
 // ---------------------------------------------------------------------------
+// Step 4b: re-FK score_movement_details
+// ---------------------------------------------------------------------------
+//
+// Insights queries inner-join on score_movement_details.crossfit_workout_movement_id,
+// so any SMD row left with only the legacy workout_movement_id populated is
+// silently invisible to Trends, RX-Gap, Domain Profile, 1RM Predictions, and
+// Notes Insights. This step resolves the unified FK from data already on the
+// row: the score has been re-FK'd to a crossfit_workout_part_id by
+// reFKScores, the legacy workout_movements row carries (movement_id,
+// order_index), and the backfill copied the legacy movement set into
+// crossfit_workout_movements verbatim. So:
+//
+//   score.crossfit_workout_part_id × workout_movements.(movement_id, order_index)
+//     → crossfit_workout_movements.id
+//
+// is a 1:1 lookup. SMD rows whose score lost its part FK (freeform section)
+// can't be resolved and are skipped — the verify assertion exempts them with
+// the same rule as scores.orphanedPartFK.
+//
+// Standalone: this step does not depend on the in-memory maps produced by
+// the workout backfill, so it self-heals on re-runs even after the workout
+// backfill has already completed.
+async function reFKScoreMovementDetails(tx: Tx): Promise<void> {
+  const result = await tx.execute(sql`
+    select
+      smd.id as smd_id,
+      smd.workout_movement_id,
+      wm.movement_id,
+      wm.order_index,
+      s.crossfit_workout_part_id
+    from score_movement_details smd
+    join workout_movements wm on wm.id = smd.workout_movement_id
+    join scores s on s.id = smd.score_id
+    where smd.crossfit_workout_movement_id is null
+      and smd.workout_movement_id is not null
+  `);
+  const rows = (result?.rows ?? result ?? []) as Array<{
+    smd_id: string;
+    workout_movement_id: string;
+    movement_id: string;
+    order_index: number;
+    crossfit_workout_part_id: string | null;
+  }>;
+  if (rows.length === 0) return;
+
+  // Bulk-fetch crossfit_workout_movements only for the parts we need.
+  const cwPartIds = new Set<string>();
+  for (const r of rows) {
+    if (r.crossfit_workout_part_id) cwPartIds.add(r.crossfit_workout_part_id);
+  }
+  const cwByKey = new Map<string, string>();
+  if (cwPartIds.size > 0) {
+    const cwm = await tx
+      .select({
+        id: crossfitWorkoutMovements.id,
+        crossfitWorkoutPartId: crossfitWorkoutMovements.crossfitWorkoutPartId,
+        movementId: crossfitWorkoutMovements.movementId,
+        orderIndex: crossfitWorkoutMovements.orderIndex,
+      })
+      .from(crossfitWorkoutMovements)
+      .where(
+        inArray(
+          crossfitWorkoutMovements.crossfitWorkoutPartId,
+          Array.from(cwPartIds)
+        )
+      );
+    for (const c of cwm) {
+      cwByKey.set(
+        `${c.crossfitWorkoutPartId}::${c.movementId}::${c.orderIndex}`,
+        c.id
+      );
+    }
+  }
+
+  let resolved = 0;
+  let skipped = 0;
+  for (const r of rows) {
+    if (!r.crossfit_workout_part_id) {
+      // Score's part wasn't migrated (freeform section). Per the
+      // orphanedPartFK verify exemption, these SMD rows can legitimately
+      // stay unmapped.
+      skipped += 1;
+      continue;
+    }
+    const key = `${r.crossfit_workout_part_id}::${r.movement_id}::${r.order_index}`;
+    const cwMovementId = cwByKey.get(key);
+    if (!cwMovementId) {
+      throw new Error(
+        `reFKScoreMovementDetails: could not resolve crossfit_workout_movement for SMD ${r.smd_id} (legacy wm=${r.workout_movement_id}, cwPart=${r.crossfit_workout_part_id}, movement=${r.movement_id}, orderIndex=${r.order_index})`
+      );
+    }
+    await tx
+      .update(scoreMovementDetails)
+      .set({ crossfitWorkoutMovementId: cwMovementId })
+      .where(eq(scoreMovementDetails.id, r.smd_id));
+    resolved += 1;
+  }
+
+  console.log(
+    `  → reFKScoreMovementDetails: ${resolved} resolved, ${skipped} skipped (freeform-section parts)`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Step 5: re-FK cross-domain references
 // ---------------------------------------------------------------------------
 
@@ -1553,6 +1698,30 @@ async function runVerifyAssertions(
   if (Number(orphanedPartFK.c) > 0) {
     throw new Error(
       `verify: ${orphanedPartFK.c} scores lost their crossfit_workout_part_id mapping`
+    );
+  }
+
+  // Every SMD whose score has a non-null crossfit_workout_part_id and a
+  // legacy workout_movement_id has a non-null crossfit_workout_movement_id.
+  // SMDs on freeform-section parts are exempt for the same reason as the
+  // score-level orphanedPartFK check above.
+  const [orphanedSmd] = await tx
+    .select({ c: sql<number>`count(*)::int` })
+    .from(scoreMovementDetails)
+    .where(
+      sql`
+        crossfit_workout_movement_id is null
+        and workout_movement_id is not null
+        and exists (
+          select 1 from scores s
+          where s.id = score_movement_details.score_id
+            and s.crossfit_workout_part_id is not null
+        )
+      `
+    );
+  if (Number(orphanedSmd.c) > 0) {
+    throw new Error(
+      `verify: ${orphanedSmd.c} score_movement_details lost their crossfit_workout_movement_id mapping`
     );
   }
 

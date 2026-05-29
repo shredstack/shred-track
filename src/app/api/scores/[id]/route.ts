@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { scores, scoreMovementDetails } from "@/db/schema";
+import { crossfitWorkoutParts, scores, scoreMovementDetails } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
@@ -20,6 +20,7 @@ interface MovementDetailInput {
   actualDurationSeconds?: number;
   actualHeightInches?: number;
   actualRepsPerRound?: number[];
+  actualDurationSecondsPerRound?: number[];
   notes?: string;
 }
 
@@ -96,24 +97,32 @@ export async function PUT(
     if (w != null) movementWeights.set(d.workoutMovementId, w);
   }
 
-  // Skip the recompute when this row was written under the unified schema
-  // (legacy `workoutId` is null) — the estimator's reader cuts over to
-  // workoutSessionId in commit #6, and until then it can't resolve a new
-  // row's prescription.
+  // Resolve the template id from the part — `crossfit_workout_parts.crossfit_workout_id`
+  // is the canonical link, so the estimator works without trusting either
+  // the legacy `scores.workoutId` (always null post-cutover) or the score's
+  // session (which on multi-section days points at the synthetic group's
+  // first session, not the part's session).
   let calorieEstimate: Awaited<ReturnType<typeof computeScoreEstimate>> | null =
     null;
-  if (existing.workoutId) {
-    try {
-      calorieEstimate = await computeScoreEstimate({
-        scoreId: id,
-        workoutId: existing.workoutId,
-        workoutPartId: existing.workoutPartId,
-        userId: user.id,
-        score: mergedScore,
-        movementWeights: movementWeights.size > 0 ? movementWeights : undefined,
-      });
-    } catch (err) {
-      console.error("[calories] estimator failed for score PUT", err);
+  if (existing.crossfitWorkoutPartId) {
+    const [partRow] = await db
+      .select({ templateId: crossfitWorkoutParts.crossfitWorkoutId })
+      .from(crossfitWorkoutParts)
+      .where(eq(crossfitWorkoutParts.id, existing.crossfitWorkoutPartId))
+      .limit(1);
+    if (partRow?.templateId) {
+      try {
+        calorieEstimate = await computeScoreEstimate({
+          scoreId: id,
+          workoutId: partRow.templateId,
+          workoutPartId: existing.crossfitWorkoutPartId,
+          userId: user.id,
+          score: mergedScore,
+          movementWeights: movementWeights.size > 0 ? movementWeights : undefined,
+        });
+      } catch (err) {
+        console.error("[calories] estimator failed for score PUT", err);
+      }
     }
   }
 
@@ -199,6 +208,13 @@ export async function PUT(
                 Array.isArray(d.actualRepsPerRound) &&
                 d.actualRepsPerRound.length > 0
                   ? d.actualRepsPerRound.map((n) => Math.max(0, Math.round(n)))
+                  : null,
+              actualDurationSecondsPerRound:
+                Array.isArray(d.actualDurationSecondsPerRound) &&
+                d.actualDurationSecondsPerRound.length > 0
+                  ? d.actualDurationSecondsPerRound.map((n) =>
+                      Math.max(0, Math.round(n))
+                    )
                   : null,
               notes: d.notes ?? null,
             }))

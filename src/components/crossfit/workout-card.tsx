@@ -176,6 +176,46 @@ function ScoreRow({
         <AmrapScoreBreakdown part={part} score={s} />
       )}
 
+      {/* Per-round time breakdown for movements that captured time per
+          round (e.g. "Run 400m × 3 as fast as possible"). The summed total
+          renders in the score chip above; the per-round splits go here so
+          the athlete can see pacing. */}
+      {s.movementDetails &&
+        s.movementDetails
+          .filter(
+            (d) =>
+              d.actualDurationSecondsPerRound &&
+              d.actualDurationSecondsPerRound.some((sec) => sec > 0)
+          )
+          .map((d) => {
+            const mov = part.movements.find(
+              (m) => m.id === d.workoutMovementId
+            );
+            const rounds = d.actualDurationSecondsPerRound!;
+            return (
+              <div
+                key={`time-per-round-${d.workoutMovementId}`}
+                className="space-y-0.5 pl-2 text-xs"
+              >
+                {mov && (
+                  <span className="text-[10px] text-muted-foreground">
+                    {mov.movementName}
+                  </span>
+                )}
+                <div className="flex flex-wrap gap-1.5 font-mono text-[11px]">
+                  {rounds.map((sec, i) => (
+                    <span
+                      key={i}
+                      className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-emerald-300"
+                    >
+                      R{i + 1} {sec > 0 ? formatTime(sec) : "—"}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+
       {/* Per-set breakdown for for_load parts. A complex logs one weight per
           set (stored against the lead movement), so drop the per-movement
           label and the e1RM estimate — neither applies to a complex. */}

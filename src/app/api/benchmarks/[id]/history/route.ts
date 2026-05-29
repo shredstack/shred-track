@@ -16,6 +16,7 @@ import {
   crossfitWorkoutParts,
   crossfitWorkouts,
   movements,
+  scoreMovementDetails,
   scores,
   workoutSessions,
 } from "@/db/schema";
@@ -23,9 +24,10 @@ import { and, desc, eq } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { pickBestScore, type ScoreRow } from "@/lib/crossfit/benchmark-stats";
 import {
-  inferRepMaxTarget,
+  classifyRepMaxSets,
   REP_MAX_TARGETS,
 } from "@/lib/crossfit/weightlifting-benchmarks";
+import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
 import type {
   BenchmarkAttempt,
   RepMaxTarget,
@@ -165,6 +167,8 @@ async function weightliftingHistory(
       createdAt: scores.createdAt,
       partRepScheme: crossfitWorkoutParts.repScheme,
       movementPrescribedReps: crossfitWorkoutMovements.prescribedReps,
+      setEntries: scoreMovementDetails.setEntries,
+      actualWeight: scoreMovementDetails.actualWeight,
     })
     .from(scores)
     .innerJoin(workoutSessions, eq(workoutSessions.id, scores.workoutSessionId))
@@ -175,6 +179,16 @@ async function weightliftingHistory(
     .innerJoin(
       crossfitWorkoutMovements,
       eq(crossfitWorkoutMovements.crossfitWorkoutPartId, crossfitWorkoutParts.id)
+    )
+    .leftJoin(
+      scoreMovementDetails,
+      and(
+        eq(scoreMovementDetails.scoreId, scores.id),
+        eq(
+          scoreMovementDetails.crossfitWorkoutMovementId,
+          crossfitWorkoutMovements.id
+        )
+      )
     )
     .where(
       and(
@@ -194,28 +208,33 @@ async function weightliftingHistory(
 
   const buckets = new Map<RepMaxTarget, BenchmarkAttempt[]>();
   for (const r of rows) {
-    const target = inferRepMaxTarget(
-      r.movementPrescribedReps ?? r.partRepScheme ?? null
-    );
-    if (!target) continue;
-    const list = buckets.get(target) ?? [];
-    list.push({
-      scoreId: r.scoreId,
-      workoutId: r.sessionId,
-      workoutDate: r.workoutDate,
-      division: r.division,
-      timeSeconds: r.timeSeconds,
-      rounds: r.rounds,
-      remainderReps: r.remainderReps,
-      weightLbs: r.weightLbs != null ? Number(r.weightLbs) : null,
-      totalReps: r.totalReps,
-      scoreText: r.scoreText,
-      hitTimeCap: r.hitTimeCap,
-      notes: r.notes,
-      createdAt: r.createdAt.toISOString(),
-      isPR: false,
+    const targetWeights = classifyRepMaxSets({
+      setEntries: normalizeSetEntries(r.setEntries),
+      scoreWeightLbs: r.weightLbs != null ? Number(r.weightLbs) : null,
+      actualWeight: r.actualWeight != null ? Number(r.actualWeight) : null,
+      movementPrescribedReps: r.movementPrescribedReps,
+      partRepScheme: r.partRepScheme,
     });
-    buckets.set(target, list);
+    for (const [target, weightLbs] of targetWeights) {
+      const list = buckets.get(target) ?? [];
+      list.push({
+        scoreId: r.scoreId,
+        workoutId: r.sessionId,
+        workoutDate: r.workoutDate,
+        division: r.division,
+        timeSeconds: r.timeSeconds,
+        rounds: r.rounds,
+        remainderReps: r.remainderReps,
+        weightLbs,
+        totalReps: r.totalReps,
+        scoreText: r.scoreText,
+        hitTimeCap: r.hitTimeCap,
+        notes: r.notes,
+        createdAt: r.createdAt.toISOString(),
+        isPR: false,
+      });
+      buckets.set(target, list);
+    }
   }
 
   const variants = REP_MAX_TARGETS.map((target) => {

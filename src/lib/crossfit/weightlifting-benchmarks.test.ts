@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyRepMaxSets,
   inferRepMaxTarget,
   pickBestPerRepTarget,
   type RepTargetScore,
 } from "./weightlifting-benchmarks";
+import type { SetEntry } from "@/types/crossfit";
 
 // inferRepMaxTarget is the rep-scheme classification surface — what
 // determines whether a logged workout shows up under a rep-max tab and
@@ -131,5 +133,132 @@ describe("pickBestPerRepTarget", () => {
   it("returns all-null when the input is empty", () => {
     const result = pickBestPerRepTarget([]);
     expect(result).toEqual({ 1: null, 2: null, 3: null, 5: null });
+  });
+});
+
+describe("classifyRepMaxSets", () => {
+  const baseInput = {
+    scoreWeightLbs: null,
+    actualWeight: null,
+    movementPrescribedReps: null,
+    partRepScheme: null,
+  };
+
+  it("buckets a ladder by each set's own reps", () => {
+    const setEntries: SetEntry[] = [
+      { weight: 190, reps: 3 },
+      { weight: 200, reps: 2 },
+      { weight: 230, reps: 1 },
+    ];
+    const result = classifyRepMaxSets({ ...baseInput, setEntries });
+    expect(result.get(1)).toBe(230);
+    expect(result.get(2)).toBe(200);
+    expect(result.get(3)).toBe(190);
+    expect(result.get(5)).toBeUndefined();
+  });
+
+  it("keeps the heaviest set when a target appears multiple times", () => {
+    const setEntries: SetEntry[] = [
+      { weight: 135, reps: 3 },
+      { weight: 190, reps: 3 },
+      { weight: 175, reps: 3 },
+    ];
+    const result = classifyRepMaxSets({ ...baseInput, setEntries });
+    expect(result.get(3)).toBe(190);
+  });
+
+  it("skips sets with reps outside {1,2,3,5}", () => {
+    const setEntries: SetEntry[] = [
+      { weight: 225, reps: 4 },
+      { weight: 185, reps: 10 },
+      { weight: 230, reps: 1 },
+    ];
+    const result = classifyRepMaxSets({ ...baseInput, setEntries });
+    expect(result.get(1)).toBe(230);
+    expect(result.size).toBe(1);
+  });
+
+  it("falls back to the prescription when a set has no explicit reps", () => {
+    const setEntries: SetEntry[] = [{ weight: 175 }];
+    const result = classifyRepMaxSets({
+      ...baseInput,
+      setEntries,
+      movementPrescribedReps: "3",
+    });
+    expect(result.get(3)).toBe(175);
+  });
+
+  it("uses the part-level repScheme when movement-level prescription is null", () => {
+    const setEntries: SetEntry[] = [{ weight: 200 }];
+    const result = classifyRepMaxSets({
+      ...baseInput,
+      setEntries,
+      partRepScheme: "5×5",
+    });
+    expect(result.get(5)).toBe(200);
+  });
+
+  it("drops entries with no reps when prescription is a non-uniform ladder", () => {
+    const setEntries: SetEntry[] = [
+      { weight: 200 },
+      { weight: 230, reps: 1 },
+    ];
+    const result = classifyRepMaxSets({
+      ...baseInput,
+      setEntries,
+      partRepScheme: "3-3-2-2-1-1-1",
+    });
+    expect(result.get(1)).toBe(230);
+    expect(result.size).toBe(1);
+  });
+
+  it("legacy fallback: classifies scores.weightLbs by a uniform prescription when no set entries", () => {
+    const result = classifyRepMaxSets({
+      ...baseInput,
+      setEntries: [],
+      scoreWeightLbs: 175,
+      movementPrescribedReps: "3",
+    });
+    expect(result.get(3)).toBe(175);
+  });
+
+  it("legacy fallback: prefers actualWeight when scoreWeightLbs is null", () => {
+    const result = classifyRepMaxSets({
+      ...baseInput,
+      setEntries: [],
+      actualWeight: 150,
+      movementPrescribedReps: "5",
+    });
+    expect(result.get(5)).toBe(150);
+  });
+
+  it("legacy fallback: emits nothing when prescription is non-uniform", () => {
+    const result = classifyRepMaxSets({
+      ...baseInput,
+      setEntries: [],
+      scoreWeightLbs: 200,
+      partRepScheme: "3-3-2-2-1-1-1",
+    });
+    expect(result.size).toBe(0);
+  });
+
+  it("legacy fallback: emits nothing when both weights are null", () => {
+    const result = classifyRepMaxSets({
+      ...baseInput,
+      setEntries: [],
+      movementPrescribedReps: "3",
+    });
+    expect(result.size).toBe(0);
+  });
+
+  it("skips entries with non-positive weight", () => {
+    const setEntries: SetEntry[] = [
+      { weight: 0, reps: 1 },
+      { weight: -10, reps: 2 },
+      { weight: 230, reps: 1 },
+    ];
+    const result = classifyRepMaxSets({ ...baseInput, setEntries });
+    expect(result.get(1)).toBe(230);
+    expect(result.size).toBe(1);
   });
 });

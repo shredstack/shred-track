@@ -108,6 +108,7 @@ export async function GET(
           id: crossfitWorkouts.id,
           title: crossfitWorkouts.title,
           description: crossfitWorkouts.description,
+          isBenchmark: crossfitWorkouts.isBenchmark,
         })
         .from(crossfitWorkouts)
         .where(inArray(crossfitWorkouts.id, templateIds))
@@ -179,6 +180,8 @@ export async function GET(
           prescribedWeightPct: crossfitWorkoutMovements.prescribedWeightPct,
           tempo: crossfitWorkoutMovements.tempo,
           isMaxReps: crossfitWorkoutMovements.isMaxReps,
+          captureDurationPerRound:
+            crossfitWorkoutMovements.captureDurationPerRound,
           isSideCadence: crossfitWorkoutMovements.isSideCadence,
           equipmentCount: crossfitWorkoutMovements.equipmentCount,
           movementName: movements.canonicalName,
@@ -262,46 +265,76 @@ export async function GET(
         prescribedWeightPct: m.prescribedWeightPct,
         tempo: m.tempo,
         isMaxReps: m.isMaxReps,
+        captureDurationPerRound: m.captureDurationPerRound,
         isSideCadence: m.isSideCadence,
         equipmentCount: m.equipmentCount,
       })),
     };
   }
 
-  // Group sessions by workoutDate. Each date becomes a "workout day"; the
-  // first session's id stands in for the legacy workouts.id (the day-level
-  // handle the admin UI uses for actions). Title/description come from
-  // the first templated session's template.
-  type Day = {
+  // Bucket sessions by (workoutDate, releaseId). Programmed sessions
+  // (release id set) on the same date merge into one "day" bucket — that
+  // matches the legacy `workouts` row the admin UI treats as the day. A
+  // manual session (release id null, added from the CrossFit tab as a
+  // gym admin) is its own one-session bucket; the week-view then renders
+  // it under the amber "manual workouts" banner instead of silently
+  // mixing it into the programmed day's `sections[]` (which dropped the
+  // manual/programmed boundary when we collapsed `workouts` away).
+  type Bucket = {
     workoutDate: string;
+    releaseId: string | null;
     sessions: typeof sessionRows;
   };
-  const byDate = new Map<string, Day>();
+  const programmedBucketByKey = new Map<string, Bucket>();
+  const buckets: Bucket[] = [];
   for (const s of sessionRows) {
-    let d = byDate.get(s.workoutDate);
-    if (!d) {
-      d = { workoutDate: s.workoutDate, sessions: [] };
-      byDate.set(s.workoutDate, d);
+    if (s.programmingReleaseId) {
+      const key = `${s.workoutDate}:${s.programmingReleaseId}`;
+      let b = programmedBucketByKey.get(key);
+      if (!b) {
+        b = {
+          workoutDate: s.workoutDate,
+          releaseId: s.programmingReleaseId,
+          sessions: [],
+        };
+        programmedBucketByKey.set(key, b);
+        buckets.push(b);
+      }
+      b.sessions.push(s);
+    } else {
+      buckets.push({
+        workoutDate: s.workoutDate,
+        releaseId: null,
+        sessions: [s],
+      });
     }
-    d.sessions.push(s);
   }
 
-  const workoutsPayload = Array.from(byDate.values()).map((day) => {
-    const first = day.sessions[0];
-    const firstTemplate = day.sessions
-      .map((s) =>
-        s.crossfitWorkoutId ? templateById.get(s.crossfitWorkoutId) : null
-      )
-      .find((t) => !!t);
+  const workoutsPayload = buckets.map((bucket) => {
+    const first = bucket.sessions[0];
+    // Owner section: prefer benchmark > wod > scored > first. Mirrors the
+    // selection in session-reader so the day-level title/description point
+    // at the real workout (e.g. Murph) instead of section 0's warmup, which
+    // typically has no template description.
+    const templateForSession = (s: (typeof bucket.sessions)[number]) =>
+      s.crossfitWorkoutId ? templateById.get(s.crossfitWorkoutId) ?? null : null;
+    const benchmarkSession = bucket.sessions.find(
+      (s) => templateForSession(s)?.isBenchmark
+    );
+    const wodSession = bucket.sessions.find((s) => s.kind === "wod");
+    const scoredSession = bucket.sessions.find((s) => s.isScored);
+    const ownerSession =
+      benchmarkSession ?? wodSession ?? scoredSession ?? first;
+    const ownerTemplate = templateForSession(ownerSession);
     return {
       id: first.id,
-      title: firstTemplate?.title ?? null,
-      description: firstTemplate?.description ?? null,
-      workoutDate: day.workoutDate,
+      title: ownerTemplate?.title ?? null,
+      description: ownerTemplate?.description ?? null,
+      workoutDate: bucket.workoutDate,
       workoutType: null, // legacy field; derived per-section in the new schema
-      programmingReleaseId: first.programmingReleaseId,
+      programmingReleaseId: bucket.releaseId,
       reviewedAt: first.reviewedAt,
-      sections: day.sessions.map((s) => ({
+      sections: bucket.sessions.map((s) => ({
         id: s.id,
         kind: s.kind,
         subKind: s.subKind,

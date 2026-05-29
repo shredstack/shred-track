@@ -328,7 +328,9 @@ export function AdminBenchmarks() {
                 </div>
                 <p className="text-[10px] text-muted-foreground truncate">
                   {b.repScheme && `${b.repScheme}: `}
-                  {b.movements.map((m) => m.movementName).join(", ")}
+                  {(b.movements ?? b.parts?.flatMap((p) => p.movements) ?? [])
+                    .map((m) => m.movementName)
+                    .join(", ")}
                 </p>
               </div>
               <Button

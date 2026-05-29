@@ -142,6 +142,8 @@ export async function GET(
             crossfitWorkoutMovements.prescribedWeightFemaleBwMultiplier,
           tempo: crossfitWorkoutMovements.tempo,
           isMaxReps: crossfitWorkoutMovements.isMaxReps,
+          captureDurationPerRound:
+            crossfitWorkoutMovements.captureDurationPerRound,
           isSideCadence: crossfitWorkoutMovements.isSideCadence,
           equipmentCount: crossfitWorkoutMovements.equipmentCount,
           rxStandard: crossfitWorkoutMovements.rxStandard,
@@ -210,130 +212,152 @@ export async function PUT(
     return NextResponse.json({ error: "Body required" }, { status: 400 });
   }
 
-  await db.transaction(async (tx) => {
-    // ----- Session-level fields -----
-    const sessionPatch: Record<string, unknown> = {
-      reviewedAt: new Date(),
-    };
-    if (body.body !== undefined) sessionPatch.body = body.body;
-    if (body.title !== undefined) {
-      const trimmed = typeof body.title === "string" ? body.title.trim() : "";
-      sessionPatch.title = trimmed.length > 0 ? trimmed : null;
-    }
-    if (body.notes !== undefined) {
-      const trimmed = typeof body.notes === "string" ? body.notes.trim() : "";
-      sessionPatch.coachNotes = trimmed.length > 0 ? body.notes : null;
-    }
-
-    // ----- Benchmark fast-path: relink to a canonical template -----
-    if (body.benchmarkWorkoutId !== undefined) {
-      const nextLink =
-        typeof body.benchmarkWorkoutId === "string" &&
-        body.benchmarkWorkoutId.length > 0
-          ? body.benchmarkWorkoutId
-          : null;
-      if (nextLink) {
-        const [tmpl] = await tx
-          .select({ id: crossfitWorkouts.id })
-          .from(crossfitWorkouts)
-          .where(eq(crossfitWorkouts.id, nextLink))
-          .limit(1);
-        if (!tmpl) {
-          throw new Error("Benchmark template not found");
-        }
-        sessionPatch.crossfitWorkoutId = nextLink;
-        // Body is no longer needed when we have a real template; null it
-        // so the section card doesn't show a stale placeholder.
-        sessionPatch.body = null;
-      } else {
-        // Clear the link only; the body keeps the placeholder.
-        sessionPatch.crossfitWorkoutId = null;
-      }
-    }
-
-    // ----- Smart Builder parts: route through the fork-on-edit helper -----
-    //   • No current template (freeform → structured) → plain upsert.
-    //   • Current template is a system row (Fran et al.) → scoped fork via
-    //     upsertTemplate; the system row stays untouched.
-    //   • Benchmark-link patch above this block already changed
-    //     sessionPatch.crossfitWorkoutId — re-read so the fork decision is
-    //     based on the target template, not the about-to-be-replaced one.
-    //   • Otherwise → forkOrEditTemplate; matches an existing community
-    //     template by fingerprint, edits in place when safe, or forks.
-    if (Array.isArray(body.parts) && body.parts.length > 0) {
-      const validParts = body.parts.filter(
-        (p) => p && p.workoutType && Array.isArray(p.movements)
-      );
-      if (validParts.length === 0) {
-        throw new Error("parts is empty after validation");
-      }
-      const firstPart = validParts[0];
-      const nextTemplate = {
-        title:
-          (typeof body.title === "string" && body.title.trim()) ||
-          firstPart.label?.trim() ||
-          "Untitled section",
-        description: body.description ?? null,
-        scope: { kind: "community", communityId } as const,
-        workoutType: firstPart.workoutType,
-        timeCapSeconds: firstPart.timeCapSeconds ?? null,
-        amrapDurationSeconds: firstPart.amrapDurationSeconds ?? null,
-        repScheme: firstPart.repScheme ?? null,
-        rounds: firstPart.rounds ?? null,
-        requiresVest:
-          body.requiresVest !== undefined ? !!body.requiresVest : undefined,
-        vestWeightMaleLb:
-          body.vestWeightMaleLb !== undefined ? body.vestWeightMaleLb : null,
-        vestWeightFemaleLb:
-          body.vestWeightFemaleLb !== undefined
-            ? body.vestWeightFemaleLb
-            : null,
-        isPartner:
-          body.isPartner !== undefined ? !!body.isPartner : undefined,
-        partnerCount:
-          body.partnerCount !== undefined ? body.partnerCount : null,
-        parts: validParts,
+  try {
+    await db.transaction(async (tx) => {
+      // ----- Session-level fields -----
+      const sessionPatch: Record<string, unknown> = {
+        reviewedAt: new Date(),
       };
+      if (body.body !== undefined) sessionPatch.body = body.body;
+      if (body.title !== undefined) {
+        const trimmed = typeof body.title === "string" ? body.title.trim() : "";
+        sessionPatch.title = trimmed.length > 0 ? trimmed : null;
+      }
+      if (body.notes !== undefined) {
+        const trimmed = typeof body.notes === "string" ? body.notes.trim() : "";
+        sessionPatch.coachNotes = trimmed.length > 0 ? body.notes : null;
+      }
 
-      // Determine the "original" template id for fork purposes. The
-      // benchmark fast-path above may have just set sessionPatch.crossfitWorkoutId
-      // to a benchmark template — that's the *target* of a relink, not an
-      // edit, so we use the section's pre-PUT template id as the fork
-      // origin if no benchmark relink happened.
-      const originalTemplateId =
-        sessionPatch.crossfitWorkoutId === undefined
-          ? section.crossfitWorkoutId
-          : (sessionPatch.crossfitWorkoutId as string | null);
+      // ----- Benchmark fast-path: relink to a canonical template -----
+      if (body.benchmarkWorkoutId !== undefined) {
+        const nextLink =
+          typeof body.benchmarkWorkoutId === "string" &&
+          body.benchmarkWorkoutId.length > 0
+            ? body.benchmarkWorkoutId
+            : null;
+        if (nextLink) {
+          const [tmpl] = await tx
+            .select({ id: crossfitWorkouts.id })
+            .from(crossfitWorkouts)
+            .where(eq(crossfitWorkouts.id, nextLink))
+            .limit(1);
+          if (!tmpl) {
+            throw new Error("Benchmark template not found");
+          }
+          sessionPatch.crossfitWorkoutId = nextLink;
+          // Body is no longer needed when we have a real template; null it
+          // so the section card doesn't show a stale placeholder.
+          sessionPatch.body = null;
+        } else {
+          // Clear the link only; the body keeps the placeholder.
+          sessionPatch.crossfitWorkoutId = null;
+        }
+      }
 
-      let resolvedTemplateId: string;
-      if (!originalTemplateId) {
-        const r = await upsertTemplate(tx, nextTemplate);
-        resolvedTemplateId = r.templateId;
-      } else {
-        const [orig] = await tx
-          .select({ isSystem: crossfitWorkouts.isSystem })
-          .from(crossfitWorkouts)
-          .where(eq(crossfitWorkouts.id, originalTemplateId))
-          .limit(1);
-        if (orig?.isSystem) {
+      // ----- Smart Builder parts: route through the fork-on-edit helper -----
+      //   • No current template (freeform → structured) → plain upsert.
+      //   • Current template is a system row (Fran et al.) → scoped fork via
+      //     upsertTemplate; the system row stays untouched.
+      //   • Benchmark-link patch above this block already changed
+      //     sessionPatch.crossfitWorkoutId — re-read so the fork decision is
+      //     based on the target template, not the about-to-be-replaced one.
+      //   • Otherwise → forkOrEditTemplate; matches an existing community
+      //     template by fingerprint, edits in place when safe, or forks.
+      //
+      // Skipped entirely when this PUT is a pure benchmark relink: per spec
+      // the session points at the canonical template, no clone. A coach who
+      // wants a variant edits the section via Smart Builder afterwards,
+      // which arrives without `benchmarkWorkoutId` and forks correctly.
+      const isBenchmarkRelink =
+        typeof body.benchmarkWorkoutId === "string" &&
+        body.benchmarkWorkoutId.length > 0;
+      if (
+        !isBenchmarkRelink &&
+        Array.isArray(body.parts) &&
+        body.parts.length > 0
+      ) {
+        const validParts = body.parts.filter(
+          (p) => p && p.workoutType && Array.isArray(p.movements)
+        );
+        if (validParts.length === 0) {
+          throw new Error("parts is empty after validation");
+        }
+        const firstPart = validParts[0];
+        const nextTemplate = {
+          title:
+            (typeof body.title === "string" && body.title.trim()) ||
+            firstPart.label?.trim() ||
+            "Untitled section",
+          description: body.description ?? null,
+          scope: { kind: "community", communityId } as const,
+          workoutType: firstPart.workoutType,
+          timeCapSeconds: firstPart.timeCapSeconds ?? null,
+          amrapDurationSeconds: firstPart.amrapDurationSeconds ?? null,
+          repScheme: firstPart.repScheme ?? null,
+          rounds: firstPart.rounds ?? null,
+          requiresVest:
+            body.requiresVest !== undefined ? !!body.requiresVest : undefined,
+          vestWeightMaleLb:
+            body.vestWeightMaleLb !== undefined ? body.vestWeightMaleLb : null,
+          vestWeightFemaleLb:
+            body.vestWeightFemaleLb !== undefined
+              ? body.vestWeightFemaleLb
+              : null,
+          isPartner:
+            body.isPartner !== undefined ? !!body.isPartner : undefined,
+          partnerCount:
+            body.partnerCount !== undefined ? body.partnerCount : null,
+          parts: validParts,
+        };
+
+        // Determine the "original" template id for fork purposes. The
+        // benchmark fast-path above may have just set sessionPatch.crossfitWorkoutId
+        // to a benchmark template — that's the *target* of a relink, not an
+        // edit, so we use the section's pre-PUT template id as the fork
+        // origin if no benchmark relink happened.
+        const originalTemplateId =
+          sessionPatch.crossfitWorkoutId === undefined
+            ? section.crossfitWorkoutId
+            : (sessionPatch.crossfitWorkoutId as string | null);
+
+        let resolvedTemplateId: string;
+        if (!originalTemplateId) {
           const r = await upsertTemplate(tx, nextTemplate);
           resolvedTemplateId = r.templateId;
         } else {
-          const r = await forkOrEditTemplate(tx, {
-            originalTemplateId,
-            next: nextTemplate,
-            triggeringSessionId: sectionId,
-          });
-          resolvedTemplateId = r.templateId;
+          const [orig] = await tx
+            .select({ isSystem: crossfitWorkouts.isSystem })
+            .from(crossfitWorkouts)
+            .where(eq(crossfitWorkouts.id, originalTemplateId))
+            .limit(1);
+          if (orig?.isSystem) {
+            const r = await upsertTemplate(tx, nextTemplate);
+            resolvedTemplateId = r.templateId;
+          } else {
+            const r = await forkOrEditTemplate(tx, {
+              originalTemplateId,
+              next: nextTemplate,
+              triggeringSessionId: sectionId,
+            });
+            resolvedTemplateId = r.templateId;
+          }
         }
+
+        sessionPatch.crossfitWorkoutId = resolvedTemplateId;
+        sessionPatch.body = null;
       }
 
-      sessionPatch.crossfitWorkoutId = resolvedTemplateId;
-      sessionPatch.body = null;
-    }
-
-    await updateSession(tx, sectionId, sessionPatch);
-  });
+      await updateSession(tx, sectionId, sessionPatch);
+    });
+  } catch (err) {
+    // Surface validation errors thrown from upsertTemplate /
+    // forkOrEditTemplate / insertTemplateParts so the Smart Builder dialog
+    // can display exactly what's wrong instead of a generic "Failed to save".
+    const message =
+      err instanceof Error && err.message ? err.message : "Failed to save";
+    console.error("[programming/sections/content] PUT failed", err);
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
 
   // Recompute the template-level calorie estimate — the session's template
   // (and therefore its parts/movements) may have changed.

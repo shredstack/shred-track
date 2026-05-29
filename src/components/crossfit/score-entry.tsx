@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useMemo } from "react";
 import { Input } from "@/components/ui/input";
+import { DurationInput } from "@/components/crossfit/duration-input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -204,6 +205,10 @@ interface PartState {
   // Per-occurrence per-round rep drafts for max-reps movements.
   // map[workoutMovementId] = ["8", "7", "6", ...] — one slot per round.
   maxRepsDrafts: Record<string, string[]>;
+  // Per-occurrence per-round duration drafts for captureDurationPerRound
+  // movements (e.g. "Run 400m × 3 as fast as possible"). Held as mm:ss
+  // strings; parsed to seconds on save. One slot per round.
+  durationPerRoundDrafts: Record<string, string[]>;
 }
 
 export interface SetEntryDraft {
@@ -221,6 +226,7 @@ function emptyPartState(
   const durationDrafts: Record<string, string> = {};
   const heightDrafts: Record<string, string> = {};
   const maxRepsDrafts: Record<string, string[]> = {};
+  const durationPerRoundDrafts: Record<string, string[]> = {};
 
   // Walk existing movementDetails (keyed by workout_movement_id) and collapse
   // down to one entry per movement_id. Different occurrences of the same
@@ -261,6 +267,13 @@ function emptyPartState(
           String(n)
         );
       }
+      if (
+        d.actualDurationSecondsPerRound &&
+        d.actualDurationSecondsPerRound.length > 0
+      ) {
+        durationPerRoundDrafts[d.workoutMovementId] =
+          d.actualDurationSecondsPerRound.map((s) => formatSecondsAsClock(s));
+      }
     }
   }
 
@@ -280,6 +293,7 @@ function emptyPartState(
     durationDrafts,
     heightDrafts,
     maxRepsDrafts,
+    durationPerRoundDrafts,
   };
 }
 
@@ -765,6 +779,21 @@ export function ScoreEntry({
             return Number.isFinite(n) && n >= 0 ? n : 0;
           });
         }
+        // Per-round duration drafts → INTEGER[] (seconds). Empty rounds
+        // become 0 (mirror max-reps behavior so the array stays contiguous
+        // with part.rounds and DNF'd rounds round-trip as zero).
+        const perRoundDurDrafts = st.durationPerRoundDrafts[mov.id];
+        let actualDurationSecondsPerRound: number[] | undefined;
+        if (
+          mov.captureDurationPerRound &&
+          perRoundDurDrafts &&
+          perRoundDurDrafts.length > 0
+        ) {
+          actualDurationSecondsPerRound = perRoundDurDrafts.map((s) => {
+            const sec = parseDurationToSeconds(s);
+            return sec != null && sec >= 0 ? sec : 0;
+          });
+        }
         // Duration / height are only meaningful when the athlete deviated
         // from the prescription. The scaling card surfaces these inputs
         // exclusively when the movement is flagged scaled, so we mirror
@@ -794,6 +823,7 @@ export function ScoreEntry({
               ? heightInches
               : undefined,
           actualRepsPerRound,
+          actualDurationSecondsPerRound,
           notes: includeScalingDetails ? scaling.notes : undefined,
         };
       });
@@ -806,6 +836,18 @@ export function ScoreEntry({
         return acc + s.actualRepsPerRound.reduce((a, b) => a + b, 0);
       }, 0);
       const partHasMaxReps = part.movements.some((m) => m.isMaxReps);
+
+      // Auto-sum total time from per-round duration captures (e.g. "Run
+      // 400m × 3 as fast as possible"). The athlete logs one mm:ss per
+      // round; we sum to the part-level timeSeconds when they haven't
+      // typed one explicitly.
+      const sumFromPerRoundDurations = scalings.reduce((acc, s) => {
+        if (!s.actualDurationSecondsPerRound) return acc;
+        return acc + s.actualDurationSecondsPerRound.reduce((a, b) => a + b, 0);
+      }, 0);
+      const partHasPerRoundDurations = part.movements.some(
+        (m) => m.captureDurationPerRound
+      );
 
       const vestWeightNumeric = parseFloat(vestWeightLbDraft);
       const score: ScoreInput = {
@@ -876,6 +918,16 @@ export function ScoreEntry({
             : partHasMaxReps && sumFromMaxReps > 0
               ? sumFromMaxReps
               : undefined;
+          // Per-round duration capture (e.g. intervals, 3 × 400m run): sum
+          // the per-round times into a part-level total time when the user
+          // hasn't typed one explicitly. Lets the part rank by total time.
+          if (
+            partHasPerRoundDurations &&
+            sumFromPerRoundDurations > 0 &&
+            score.timeSeconds == null
+          ) {
+            score.timeSeconds = sumFromPerRoundDurations;
+          }
           break;
         case "emom":
         case "tabata":
@@ -919,6 +971,15 @@ export function ScoreEntry({
         case "max_effort":
           return (
             !!st.totalReps ||
+            // Per-round time entries on a captureDurationPerRound movement
+            // also count as data — for "Run 400m × 3 as fast as possible"
+            // the per-round time inputs ARE the score.
+            Object.values(st.durationPerRoundDrafts).some((rounds) =>
+              rounds.some((r) => {
+                const sec = parseDurationToSeconds(r);
+                return sec != null && sec > 0;
+              })
+            ) ||
             // Per-round entries on a max-reps movement count as data — the
             // user shouldn't have to also type the total in the explicit
             // input when they've been clicking through round inputs.
@@ -1345,6 +1406,15 @@ export function ScoreEntry({
       case "intervals":
       case "max_effort": {
         const partHasMax = activePart.movements.some((m) => m.isMaxReps);
+        const partHasPerRoundDur = activePart.movements.some(
+          (m) => m.captureDurationPerRound
+        );
+        // When the part captures time per round, the part-level total is a
+        // total time auto-summed from those inputs — render no top-level
+        // input here. The per-round duration block below carries the score.
+        if (partHasPerRoundDur && !partHasMax) {
+          return null;
+        }
         return (
           <div className="space-y-2">
             <Label htmlFor="se-total">
@@ -1689,6 +1759,111 @@ export function ScoreEntry({
                 <p className="text-[10px] text-muted-foreground">
                   Sum auto-fills the workout total. Type a value in &quot;Total
                   Reps&quot; above to override.
+                </p>
+              </div>
+            );
+          })()}
+
+          {/* Per-round time capture — for prescriptions like "Run 400m × 3
+              as fast as possible". The athlete logs one mm:ss per round and
+              the sum becomes the part's total time. Mirrors the max-reps
+              block above. */}
+          {(() => {
+            const timedMovements = activePart.movements.filter(
+              (m) => m.captureDurationPerRound
+            );
+            if (timedMovements.length === 0) return null;
+            const rounds =
+              activePart.rounds && activePart.rounds > 0
+                ? activePart.rounds
+                : 1;
+            const totalSecondsAcross = timedMovements.reduce((acc, mov) => {
+              const drafts = state.durationPerRoundDrafts[mov.id] ?? [];
+              const movSum = drafts.reduce((a, s) => {
+                const sec = parseDurationToSeconds(s);
+                return a + (sec != null && sec > 0 ? sec : 0);
+              }, 0);
+              return acc + movSum;
+            }, 0);
+            return (
+              <div className="space-y-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm font-medium flex-1">
+                    Time {rounds > 1 ? "per round" : ""}
+                  </Label>
+                  <span className="font-mono text-sm font-bold text-emerald-300">
+                    Total:{" "}
+                    {totalSecondsAcross > 0
+                      ? formatSecondsAsClock(totalSecondsAcross)
+                      : "--"}
+                  </span>
+                </div>
+                {timedMovements.map((mov) => {
+                  const drafts = state.durationPerRoundDrafts[mov.id] ?? [];
+                  const movSumSec = drafts.reduce((a, s) => {
+                    const sec = parseDurationToSeconds(s);
+                    return a + (sec != null && sec > 0 ? sec : 0);
+                  }, 0);
+                  return (
+                    <div key={mov.id} className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-medium">
+                          {mov.movementName}
+                        </Label>
+                        {timedMovements.length > 1 && movSumSec > 0 && (
+                          <span className="text-[10px] text-muted-foreground font-mono">
+                            sub-total: {formatSecondsAsClock(movSumSec)}
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        className="grid gap-1.5"
+                        style={{
+                          gridTemplateColumns: `repeat(${Math.min(rounds, 5)}, minmax(0, 1fr))`,
+                        }}
+                      >
+                        {Array.from({ length: rounds }, (_, i) => (
+                          <div key={i} className="space-y-0.5">
+                            <Label className="text-[10px] text-muted-foreground text-center block">
+                              {rounds > 1 ? `R${i + 1}` : "Time"}
+                            </Label>
+                            <DurationInput
+                              value={drafts[i] ?? ""}
+                              onChange={(v) =>
+                                setPartStates((prev) => {
+                                  const current =
+                                    prev[activePart.id]
+                                      .durationPerRoundDrafts[mov.id] ?? [];
+                                  const updated = [...current];
+                                  for (let j = updated.length; j <= i; j++) {
+                                    updated[j] = "";
+                                  }
+                                  updated[i] = v;
+                                  return {
+                                    ...prev,
+                                    [activePart.id]: {
+                                      ...prev[activePart.id],
+                                      durationPerRoundDrafts: {
+                                        ...prev[activePart.id]
+                                          .durationPerRoundDrafts,
+                                        [mov.id]: updated,
+                                      },
+                                    },
+                                  };
+                                })
+                              }
+                              placeholder="0:00"
+                              className="h-8 text-center font-mono text-xs"
+                              ariaLabel={`${mov.movementName} round ${i + 1} time`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+                <p className="text-[10px] text-muted-foreground">
+                  Sum auto-fills the workout total time.
                 </p>
               </div>
             );

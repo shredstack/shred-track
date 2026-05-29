@@ -209,6 +209,7 @@ function makeBuilderMovement(option: MovementOption): WorkoutBuilderMovement {
     prescribedWeightPct: asString(defaults.weight_pct),
     tempo: defaults.tempo ?? "",
     isMaxReps: false,
+    captureDurationPerRound: false,
     isSideCadence: false,
     rxStandard: "",
     notes: "",
@@ -988,7 +989,9 @@ function MovementCard({
           onChange={(e) =>
             onUpdate(mov.tempId, {
               isMaxReps: e.target.checked,
-              ...(e.target.checked ? { prescribedReps: "" } : {}),
+              ...(e.target.checked
+                ? { prescribedReps: "", captureDurationPerRound: false }
+                : {}),
             })
           }
           className="size-3 cursor-pointer"
@@ -1006,6 +1009,32 @@ function MovementCard({
           </span>
         )}
       </label>
+
+      {/* Per-round time capture — for prescriptions like "Run 400m × 3 as
+          fast as possible". Athlete logs one time per round; the sum
+          becomes the part's score. Only meaningful when the part has
+          rounds, and mutually exclusive with isMaxReps. */}
+      {(workoutType === "intervals" || workoutType === "for_time") && (
+        <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!mov.captureDurationPerRound}
+            onChange={(e) =>
+              onUpdate(mov.tempId, {
+                captureDurationPerRound: e.target.checked,
+                ...(e.target.checked ? { isMaxReps: false } : {}),
+              })
+            }
+            className="size-3 cursor-pointer"
+          />
+          Time per round (score)
+          {mov.captureDurationPerRound && (
+            <span className="rounded bg-emerald-500/15 px-1 py-px text-[10px] font-bold text-emerald-300">
+              TIMED
+            </span>
+          )}
+        </label>
+      )}
 
       {!useLegacyBranches && (
         <>

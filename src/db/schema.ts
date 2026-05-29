@@ -565,6 +565,13 @@ export const workoutMovements = pgTable("workout_movements", {
   // them into totalReps. Mutually exclusive with prescribedReps at the
   // UI layer.
   isMaxReps: boolean("is_max_reps").default(false).notNull(),
+  // When true the movement's score is the duration of each round (e.g.
+  // "Run 400m × 3 as fast as possible"): the athlete logs one duration
+  // per round at score entry, and the total time across rounds becomes
+  // the part's score. Mutually exclusive with isMaxReps at the UI layer.
+  captureDurationPerRound: boolean("capture_duration_per_round")
+    .default(false)
+    .notNull(),
   // When true, this movement is the side-cadence movement (performed at
   // the part's cadence) rather than part of the main task. See workout_parts.
   isSideCadence: boolean("is_side_cadence").default(false).notNull(),
@@ -640,7 +647,17 @@ export const scores = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
+    // Legacy per-`workout_parts` dedup. Partial in the DB (only fires when
+    // workout_part_id is not null) — kept here for documentation; new
+    // unified-schema writes leave workout_part_id null.
     uniqueIndex("scores_part_user_unique").on(table.workoutPartId, table.userId),
+    // Unified-schema dedup: one score per (session, template-part, user).
+    // Partial — only enforced when both unified FKs are populated.
+    uniqueIndex("scores_session_part_user_unique").on(
+      table.workoutSessionId,
+      table.crossfitWorkoutPartId,
+      table.userId
+    ),
     index("scores_part_idx").on(table.workoutPartId),
   ]
 );
@@ -720,6 +737,11 @@ export const scoreMovementDetails = pgTable("score_movement_details", {
   actualHeightInches: numeric("actual_height_inches"),
   // Per-round rep counts for max-reps movements. Length matches part.rounds.
   actualRepsPerRound: integer("actual_reps_per_round").array(),
+  // Per-round duration in seconds for captureDurationPerRound movements
+  // (e.g. "Run 400m × 3 as fast as possible"). Length matches part.rounds.
+  actualDurationSecondsPerRound: integer(
+    "actual_duration_seconds_per_round"
+  ).array(),
   notes: text("notes"),
 }, (table) => [
   foreignKey({
@@ -878,6 +900,9 @@ export const benchmarkWorkoutMovements = pgTable("benchmark_workout_movements", 
   prescribedWeightFemaleBwMultiplier: numeric("prescribed_weight_female_bw_multiplier"),
   tempo: text("tempo"),
   isMaxReps: boolean("is_max_reps").default(false).notNull(),
+  captureDurationPerRound: boolean("capture_duration_per_round")
+    .default(false)
+    .notNull(),
   isSideCadence: boolean("is_side_cadence").default(false).notNull(),
   repSchemeParsed: jsonb("rep_scheme_parsed"),
   equipmentCount: integer("equipment_count"),
@@ -1073,6 +1098,9 @@ export const crossfitWorkoutMovements = pgTable(
     ).references(() => crossfitWorkoutParts.id, { onDelete: "set null" }),
     tempo: text("tempo"),
     isMaxReps: boolean("is_max_reps").default(false).notNull(),
+    captureDurationPerRound: boolean("capture_duration_per_round")
+      .default(false)
+      .notNull(),
     isSideCadence: boolean("is_side_cadence").default(false).notNull(),
     repSchemeParsed: jsonb("rep_scheme_parsed"),
     equipmentCount: integer("equipment_count"),

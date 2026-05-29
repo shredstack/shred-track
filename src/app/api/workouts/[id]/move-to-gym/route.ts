@@ -71,10 +71,16 @@ export async function POST(
     );
   }
 
+  // Personal sessions write as kind='custom' (see /api/workouts POST); a
+  // move into gym programming is semantically "promote to the day's WOD",
+  // so we flip the kind on scope-swap. Without this, the moved session
+  // would show up under the gym's day as a 'custom' section instead of
+  // the WOD slot.
   const updated = await db.transaction(async (tx) =>
     updateSession(tx, id, {
       userId: null,
       communityId: targetCommunityId,
+      kind: "wod",
     })
   );
 

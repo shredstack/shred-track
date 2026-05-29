@@ -28,6 +28,7 @@ export interface BenchmarkPartMovementInput {
   prescribedWeightFemaleBwMultiplier?: number | string | null;
   tempo?: string | null;
   isMaxReps?: boolean;
+  captureDurationPerRound?: boolean;
   isSideCadence?: boolean;
   equipmentCount?: number | null;
   rxStandard?: string | null;

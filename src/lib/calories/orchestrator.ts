@@ -201,8 +201,7 @@ export async function recomputeScoreEstimate(scoreId: string): Promise<void> {
     .select({
       id: scores.id,
       userId: scores.userId,
-      workoutId: scores.workoutId,
-      workoutPartId: scores.workoutPartId,
+      crossfitWorkoutPartId: scores.crossfitWorkoutPartId,
       timeSeconds: scores.timeSeconds,
       hitTimeCap: scores.hitTimeCap,
       woreVest: scores.woreVest,
@@ -217,17 +216,22 @@ export async function recomputeScoreEstimate(scoreId: string): Promise<void> {
     .limit(1);
 
   if (!row) return;
-  // Legacy-tree recompute: bail when the row was written post-cutover (it
-  // carries `workout_session_id` / `crossfit_workout_part_id` but no legacy
-  // workoutId). The unified-schema recompute path lands with the rest of
-  // the calorie reader cutover in commit #6.
-  if (!row.workoutId) return;
+  if (!row.crossfitWorkoutPartId) return;
+
+  // Resolve the template id from the part — canonical link via the part's
+  // `crossfit_workout_id` FK.
+  const [partRow] = await db
+    .select({ templateId: crossfitWorkoutParts.crossfitWorkoutId })
+    .from(crossfitWorkoutParts)
+    .where(eq(crossfitWorkoutParts.id, row.crossfitWorkoutPartId))
+    .limit(1);
+  if (!partRow?.templateId) return;
 
   // Rebuild the per-movement working weights from the persisted detail rows
   // so a recompute reproduces the load-relative modifier.
   const details = await db
     .select({
-      workoutMovementId: scoreMovementDetails.workoutMovementId,
+      crossfitWorkoutMovementId: scoreMovementDetails.crossfitWorkoutMovementId,
       actualWeight: scoreMovementDetails.actualWeight,
       setEntries: scoreMovementDetails.setEntries,
     })
@@ -236,18 +240,15 @@ export async function recomputeScoreEstimate(scoreId: string): Promise<void> {
   const movementWeights = new Map<string, number>();
   for (const d of details) {
     const w = workingWeightFromSetData(d.actualWeight, d.setEntries);
-    // workoutMovementId is nullable for unified-schema rows; skip them
-    // here — the unified recompute path lands with the rest of the
-    // calorie reader cutover in a follow-up commit.
-    if (w != null && d.workoutMovementId) {
-      movementWeights.set(d.workoutMovementId, w);
+    if (w != null && d.crossfitWorkoutMovementId) {
+      movementWeights.set(d.crossfitWorkoutMovementId, w);
     }
   }
 
   const result = await computeScoreEstimate({
     scoreId: row.id,
-    workoutId: row.workoutId,
-    workoutPartId: row.workoutPartId,
+    workoutId: partRow.templateId,
+    workoutPartId: row.crossfitWorkoutPartId,
     userId: row.userId,
     movementWeights,
     score: {

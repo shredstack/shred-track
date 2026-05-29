@@ -213,7 +213,12 @@ export async function POST(req: NextRequest) {
           userId: targetCommunityId ? null : user.id,
           communityId: targetCommunityId,
           workoutDate,
-          kind: "wod",
+          // 'wod' is the gym-programmed-section taxonomy; on a personal
+          // log it's noise that pollutes downstream analytics and forces
+          // the synthetic-workout reader's owner-section logic. Personal
+          // adds default to 'custom' so 'wod' unambiguously means a
+          // gym-programmed WOD section.
+          kind: targetCommunityId ? "wod" : "custom",
           position: 0,
           isScored: true,
           source: source || "benchmark",
@@ -262,50 +267,67 @@ export async function POST(req: NextRequest) {
     if (autoLink) autoLinkedTemplateId = autoLink.templateId;
   }
 
-  const result = await db.transaction(async (tx) => {
-    let templateId: string;
-    let isNewTemplate = false;
+  let result: {
+    session: Awaited<ReturnType<typeof createSession>>;
+    templateId: string;
+    isNewTemplate: boolean;
+  };
+  try {
+    result = await db.transaction(async (tx) => {
+      let templateId: string;
+      let isNewTemplate = false;
 
-    if (autoLinkedTemplateId) {
-      // Reuse the canonical weightlifting benchmark template — the
-      // athlete's actual weight will live on the score, not the template.
-      templateId = autoLinkedTemplateId;
-    } else {
-      const upsertResult = await upsertTemplate(tx, {
-        title: deriveTitle(title, firstPart),
-        description: description ?? null,
-        scope,
-        workoutType: firstPart.workoutType,
-        timeCapSeconds: firstPart.timeCapSeconds ?? null,
-        amrapDurationSeconds: firstPart.amrapDurationSeconds ?? null,
-        repScheme: firstPart.repScheme ?? null,
-        rounds: firstPart.rounds ?? null,
-        requiresVest: !!requiresVest,
-        vestWeightMaleLb: vestWeightMaleLb ?? null,
-        vestWeightFemaleLb: vestWeightFemaleLb ?? null,
-        isPartner: !!isPartner,
-        partnerCount: partnerCount ?? null,
-        parts,
+      if (autoLinkedTemplateId) {
+        // Reuse the canonical weightlifting benchmark template — the
+        // athlete's actual weight will live on the score, not the template.
+        templateId = autoLinkedTemplateId;
+      } else {
+        const upsertResult = await upsertTemplate(tx, {
+          title: deriveTitle(title, firstPart),
+          description: description ?? null,
+          scope,
+          workoutType: firstPart.workoutType,
+          timeCapSeconds: firstPart.timeCapSeconds ?? null,
+          amrapDurationSeconds: firstPart.amrapDurationSeconds ?? null,
+          repScheme: firstPart.repScheme ?? null,
+          rounds: firstPart.rounds ?? null,
+          requiresVest: !!requiresVest,
+          vestWeightMaleLb: vestWeightMaleLb ?? null,
+          vestWeightFemaleLb: vestWeightFemaleLb ?? null,
+          isPartner: !!isPartner,
+          partnerCount: partnerCount ?? null,
+          parts,
+        });
+        templateId = upsertResult.templateId;
+        isNewTemplate = upsertResult.isNew;
+      }
+
+      const session = await createSession(tx, {
+        crossfitWorkoutId: templateId,
+        userId: targetCommunityId ? null : user.id,
+        communityId: targetCommunityId,
+        workoutDate,
+        // See benchmark fast-path above for the kind default rationale.
+        kind: targetCommunityId ? "wod" : "custom",
+        position: 0,
+        isScored: true,
+        source:
+          source || (autoLinkedTemplateId ? "benchmark_inferred" : "manual"),
+        published: published ?? targetCommunityId !== null,
       });
-      templateId = upsertResult.templateId;
-      isNewTemplate = upsertResult.isNew;
-    }
 
-    const session = await createSession(tx, {
-      crossfitWorkoutId: templateId,
-      userId: targetCommunityId ? null : user.id,
-      communityId: targetCommunityId,
-      workoutDate,
-      kind: "wod",
-      position: 0,
-      isScored: true,
-      source:
-        source || (autoLinkedTemplateId ? "benchmark_inferred" : "manual"),
-      published: published ?? targetCommunityId !== null,
+      return { session, templateId, isNewTemplate };
     });
-
-    return { session, templateId, isNewTemplate };
-  });
+  } catch (err) {
+    // Surface validation errors thrown from upsertTemplate /
+    // insertTemplateParts so the Smart Builder can show the user exactly
+    // what's missing (e.g. intervals work/rest cadence) instead of a
+    // generic "Failed to save".
+    const message =
+      err instanceof Error && err.message ? err.message : "Failed to save";
+    console.error("[api/workouts] POST failed", err);
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
 
   await fireCalorieEstimate(result.templateId);
   return NextResponse.json(

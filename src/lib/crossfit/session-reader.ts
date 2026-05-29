@@ -64,17 +64,13 @@ export interface SessionReaderFilters {
   // Row limit on the session fetch. Defaults to 50 (day view); search
   // requests usually want 100+.
   limit?: number;
-  // Filter to a single session id (used by GET /api/workouts/[id]).
-  sessionId?: string | null;
 }
 
 export async function readSessionWorkouts(
   filters: SessionReaderFilters
 ): Promise<SyntheticWorkout[]> {
   const conds: SQL<unknown>[] = [];
-  if (filters.sessionId) {
-    conds.push(eq(workoutSessions.id, filters.sessionId));
-  } else if (filters.communityId) {
+  if (filters.communityId) {
     conds.push(eq(workoutSessions.communityId, filters.communityId));
   } else if (filters.personalOnly) {
     conds.push(eq(workoutSessions.userId, filters.userId));
@@ -238,6 +234,8 @@ export async function readSessionWorkouts(
             crossfitWorkoutMovements.prescribedWeightPctSourcePartId,
           tempo: crossfitWorkoutMovements.tempo,
           isMaxReps: crossfitWorkoutMovements.isMaxReps,
+          captureDurationPerRound:
+            crossfitWorkoutMovements.captureDurationPerRound,
           isSideCadence: crossfitWorkoutMovements.isSideCadence,
           repSchemeParsed: crossfitWorkoutMovements.repSchemeParsed,
           equipmentCount: crossfitWorkoutMovements.equipmentCount,
@@ -459,6 +457,7 @@ export async function readSessionWorkouts(
               m.prescribedWeightPctSourcePartId ?? undefined,
             tempo: m.tempo ?? undefined,
             isMaxReps: !!m.isMaxReps,
+            captureDurationPerRound: !!m.captureDurationPerRound,
             isSideCadence: !!m.isSideCadence,
             repSchemeParsed: m.repSchemeParsed,
             equipmentCount: m.equipmentCount,
@@ -524,6 +523,11 @@ export async function readSessionWorkouts(
                         d.actualRepsPerRound &&
                         d.actualRepsPerRound.length > 0
                           ? d.actualRepsPerRound
+                          : undefined,
+                      actualDurationSecondsPerRound:
+                        d.actualDurationSecondsPerRound &&
+                        d.actualDurationSecondsPerRound.length > 0
+                          ? d.actualDurationSecondsPerRound
                           : undefined,
                       notes: d.notes ?? undefined,
                     };
@@ -644,6 +648,7 @@ export interface SyntheticWorkoutMovementScore {
   actualDurationSeconds?: number;
   actualHeightInches?: number;
   actualRepsPerRound?: number[];
+  actualDurationSecondsPerRound?: number[];
   notes?: string;
 }
 

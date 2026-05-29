@@ -66,6 +66,13 @@ export async function GET(_req: NextRequest) {
     movementsByPart.set(m.crossfitWorkoutPartId, list);
   }
 
+  const movementsByBenchmark = new Map<string, typeof movementRows>();
+  for (const m of movementRows) {
+    const list = movementsByBenchmark.get(m.crossfitWorkoutId) ?? [];
+    list.push(m);
+    movementsByBenchmark.set(m.crossfitWorkoutId, list);
+  }
+
   const result = rows.map((bw) => {
     const parts = (partsByBenchmark.get(bw.id) ?? []).map((p) => ({
       id: p.id,
@@ -116,6 +123,19 @@ export async function GET(_req: NextRequest) {
       isPartner: bw.isPartner,
       partnerCount: bw.partnerCount,
       weightliftingMovementId: bw.weightliftingMovementId,
+      movements: (movementsByBenchmark.get(bw.id) ?? []).map((m) => ({
+        id: m.id,
+        movementId: m.movementId,
+        movementName: m.movementName,
+        orderIndex: m.orderIndex,
+        prescribedReps: m.prescribedReps,
+        prescribedWeightMale:
+          m.prescribedWeightMale != null ? Number(m.prescribedWeightMale) : null,
+        prescribedWeightFemale:
+          m.prescribedWeightFemale != null
+            ? Number(m.prescribedWeightFemale)
+            : null,
+      })),
       parts,
     };
   });

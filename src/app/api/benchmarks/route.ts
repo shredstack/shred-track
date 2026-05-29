@@ -21,6 +21,7 @@ import {
   crossfitWorkoutParts,
   crossfitWorkouts,
   movements,
+  scoreMovementDetails,
   scores,
   workoutSessions,
 } from "@/db/schema";
@@ -28,9 +29,10 @@ import { getSessionUser } from "@/lib/session";
 import { pickBestScore, type ScoreRow } from "@/lib/crossfit/benchmark-stats";
 import type { RepMaxTarget, RepMaxStat, WorkoutType } from "@/types/crossfit";
 import {
-  inferRepMaxTarget,
+  classifyRepMaxSets,
   pickBestPerRepTarget,
 } from "@/lib/crossfit/weightlifting-benchmarks";
+import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
 import {
   upsertTemplate,
   type TemplatePartInput,
@@ -156,6 +158,8 @@ export async function GET(req: NextRequest) {
               crossfitWorkoutMovements.prescribedWeightFemaleBwMultiplier,
             tempo: crossfitWorkoutMovements.tempo,
             isMaxReps: crossfitWorkoutMovements.isMaxReps,
+            captureDurationPerRound:
+              crossfitWorkoutMovements.captureDurationPerRound,
             isSideCadence: crossfitWorkoutMovements.isSideCadence,
             equipmentCount: crossfitWorkoutMovements.equipmentCount,
             rxStandard: crossfitWorkoutMovements.rxStandard,
@@ -296,6 +300,8 @@ export async function GET(req: NextRequest) {
         movementId: crossfitWorkoutMovements.movementId,
         partRepScheme: crossfitWorkoutParts.repScheme,
         movementPrescribedReps: crossfitWorkoutMovements.prescribedReps,
+        setEntries: scoreMovementDetails.setEntries,
+        actualWeight: scoreMovementDetails.actualWeight,
       })
       .from(scores)
       .innerJoin(workoutSessions, eq(workoutSessions.id, scores.workoutSessionId))
@@ -306,6 +312,16 @@ export async function GET(req: NextRequest) {
       .innerJoin(
         crossfitWorkoutMovements,
         eq(crossfitWorkoutMovements.crossfitWorkoutPartId, crossfitWorkoutParts.id)
+      )
+      .leftJoin(
+        scoreMovementDetails,
+        and(
+          eq(scoreMovementDetails.scoreId, scores.id),
+          eq(
+            scoreMovementDetails.crossfitWorkoutMovementId,
+            crossfitWorkoutMovements.id
+          )
+        )
       )
       .where(
         and(
@@ -325,19 +341,23 @@ export async function GET(req: NextRequest) {
       }>
     >();
     for (const r of wlRows) {
-      const target = inferRepMaxTarget(
-        r.movementPrescribedReps ?? r.partRepScheme ?? null
-      );
-      if (!target) continue;
-      const lbs = r.weightLbs != null ? Number(r.weightLbs) : null;
-      if (lbs == null) continue;
-      const list = byMovement.get(r.movementId) ?? [];
-      list.push({
-        scoreId: r.scoreId,
-        workoutDate: r.workoutDate,
-        weightLbs: lbs,
-        repTarget: target,
+      const buckets = classifyRepMaxSets({
+        setEntries: normalizeSetEntries(r.setEntries),
+        scoreWeightLbs: r.weightLbs != null ? Number(r.weightLbs) : null,
+        actualWeight: r.actualWeight != null ? Number(r.actualWeight) : null,
+        movementPrescribedReps: r.movementPrescribedReps,
+        partRepScheme: r.partRepScheme,
       });
+      if (buckets.size === 0) continue;
+      const list = byMovement.get(r.movementId) ?? [];
+      for (const [repTarget, weightLbs] of buckets) {
+        list.push({
+          scoreId: r.scoreId,
+          workoutDate: r.workoutDate,
+          weightLbs,
+          repTarget,
+        });
+      }
       byMovement.set(r.movementId, list);
     }
 
@@ -410,6 +430,7 @@ export async function GET(req: NextRequest) {
             : null,
         tempo: m.tempo,
         isMaxReps: !!m.isMaxReps,
+        captureDurationPerRound: !!m.captureDurationPerRound,
         isSideCadence: !!m.isSideCadence,
         equipmentCount: m.equipmentCount,
         rxStandard: m.rxStandard,

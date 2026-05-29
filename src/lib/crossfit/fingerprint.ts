@@ -54,6 +54,7 @@ export type FingerprintMovement = {
   prescribedWeightPct?: number | string | null;
   tempo?: string | null;
   isMaxReps?: boolean | null;
+  captureDurationPerRound?: boolean | null;
   isSideCadence?: boolean | null;
   equipmentCount?: number | null;
   rxStandard?: string | null;
@@ -179,6 +180,7 @@ function pickMovementLevel(m: FingerprintMovement): Record<string, unknown> {
     prescribedWeightPct: m.prescribedWeightPct ?? null,
     tempo: m.tempo ?? null,
     isMaxReps: m.isMaxReps ?? false,
+    captureDurationPerRound: m.captureDurationPerRound ?? false,
     isSideCadence: m.isSideCadence ?? false,
     equipmentCount: m.equipmentCount ?? null,
     rxStandard: m.rxStandard ?? null,

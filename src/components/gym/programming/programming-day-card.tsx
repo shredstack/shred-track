@@ -58,10 +58,7 @@ import {
   type WorkoutSectionKind,
 } from "@/db/schema";
 import { AddWorkoutTabs } from "@/components/crossfit/add-workout-tabs";
-import {
-  benchmarkPartToBuilderPart,
-  builderPartToPayload,
-} from "@/lib/crossfit/builder-payload";
+import { builderPartToPayload } from "@/lib/crossfit/builder-payload";
 import { resolveParsedToCreatePart } from "@/lib/crossfit/resolve-parsed-movements";
 import { useMovements, useCreateMovement } from "@/hooks/useMovements";
 import {
@@ -104,6 +101,7 @@ interface MovementWire {
   prescribedWeightPct: string | null;
   tempo: string | null;
   isMaxReps: boolean;
+  captureDurationPerRound: boolean;
   isSideCadence: boolean;
   equipmentCount: number | null;
 }
@@ -340,9 +338,7 @@ export function ProgrammingDayCard({
     opts?: { silent?: boolean; body?: string | null; title?: string | null }
   ): Promise<{ id: string } | null> {
     try {
-      const payload: Record<string, unknown> = workout
-        ? { workoutId: workout.id, kind }
-        : { workoutDate: date, kind };
+      const payload: Record<string, unknown> = { workoutDate: date, kind };
       if (opts?.body !== undefined) payload.body = opts.body;
       if (opts?.title !== undefined) payload.title = opts.title;
       const res = await fetch(
@@ -686,7 +682,7 @@ function SectionRow({
       vestWeightFemaleLb?: number | string | null;
       successMessage?: string;
     }) => {
-      if (input.parts.length === 0) {
+      if (input.parts.length === 0 && !input.benchmarkWorkoutId) {
         setBuilderError("Add at least one part with movements.");
         return;
       }
@@ -816,37 +812,16 @@ function SectionRow({
   );
 
   const handleBenchmarkSave = useCallback(
-    async (
-      benchmark: BenchmarkWorkout,
-      _workoutDate: string,
-      options: { isPartner: boolean; partnerCount: number | null }
-    ) => {
-      // Run the benchmark's parts through the same form→payload pipeline
-      // the user-facing benchmark form uses, so section content matches
-      // what users see when they pick the same benchmark from the
-      // CrossFit tab.
-      const parts = benchmark.parts
-        .map((p) => builderPartToPayload(benchmarkPartToBuilderPart(p)))
-        .filter((p): p is CreatePartInput => p !== null);
+    async (benchmark: BenchmarkWorkout) => {
+      // Pure relink: the session points at the canonical benchmark template
+      // so description, vest, partner, leaderboard rollup, and future system
+      // updates all flow from one row. Per-session overrides (e.g. change
+      // partner mode) happen through Smart Builder edit, which forks.
       await saveSectionContent({
-        parts,
+        parts: [],
         title: benchmark.name,
-        // Description lives on the parent workout (mirrors the CrossFit-tab
-        // fast path) — explicitly clear notes so we don't double-render
-        // the blurb on sections that previously stashed it here.
         notes: "",
-        // Tag the section with the benchmark so athletes' scores roll up
-        // into the benchmark's history / trends / stats.
         benchmarkWorkoutId: benchmark.id,
-        // Mirror POST /api/workouts: copy benchmark metadata to the parent
-        // workout so ProgrammedWorkoutDay can render description, partner
-        // chip, and vest chip identically to the CrossFit-tab card.
-        description: benchmark.description ?? null,
-        isPartner: options.isPartner,
-        partnerCount: options.partnerCount,
-        requiresVest: !!benchmark.requiresVest,
-        vestWeightMaleLb: benchmark.vestWeightMaleLb ?? null,
-        vestWeightFemaleLb: benchmark.vestWeightFemaleLb ?? null,
         successMessage: `Added ${benchmark.name}`,
       });
     },

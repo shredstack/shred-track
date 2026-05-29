@@ -58,6 +58,7 @@ export type TemplatePartMovementInput = {
   weightPctSourcePartTempRef?: string | null;
   tempo?: string | null;
   isMaxReps?: boolean;
+  captureDurationPerRound?: boolean;
   isSideCadence?: boolean;
   blockId?: string | null;
   blockTempRef?: string | null;
@@ -284,6 +285,7 @@ export function buildFingerprintInput(
         prescribedWeightPct: m.prescribedWeightPct ?? null,
         tempo: m.tempo ?? null,
         isMaxReps: !!m.isMaxReps,
+        captureDurationPerRound: !!m.captureDurationPerRound,
         isSideCadence: !!m.isSideCadence,
         equipmentCount: m.equipmentCount ?? null,
         rxStandard: m.rxStandard ?? null,
@@ -455,9 +457,14 @@ export async function insertTemplateParts(
       if (!normalizedRounds) {
         const work = toDurationSecondsOrNull(p.intervalWorkSeconds);
         const rest = toDurationSecondsOrNull(p.intervalRestSeconds);
-        if (!p.rounds || work == null || rest == null) {
+        if (!p.rounds) {
           throw new Error(
-            "Intervals parts require rounds plus either intervalWorkSeconds/Rest or a per-round intervalRounds array"
+            "Intervals workouts need a number of rounds. Set the rounds field (e.g. 3)."
+          );
+        }
+        if (work == null && rest == null) {
+          throw new Error(
+            "Intervals workouts need a work or rest duration per round. Add at least one (e.g. 2:00 rest)."
           );
         }
       }
@@ -562,6 +569,7 @@ export async function insertTemplateParts(
             : null,
           tempo: m.tempo?.trim() || null,
           isMaxReps: !!m.isMaxReps,
+          captureDurationPerRound: !!m.captureDurationPerRound,
           isSideCadence: !!m.isSideCadence,
           repSchemeParsed: parseAndPromote(
             m.prescribedReps,

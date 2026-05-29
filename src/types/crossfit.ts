@@ -382,6 +382,10 @@ export interface BenchmarkMovement {
   prescribedWeightPctSourcePartId?: string | null;
   tempo?: string | null;
   isMaxReps?: boolean;
+  // When true the athlete logs one duration per round at score entry
+  // (e.g. "Run 400m × 3 as fast as possible"). Sums into the part's total
+  // time. Mutually exclusive with isMaxReps.
+  captureDurationPerRound?: boolean;
   isSideCadence?: boolean;
   equipmentCount?: number | null;
   rxStandard: string | null;
@@ -421,6 +425,10 @@ export interface WorkoutMovementDisplay {
   prescribedWeightPctSourcePartId?: string;
   tempo?: string;
   isMaxReps?: boolean;
+  // When true the athlete logs one duration per round at score entry
+  // (e.g. "Run 400m × 3 as fast as possible"). Sums into the part's total
+  // time. Mutually exclusive with isMaxReps.
+  captureDurationPerRound?: boolean;
   // When true, this movement runs on the part's side-cadence rather than
   // contributing to the main task.
   isSideCadence?: boolean;
@@ -616,6 +624,9 @@ export interface ScoreMovementDetailDisplay {
   actualHeightInches?: number;
   // Per-round rep counts when this is a max-reps movement.
   actualRepsPerRound?: number[];
+  // Per-round durations (seconds) when this is a captureDurationPerRound
+  // movement. Length matches part.rounds.
+  actualDurationSecondsPerRound?: number[];
   notes?: string;
 }
 
@@ -666,6 +677,7 @@ export interface MovementScaling {
   actualDurationSeconds?: number;
   actualHeightInches?: number;
   actualRepsPerRound?: number[];
+  actualDurationSecondsPerRound?: number[];
   notes?: string;
 }
 
@@ -729,6 +741,10 @@ export interface WorkoutBuilderMovement {
   // When true, the prescribedReps field is suppressed and the score-entry
   // surfaces per-round rep inputs that auto-sum into the part's total.
   isMaxReps?: boolean;
+  // When true the athlete logs one duration per round at score entry
+  // (e.g. "Run 400m × 3 as fast as possible"). Sums into the part's total
+  // time. Mutually exclusive with isMaxReps.
+  captureDurationPerRound?: boolean;
   // When true, this movement is the part's side-cadence movement (runs
   // on the part's cadence rather than contributing to the main task).
   isSideCadence?: boolean;

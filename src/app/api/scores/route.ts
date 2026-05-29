@@ -34,6 +34,7 @@ interface MovementDetailInput {
   actualDurationSeconds?: number;
   actualHeightInches?: number;
   actualRepsPerRound?: number[];
+  actualDurationSecondsPerRound?: number[];
   notes?: string;
 }
 
@@ -413,6 +414,13 @@ export async function POST(req: NextRequest) {
                 Array.isArray(d.actualRepsPerRound) &&
                 d.actualRepsPerRound.length > 0
                   ? d.actualRepsPerRound.map((n) => Math.max(0, Math.round(n)))
+                  : null,
+              actualDurationSecondsPerRound:
+                Array.isArray(d.actualDurationSecondsPerRound) &&
+                d.actualDurationSecondsPerRound.length > 0
+                  ? d.actualDurationSecondsPerRound.map((n) =>
+                      Math.max(0, Math.round(n))
+                    )
                   : null,
               notes: d.notes ?? null,
             }))

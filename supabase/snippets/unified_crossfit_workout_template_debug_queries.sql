@@ -85,3 +85,23 @@ where cw.is_benchmark = false
 group by cw.id, cw.title
 having count(ws.id) > 1
 order by session_count desc limit 20;
+
+-- a session is one section of a day, not the whole day
+select id, workout_date, position, kind, sub_kind, title,
+       crossfit_workout_id, published
+from workout_sessions
+where workout_date = '2026-05-11'
+order by position;
+
+select id, position, kind, title, published
+from workout_sessions
+where workout_date = '2026-05-25'
+order by position;
+
+-- scores for a single date
+select s.position, s.title, sc.division, sc.time_seconds, sc.rounds, sc.score_text
+from workout_sessions s
+join scores sc on sc.workout_session_id = s.id 
+where s.workout_date = '2026-05-11'
+  and (s.user_id = sc.user_id or s.community_id is not null)
+order by s.position;

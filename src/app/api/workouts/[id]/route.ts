@@ -14,8 +14,11 @@ import { updateSession } from "@/lib/crossfit/session-writer";
 import { readSessionWorkouts } from "@/lib/crossfit/session-reader";
 import { inngest } from "@/inngest/client";
 
-// GET /api/workouts/[id] — single session view, returned as a one-element
-// synthetic workout. `id` is a workout_sessions.id post-cutover.
+// GET /api/workouts/[id] — day view. `id` is a workout_sessions.id, but
+// the response is the whole day's grouped synthetic workout (every
+// session sharing the requested session's scope + workout_date),
+// mirroring the wire shape of GET /api/workouts. PUT/DELETE on this
+// route stay session-level.
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -37,20 +40,37 @@ export async function GET(
     }
   }
 
-  // Use the shared reader so the wire shape matches GET /api/workouts.
-  // userId is required by the reader for score-attachment; on anonymous
-  // GETs we pass the empty string, which never matches a scores.user_id.
-  const result = await readSessionWorkouts({
-    userId: user?.id ?? "",
-    sessionId: id,
-    limit: 50,
-  });
-
-  if (result.length === 0) {
+  // Resolve the requested session's scope + date so the reader can pull
+  // every sibling session in the same day group.
+  const [s] = await db
+    .select({
+      userId: workoutSessions.userId,
+      communityId: workoutSessions.communityId,
+      workoutDate: workoutSessions.workoutDate,
+    })
+    .from(workoutSessions)
+    .where(eq(workoutSessions.id, id))
+    .limit(1);
+  if (!s) {
     return NextResponse.json({ error: "Workout not found" }, { status: 404 });
   }
 
-  return NextResponse.json(result[0]);
+  const result = await readSessionWorkouts({
+    userId: user?.id ?? "",
+    date: s.workoutDate,
+    communityId: s.communityId ?? null,
+    personalOnly: s.communityId == null,
+    limit: 50,
+  });
+
+  const workout =
+    result.find((w) => w.id === id) ??
+    result.find((w) => w.sections.some((sec) => sec.id === id));
+  if (!workout) {
+    return NextResponse.json({ error: "Workout not found" }, { status: 404 });
+  }
+
+  return NextResponse.json(workout);
 }
 
 // In the unified schema the prescription lives on a template (not on a per-

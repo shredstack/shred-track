@@ -97,19 +97,26 @@ export async function POST(
       { status: 404 }
     );
   }
-  // Only personal sessions belong in this flow. A community-scoped row
-  // already lives in programming — refuse it explicitly so the caller
-  // doesn't double-move and lose attribution.
-  if (source.communityId !== null) {
-    return NextResponse.json(
-      { error: "Workout is already part of a gym schedule" },
-      { status: 400 }
-    );
-  }
+  // Two flows land here:
+  //   • Personal log → gym programming (the legacy "move into gym" path).
+  //   • Gym-manual workout → gym programming (the manual-workouts banner's
+  //     "Move into programming" button, surfaced now that the programming
+  //     route buckets manual sessions separately).
+  // We accept either, but a session that's already attached to a release
+  // is double-promotion and should bounce.
   if (source.programmingReleaseId) {
     return NextResponse.json(
       { error: "Workout is already part of programming" },
       { status: 400 }
+    );
+  }
+  // A gym-scoped source must belong to THIS gym. Cross-gym moves aren't
+  // an authorized flow — admins of gym A can't reach into gym B's manual
+  // workouts.
+  if (source.communityId !== null && source.communityId !== communityId) {
+    return NextResponse.json(
+      { error: "Workout belongs to a different gym" },
+      { status: 403 }
     );
   }
   if (source.workoutDate !== workoutDate) {
@@ -118,9 +125,9 @@ export async function POST(
       { status: 400 }
     );
   }
-  // The mover must own the source. Anyone else's personal log shouldn't
-  // be reachable through this endpoint even by a gym admin.
-  if (source.userId !== user.id) {
+  // Personal sessions move only when the caller owns them. Gym-manual
+  // sessions are owned by the gym; canManageGym above is the authz check.
+  if (source.communityId === null && source.userId !== user.id) {
     return NextResponse.json(
       { error: "You can only move your own workouts" },
       { status: 403 }
