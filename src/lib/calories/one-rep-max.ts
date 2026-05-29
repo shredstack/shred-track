@@ -18,8 +18,9 @@ import {
   movements,
   scoreMovementDetails,
   scores,
+  workoutMovements,
 } from "@/db/schema";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { normalizeSetEntries, maxWeight } from "@/lib/crossfit/set-entries";
 import { estimatedOneRmForSet } from "@/lib/crossfit/insights/predicted-1rm";
 import {
@@ -77,33 +78,47 @@ export async function loadUserOneRepMaxes(
   const result = new Map<string, number>();
   if (movementIds.length === 0) return result;
 
+  // Resolve movement + repSchemeParsed via whichever SMD FK is populated.
+  // Pre-unification scores whose backfill left `crossfitWorkoutMovementId`
+  // null (the divergent-template exemption in migrate_to_unified_crossfit.ts)
+  // fall back to the legacy `workoutMovements` row via `workoutMovementId`.
+  // See the matching fix in lib/crossfit/insights/predicted-1rm.ts.
   const rows = await db
     .select({
-      movementId: crossfitWorkoutMovements.movementId,
+      movementId: sql<string>`coalesce(${crossfitWorkoutMovements.movementId}, ${workoutMovements.movementId})`,
       partRepScheme: crossfitWorkoutParts.repScheme,
-      movementRepSchemeParsed: crossfitWorkoutMovements.repSchemeParsed,
+      movementRepSchemeParsed: sql<unknown>`coalesce(${crossfitWorkoutMovements.repSchemeParsed}, ${workoutMovements.repSchemeParsed})`,
       actualWeight: scoreMovementDetails.actualWeight,
       setEntries: scoreMovementDetails.setEntries,
     })
     .from(scoreMovementDetails)
     .innerJoin(scores, eq(scores.id, scoreMovementDetails.scoreId))
+    // Part is resolved via the score so divergent-backfill rows (cwm FK null)
+    // still pick up their part-level workoutType / repScheme.
     .innerJoin(
+      crossfitWorkoutParts,
+      eq(crossfitWorkoutParts.id, scores.crossfitWorkoutPartId)
+    )
+    .leftJoin(
       crossfitWorkoutMovements,
       eq(
         crossfitWorkoutMovements.id,
         scoreMovementDetails.crossfitWorkoutMovementId
       )
     )
-    .innerJoin(
-      crossfitWorkoutParts,
-      eq(crossfitWorkoutParts.id, crossfitWorkoutMovements.crossfitWorkoutPartId)
+    .leftJoin(
+      workoutMovements,
+      eq(workoutMovements.id, scoreMovementDetails.workoutMovementId)
     )
-    .innerJoin(movements, eq(movements.id, crossfitWorkoutMovements.movementId))
+    .innerJoin(
+      movements,
+      sql`${movements.id} = coalesce(${crossfitWorkoutMovements.movementId}, ${workoutMovements.movementId})`
+    )
     .where(
       and(
         eq(scores.userId, userId),
         eq(movements.is1rmApplicable, true),
-        inArray(crossfitWorkoutMovements.movementId, movementIds),
+        inArray(movements.id, movementIds),
         // Only for_load parts (max_effort exists at the template level as
         // workoutType but parts always pivot through for_load in practice).
         inArray(crossfitWorkoutParts.workoutType, ["for_load", "max_effort"])

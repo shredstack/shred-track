@@ -14,10 +14,11 @@ import {
   crossfitWorkoutMovements,
   crossfitWorkoutParts,
   crossfitWorkouts,
+  workoutMovements,
   workoutSessions,
   movements,
 } from "@/db/schema";
-import { and, eq, gte } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
 import type { SetEntry } from "@/types/crossfit";
 
@@ -141,6 +142,14 @@ async function fetchSetData(
 ): Promise<RawSetRow[]> {
   const since = toIsoDate(daysAgo(windowDays));
 
+  // Resolve the lifted movement via whichever SMD FK is populated. The
+  // unified-schema backfill (migrate_to_unified_crossfit.ts) leaves
+  // `crossfitWorkoutMovementId` null on legacy SMDs whose workout's movements
+  // diverged from the benchmark template it was tagged to, so we fall back to
+  // the legacy `workoutMovementId → workout_movements.movement_id` path. New
+  // post-cutover writes leave `workoutMovementId` null, so coalesce picks the
+  // cwm side. Resolves the symptom where pre-unification scores silently
+  // dropped out of the 1RM predictor.
   const rows = await db
     .select({
       movementId: movements.id,
@@ -152,30 +161,38 @@ async function fetchSetData(
       partWorkoutType: crossfitWorkoutParts.workoutType,
       workoutRepScheme: crossfitWorkouts.repScheme,
       partRepScheme: crossfitWorkoutParts.repScheme,
-      movementPrescribedReps: crossfitWorkoutMovements.prescribedReps,
+      movementPrescribedReps: sql<string | null>`coalesce(${crossfitWorkoutMovements.prescribedReps}, ${workoutMovements.prescribedReps})`,
       actualWeight: scoreMovementDetails.actualWeight,
       setEntries: scoreMovementDetails.setEntries,
     })
     .from(scoreMovementDetails)
     .innerJoin(scores, eq(scores.id, scoreMovementDetails.scoreId))
+    .innerJoin(workoutSessions, eq(workoutSessions.id, scores.workoutSessionId))
     .innerJoin(
+      crossfitWorkouts,
+      eq(crossfitWorkouts.id, workoutSessions.crossfitWorkoutId)
+    )
+    // Part is resolved via the score, not via cwm, so divergent-backfill rows
+    // (cwm FK null) still pick up their part-level prescription context.
+    .innerJoin(
+      crossfitWorkoutParts,
+      eq(crossfitWorkoutParts.id, scores.crossfitWorkoutPartId)
+    )
+    .leftJoin(
       crossfitWorkoutMovements,
       eq(
         crossfitWorkoutMovements.id,
         scoreMovementDetails.crossfitWorkoutMovementId
       )
     )
-    // Part FK is NOT NULL in the unified schema; inner join is safe.
-    .innerJoin(
-      crossfitWorkoutParts,
-      eq(crossfitWorkoutParts.id, crossfitWorkoutMovements.crossfitWorkoutPartId)
+    .leftJoin(
+      workoutMovements,
+      eq(workoutMovements.id, scoreMovementDetails.workoutMovementId)
     )
-    .innerJoin(workoutSessions, eq(workoutSessions.id, scores.workoutSessionId))
     .innerJoin(
-      crossfitWorkouts,
-      eq(crossfitWorkouts.id, workoutSessions.crossfitWorkoutId)
+      movements,
+      sql`${movements.id} = coalesce(${crossfitWorkoutMovements.movementId}, ${workoutMovements.movementId})`
     )
-    .innerJoin(movements, eq(movements.id, crossfitWorkoutMovements.movementId))
     .where(
       and(
         eq(scores.userId, userId),
