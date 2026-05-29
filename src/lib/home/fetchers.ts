@@ -14,14 +14,14 @@ import {
   classRegistrations,
   classSchedules,
   communities,
+  crossfitWorkouts,
   gymPosts,
   programmingTrackDays,
   programmingTrackParticipations,
   programmingTracks,
   scores,
   users,
-  workouts,
-  workoutSections,
+  workoutSessions,
 } from "@/db/schema";
 import { isFlagOn } from "@/lib/feature-flags";
 import {
@@ -89,58 +89,76 @@ function tzOffsetMs(tz: string, at: Date): number {
   return localUtc - at.getTime();
 }
 
+// Each fetcher swallows its own errors and returns a safe fallback so a single
+// stalled query (or transient Supabase outage) can't take down the whole home
+// page — combined with per-card Suspense in page.tsx, this means a slow
+// fetcher only delays/hides one card instead of blocking the render.
+function logFetcherError(label: string, e: unknown) {
+  console.error(`[home fetcher ${label}] failed:`, e);
+}
+
 export async function fetchPendingDocuments(
   userId: string,
   communityId: string
 ): Promise<PendingDocumentsBannerData | null> {
-  const pending = await getPendingDocuments(userId, communityId);
-  if (pending.length === 0) return null;
-  const [c] = await db
-    .select({ name: communities.name, slug: communities.inviteUrlSlug })
-    .from(communities)
-    .where(eq(communities.id, communityId))
-    .limit(1);
-  if (!c?.slug) return null;
-  return {
-    slug: c.slug,
-    gymName: c.name,
-    pendingCount: pending.length,
-    anyResign: pending.some((d) => d.isResign),
-  };
+  try {
+    const pending = await getPendingDocuments(userId, communityId);
+    if (pending.length === 0) return null;
+    const [c] = await db
+      .select({ name: communities.name, slug: communities.inviteUrlSlug })
+      .from(communities)
+      .where(eq(communities.id, communityId))
+      .limit(1);
+    if (!c?.slug) return null;
+    return {
+      slug: c.slug,
+      gymName: c.name,
+      pendingCount: pending.length,
+      anyResign: pending.some((d) => d.isResign),
+    };
+  } catch (e) {
+    logFetcherError("fetchPendingDocuments", e);
+    return null;
+  }
 }
 
 export async function fetchGymHeaderStrip(
   communityId: string
 ): Promise<GymHeaderStripData | null> {
-  const [c] = await db
-    .select({
-      name: communities.name,
-      logoUrl: communities.logoUrl,
-      websiteUrl: communities.websiteUrl,
-    })
-    .from(communities)
-    .where(eq(communities.id, communityId))
-    .limit(1);
-  if (!c) return null;
-  // Pinned announcement: latest published pinned gym_post for the gym.
-  const [pinned] = await db
-    .select({ body: gymPosts.body })
-    .from(gymPosts)
-    .where(
-      and(
-        eq(gymPosts.communityId, communityId),
-        eq(gymPosts.status, "published"),
-        eq(gymPosts.isPinned, true)
+  try {
+    const [c] = await db
+      .select({
+        name: communities.name,
+        logoUrl: communities.logoUrl,
+        websiteUrl: communities.websiteUrl,
+      })
+      .from(communities)
+      .where(eq(communities.id, communityId))
+      .limit(1);
+    if (!c) return null;
+    // Pinned announcement: latest published pinned gym_post for the gym.
+    const [pinned] = await db
+      .select({ body: gymPosts.body })
+      .from(gymPosts)
+      .where(
+        and(
+          eq(gymPosts.communityId, communityId),
+          eq(gymPosts.status, "published"),
+          eq(gymPosts.isPinned, true)
+        )
       )
-    )
-    .orderBy(desc(gymPosts.publishedAt))
-    .limit(1);
-  return {
-    name: c.name,
-    logoUrl: c.logoUrl ?? null,
-    pinnedAnnouncement: pinned?.body ?? null,
-    websiteUrl: c.websiteUrl ?? null,
-  };
+      .orderBy(desc(gymPosts.publishedAt))
+      .limit(1);
+    return {
+      name: c.name,
+      logoUrl: c.logoUrl ?? null,
+      pinnedAnnouncement: pinned?.body ?? null,
+      websiteUrl: c.websiteUrl ?? null,
+    };
+  } catch (e) {
+    logFetcherError("fetchGymHeaderStrip", e);
+    return null;
+  }
 }
 
 export async function fetchTodaysClass(
@@ -148,92 +166,106 @@ export async function fetchTodaysClass(
   communityId: string,
   gymTimezone: string
 ): Promise<TodaysClassCardData | null> {
-  if (!(await isFlagOn("classes", { userId, communityId }))) return null;
-  const startUtc = startOfTodayUtc(gymTimezone);
-  const endUtc = endOfTodayUtc(gymTimezone);
-  // Show the next class today the member is registered for.
-  const [row] = await db
-    .select({
-      classInstanceId: classInstances.id,
-      scheduleId: classInstances.scheduleId,
-      startAt: classInstances.startAt,
-      eventTitle: classInstances.eventTitle,
-      coachId: classInstances.coachId,
-      scheduleName: classSchedules.name,
-    })
-    .from(classRegistrations)
-    .innerJoin(
-      classInstances,
-      eq(classInstances.id, classRegistrations.classInstanceId)
-    )
-    .leftJoin(classSchedules, eq(classSchedules.id, classInstances.scheduleId))
-    .where(
-      and(
-        eq(classRegistrations.userId, userId),
-        eq(classRegistrations.status, "registered"),
-        eq(classInstances.communityId, communityId),
-        eq(classInstances.status, "scheduled"),
-        gte(classInstances.startAt, startUtc),
-        lt(classInstances.startAt, endUtc)
+  try {
+    if (!(await isFlagOn("classes", { userId, communityId }))) return null;
+    const startUtc = startOfTodayUtc(gymTimezone);
+    const endUtc = endOfTodayUtc(gymTimezone);
+    // Show the next class today the member is registered for.
+    const [row] = await db
+      .select({
+        classInstanceId: classInstances.id,
+        scheduleId: classInstances.scheduleId,
+        startAt: classInstances.startAt,
+        eventTitle: classInstances.eventTitle,
+        coachId: classInstances.coachId,
+        scheduleName: classSchedules.name,
+      })
+      .from(classRegistrations)
+      .innerJoin(
+        classInstances,
+        eq(classInstances.id, classRegistrations.classInstanceId)
       )
-    )
-    .orderBy(asc(classInstances.startAt))
-    .limit(1);
-  if (!row) return null;
-  let coachName: string | null = null;
-  if (row.coachId) {
-    const [c] = await db
-      .select({ name: users.name })
-      .from(users)
-      .where(eq(users.id, row.coachId))
+      .leftJoin(classSchedules, eq(classSchedules.id, classInstances.scheduleId))
+      .where(
+        and(
+          eq(classRegistrations.userId, userId),
+          eq(classRegistrations.status, "registered"),
+          eq(classInstances.communityId, communityId),
+          eq(classInstances.status, "scheduled"),
+          gte(classInstances.startAt, startUtc),
+          lt(classInstances.startAt, endUtc)
+        )
+      )
+      .orderBy(asc(classInstances.startAt))
       .limit(1);
-    coachName = c?.name ?? null;
+    if (!row) return null;
+    let coachName: string | null = null;
+    if (row.coachId) {
+      const [c] = await db
+        .select({ name: users.name })
+        .from(users)
+        .where(eq(users.id, row.coachId))
+        .limit(1);
+      coachName = c?.name ?? null;
+    }
+    return {
+      classInstanceId: row.classInstanceId,
+      name: row.eventTitle ?? row.scheduleName ?? "Class",
+      startAt: row.startAt.toISOString(),
+      coachName,
+    };
+  } catch (e) {
+    logFetcherError("fetchTodaysClass", e);
+    return null;
   }
-  return {
-    classInstanceId: row.classInstanceId,
-    name: row.eventTitle ?? row.scheduleName ?? "Class",
-    startAt: row.startAt.toISOString(),
-    coachName,
-  };
 }
 
 export async function fetchTodaysWorkout(
   communityId: string,
   gymTimezone: string
 ): Promise<TodaysWorkoutCardData | null> {
-  const today = todayInTz(gymTimezone);
-  const [w] = await db
-    .select({
-      id: workouts.id,
-      title: workouts.title,
-      description: workouts.description,
-    })
-    .from(workouts)
-    .where(
-      and(
-        eq(workouts.communityId, communityId),
-        eq(workouts.workoutDate, today),
-        eq(workouts.published, true)
+  try {
+    const today = todayInTz(gymTimezone);
+    // Prefer a WOD-kind session; fall back to position 0 if none. The
+    // session.id stands in for the legacy workouts.id (day-level handle).
+    const [s] = await db
+      .select({
+        id: workoutSessions.id,
+        sessionTitle: workoutSessions.title,
+        templateTitle: crossfitWorkouts.title,
+        templateDescription: crossfitWorkouts.description,
+        kind: workoutSessions.kind,
+      })
+      .from(workoutSessions)
+      .leftJoin(
+        crossfitWorkouts,
+        eq(crossfitWorkouts.id, workoutSessions.crossfitWorkoutId)
       )
-    )
-    .orderBy(desc(workouts.updatedAt))
-    .limit(1);
-  if (!w) return null;
-  // Compose a one-line summary from the first WOD section title or
-  // workout description.
-  let summary: string | null = w.description ? w.description.slice(0, 100) : null;
-  const [wodSection] = await db
-    .select({ title: workoutSections.title })
-    .from(workoutSections)
-    .where(
-      and(
-        eq(workoutSections.workoutId, w.id),
-        eq(workoutSections.kind, "wod")
+      .where(
+        and(
+          eq(workoutSessions.communityId, communityId),
+          eq(workoutSessions.workoutDate, today),
+          eq(workoutSessions.published, true)
+        )
       )
-    )
-    .limit(1);
-  if (wodSection?.title) summary = wodSection.title;
-  return { workoutId: w.id, title: w.title ?? null, summary };
+      .orderBy(
+        desc(eq(workoutSessions.kind, "wod")),
+        asc(workoutSessions.position)
+      )
+      .limit(1);
+    if (!s) return null;
+    const summary = s.templateDescription
+      ? s.templateDescription.slice(0, 100)
+      : s.templateTitle ?? null;
+    return {
+      workoutId: s.id,
+      title: s.sessionTitle ?? s.templateTitle ?? null,
+      summary,
+    };
+  } catch (e) {
+    logFetcherError("fetchTodaysWorkout", e);
+    return null;
+  }
 }
 
 export async function fetchActiveChallenge(
@@ -241,6 +273,7 @@ export async function fetchActiveChallenge(
   communityId: string,
   gymTimezone: string
 ): Promise<ChallengeCardData | null> {
+  try {
   if (
     !(await isFlagOn("programming_tracks", { userId, communityId }))
   ) {
@@ -331,6 +364,10 @@ export async function fetchActiveChallenge(
     todayBody: day?.body ?? null,
     rollup,
   };
+  } catch (e) {
+    logFetcherError("fetchActiveChallenge", e);
+    return null;
+  }
 }
 
 export async function fetchMurphPrep(
@@ -338,6 +375,7 @@ export async function fetchMurphPrep(
   communityId: string,
   gymTimezone: string
 ): Promise<MurphPrepCardData | null> {
+  try {
   if (!(await isFlagOn("programming_tracks", { userId, communityId }))) {
     return null;
   }
@@ -407,53 +445,67 @@ export async function fetchMurphPrep(
     joined: !!participation,
     todayBody,
   };
+  } catch (e) {
+    logFetcherError("fetchMurphPrep", e);
+    return null;
+  }
 }
 
 export async function fetchCommittedClub(
   userId: string,
   communityId: string
 ): Promise<CommittedClubWidgetData | null> {
-  if (!(await isFlagOn("committed_club", { userId, communityId }))) {
+  try {
+    if (!(await isFlagOn("committed_club", { userId, communityId }))) {
+      return null;
+    }
+    const p = await getCurrentMonthProgress(userId, communityId);
+    return {
+      classesAttended: p.classesAttended,
+      threshold: p.threshold,
+      qualified: p.qualified,
+    };
+  } catch (e) {
+    logFetcherError("fetchCommittedClub", e);
     return null;
   }
-  const p = await getCurrentMonthProgress(userId, communityId);
-  return {
-    classesAttended: p.classesAttended,
-    threshold: p.threshold,
-    qualified: p.qualified,
-  };
 }
 
 export async function fetchSocialFeedTeaser(
   userId: string,
   communityId: string
 ): Promise<SocialFeedTeaserPost[]> {
-  if (!(await isFlagOn("social_feed", { userId, communityId }))) return [];
-  const rows = await db
-    .select({
-      id: gymPosts.id,
-      kind: gymPosts.kind,
-      body: gymPosts.body,
-      publishedAt: gymPosts.publishedAt,
-      authorName: users.name,
-    })
-    .from(gymPosts)
-    .innerJoin(users, eq(users.id, gymPosts.authorId))
-    .where(
-      and(
-        eq(gymPosts.communityId, communityId),
-        eq(gymPosts.status, "published")
+  try {
+    if (!(await isFlagOn("social_feed", { userId, communityId }))) return [];
+    const rows = await db
+      .select({
+        id: gymPosts.id,
+        kind: gymPosts.kind,
+        body: gymPosts.body,
+        publishedAt: gymPosts.publishedAt,
+        authorName: users.name,
+      })
+      .from(gymPosts)
+      .innerJoin(users, eq(users.id, gymPosts.authorId))
+      .where(
+        and(
+          eq(gymPosts.communityId, communityId),
+          eq(gymPosts.status, "published")
+        )
       )
-    )
-    .orderBy(desc(gymPosts.publishedAt))
-    .limit(3);
-  return rows.map((r) => ({
-    id: r.id,
-    kind: r.kind,
-    authorName: r.authorName,
-    body: r.body,
-    publishedAt: r.publishedAt.toISOString(),
-  }));
+      .orderBy(desc(gymPosts.publishedAt))
+      .limit(3);
+    return rows.map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      authorName: r.authorName,
+      body: r.body,
+      publishedAt: r.publishedAt.toISOString(),
+    }));
+  } catch (e) {
+    logFetcherError("fetchSocialFeedTeaser", e);
+    return [];
+  }
 }
 
 export async function fetchQuickStats(
@@ -461,37 +513,42 @@ export async function fetchQuickStats(
   communityId: string | null,
   gymTimezone: string
 ): Promise<QuickStatsStripData> {
-  // For gym members: counts of attended class_registrations in week/month/year.
-  // For solo: counts of scores logged in week/month/year.
-  const now = new Date();
-  const { startUtc: monthStart } = gymMonthBounds(gymTimezone, now);
-  const yearStartUtc = new Date(
-    new Date(monthStart).getUTCFullYear(),
-    0,
-    1
-  );
-  // Week-start = monday of current week (gym-local). Approximate: subtract
-  // ((today.getUTCDay()+6) % 7) days from today's gym-local start.
-  const todayStartUtc = startOfTodayUtc(gymTimezone);
-  const dow = (todayStartUtc.getUTCDay() + 6) % 7;
-  const weekStartUtc = new Date(todayStartUtc.getTime() - dow * 86_400_000);
+  try {
+    // For gym members: counts of attended class_registrations in week/month/year.
+    // For solo: counts of scores logged in week/month/year.
+    const now = new Date();
+    const { startUtc: monthStart } = gymMonthBounds(gymTimezone, now);
+    const yearStartUtc = new Date(
+      new Date(monthStart).getUTCFullYear(),
+      0,
+      1
+    );
+    // Week-start = monday of current week (gym-local). Approximate: subtract
+    // ((today.getUTCDay()+6) % 7) days from today's gym-local start.
+    const todayStartUtc = startOfTodayUtc(gymTimezone);
+    const dow = (todayStartUtc.getUTCDay() + 6) % 7;
+    const weekStartUtc = new Date(todayStartUtc.getTime() - dow * 86_400_000);
 
-  if (communityId) {
+    if (communityId) {
+      const [allTime, w, m, y] = await Promise.all([
+        countAttended(userId, communityId, null),
+        countAttended(userId, communityId, weekStartUtc),
+        countAttended(userId, communityId, monthStart),
+        countAttended(userId, communityId, yearStartUtc),
+      ]);
+      return { week: w, month: m, year: y, allTime };
+    }
     const [allTime, w, m, y] = await Promise.all([
-      countAttended(userId, communityId, null),
-      countAttended(userId, communityId, weekStartUtc),
-      countAttended(userId, communityId, monthStart),
-      countAttended(userId, communityId, yearStartUtc),
+      countScores(userId, null),
+      countScores(userId, weekStartUtc),
+      countScores(userId, monthStart),
+      countScores(userId, yearStartUtc),
     ]);
     return { week: w, month: m, year: y, allTime };
+  } catch (e) {
+    logFetcherError("fetchQuickStats", e);
+    return { week: 0, month: 0, year: 0, allTime: 0 };
   }
-  const [allTime, w, m, y] = await Promise.all([
-    countScores(userId, null),
-    countScores(userId, weekStartUtc),
-    countScores(userId, monthStart),
-    countScores(userId, yearStartUtc),
-  ]);
-  return { week: w, month: m, year: y, allTime };
 }
 
 async function countAttended(

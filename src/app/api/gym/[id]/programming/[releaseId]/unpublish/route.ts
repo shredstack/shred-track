@@ -1,9 +1,9 @@
 // POST /api/gym/[id]/programming/[releaseId]/unpublish
 //
 // Reverses a publish: flips the release back to draft, un-flags all of
-// the release's workouts (workouts.published=false) so members no longer
-// see them on the CrossFit tab, and clears the workout_published
-// notifications fired by the original publish.
+// the release's sessions (workout_sessions.published=false) so members
+// no longer see them on the CrossFit tab, and clears the
+// workout_published notifications fired by the original publish.
 //
 // Notifications are deleted (not just dismissed) so a subsequent
 // republish can re-send them — the partial unique index on
@@ -20,7 +20,7 @@ import { db } from "@/db";
 import {
   notifications,
   programmingReleases,
-  workouts,
+  workoutSessions,
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canManageGym } from "@/lib/authz/community";
@@ -66,9 +66,9 @@ export async function POST(
       .where(eq(programmingReleases.id, releaseId));
 
     await tx
-      .update(workouts)
+      .update(workoutSessions)
       .set({ published: false, updatedAt: new Date() })
-      .where(eq(workouts.programmingReleaseId, releaseId));
+      .where(eq(workoutSessions.programmingReleaseId, releaseId));
 
     await tx
       .delete(notifications)

@@ -441,6 +441,12 @@ export function useActivePlan() {
       if (!response.ok) throw new Error("Failed to fetch plan");
       return response.json();
     },
+    // Plan metadata only changes via mutations in this file (generate,
+    // recalibrate, etc.), and each of those invalidates ["hyrox-plan"]. So
+    // until a mutation explicitly invalidates, the cached value is correct
+    // and we don't need to refetch on every navigation into /hyrox. 5 min
+    // is just a safety net in case something updates the row out-of-band.
+    staleTime: 5 * 60 * 1000,
     refetchInterval: (query) => {
       const status = query.state.data?.generationStatus;
       if (status === "pending" || status === "generating") return 3000;

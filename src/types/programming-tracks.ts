@@ -67,7 +67,10 @@ export type TrackKind = (typeof TRACK_KINDS)[number];
 
 export interface TrackDayUpsertInput {
   body?: string | null;
-  workoutId?: string | null;
+  // Unified-schema link. `workout_sessions.id`. The legacy day editor never
+  // sends this; only the workout-creating endpoint sets it on behalf of
+  // the coach after upserting a template + creating the session.
+  workoutSessionId?: string | null;
   isScored?: boolean;
   scoreType?:
     | "time"

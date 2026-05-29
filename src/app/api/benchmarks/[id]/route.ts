@@ -1,26 +1,23 @@
+// PUT /api/benchmarks/[id]    — update a user-created benchmark template.
+// DELETE /api/benchmarks/[id] — delete a user-created benchmark template.
+//
+// Unified-schema cutover: user benchmarks live in `crossfit_workouts` with
+// `is_benchmark = true, is_system = false`. The PUT replaces the
+// prescription via insertTemplateParts (delete + reinsert), preserving
+// the template id so existing scores stay attached.
+
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import {
-  benchmarkWorkouts,
-  benchmarkWorkoutBlocks,
-  benchmarkWorkoutMovements,
-  benchmarkWorkoutParts,
-} from "@/db/schema";
-import { eq, and, notInArray } from "drizzle-orm";
+import { crossfitWorkoutParts, crossfitWorkouts } from "@/db/schema";
+import { eq, and } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import {
-  coerceBenchmarkBlockValues,
-  coerceBenchmarkMovementValues,
-  coerceBenchmarkPartValues,
-  type BenchmarkPartInput,
-} from "@/lib/crossfit/benchmark-parts";
+  buildFingerprintInput,
+  insertTemplateParts,
+  type TemplatePartInput,
+} from "@/lib/crossfit/upsert-template";
+import { computeWorkoutFingerprint } from "@/lib/crossfit/fingerprint";
 
-// PUT /api/benchmarks/[id] — update a user-created benchmark.
-//
-// Accepts the multi-part shape: `parts[]` with the same per-part /
-// per-movement schema as POST. Existing parts/movements with an `id` are
-// updated in place (preserving their UUIDs); rows missing from the payload
-// are deleted; rows without an id are inserted.
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -32,51 +29,50 @@ export async function PUT(
 
   const [existing] = await db
     .select()
-    .from(benchmarkWorkouts)
-    .where(eq(benchmarkWorkouts.id, id))
+    .from(crossfitWorkouts)
+    .where(eq(crossfitWorkouts.id, id))
     .limit(1);
 
   if (!existing) {
     return NextResponse.json({ error: "Benchmark not found" }, { status: 404 });
   }
-
   if (existing.isSystem) {
-    return NextResponse.json({ error: "System benchmarks cannot be modified" }, { status: 403 });
+    return NextResponse.json(
+      { error: "System benchmarks cannot be modified" },
+      { status: 403 }
+    );
   }
-
   if (existing.createdBy !== user.id) {
-    return NextResponse.json({ error: "Not authorized to modify this benchmark" }, { status: 403 });
+    return NextResponse.json(
+      { error: "Not authorized to modify this benchmark" },
+      { status: 403 }
+    );
   }
 
   const body = await req.json();
-  const {
-    name,
-    description,
-    category,
-    isPartner,
-    partnerCount,
-    parts,
-  } = body as {
-    name?: string;
-    description?: string;
-    category?: string | null;
-    isPartner?: boolean;
-    partnerCount?: number | string | null;
-    parts?: BenchmarkPartInput[];
-  };
+  const { name, description, category, isPartner, partnerCount, parts } =
+    body as {
+      name?: string;
+      description?: string;
+      category?: string | null;
+      isPartner?: boolean;
+      partnerCount?: number | string | null;
+      parts?: TemplatePartInput[];
+    };
 
   const trimmedName = name?.trim();
   if (!trimmedName || trimmedName.length > 100) {
-    return NextResponse.json({ error: "Name is required (max 100 characters)" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Name is required (max 100 characters)" },
+      { status: 400 }
+    );
   }
-
   if (!Array.isArray(parts) || parts.length === 0) {
     return NextResponse.json(
       { error: "At least one part is required" },
       { status: 400 }
     );
   }
-
   for (const p of parts) {
     if (!p.workoutType) {
       return NextResponse.json(
@@ -92,18 +88,17 @@ export async function PUT(
     }
   }
 
-  if (trimmedName !== existing.name) {
+  if (trimmedName !== existing.title) {
     const systemConflict = await db
-      .select({ id: benchmarkWorkouts.id })
-      .from(benchmarkWorkouts)
+      .select({ id: crossfitWorkouts.id })
+      .from(crossfitWorkouts)
       .where(
         and(
-          eq(benchmarkWorkouts.name, trimmedName),
-          eq(benchmarkWorkouts.isSystem, true)
+          eq(crossfitWorkouts.title, trimmedName),
+          eq(crossfitWorkouts.isSystem, true)
         )
       )
       .limit(1);
-
     if (systemConflict.length > 0) {
       return NextResponse.json(
         { error: "A system benchmark with this name already exists" },
@@ -113,19 +108,54 @@ export async function PUT(
   }
 
   const firstPart = parts[0];
-  const firstPartValues = coerceBenchmarkPartValues(firstPart);
+
+  // Recompute the fingerprint so dedup queries still find this template.
+  const fingerprint = computeWorkoutFingerprint(
+    buildFingerprintInput({
+      title: trimmedName,
+      scope: existing.communityId
+        ? { kind: "community", communityId: existing.communityId }
+        : { kind: "personal", userId: user.id },
+      workoutType: firstPart.workoutType,
+      timeCapSeconds: firstPart.timeCapSeconds ?? null,
+      amrapDurationSeconds: firstPart.amrapDurationSeconds ?? null,
+      repScheme: firstPart.repScheme ?? null,
+      isBenchmark: true,
+      isSystem: false,
+      requiresVest: !!existing.requiresVest,
+      vestWeightMaleLb: existing.vestWeightMaleLb,
+      vestWeightFemaleLb: existing.vestWeightFemaleLb,
+      isPartner:
+        isPartner !== undefined ? !!isPartner : !!existing.isPartner,
+      partnerCount:
+        partnerCount !== undefined
+          ? partnerCount != null && partnerCount !== ""
+            ? Number(partnerCount)
+            : null
+          : existing.partnerCount,
+      parts,
+    })
+  );
 
   const result = await db.transaction(async (tx) => {
+    await tx
+      .delete(crossfitWorkoutParts)
+      .where(eq(crossfitWorkoutParts.crossfitWorkoutId, id));
+    await insertTemplateParts(tx, id, parts);
+
     const [updated] = await tx
-      .update(benchmarkWorkouts)
+      .update(crossfitWorkouts)
       .set({
-        name: trimmedName,
+        title: trimmedName,
         description: description?.trim() || null,
+        category:
+          category !== undefined ? category || null : existing.category,
         workoutType: firstPart.workoutType,
-        category: category !== undefined ? (category || null) : existing.category,
-        timeCapSeconds: firstPartValues.timeCapSeconds,
-        amrapDurationSeconds: firstPartValues.amrapDurationSeconds,
-        repScheme: firstPartValues.repScheme,
+        timeCapSeconds: firstPart.timeCapSeconds ?? null,
+        amrapDurationSeconds: firstPart.amrapDurationSeconds ?? null,
+        repScheme: firstPart.repScheme ?? null,
+        rounds: firstPart.rounds ?? null,
+        contentFingerprint: fingerprint,
         ...(isPartner !== undefined ? { isPartner: !!isPartner } : {}),
         ...(partnerCount !== undefined
           ? {
@@ -137,197 +167,17 @@ export async function PUT(
           : {}),
         updatedAt: new Date(),
       })
-      .where(eq(benchmarkWorkouts.id, id))
+      .where(eq(crossfitWorkouts.id, id))
       .returning();
-
-    // Drop parts that disappeared from the payload. Cascade removes their
-    // movements. Synthetic ids (from legacy single-part rows) never match
-    // a real id, so they're treated as new inserts and the legacy part
-    // (the sole row in the parts table) gets pruned by the diff.
-    const keepPartIds = parts
-      .map((p) => p.id)
-      .filter((x): x is string => !!x && !x.startsWith("synthetic:"));
-    if (keepPartIds.length > 0) {
-      await tx
-        .delete(benchmarkWorkoutParts)
-        .where(
-          and(
-            eq(benchmarkWorkoutParts.benchmarkWorkoutId, id),
-            notInArray(benchmarkWorkoutParts.id, keepPartIds)
-          )
-        );
-    } else {
-      await tx
-        .delete(benchmarkWorkoutParts)
-        .where(eq(benchmarkWorkoutParts.benchmarkWorkoutId, id));
-    }
-
-    for (let i = 0; i < parts.length; i++) {
-      const p = parts[i];
-      const partValues = coerceBenchmarkPartValues(p);
-      let partId: string;
-
-      if (p.id && !p.id.startsWith("synthetic:")) {
-        const [updatedPart] = await tx
-          .update(benchmarkWorkoutParts)
-          .set({ orderIndex: i, ...partValues })
-          .where(
-            and(
-              eq(benchmarkWorkoutParts.id, p.id),
-              eq(benchmarkWorkoutParts.benchmarkWorkoutId, id)
-            )
-          )
-          .returning();
-        if (!updatedPart) {
-          const [inserted] = await tx
-            .insert(benchmarkWorkoutParts)
-            .values({
-              benchmarkWorkoutId: id,
-              orderIndex: i,
-              ...partValues,
-            })
-            .returning();
-          partId = inserted.id;
-        } else {
-          partId = updatedPart.id;
-        }
-      } else {
-        const [inserted] = await tx
-          .insert(benchmarkWorkoutParts)
-          .values({
-            benchmarkWorkoutId: id,
-            orderIndex: i,
-            ...partValues,
-          })
-          .returning();
-        partId = inserted.id;
-      }
-
-      // Diff blocks before movements so movement.blockTempRef can resolve.
-      const inputBlocks = Array.isArray(p.blocks) ? p.blocks : [];
-      const keepBlockIds = inputBlocks
-        .map((b) => b.id)
-        .filter((x): x is string => !!x);
-      if (keepBlockIds.length > 0) {
-        await tx
-          .delete(benchmarkWorkoutBlocks)
-          .where(
-            and(
-              eq(benchmarkWorkoutBlocks.benchmarkWorkoutPartId, partId),
-              notInArray(benchmarkWorkoutBlocks.id, keepBlockIds)
-            )
-          );
-      } else {
-        await tx
-          .delete(benchmarkWorkoutBlocks)
-          .where(eq(benchmarkWorkoutBlocks.benchmarkWorkoutPartId, partId));
-      }
-
-      const blockTempRefToId = new Map<string, string>();
-      for (let k = 0; k < inputBlocks.length; k++) {
-        const b = inputBlocks[k];
-        const blockValues = coerceBenchmarkBlockValues(b, k);
-        if (blockValues.title.length === 0) continue;
-
-        if (b.id) {
-          const [updatedBlock] = await tx
-            .update(benchmarkWorkoutBlocks)
-            .set(blockValues)
-            .where(
-              and(
-                eq(benchmarkWorkoutBlocks.id, b.id),
-                eq(benchmarkWorkoutBlocks.benchmarkWorkoutPartId, partId)
-              )
-            )
-            .returning({ id: benchmarkWorkoutBlocks.id });
-          if (!updatedBlock) {
-            const [inserted] = await tx
-              .insert(benchmarkWorkoutBlocks)
-              .values({
-                benchmarkWorkoutPartId: partId,
-                ...blockValues,
-              })
-              .returning({ id: benchmarkWorkoutBlocks.id });
-            if (b.tempRef) blockTempRefToId.set(b.tempRef, inserted.id);
-          }
-        } else {
-          const [inserted] = await tx
-            .insert(benchmarkWorkoutBlocks)
-            .values({ benchmarkWorkoutPartId: partId, ...blockValues })
-            .returning({ id: benchmarkWorkoutBlocks.id });
-          if (b.tempRef) blockTempRefToId.set(b.tempRef, inserted.id);
-        }
-      }
-
-      const resolveMovementBlockId = (
-        m: BenchmarkPartInput["movements"][number]
-      ): string | null => {
-        if (m.blockTempRef) return blockTempRefToId.get(m.blockTempRef) ?? null;
-        if (m.blockId) return m.blockId;
-        return null;
-      };
-
-      // Diff movements within this part.
-      const keepMovementIds = p.movements
-        .map((m) => m.id)
-        .filter((x): x is string => !!x);
-      if (keepMovementIds.length > 0) {
-        await tx
-          .delete(benchmarkWorkoutMovements)
-          .where(
-            and(
-              eq(benchmarkWorkoutMovements.benchmarkWorkoutPartId, partId),
-              notInArray(benchmarkWorkoutMovements.id, keepMovementIds)
-            )
-          );
-      } else {
-        await tx
-          .delete(benchmarkWorkoutMovements)
-          .where(eq(benchmarkWorkoutMovements.benchmarkWorkoutPartId, partId));
-      }
-
-      for (let j = 0; j < p.movements.length; j++) {
-        const m = p.movements[j];
-        const fields = coerceBenchmarkMovementValues(m, j);
-        const benchmarkWorkoutBlockId = resolveMovementBlockId(m);
-
-        if (m.id) {
-          const [updatedMov] = await tx
-            .update(benchmarkWorkoutMovements)
-            .set({ ...fields, benchmarkWorkoutBlockId })
-            .where(
-              and(
-                eq(benchmarkWorkoutMovements.id, m.id),
-                eq(benchmarkWorkoutMovements.benchmarkWorkoutPartId, partId)
-              )
-            )
-            .returning();
-          if (!updatedMov) {
-            await tx.insert(benchmarkWorkoutMovements).values({
-              benchmarkWorkoutId: id,
-              benchmarkWorkoutPartId: partId,
-              benchmarkWorkoutBlockId,
-              ...fields,
-            });
-          }
-        } else {
-          await tx.insert(benchmarkWorkoutMovements).values({
-            benchmarkWorkoutId: id,
-            benchmarkWorkoutPartId: partId,
-            benchmarkWorkoutBlockId,
-            ...fields,
-          });
-        }
-      }
-    }
-
     return updated;
   });
 
-  return NextResponse.json(result);
+  return NextResponse.json({
+    id: result.id,
+    name: result.title,
+  });
 }
 
-// DELETE /api/benchmarks/[id] — delete a user-created benchmark
 export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -338,24 +188,31 @@ export async function DELETE(
   const { id } = await params;
 
   const [existing] = await db
-    .select()
-    .from(benchmarkWorkouts)
-    .where(eq(benchmarkWorkouts.id, id))
+    .select({
+      id: crossfitWorkouts.id,
+      isSystem: crossfitWorkouts.isSystem,
+      createdBy: crossfitWorkouts.createdBy,
+    })
+    .from(crossfitWorkouts)
+    .where(eq(crossfitWorkouts.id, id))
     .limit(1);
 
   if (!existing) {
     return NextResponse.json({ error: "Benchmark not found" }, { status: 404 });
   }
-
   if (existing.isSystem) {
-    return NextResponse.json({ error: "System benchmarks cannot be deleted" }, { status: 403 });
+    return NextResponse.json(
+      { error: "System benchmarks cannot be deleted" },
+      { status: 403 }
+    );
   }
-
   if (existing.createdBy !== user.id) {
-    return NextResponse.json({ error: "Not authorized to delete this benchmark" }, { status: 403 });
+    return NextResponse.json(
+      { error: "Not authorized to delete this benchmark" },
+      { status: 403 }
+    );
   }
 
-  await db.delete(benchmarkWorkouts).where(eq(benchmarkWorkouts.id, id));
-
+  await db.delete(crossfitWorkouts).where(eq(crossfitWorkouts.id, id));
   return NextResponse.json({ success: true });
 }

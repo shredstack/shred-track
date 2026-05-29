@@ -13,15 +13,16 @@ import { createHash } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/db";
 import {
+  crossfitWorkoutMovements,
+  crossfitWorkouts,
   movements,
   scores,
   scoreMovementDetails,
   scoreNotesExtractions,
   users,
-  workoutMovements,
-  workouts,
+  workoutSessions,
 } from "@/db/schema";
-import { and, desc, eq, gte, inArray, isNotNull, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, or, sql } from "drizzle-orm";
 import type {
   NotesComplaint,
   NotesExtraction,
@@ -479,17 +480,22 @@ export async function listScoresNeedingExtraction(
 
   // Step 2: candidate scores — those that have either a score-level note OR
   // at least one movement-level note. Order by date desc so newest-first.
+  // workoutTitle: prefer the session's title override (set by coaches on
+  // programmed days); fall back to the template title.
   const candidateRows = await db
     .selectDistinct({
       scoreId: scores.id,
       scoreNote: scores.notes,
-      workoutId: scores.workoutId,
-      workoutDate: workouts.workoutDate,
-      workoutTitle: workouts.title,
-      workoutType: workouts.workoutType,
+      workoutDate: workoutSessions.workoutDate,
+      workoutTitle: sql<string>`COALESCE(${workoutSessions.title}, ${crossfitWorkouts.title})`,
+      workoutType: crossfitWorkouts.workoutType,
     })
     .from(scores)
-    .innerJoin(workouts, eq(workouts.id, scores.workoutId))
+    .innerJoin(workoutSessions, eq(workoutSessions.id, scores.workoutSessionId))
+    .innerJoin(
+      crossfitWorkouts,
+      eq(crossfitWorkouts.id, workoutSessions.crossfitWorkoutId)
+    )
     .leftJoin(
       scoreMovementDetails,
       eq(scoreMovementDetails.scoreId, scores.id)
@@ -500,7 +506,7 @@ export async function listScoresNeedingExtraction(
         or(isNotNull(scores.notes), isNotNull(scoreMovementDetails.notes))
       )
     )
-    .orderBy(desc(workouts.workoutDate))
+    .orderBy(desc(workoutSessions.workoutDate))
     .limit(limit * 4);
 
   if (candidateRows.length === 0) return [];
@@ -526,23 +532,23 @@ export async function listScoresNeedingExtraction(
   const movementRows = await db
     .select({
       scoreId: scoreMovementDetails.scoreId,
-      orderIndex: workoutMovements.orderIndex,
+      orderIndex: crossfitWorkoutMovements.orderIndex,
       canonicalName: movements.canonicalName,
-      prescribedReps: workoutMovements.prescribedReps,
-      prescribedWeightMale: workoutMovements.prescribedWeightMale,
-      prescribedWeightFemale: workoutMovements.prescribedWeightFemale,
+      prescribedReps: crossfitWorkoutMovements.prescribedReps,
+      prescribedWeightMale: crossfitWorkoutMovements.prescribedWeightMale,
+      prescribedWeightFemale: crossfitWorkoutMovements.prescribedWeightFemale,
       prescribedDurationSecondsMale:
-        workoutMovements.prescribedDurationSecondsMale,
+        crossfitWorkoutMovements.prescribedDurationSecondsMale,
       prescribedDurationSecondsFemale:
-        workoutMovements.prescribedDurationSecondsFemale,
-      prescribedHeightInches: workoutMovements.prescribedHeightInches,
+        crossfitWorkoutMovements.prescribedDurationSecondsFemale,
+      prescribedHeightInches: crossfitWorkoutMovements.prescribedHeightInches,
       prescribedWeightMaleBwMultiplier:
-        workoutMovements.prescribedWeightMaleBwMultiplier,
+        crossfitWorkoutMovements.prescribedWeightMaleBwMultiplier,
       prescribedWeightFemaleBwMultiplier:
-        workoutMovements.prescribedWeightFemaleBwMultiplier,
-      tempo: workoutMovements.tempo,
-      isMaxReps: workoutMovements.isMaxReps,
-      rxStandard: workoutMovements.rxStandard,
+        crossfitWorkoutMovements.prescribedWeightFemaleBwMultiplier,
+      tempo: crossfitWorkoutMovements.tempo,
+      isMaxReps: crossfitWorkoutMovements.isMaxReps,
+      rxStandard: crossfitWorkoutMovements.rxStandard,
       wasRx: scoreMovementDetails.wasRx,
       actualWeight: scoreMovementDetails.actualWeight,
       actualDurationSeconds: scoreMovementDetails.actualDurationSeconds,
@@ -554,10 +560,13 @@ export async function listScoresNeedingExtraction(
     })
     .from(scoreMovementDetails)
     .innerJoin(
-      workoutMovements,
-      eq(workoutMovements.id, scoreMovementDetails.workoutMovementId)
+      crossfitWorkoutMovements,
+      eq(
+        crossfitWorkoutMovements.id,
+        scoreMovementDetails.crossfitWorkoutMovementId
+      )
     )
-    .innerJoin(movements, eq(movements.id, workoutMovements.movementId))
+    .innerJoin(movements, eq(movements.id, crossfitWorkoutMovements.movementId))
     .where(inArray(scoreMovementDetails.scoreId, candidateIds));
 
   // Step 5: substitution movement names (separate query — small)
@@ -738,12 +747,14 @@ export async function aggregateNotesForUser(
       scalingRationale: scoreNotesExtractions.scalingRationale,
       milestones: scoreNotesExtractions.milestones,
       extractedAt: scoreNotesExtractions.extractedAt,
-      workoutDate: workouts.workoutDate,
+      workoutDate: workoutSessions.workoutDate,
     })
     .from(scoreNotesExtractions)
     .innerJoin(scores, eq(scores.id, scoreNotesExtractions.scoreId))
-    .innerJoin(workouts, eq(workouts.id, scores.workoutId))
-    .where(and(eq(scores.userId, userId), gte(workouts.workoutDate, since)));
+    .innerJoin(workoutSessions, eq(workoutSessions.id, scores.workoutSessionId))
+    .where(
+      and(eq(scores.userId, userId), gte(workoutSessions.workoutDate, since))
+    );
 
   if (rows.length === 0) {
     return {

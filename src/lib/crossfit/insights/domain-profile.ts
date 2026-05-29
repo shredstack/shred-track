@@ -13,8 +13,9 @@ import { db } from "@/db";
 import {
   scores,
   scoreMovementDetails,
-  workoutMovements,
-  workouts,
+  crossfitWorkoutMovements,
+  crossfitWorkouts,
+  workoutSessions,
   movements,
 } from "@/db/schema";
 import { and, eq, gte } from "drizzle-orm";
@@ -92,7 +93,7 @@ export type DomainProfile = {
 // without depending on the DB.
 export type DomainProfileRow = {
   scoreId: string;
-  workoutId: string;
+  workoutSessionId: string;
   workoutDate: string;
   workoutType: string;
   workoutRepScheme: string | null;
@@ -142,10 +143,10 @@ async function fetchRows(userId: string, lookbackDays: number): Promise<DomainPr
   const rows = await db
     .select({
       scoreId: scores.id,
-      workoutId: scores.workoutId,
-      workoutDate: workouts.workoutDate,
-      workoutType: workouts.workoutType,
-      workoutRepScheme: workouts.repScheme,
+      workoutSessionId: scores.workoutSessionId,
+      workoutDate: workoutSessions.workoutDate,
+      workoutType: crossfitWorkouts.workoutType,
+      workoutRepScheme: crossfitWorkouts.repScheme,
       movementId: movements.id,
       movementCategory: movements.category,
       movementIsWeighted: movements.isWeighted,
@@ -157,16 +158,26 @@ async function fetchRows(userId: string, lookbackDays: number): Promise<DomainPr
     .from(scoreMovementDetails)
     .innerJoin(scores, eq(scores.id, scoreMovementDetails.scoreId))
     .innerJoin(
-      workoutMovements,
-      eq(workoutMovements.id, scoreMovementDetails.workoutMovementId)
+      crossfitWorkoutMovements,
+      eq(
+        crossfitWorkoutMovements.id,
+        scoreMovementDetails.crossfitWorkoutMovementId
+      )
     )
-    .innerJoin(workouts, eq(workouts.id, scores.workoutId))
-    .innerJoin(movements, eq(movements.id, workoutMovements.movementId))
-    .where(and(eq(scores.userId, userId), gte(workouts.workoutDate, since)));
+    .innerJoin(workoutSessions, eq(workoutSessions.id, scores.workoutSessionId))
+    .innerJoin(
+      crossfitWorkouts,
+      eq(crossfitWorkouts.id, workoutSessions.crossfitWorkoutId)
+    )
+    .innerJoin(movements, eq(movements.id, crossfitWorkoutMovements.movementId))
+    .where(
+      and(eq(scores.userId, userId), gte(workoutSessions.workoutDate, since))
+    );
 
   return rows.map((r) => ({
     scoreId: r.scoreId,
-    workoutId: r.workoutId,
+    // workout_sessions inner join guarantees non-null; Drizzle just can't narrow it.
+    workoutSessionId: r.workoutSessionId as string,
     workoutDate: r.workoutDate,
     workoutType: r.workoutType,
     workoutRepScheme: r.workoutRepScheme,
@@ -181,25 +192,25 @@ async function fetchRows(userId: string, lookbackDays: number): Promise<DomainPr
 }
 
 type WindowAgg = {
-  // Per domain
-  workoutIdsByDomain: Map<DomainKey, Set<string>>;
+  // Per domain. Distinct sessions per domain — one "workout" = one session.
+  sessionIdsByDomain: Map<DomainKey, Set<string>>;
   totalsByDomain: Map<DomainKey, { total: number; scaled: number }>;
   // For e1RM (weightlifting only): movementId → best e1RM in window
   bestE1rmByMovement: Map<string, { e1rm: number; movementDomain: DomainKey }>;
 };
 
 function emptyWindow(): WindowAgg {
-  const workoutIdsByDomain = new Map<DomainKey, Set<string>>();
+  const sessionIdsByDomain = new Map<DomainKey, Set<string>>();
   const totalsByDomain = new Map<
     DomainKey,
     { total: number; scaled: number }
   >();
   for (const k of DOMAIN_KEYS) {
-    workoutIdsByDomain.set(k, new Set());
+    sessionIdsByDomain.set(k, new Set());
     totalsByDomain.set(k, { total: 0, scaled: 0 });
   }
   return {
-    workoutIdsByDomain,
+    sessionIdsByDomain,
     totalsByDomain,
     bestE1rmByMovement: new Map(),
   };
@@ -210,7 +221,7 @@ function aggregate(rows: DomainProfileRow[]): WindowAgg {
 
   for (const r of rows) {
     const domain = bucketFor(r.movementCategory, r.movementIsWeighted);
-    agg.workoutIdsByDomain.get(domain)!.add(r.workoutId);
+    agg.sessionIdsByDomain.get(domain)!.add(r.workoutSessionId);
     const totals = agg.totalsByDomain.get(domain)!;
     totals.total += 1;
     if (!r.wasRx) totals.scaled += 1;
@@ -277,8 +288,8 @@ function buildProgression(
 ): ProgressionMetric[] {
   const metrics: ProgressionMetric[] = [];
 
-  const curWorkouts = current.workoutIdsByDomain.get(domain)!.size;
-  const priWorkouts = prior.workoutIdsByDomain.get(domain)!.size;
+  const curWorkouts = current.sessionIdsByDomain.get(domain)!.size;
+  const priWorkouts = prior.sessionIdsByDomain.get(domain)!.size;
   const volChange = pctChange(curWorkouts, priWorkouts);
   metrics.push({
     metric: "volume",
@@ -367,7 +378,7 @@ export function computeDomainProfileFromRows(
   );
 
   const totalScores = new Set(rows.map((r) => r.scoreId)).size;
-  const totalDistinctWorkouts = new Set(rows.map((r) => r.workoutId)).size;
+  const totalDistinctWorkouts = new Set(rows.map((r) => r.workoutSessionId)).size;
 
   let scoringSpanDays = 0;
   if (rows.length > 0) {
@@ -388,13 +399,13 @@ export function computeDomainProfileFromRows(
   let totalCurrentVolume = 0;
   let totalPriorVolume = 0;
   for (const k of DOMAIN_KEYS) {
-    totalCurrentVolume += current.workoutIdsByDomain.get(k)!.size;
-    totalPriorVolume += prior.workoutIdsByDomain.get(k)!.size;
+    totalCurrentVolume += current.sessionIdsByDomain.get(k)!.size;
+    totalPriorVolume += prior.sessionIdsByDomain.get(k)!.size;
   }
 
   const domainsOut: DomainMetrics[] = DOMAIN_KEYS.map((domain) => {
-    const curW = current.workoutIdsByDomain.get(domain)!.size;
-    const priW = prior.workoutIdsByDomain.get(domain)!.size;
+    const curW = current.sessionIdsByDomain.get(domain)!.size;
+    const priW = prior.sessionIdsByDomain.get(domain)!.size;
     const curTotals = current.totalsByDomain.get(domain)!;
     const priTotals = prior.totalsByDomain.get(domain)!;
     const curRate = curTotals.total > 0 ? curTotals.scaled / curTotals.total : 0;

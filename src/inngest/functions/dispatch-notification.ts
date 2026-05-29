@@ -18,7 +18,8 @@ import {
   programmingReleases,
   pushTokens,
   users,
-  workouts,
+  crossfitWorkouts,
+  workoutSessions,
   communities,
   gymPosts,
   classInstances,
@@ -73,6 +74,7 @@ export const dispatchNotification = inngest.createFunction(
           actorId: notifications.actorId,
           kind: notifications.kind,
           workoutId: notifications.workoutId,
+          workoutSessionId: notifications.workoutSessionId,
           programmingReleaseId: notifications.programmingReleaseId,
           gymPostId: notifications.gymPostId,
           classInstanceId: notifications.classInstanceId,
@@ -88,6 +90,7 @@ export const dispatchNotification = inngest.createFunction(
       actorId: string | null;
       kind: string;
       workoutId: string | null;
+      workoutSessionId: string | null;
       programmingReleaseId: string | null;
       gymPostId: string | null;
       classInstanceId: string | null;
@@ -141,13 +144,22 @@ export const dispatchNotification = inngest.createFunction(
           .limit(1);
         out.actorName = actor?.name;
       }
-      if (notif.workoutId) {
+      // Prefer the unified session → template title; fall back to the
+      // legacy workouts.title path is no longer wired (commit removed the
+      // legacy import). Older notifications missing workoutSessionId
+      // simply won't carry a title, which the renderer tolerates.
+      const sessionId = notif.workoutSessionId;
+      if (sessionId) {
         const [w] = await db
-          .select({ title: workouts.title })
-          .from(workouts)
-          .where(eq(workouts.id, notif.workoutId))
+          .select({ title: crossfitWorkouts.title, sessionTitle: workoutSessions.title })
+          .from(workoutSessions)
+          .innerJoin(
+            crossfitWorkouts,
+            eq(crossfitWorkouts.id, workoutSessions.crossfitWorkoutId)
+          )
+          .where(eq(workoutSessions.id, sessionId))
           .limit(1);
-        out.workoutTitle = w?.title ?? undefined;
+        out.workoutTitle = w?.sessionTitle ?? w?.title ?? undefined;
       }
       if (notif.programmingReleaseId) {
         const [r] = await db
@@ -216,8 +228,8 @@ export const dispatchNotification = inngest.createFunction(
           ? `/gym/committed-club${communityParam}`
           : kind === "workout_published"
             ? `/crossfit${communityParam}`
-            : notif.workoutId
-              ? `/crossfit?date=&workout=${notif.workoutId}`
+            : notif.workoutSessionId ?? notif.workoutId
+              ? `/crossfit?date=&workout=${notif.workoutSessionId ?? notif.workoutId}`
               : undefined;
 
     type SendResult = { tokenId: string; ok: boolean; invalid: boolean };

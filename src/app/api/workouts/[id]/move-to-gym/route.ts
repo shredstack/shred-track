@@ -1,15 +1,18 @@
-// POST /api/workouts/[id]/move-to-gym — moves a personal workout (the
-// caller's, communityId == null) into a gym they admin. Gated by the
-// `move_to_gym` per-user feature flag so access is granted explicitly via
-// /admin/feature-flags rather than baked-into-code.
+// POST /api/workouts/[id]/move-to-gym — move a personal session into a gym
+// the caller administers. In the unified schema this is a one-line scope
+// swap: flip `user_id` to null and set `community_id`. Scores stay
+// attached because the session row itself is the one row that moves.
+//
+// Gated by the `move_to_gym` per-user feature flag.
 
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { workouts } from "@/db/schema";
+import { workoutSessions } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canAdminGym } from "@/lib/authz/community";
 import { isFlagOn } from "@/lib/feature-flags";
+import { updateSession } from "@/lib/crossfit/session-writer";
 
 export async function POST(
   req: NextRequest,
@@ -35,25 +38,25 @@ export async function POST(
     );
   }
 
-  const [workout] = await db
+  const [session] = await db
     .select({
-      id: workouts.id,
-      createdBy: workouts.createdBy,
-      communityId: workouts.communityId,
+      id: workoutSessions.id,
+      userId: workoutSessions.userId,
+      communityId: workoutSessions.communityId,
     })
-    .from(workouts)
-    .where(eq(workouts.id, id))
+    .from(workoutSessions)
+    .where(eq(workoutSessions.id, id))
     .limit(1);
 
-  if (!workout) {
+  if (!session) {
     return NextResponse.json({ error: "Workout not found" }, { status: 404 });
   }
 
-  if (workout.createdBy !== user.id) {
+  if (session.userId !== user.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  if (workout.communityId !== null) {
+  if (session.communityId !== null) {
     return NextResponse.json(
       { error: "Workout is already attached to a gym" },
       { status: 400 }
@@ -68,14 +71,21 @@ export async function POST(
     );
   }
 
-  const [updated] = await db
-    .update(workouts)
-    .set({ communityId: targetCommunityId, updatedAt: new Date() })
-    .where(eq(workouts.id, id))
-    .returning({
-      id: workouts.id,
-      communityId: workouts.communityId,
-    });
+  // Personal sessions write as kind='custom' (see /api/workouts POST); a
+  // move into gym programming is semantically "promote to the day's WOD",
+  // so we flip the kind on scope-swap. Without this, the moved session
+  // would show up under the gym's day as a 'custom' section instead of
+  // the WOD slot.
+  const updated = await db.transaction(async (tx) =>
+    updateSession(tx, id, {
+      userId: null,
+      communityId: targetCommunityId,
+      kind: "wod",
+    })
+  );
 
-  return NextResponse.json(updated);
+  return NextResponse.json({
+    id: updated?.id ?? id,
+    communityId: updated?.communityId ?? targetCommunityId,
+  });
 }

@@ -317,7 +317,7 @@ function volRow(partial: Partial<VolumeTrendRow>): VolumeTrendRow {
   nextVolRow += 1;
   return {
     scoreId: partial.scoreId ?? `vol-score-${nextVolRow}`,
-    workoutId: partial.workoutId ?? `vol-workout-${nextVolRow}`,
+    workoutSessionId: partial.workoutSessionId ?? `vol-session-${nextVolRow}`,
     workoutDate: partial.workoutDate ?? isoDaysAgo(7),
     timeSeconds: partial.timeSeconds ?? null,
     timeCapSeconds: partial.timeCapSeconds ?? null,
@@ -341,19 +341,19 @@ describe("computeVolumeTrendsFromRows", () => {
     // Same workout, three barbell movements → weightlifting count = 1.
     const rows = [
       volRow({
-        workoutId: "w1",
+        workoutSessionId: "w1",
         scoreId: "s1",
         workoutDate: isoDaysAgo(7),
         movementCategory: "barbell",
       }),
       volRow({
-        workoutId: "w1",
+        workoutSessionId: "w1",
         scoreId: "s1",
         workoutDate: isoDaysAgo(7),
         movementCategory: "barbell",
       }),
       volRow({
-        workoutId: "w1",
+        workoutSessionId: "w1",
         scoreId: "s1",
         workoutDate: isoDaysAgo(7),
         movementCategory: "barbell",
@@ -368,14 +368,14 @@ describe("computeVolumeTrendsFromRows", () => {
   it("counts a mixed-domain workout once in each domain it touches", () => {
     const rows = [
       volRow({
-        workoutId: "w1",
+        workoutSessionId: "w1",
         scoreId: "s1",
         workoutDate: isoDaysAgo(7),
         movementCategory: "barbell",
         movementIsWeighted: true,
       }),
       volRow({
-        workoutId: "w1",
+        workoutSessionId: "w1",
         scoreId: "s1",
         workoutDate: isoDaysAgo(7),
         movementCategory: "gymnastics",
@@ -394,7 +394,7 @@ describe("computeVolumeTrendsFromRows", () => {
   it("caps timeSeconds at the workout's time cap when both are set", () => {
     const rows = [
       volRow({
-        workoutId: "w1",
+        workoutSessionId: "w1",
         scoreId: "s1",
         workoutDate: isoDaysAgo(7),
         timeSeconds: 1500,
@@ -408,12 +408,12 @@ describe("computeVolumeTrendsFromRows", () => {
   it("ignores rows older than the requested weeks window", () => {
     const rows = [
       volRow({
-        workoutId: "w1",
+        workoutSessionId: "w1",
         scoreId: "s1",
         workoutDate: isoDaysAgo(7),
       }),
       volRow({
-        workoutId: "w_old",
+        workoutSessionId: "w_old",
         scoreId: "s_old",
         workoutDate: isoDaysAgo(200),
       }),
@@ -426,13 +426,13 @@ describe("computeVolumeTrendsFromRows", () => {
     // Two workouts in the same week — should land in the same bucket.
     const rows = [
       volRow({
-        workoutId: "w1",
+        workoutSessionId: "w1",
         scoreId: "s1",
         workoutDate: isoDaysAgo(7),
         movementCategory: "barbell",
       }),
       volRow({
-        workoutId: "w2",
+        workoutSessionId: "w2",
         scoreId: "s2",
         workoutDate: isoDaysAgo(8),
         movementCategory: "barbell",

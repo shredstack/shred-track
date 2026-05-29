@@ -1,23 +1,24 @@
-// ---------------------------------------------------------------------------
 // GET /api/movements/[id]/history
 //
 // Returns the caller's logged history for a single movement. Used by the
-// movement detail page on the CrossFit tab to show weight progression over
-// time and Rx-vs-scaled stats.
+// movement detail page on the CrossFit tab to show weight progression
+// over time and Rx-vs-scaled stats.
 //
-// Visibility: the movement itself must be visible to the caller — system
-// (created_by IS NULL) or owned by the caller. Returns 404 otherwise.
-// ---------------------------------------------------------------------------
+// Unified-schema: score_movement_details →
+// crossfit_workout_movements (filtered to this movement_id) →
+// workout_sessions (for workoutDate / title). The session.id stands in
+// for the legacy workouts.id (it's the day-level handle the client uses).
 
 import { NextResponse } from "next/server";
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  crossfitWorkoutMovements,
+  crossfitWorkouts,
   movements,
   scoreMovementDetails,
   scores,
-  workoutMovements,
-  workouts,
+  workoutSessions,
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
@@ -40,7 +41,7 @@ export interface MovementHistoryEntry {
 
 export async function GET(
   _req: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -53,8 +54,8 @@ export async function GET(
     .where(
       and(
         eq(movements.id, id),
-        or(isNull(movements.createdBy), eq(movements.createdBy, user.id))!,
-      ),
+        or(isNull(movements.createdBy), eq(movements.createdBy, user.id))!
+      )
     )
     .limit(1);
 
@@ -66,10 +67,11 @@ export async function GET(
     .select({
       detailId: scoreMovementDetails.id,
       scoreId: scores.id,
-      workoutId: workouts.id,
-      workoutPartId: scores.workoutPartId,
-      workoutDate: workouts.workoutDate,
-      workoutTitle: workouts.title,
+      workoutId: workoutSessions.id,
+      workoutPartId: scores.crossfitWorkoutPartId,
+      workoutDate: workoutSessions.workoutDate,
+      sessionTitle: workoutSessions.title,
+      templateTitle: crossfitWorkouts.title,
       actualWeight: scoreMovementDetails.actualWeight,
       setEntries: scoreMovementDetails.setEntries,
       actualReps: scoreMovementDetails.actualReps,
@@ -80,23 +82,37 @@ export async function GET(
     .from(scoreMovementDetails)
     .innerJoin(scores, eq(scores.id, scoreMovementDetails.scoreId))
     .innerJoin(
-      workoutMovements,
-      eq(workoutMovements.id, scoreMovementDetails.workoutMovementId),
+      crossfitWorkoutMovements,
+      eq(crossfitWorkoutMovements.id, scoreMovementDetails.crossfitWorkoutMovementId)
     )
-    .innerJoin(workouts, eq(workouts.id, workoutMovements.workoutId))
+    .innerJoin(workoutSessions, eq(workoutSessions.id, scores.workoutSessionId))
+    .leftJoin(
+      crossfitWorkouts,
+      eq(crossfitWorkouts.id, workoutSessions.crossfitWorkoutId)
+    )
     .where(
       and(
         eq(scores.userId, user.id),
-        eq(workoutMovements.movementId, id),
-      ),
+        eq(crossfitWorkoutMovements.movementId, id)
+      )
     )
-    .orderBy(desc(workouts.workoutDate), desc(scores.createdAt));
+    .orderBy(desc(workoutSessions.workoutDate), desc(scores.createdAt));
 
   const logs: MovementHistoryEntry[] = rawLogs.map((l) => {
     const entries = normalizeSetEntries(l.setEntries);
     return {
-      ...l,
+      detailId: l.detailId,
+      scoreId: l.scoreId,
+      workoutId: l.workoutId,
+      workoutPartId: l.workoutPartId,
+      workoutDate: l.workoutDate,
+      workoutTitle: l.sessionTitle ?? l.templateTitle ?? null,
+      actualWeight: l.actualWeight,
       setEntries: entries.length > 0 ? entries : null,
+      actualReps: l.actualReps,
+      wasRx: l.wasRx,
+      modification: l.modification,
+      notes: l.notes,
     };
   });
 

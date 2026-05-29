@@ -1,36 +1,39 @@
+// GET /api/benchmarks/[id]/history — full attempt history for the user
+// against a benchmark template. One-predicate join in the unified schema:
+// scores → workout_sessions WHERE session.crossfit_workout_id = $id.
+// The legacy reader had to UNION across workouts.benchmark_workout_id and
+// workout_sections.benchmark_workout_id; both collapse to a single FK now.
+//
+// For weightlifting benchmarks the response is a `repMaxHistory` shape
+// with one variant per rep target {1, 2, 3, 5}, including for_load
+// attempts that weren't auto-linked at write time (history rolls up via
+// the anchor movement, not the FK).
+
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
-  benchmarkWorkouts,
+  crossfitWorkoutMovements,
+  crossfitWorkoutParts,
+  crossfitWorkouts,
   movements,
+  scoreMovementDetails,
   scores,
-  workoutMovements,
-  workoutParts,
-  workouts,
+  workoutSessions,
 } from "@/db/schema";
 import { and, desc, eq } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { pickBestScore, type ScoreRow } from "@/lib/crossfit/benchmark-stats";
 import {
-  inferRepMaxTarget,
+  classifyRepMaxSets,
   REP_MAX_TARGETS,
 } from "@/lib/crossfit/weightlifting-benchmarks";
+import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
 import type {
   BenchmarkAttempt,
   RepMaxTarget,
   WorkoutType,
 } from "@/types/crossfit";
 
-// GET /api/benchmarks/[id]/history — full attempt history for the user against a benchmark.
-//
-// For weightlifting benchmarks (where the row carries a
-// `weightliftingMovementId`), the response is a `repMaxHistory` shape with
-// one variant per rep target (1, 2, 3, 5). The variants include the full
-// for_load history against the movement — even attempts that weren't
-// auto-linked at write time. The discriminator is `repMaxHistory in result`.
-//
-// For everything else (Girls, Heroes, Open, gym benchmarks, custom user
-// benchmarks), the response keeps the legacy flat `attempts` shape.
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -42,13 +45,13 @@ export async function GET(
 
   const [bw] = await db
     .select({
-      id: benchmarkWorkouts.id,
-      name: benchmarkWorkouts.name,
-      workoutType: benchmarkWorkouts.workoutType,
-      weightliftingMovementId: benchmarkWorkouts.weightliftingMovementId,
+      id: crossfitWorkouts.id,
+      name: crossfitWorkouts.title,
+      workoutType: crossfitWorkouts.workoutType,
+      weightliftingMovementId: crossfitWorkouts.weightliftingMovementId,
     })
-    .from(benchmarkWorkouts)
-    .where(eq(benchmarkWorkouts.id, id))
+    .from(crossfitWorkouts)
+    .where(eq(crossfitWorkouts.id, id))
     .limit(1);
 
   if (!bw) {
@@ -56,15 +59,22 @@ export async function GET(
   }
 
   if (bw.weightliftingMovementId) {
-    return weightliftingHistory(user.id, bw.id, bw.name, bw.workoutType, bw.weightliftingMovementId);
+    return weightliftingHistory(
+      user.id,
+      bw.id,
+      bw.name,
+      bw.workoutType,
+      bw.weightliftingMovementId
+    );
   }
 
-  // Legacy flat-history path.
+  // Non-weightlifting branch: join scores → sessions where
+  // session.crossfit_workout_id = $id.
   const rows = await db
     .select({
       scoreId: scores.id,
-      workoutId: scores.workoutId,
-      workoutDate: workouts.workoutDate,
+      sessionId: scores.workoutSessionId,
+      workoutDate: workoutSessions.workoutDate,
       division: scores.division,
       timeSeconds: scores.timeSeconds,
       rounds: scores.rounds,
@@ -77,15 +87,18 @@ export async function GET(
       createdAt: scores.createdAt,
     })
     .from(scores)
-    .innerJoin(workouts, eq(workouts.id, scores.workoutId))
+    .innerJoin(workoutSessions, eq(workoutSessions.id, scores.workoutSessionId))
     .where(
-      and(eq(scores.userId, user.id), eq(workouts.benchmarkWorkoutId, id))
+      and(
+        eq(scores.userId, user.id),
+        eq(workoutSessions.crossfitWorkoutId, id)
+      )
     )
-    .orderBy(desc(workouts.workoutDate), desc(scores.createdAt));
+    .orderBy(desc(workoutSessions.workoutDate), desc(scores.createdAt));
 
   const normalized: ScoreRow[] = rows.map((r) => ({
     scoreId: r.scoreId,
-    workoutId: r.workoutId,
+    sessionId: r.sessionId,
     workoutDate: r.workoutDate,
     division: r.division,
     timeSeconds: r.timeSeconds,
@@ -102,7 +115,7 @@ export async function GET(
 
   const attempts = rows.map((r, i) => ({
     scoreId: r.scoreId,
-    workoutId: r.workoutId,
+    sessionId: r.sessionId,
     workoutDate: r.workoutDate,
     division: r.division,
     timeSeconds: r.timeSeconds,
@@ -125,10 +138,6 @@ export async function GET(
   });
 }
 
-// ---------------------------------------------------------------------------
-// Weightlifting branch
-// ---------------------------------------------------------------------------
-
 async function weightliftingHistory(
   userId: string,
   benchmarkId: string,
@@ -136,13 +145,16 @@ async function weightliftingHistory(
   workoutType: string,
   movementId: string
 ) {
-  // Pull every for_load score the user has logged whose part contains this
-  // movement. Includes attempts that weren't auto-linked at write time.
+  // Pull every for_load score whose part references this movement,
+  // regardless of which template the session points at (auto-link or
+  // user-created). The join goes through crossfit_workout_parts so we
+  // get the part-level repScheme + movement-level prescribedReps for
+  // classification.
   const rows = await db
     .select({
       scoreId: scores.id,
-      workoutId: scores.workoutId,
-      workoutDate: workouts.workoutDate,
+      sessionId: scores.workoutSessionId,
+      workoutDate: workoutSessions.workoutDate,
       division: scores.division,
       timeSeconds: scores.timeSeconds,
       rounds: scores.rounds,
@@ -153,30 +165,40 @@ async function weightliftingHistory(
       hitTimeCap: scores.hitTimeCap,
       notes: scores.notes,
       createdAt: scores.createdAt,
-      partRepScheme: workoutParts.repScheme,
-      // For_load workouts carry the rep scheme on the movement, not the
-      // part. Read both and prefer the movement-level value at classify
-      // time so per-movement schemes like "5-5-5-5-5" route into the right
-      // rep-max tab.
-      movementPrescribedReps: workoutMovements.prescribedReps,
+      partRepScheme: crossfitWorkoutParts.repScheme,
+      movementPrescribedReps: crossfitWorkoutMovements.prescribedReps,
+      setEntries: scoreMovementDetails.setEntries,
+      actualWeight: scoreMovementDetails.actualWeight,
     })
     .from(scores)
-    .innerJoin(workouts, eq(workouts.id, scores.workoutId))
-    .innerJoin(workoutParts, eq(workoutParts.id, scores.workoutPartId))
+    .innerJoin(workoutSessions, eq(workoutSessions.id, scores.workoutSessionId))
     .innerJoin(
-      workoutMovements,
-      eq(workoutMovements.workoutPartId, workoutParts.id)
+      crossfitWorkoutParts,
+      eq(crossfitWorkoutParts.id, scores.crossfitWorkoutPartId)
+    )
+    .innerJoin(
+      crossfitWorkoutMovements,
+      eq(crossfitWorkoutMovements.crossfitWorkoutPartId, crossfitWorkoutParts.id)
+    )
+    .leftJoin(
+      scoreMovementDetails,
+      and(
+        eq(scoreMovementDetails.scoreId, scores.id),
+        eq(
+          scoreMovementDetails.crossfitWorkoutMovementId,
+          crossfitWorkoutMovements.id
+        )
+      )
     )
     .where(
       and(
         eq(scores.userId, userId),
-        eq(workoutParts.workoutType, "for_load"),
-        eq(workoutMovements.movementId, movementId)
+        eq(crossfitWorkoutParts.workoutType, "for_load"),
+        eq(crossfitWorkoutMovements.movementId, movementId)
       )
     )
-    .orderBy(desc(workouts.workoutDate), desc(scores.createdAt));
+    .orderBy(desc(workoutSessions.workoutDate), desc(scores.createdAt));
 
-  // Resolve the canonical movement name once for the response.
   const [mv] = await db
     .select({ canonicalName: movements.canonicalName })
     .from(movements)
@@ -184,36 +206,37 @@ async function weightliftingHistory(
     .limit(1);
   const movementName = mv?.canonicalName ?? benchmarkName;
 
-  // Bucket by rep target. Drop rows where the rep scheme doesn't classify
-  // to {1, 2, 3, 5} — those can't be attributed to any tab.
   const buckets = new Map<RepMaxTarget, BenchmarkAttempt[]>();
   for (const r of rows) {
-    const target = inferRepMaxTarget(
-      r.movementPrescribedReps ?? r.partRepScheme ?? null
-    );
-    if (!target) continue;
-    const list = buckets.get(target) ?? [];
-    list.push({
-      scoreId: r.scoreId,
-      workoutId: r.workoutId,
-      workoutDate: r.workoutDate,
-      division: r.division,
-      timeSeconds: r.timeSeconds,
-      rounds: r.rounds,
-      remainderReps: r.remainderReps,
-      weightLbs: r.weightLbs != null ? Number(r.weightLbs) : null,
-      totalReps: r.totalReps,
-      scoreText: r.scoreText,
-      hitTimeCap: r.hitTimeCap,
-      notes: r.notes,
-      createdAt: r.createdAt.toISOString(),
-      isPR: false,
+    const targetWeights = classifyRepMaxSets({
+      setEntries: normalizeSetEntries(r.setEntries),
+      scoreWeightLbs: r.weightLbs != null ? Number(r.weightLbs) : null,
+      actualWeight: r.actualWeight != null ? Number(r.actualWeight) : null,
+      movementPrescribedReps: r.movementPrescribedReps,
+      partRepScheme: r.partRepScheme,
     });
-    buckets.set(target, list);
+    for (const [target, weightLbs] of targetWeights) {
+      const list = buckets.get(target) ?? [];
+      list.push({
+        scoreId: r.scoreId,
+        sessionId: r.sessionId,
+        workoutDate: r.workoutDate,
+        division: r.division,
+        timeSeconds: r.timeSeconds,
+        rounds: r.rounds,
+        remainderReps: r.remainderReps,
+        weightLbs,
+        totalReps: r.totalReps,
+        scoreText: r.scoreText,
+        hitTimeCap: r.hitTimeCap,
+        notes: r.notes,
+        createdAt: r.createdAt.toISOString(),
+        isPR: false,
+      });
+      buckets.set(target, list);
+    }
   }
 
-  // Per-target PR detection. Heaviest weight wins; ties broken by older
-  // workoutDate so the PR points at the original lift.
   const variants = REP_MAX_TARGETS.map((target) => {
     const attempts = buckets.get(target) ?? [];
     let prAttempt: BenchmarkAttempt | null = null;

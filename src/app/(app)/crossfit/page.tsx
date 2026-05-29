@@ -63,6 +63,16 @@ function toDateString(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
+// Monday of the week containing `d`, returned as a local YYYY-MM-DD. Drives
+// the deep-link from the Gym view banner to the matching week in the
+// programming admin.
+function mondayOfWeek(d: Date): string {
+  const copy = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const dow = (copy.getDay() + 6) % 7; // Mon=0, Sun=6
+  copy.setDate(copy.getDate() - dow);
+  return toDateString(copy);
+}
+
 // Parse a YYYY-MM-DD param into a Date in local time (no UTC drift), or
 // null when the value is missing/malformed. Used by ?date=... deep links
 // from the benchmarks page so the user lands on the day they just added
@@ -227,6 +237,7 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
               : null,
             tempo: m.tempo ?? "",
             isMaxReps: !!m.isMaxReps,
+            captureDurationPerRound: !!m.captureDurationPerRound,
             isSideCadence: !!m.isSideCadence,
             equipmentCount: m.equipmentCount,
             rxStandard: m.rxStandard ?? "",
@@ -652,9 +663,13 @@ function CrossfitPageBody() {
   // Render
   // ============================================
 
-  // Members of a gym can't add/edit/delete the gym's coach-programmed
-  // workouts. We hide the buttons rather than letting the API 403.
-  const canAddInCurrentView = !inGymMode || isCoach || isSuperAdmin;
+  // Add Workout from the CrossFit tab is a personal-scope action. In Gym
+  // programming view, coaches manage the day's prescription through the
+  // programming admin (which enforces one WOD per day and the section
+  // taxonomy); allowing a Smart Builder write here lands a duplicate
+  // wod-kind session that the synthetic-workout reader silently shadows.
+  // Members in Gym view also can't add — they switch to My personal.
+  const canAddInCurrentView = !inGymMode;
   // Edit/delete are decided per-workout below using role + creator info.
   const canEditWorkout = (w: { createdBy: string; communityId?: string | null }) => {
     if (!userId) return false;
@@ -747,6 +762,28 @@ function CrossfitPageBody() {
       {inGymMode && !isCoach && !isSuperAdmin && (
         <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px] text-muted-foreground">
           Viewing programming from {activeMembership!.communityName}. Switch to{" "}
+          <button
+            type="button"
+            className="underline underline-offset-2 hover:text-foreground"
+            onClick={() => setCrossfitView.mutate("personal")}
+          >
+            My personal
+          </button>{" "}
+          to add your own workouts.
+        </div>
+      )}
+
+      {inGymMode && (isCoach || isSuperAdmin) && (
+        <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px] text-muted-foreground">
+          Viewing programming from {activeMembership!.communityName}. Edit it
+          on the{" "}
+          <Link
+            href={`/gym/programming/${mondayOfWeek(selectedDate)}`}
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            programming admin
+          </Link>
+          , or switch to{" "}
           <button
             type="button"
             className="underline underline-offset-2 hover:text-foreground"
@@ -988,7 +1025,7 @@ function CrossfitPageBody() {
               setScoringSectionId(null);
             }
           }}
-          workoutId={scoringWorkout.id}
+          workoutId={scoringSection?.id ?? scoringWorkout.id}
           workoutTitle={scoringModalTitle}
           parts={scoringParts}
           workout={scoringWorkout}
@@ -1001,6 +1038,11 @@ function CrossfitPageBody() {
         workout={
           workouts.find((w) => w.id === leaderboardWorkoutId) ?? null
         }
+        // For programmed days the synthetic workout.id is the first
+        // session in the group (usually the warm-up, no template). Route
+        // the fetch through the section's own session id when scoped so
+        // the leaderboard route lands on a session that has a template.
+        sessionId={leaderboardSectionId}
         commentScoreId={deepLinkScoreCommentId}
         onCommentScoreIdChange={setDeepLinkScoreCommentId}
         scopePartIds={leaderboardScope?.partIds ?? null}

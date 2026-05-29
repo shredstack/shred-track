@@ -51,6 +51,7 @@ interface WireMovement {
   prescribedWeightPctSourcePartId: string | null;
   tempo: string | null;
   isMaxReps: boolean;
+  captureDurationPerRound: boolean;
   isSideCadence: boolean;
   repSchemeParsed: RepSchemeParsed | null;
   equipmentCount: number | null;
@@ -203,6 +204,7 @@ function wireMovementToDisplay(m: WireMovement): WorkoutMovementDisplay {
       m.prescribedWeightPctSourcePartId ?? undefined,
     tempo: m.tempo ?? undefined,
     isMaxReps: m.isMaxReps,
+    captureDurationPerRound: m.captureDurationPerRound,
     isSideCadence: m.isSideCadence,
     repSchemeParsed: m.repSchemeParsed,
     equipmentCount: m.equipmentCount ?? undefined,

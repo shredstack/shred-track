@@ -24,6 +24,12 @@ interface LeaderboardSheetProps {
   /** Optional override for the sheet title when scoped to a section
    *  (e.g. "Pre-skill · Deadlift Build-up"). Falls back to workout.title. */
   scopeTitle?: string | null;
+  /** Optional override for the API fetch key. On gym programmed days the
+   *  synthetic `workout.id` is the first session in the group (often the
+   *  warm-up, which has no template), so the leaderboard route can't
+   *  resolve a template. When the parent has a specific section in scope,
+   *  it passes that section's session id here. Falls back to `workout.id`. */
+  sessionId?: string | null;
 }
 
 // Per-part display label for the tab strip / single-part header. Priority:
@@ -50,8 +56,13 @@ export function LeaderboardSheet({
   onCommentScoreIdChange,
   scopePartIds,
   scopeTitle,
+  sessionId,
 }: LeaderboardSheetProps) {
   const workoutId = workout?.id ?? null;
+  // The fetch key. Per-section leaderboards on programmed days route to
+  // the section's session id so the route lands on a session with a
+  // template; everywhere else this falls back to the synthetic workout id.
+  const leaderboardFetchId = sessionId ?? workoutId;
 
   // Parts ordered for the tab strip. Multi-part workouts get a tab per part;
   // single-part workouts render the leaderboard without a tab strip. When
@@ -91,11 +102,11 @@ export function LeaderboardSheet({
     parts[0]?.id ?? null
   );
 
-  // When the sheet re-opens for a different workout, reset the active tab
-  // by remounting via a key.
-  const sheetKey = workoutId ?? "closed";
+  // When the sheet re-opens for a different workout/section, reset the
+  // active tab by remounting via a key.
+  const sheetKey = leaderboardFetchId ?? "closed";
 
-  const { data, isLoading, error } = useLeaderboard(workoutId);
+  const { data, isLoading, error } = useLeaderboard(leaderboardFetchId);
 
   // For the comments drawer header — find the row whose score is being
   // commented on. Cheap lookup across all parts.

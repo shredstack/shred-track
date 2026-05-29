@@ -1,36 +1,35 @@
 // POST /api/gym/[id]/programming/sections/from-workout
 //
-// Move a manual CrossFit-tab workout into the day's programming as a new
-// section of the chosen kind. The source workout's parts, movements, and
-// scores get reparented onto the day's programmed workout; the source
-// workout shell is then deleted so the manual entry disappears from the
-// CrossFit tab.
+// Move a manual CrossFit-tab session into the day's programming as a new
+// section of the chosen kind. In the unified schema this collapses to a
+// one-line scope swap: the source `workout_sessions` row keeps its
+// template + scores; we just flip its `user_id` to null, set `community_id`
+// + `position` + `kind`. No prescription copy, no metadata copy.
 //
-// Body: { sourceWorkoutId, kind, workoutDate (YYYY-MM-DD) }
+// Body: { sourceWorkoutId, kind, workoutDate (YYYY-MM-DD) }.
+// `sourceWorkoutId` is a `workout_sessions.id` post-cutover.
 // Coach/admin only.
 
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  WORKOUT_SECTION_KINDS,
-  classInstances,
-  gymPosts,
+  WORKOUT_SESSION_KINDS,
   programmingReleases,
-  scores,
-  workoutMovements,
-  workoutParts,
-  workoutSections,
-  workouts,
-  type WorkoutSectionKind,
+  workoutSessions,
+  type WorkoutSessionKind,
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canManageGym } from "@/lib/authz/community";
+import {
+  nextPositionForDay,
+  updateSession,
+} from "@/lib/crossfit/session-writer";
 
-function isValidKind(v: unknown): v is WorkoutSectionKind {
+function isValidKind(v: unknown): v is WorkoutSessionKind {
   return (
     typeof v === "string" &&
-    (WORKOUT_SECTION_KINDS as readonly string[]).includes(v)
+    (WORKOUT_SESSION_KINDS as readonly string[]).includes(v)
   );
 }
 
@@ -67,7 +66,10 @@ export async function POST(
     );
   }
   if (!isValidKind(body.kind)) {
-    return NextResponse.json({ error: "A valid kind is required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "A valid kind is required" },
+      { status: 400 }
+    );
   }
   const workoutDate = body.workoutDate;
   if (!workoutDate || !/^\d{4}-\d{2}-\d{2}$/.test(workoutDate)) {
@@ -77,34 +79,44 @@ export async function POST(
     );
   }
 
-  // Confirm the source workout belongs to this gym and is a manual workout
-  // (no programming release). Refuse to move workouts that are already
-  // part of a release — those are already in programming.
   const [source] = await db
     .select({
-      id: workouts.id,
-      title: workouts.title,
-      workoutDate: workouts.workoutDate,
-      programmingReleaseId: workouts.programmingReleaseId,
+      id: workoutSessions.id,
+      userId: workoutSessions.userId,
+      communityId: workoutSessions.communityId,
+      workoutDate: workoutSessions.workoutDate,
+      crossfitWorkoutId: workoutSessions.crossfitWorkoutId,
+      programmingReleaseId: workoutSessions.programmingReleaseId,
     })
-    .from(workouts)
-    .where(
-      and(
-        eq(workouts.id, body.sourceWorkoutId),
-        eq(workouts.communityId, communityId)
-      )
-    )
+    .from(workoutSessions)
+    .where(eq(workoutSessions.id, body.sourceWorkoutId))
     .limit(1);
   if (!source) {
     return NextResponse.json(
-      { error: "Workout not found in this gym" },
+      { error: "Workout not found" },
       { status: 404 }
     );
   }
+  // Two flows land here:
+  //   • Personal log → gym programming (the legacy "move into gym" path).
+  //   • Gym-manual workout → gym programming (the manual-workouts banner's
+  //     "Move into programming" button, surfaced now that the programming
+  //     route buckets manual sessions separately).
+  // We accept either, but a session that's already attached to a release
+  // is double-promotion and should bounce.
   if (source.programmingReleaseId) {
     return NextResponse.json(
       { error: "Workout is already part of programming" },
       { status: 400 }
+    );
+  }
+  // A gym-scoped source must belong to THIS gym. Cross-gym moves aren't
+  // an authorized flow — admins of gym A can't reach into gym B's manual
+  // workouts.
+  if (source.communityId !== null && source.communityId !== communityId) {
+    return NextResponse.json(
+      { error: "Workout belongs to a different gym" },
+      { status: 403 }
     );
   }
   if (source.workoutDate !== workoutDate) {
@@ -113,178 +125,69 @@ export async function POST(
       { status: 400 }
     );
   }
+  // Personal sessions move only when the caller owns them. Gym-manual
+  // sessions are owned by the gym; canManageGym above is the authz check.
+  if (source.communityId === null && source.userId !== user.id) {
+    return NextResponse.json(
+      { error: "You can only move your own workouts" },
+      { status: 403 }
+    );
+  }
 
   const kind = body.kind;
 
   try {
     const result = await db.transaction(async (tx) => {
-      // Find or create the destination programmed workout for the date.
-      let destWorkoutId: string;
-      const [existing] = await tx
-        .select({ id: workouts.id })
-        .from(workouts)
+      // Find or create the draft release covering the date.
+      const monday = mondayOf(workoutDate);
+      const [release] = await tx
+        .select({ id: programmingReleases.id })
+        .from(programmingReleases)
         .where(
           and(
-            eq(workouts.communityId, communityId),
-            eq(workouts.workoutDate, workoutDate),
-            isNotNull(workouts.programmingReleaseId)
+            eq(programmingReleases.communityId, communityId),
+            eq(programmingReleases.weekStart, monday)
           )
         )
         .limit(1);
-      if (existing) {
-        destWorkoutId = existing.id;
+      let releaseId: string;
+      if (release) {
+        releaseId = release.id;
       } else {
-        // Find or create the draft release for the week.
-        const monday = mondayOf(workoutDate);
-        let releaseId: string;
-        const [release] = await tx
-          .select({ id: programmingReleases.id })
-          .from(programmingReleases)
-          .where(
-            and(
-              eq(programmingReleases.communityId, communityId),
-              eq(programmingReleases.weekStart, monday)
-            )
-          )
-          .limit(1);
-        if (release) {
-          releaseId = release.id;
-        } else {
-          const [r] = await tx
-            .insert(programmingReleases)
-            .values({
-              communityId,
-              weekStart: monday,
-              status: "draft",
-              source: "manual",
-            })
-            .returning({ id: programmingReleases.id });
-          releaseId = r.id;
-        }
-        const [w] = await tx
-          .insert(workouts)
+        const [r] = await tx
+          .insert(programmingReleases)
           .values({
-            createdBy: user.id,
             communityId,
-            workoutDate,
-            workoutType: "other",
-            programmingReleaseId: releaseId,
-            published: false,
+            weekStart: monday,
+            status: "draft",
             source: "manual",
           })
-          .returning({ id: workouts.id });
-        destWorkoutId = w.id;
+          .returning({ id: programmingReleases.id });
+        releaseId = r.id;
       }
 
-      // Next position for the new section.
-      const positions = await tx
-        .select({ position: workoutSections.position })
-        .from(workoutSections)
-        .where(eq(workoutSections.workoutId, destWorkoutId));
-      const nextPosition = positions.reduce(
-        (max, s) => Math.max(max, s.position + 1),
-        0
-      );
+      const position = await nextPositionForDay(tx, {
+        communityId,
+        workoutDate,
+      });
 
-      // Create the new section. Use the source workout's title so the
-      // section header shows something meaningful (e.g. "Cindy").
-      const [newSection] = await tx
-        .insert(workoutSections)
-        .values({
-          workoutId: destWorkoutId,
-          kind,
-          position: nextPosition,
-          title: source.title?.trim() ? source.title : null,
-          reviewedAt: new Date(),
-        })
-        .returning();
+      // The one-line scope swap. The session keeps its
+      // crossfit_workout_id (template); the existing scores stay
+      // attached via workout_session_id; no rows move around.
+      const updated = await updateSession(tx, source.id, {
+        userId: null,
+        communityId,
+        kind,
+        position,
+        programmingReleaseId: releaseId,
+        reviewedAt: new Date(),
+      });
 
-      // Move the source workout's parts. Renumber orderIndex sequentially
-      // from the destination's current max so we don't collide with the
-      // (workoutId, orderIndex) unique index.
-      const destPartsMax = await tx
-        .select({ orderIndex: workoutParts.orderIndex })
-        .from(workoutParts)
-        .where(eq(workoutParts.workoutId, destWorkoutId));
-      const baseOrder = destPartsMax.reduce(
-        (max, p) => Math.max(max, p.orderIndex + 1),
-        0
-      );
-
-      const sourceParts = await tx
-        .select({ id: workoutParts.id, orderIndex: workoutParts.orderIndex })
-        .from(workoutParts)
-        .where(eq(workoutParts.workoutId, source.id))
-        .orderBy(workoutParts.orderIndex);
-
-      // Two-phase update: bump source parts' orderIndex into a temporary
-      // high range first to avoid colliding with destination's existing
-      // (workoutId, orderIndex) pairs once we flip workoutId. Then flip
-      // workoutId + workoutSectionId + final orderIndex in one shot.
-      // Use a large offset that can't realistically overlap.
-      const SAFE_OFFSET = 1_000_000;
-      for (let i = 0; i < sourceParts.length; i++) {
-        await tx
-          .update(workoutParts)
-          .set({ orderIndex: SAFE_OFFSET + i })
-          .where(eq(workoutParts.id, sourceParts[i].id));
-      }
-      for (let i = 0; i < sourceParts.length; i++) {
-        await tx
-          .update(workoutParts)
-          .set({
-            workoutId: destWorkoutId,
-            workoutSectionId: newSection.id,
-            orderIndex: baseOrder + i,
-          })
-          .where(eq(workoutParts.id, sourceParts[i].id));
-      }
-
-      // Reparent any workoutMovements / scores that referenced the source
-      // workout directly. (workoutMovements.workoutPartId stays valid since
-      // the parts themselves moved with us; only the denormalized workoutId
-      // needs updating.)
-      await tx
-        .update(workoutMovements)
-        .set({ workoutId: destWorkoutId })
-        .where(eq(workoutMovements.workoutId, source.id));
-      await tx
-        .update(scores)
-        .set({ workoutId: destWorkoutId })
-        .where(eq(scores.workoutId, source.id));
-
-      // Any sections that lived on the source workout get cascade-deleted
-      // with the workout below. Parts have already been reparented so this
-      // only drops the empty section shells.
-
-      // If the destination workout has no title yet, lift the source
-      // workout's title onto it so the day card reads naturally.
-      if (source.title?.trim()) {
-        await tx
-          .update(workouts)
-          .set({ title: source.title })
-          .where(
-            and(eq(workouts.id, destWorkoutId), isNull(workouts.title))
-          );
-      }
-
-      // class_instances.workout_id and gym_posts.workout_id reference
-      // workouts with no ON DELETE rule. Null them out before deleting the
-      // source shell so a manual workout that's been scheduled to a class
-      // or posted to the feed can still be moved into programming.
-      await tx
-        .update(classInstances)
-        .set({ workoutId: null })
-        .where(eq(classInstances.workoutId, source.id));
-      await tx
-        .update(gymPosts)
-        .set({ workoutId: null })
-        .where(eq(gymPosts.workoutId, source.id));
-
-      // Finally delete the source workout shell.
-      await tx.delete(workouts).where(eq(workouts.id, source.id));
-
-      return { sectionId: newSection.id, workoutId: destWorkoutId };
+      return {
+        sectionId: source.id,
+        crossfitWorkoutId: updated?.crossfitWorkoutId ?? null,
+        programmingReleaseId: releaseId,
+      };
     });
 
     return NextResponse.json(result);

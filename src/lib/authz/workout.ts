@@ -1,75 +1,83 @@
 // ---------------------------------------------------------------------------
-// Workout authorization helpers.
+// Session authorization helpers.
 //
-// Personal workouts (community_id IS NULL) are visible/editable only by
-// the creator. Gym workouts (community_id IS NOT NULL) are visible to all
-// active members of the gym, but editable only by coaches/admins of that
-// gym (or the super admin).
+// Workouts collapse into sessions in the unified schema. Personal
+// sessions (user_id set) are visible/editable only by the owner. Gym
+// sessions (community_id set) are visible to active members and editable
+// by coaches/admins of that gym (or the super admin).
 // ---------------------------------------------------------------------------
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { workouts, communityMemberships } from "@/db/schema";
+import { communityMemberships, workoutSessions } from "@/db/schema";
 import { canProgramForGym, isSuperAdmin } from "./community";
 
-export interface WorkoutAccess {
-  /** Workout exists. */
+/** Convenience for create-time. Personal sessions are always allowed; gym
+ *  sessions require coach/admin in the target gym. */
+export async function canCreateWorkoutInGym(
+  userId: string,
+  communityId: string | null
+): Promise<boolean> {
+  if (communityId === null) return true;
+  return canProgramForGym(userId, communityId);
+}
+
+export interface SessionAccess {
+  /** Session row exists. */
   exists: boolean;
-  /** Caller can read this workout. */
+  /** Caller can read this session. */
   canRead: boolean;
-  /** Caller can edit/delete this workout. */
+  /** Caller can edit/delete this session. */
   canEdit: boolean;
-  /** True when the workout is a gym workout (has communityId). */
-  isGymWorkout: boolean;
-  /** The gym id, or null for personal workouts. */
+  /** True when the session is scoped to a gym. */
+  isGymSession: boolean;
+  /** The gym id, or null for personal sessions. */
   communityId: string | null;
 }
 
-/** Authoritative workout access decision. One DB hit for the workout row,
- *  plus at most one membership lookup for gym workouts. */
-export async function getWorkoutAccess(
+export async function getSessionAccess(
   userId: string,
-  workoutId: string
-): Promise<WorkoutAccess> {
-  const [w] = await db
+  sessionId: string
+): Promise<SessionAccess> {
+  const [s] = await db
     .select({
-      createdBy: workouts.createdBy,
-      communityId: workouts.communityId,
+      userId: workoutSessions.userId,
+      communityId: workoutSessions.communityId,
     })
-    .from(workouts)
-    .where(eq(workouts.id, workoutId))
+    .from(workoutSessions)
+    .where(eq(workoutSessions.id, sessionId))
     .limit(1);
 
-  if (!w) {
+  if (!s) {
     return {
       exists: false,
       canRead: false,
       canEdit: false,
-      isGymWorkout: false,
+      isGymSession: false,
       communityId: null,
     };
   }
 
-  // Personal workout: only the creator can touch it.
-  if (w.communityId === null) {
-    const isOwner = w.createdBy === userId;
+  // Personal session: only the owner can read or edit.
+  if (s.communityId === null) {
+    const isOwner = s.userId === userId;
     return {
       exists: true,
       canRead: isOwner,
       canEdit: isOwner,
-      isGymWorkout: false,
+      isGymSession: false,
       communityId: null,
     };
   }
 
-  // Gym workout. Super admin first to short-circuit a membership lookup.
+  // Gym session. Super admin short-circuits the membership lookup.
   if (await isSuperAdmin(userId)) {
     return {
       exists: true,
       canRead: true,
       canEdit: true,
-      isGymWorkout: true,
-      communityId: w.communityId,
+      isGymSession: true,
+      communityId: s.communityId,
     };
   }
 
@@ -82,7 +90,7 @@ export async function getWorkoutAccess(
     .from(communityMemberships)
     .where(
       and(
-        eq(communityMemberships.communityId, w.communityId),
+        eq(communityMemberships.communityId, s.communityId),
         eq(communityMemberships.userId, userId)
       )
     )
@@ -93,8 +101,8 @@ export async function getWorkoutAccess(
       exists: true,
       canRead: false,
       canEdit: false,
-      isGymWorkout: true,
-      communityId: w.communityId,
+      isGymSession: true,
+      communityId: s.communityId,
     };
   }
 
@@ -103,17 +111,7 @@ export async function getWorkoutAccess(
     exists: true,
     canRead: true,
     canEdit,
-    isGymWorkout: true,
-    communityId: w.communityId,
+    isGymSession: true,
+    communityId: s.communityId,
   };
-}
-
-/** Convenience for create-time. Personal workouts are always allowed; gym
- *  workouts require coach/admin in the target gym. */
-export async function canCreateWorkoutInGym(
-  userId: string,
-  communityId: string | null
-): Promise<boolean> {
-  if (communityId === null) return true;
-  return canProgramForGym(userId, communityId);
 }

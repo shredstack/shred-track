@@ -16,12 +16,12 @@ import { db } from "@/db";
 import {
   scores,
   scoreMovementDetails,
-  workoutMovements,
-  workouts,
+  crossfitWorkoutMovements,
+  crossfitWorkouts,
+  workoutSessions,
   movements,
-  benchmarkWorkouts,
 } from "@/db/schema";
-import { and, eq, gte, isNotNull } from "drizzle-orm";
+import { and, eq, gte } from "drizzle-orm";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
 import { estimatedOneRmForSet, parseRepScheme } from "./predicted-1rm";
 import type { SetEntry } from "@/types/crossfit";
@@ -146,7 +146,7 @@ export type BenchmarkTrendRow = {
 
 export type VolumeTrendRow = {
   scoreId: string;
-  workoutId: string;
+  workoutSessionId: string;
   workoutDate: string;
   timeSeconds: number | null;
   timeCapSeconds: number | null;
@@ -213,8 +213,8 @@ async function fetchStrengthRows(
   const rows = await db
     .select({
       scoreId: scores.id,
-      workoutDate: workouts.workoutDate,
-      workoutRepScheme: workouts.repScheme,
+      workoutDate: workoutSessions.workoutDate,
+      workoutRepScheme: crossfitWorkouts.repScheme,
       movementId: movements.id,
       movementName: movements.canonicalName,
       actualWeight: scoreMovementDetails.actualWeight,
@@ -223,16 +223,23 @@ async function fetchStrengthRows(
     .from(scoreMovementDetails)
     .innerJoin(scores, eq(scores.id, scoreMovementDetails.scoreId))
     .innerJoin(
-      workoutMovements,
-      eq(workoutMovements.id, scoreMovementDetails.workoutMovementId)
+      crossfitWorkoutMovements,
+      eq(
+        crossfitWorkoutMovements.id,
+        scoreMovementDetails.crossfitWorkoutMovementId
+      )
     )
-    .innerJoin(workouts, eq(workouts.id, scores.workoutId))
-    .innerJoin(movements, eq(movements.id, workoutMovements.movementId))
+    .innerJoin(workoutSessions, eq(workoutSessions.id, scores.workoutSessionId))
+    .innerJoin(
+      crossfitWorkouts,
+      eq(crossfitWorkouts.id, workoutSessions.crossfitWorkoutId)
+    )
+    .innerJoin(movements, eq(movements.id, crossfitWorkoutMovements.movementId))
     .where(
       and(
         eq(scores.userId, userId),
         eq(movements.is1rmApplicable, true),
-        gte(workouts.workoutDate, since)
+        gte(workoutSessions.workoutDate, since)
       )
     );
 
@@ -372,14 +379,17 @@ async function fetchBenchmarkRows(
 ): Promise<BenchmarkTrendRow[]> {
   const since = toIsoDate(daysAgoFrom(new Date(), windowDays));
 
+  // A score is "against a benchmark" when its session points at a template
+  // marked is_benchmark = true. One join, one predicate — the legacy
+  // section-or-workout COALESCE union goes away with the unified schema.
   const rows = await db
     .select({
       scoreId: scores.id,
-      workoutDate: workouts.workoutDate,
-      benchmarkId: benchmarkWorkouts.id,
-      benchmarkName: benchmarkWorkouts.name,
-      workoutType: workouts.workoutType,
-      timeCapSeconds: workouts.timeCapSeconds,
+      workoutDate: workoutSessions.workoutDate,
+      benchmarkId: crossfitWorkouts.id,
+      benchmarkName: crossfitWorkouts.title,
+      workoutType: crossfitWorkouts.workoutType,
+      timeCapSeconds: crossfitWorkouts.timeCapSeconds,
       timeSeconds: scores.timeSeconds,
       totalReps: scores.totalReps,
       weightLbs: scores.weightLbs,
@@ -389,16 +399,16 @@ async function fetchBenchmarkRows(
       hitTimeCap: scores.hitTimeCap,
     })
     .from(scores)
-    .innerJoin(workouts, eq(workouts.id, scores.workoutId))
+    .innerJoin(workoutSessions, eq(workoutSessions.id, scores.workoutSessionId))
     .innerJoin(
-      benchmarkWorkouts,
-      eq(benchmarkWorkouts.id, workouts.benchmarkWorkoutId)
+      crossfitWorkouts,
+      eq(crossfitWorkouts.id, workoutSessions.crossfitWorkoutId)
     )
     .where(
       and(
         eq(scores.userId, userId),
-        isNotNull(workouts.benchmarkWorkoutId),
-        gte(workouts.workoutDate, since)
+        eq(crossfitWorkouts.isBenchmark, true),
+        gte(workoutSessions.workoutDate, since)
       )
     );
 
@@ -581,26 +591,36 @@ async function fetchVolumeRows(
   const rows = await db
     .select({
       scoreId: scores.id,
-      workoutId: scores.workoutId,
-      workoutDate: workouts.workoutDate,
+      workoutSessionId: scores.workoutSessionId,
+      workoutDate: workoutSessions.workoutDate,
       timeSeconds: scores.timeSeconds,
-      timeCapSeconds: workouts.timeCapSeconds,
+      timeCapSeconds: crossfitWorkouts.timeCapSeconds,
       movementCategory: movements.category,
       movementIsWeighted: movements.isWeighted,
     })
     .from(scoreMovementDetails)
     .innerJoin(scores, eq(scores.id, scoreMovementDetails.scoreId))
     .innerJoin(
-      workoutMovements,
-      eq(workoutMovements.id, scoreMovementDetails.workoutMovementId)
+      crossfitWorkoutMovements,
+      eq(
+        crossfitWorkoutMovements.id,
+        scoreMovementDetails.crossfitWorkoutMovementId
+      )
     )
-    .innerJoin(workouts, eq(workouts.id, scores.workoutId))
-    .innerJoin(movements, eq(movements.id, workoutMovements.movementId))
-    .where(and(eq(scores.userId, userId), gte(workouts.workoutDate, since)));
+    .innerJoin(workoutSessions, eq(workoutSessions.id, scores.workoutSessionId))
+    .innerJoin(
+      crossfitWorkouts,
+      eq(crossfitWorkouts.id, workoutSessions.crossfitWorkoutId)
+    )
+    .innerJoin(movements, eq(movements.id, crossfitWorkoutMovements.movementId))
+    .where(
+      and(eq(scores.userId, userId), gte(workoutSessions.workoutDate, since))
+    );
 
   return rows.map((r) => ({
     scoreId: r.scoreId,
-    workoutId: r.workoutId,
+    // workout_sessions inner join guarantees non-null; Drizzle just can't narrow it.
+    workoutSessionId: r.workoutSessionId as string,
     workoutDate: r.workoutDate,
     timeSeconds: r.timeSeconds,
     timeCapSeconds: r.timeCapSeconds,
@@ -634,20 +654,20 @@ export function computeVolumeTrendsFromRows(
     });
   }
 
-  // Index workouts → which domains appeared on them, plus working seconds.
-  // We count one workout-per-domain per week, not movement-instances.
-  type WorkoutAcc = {
+  // Index sessions → which domains appeared on them, plus working seconds.
+  // We count one session-per-domain per week, not movement-instances.
+  type SessionAcc = {
     week: string;
     domains: Set<DomainKey>;
-    timeSeconds: number; // capped per workout
+    timeSeconds: number; // capped per session
   };
-  const byWorkout = new Map<string, WorkoutAcc>();
+  const bySession = new Map<string, SessionAcc>();
 
   for (const r of rows) {
     const week = weekStartIso(r.workoutDate);
     if (!buckets.has(week)) continue; // outside window
 
-    let acc = byWorkout.get(r.workoutId);
+    let acc = bySession.get(r.workoutSessionId);
     if (!acc) {
       const seconds = (() => {
         if (r.timeSeconds == null) return 0;
@@ -657,13 +677,13 @@ export function computeVolumeTrendsFromRows(
         return r.timeSeconds;
       })();
       acc = { week, domains: new Set(), timeSeconds: seconds };
-      byWorkout.set(r.workoutId, acc);
+      bySession.set(r.workoutSessionId, acc);
     }
     acc.domains.add(bucketFor(r.movementCategory, r.movementIsWeighted));
   }
 
-  // Roll up per-workout counts into per-week buckets.
-  for (const acc of byWorkout.values()) {
+  // Roll up per-session counts into per-week buckets.
+  for (const acc of bySession.values()) {
     const bucket = buckets.get(acc.week);
     if (!bucket) continue;
     for (const d of acc.domains) {

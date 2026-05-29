@@ -3,27 +3,25 @@
 //
 // Powers the user-facing CrossFit Movements tab. Returns every validated
 // movement visible to the caller (system + the caller's own validated rows)
-// plus per-user usage stats so the list can show "last logged" / "Rx %" and
-// surface movements they've never tried.
+// plus per-user usage stats so the list can show "last logged" / "Rx %".
 //
-// Stats are derived from the user's scores ledger:
-//   - logCount    — number of score_movement_details rows tied to this movement
-//   - rxCount     — those rows where was_rx = true
-//   - lastLoggedAt — most recent workout_date for those rows
-//
-// Substitutions are intentionally not counted here — we key on the prescribed
-// movement (workout_movements.movement_id), not score_movement_details.substitution_movement_id.
+// Stats source: score_movement_details rows tied to the caller's scores,
+// joined via crossfit_workout_movements → crossfit_workout_parts →
+// workout_sessions to recover the workoutDate. Substitution movements
+// (score_movement_details.substitution_movement_id) are intentionally not
+// counted — we key on the prescribed movement.
 // ---------------------------------------------------------------------------
 
 import { NextResponse } from "next/server";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  crossfitWorkoutMovements,
+  crossfitWorkoutParts,
   movements,
   scoreMovementDetails,
   scores,
-  workoutMovements,
-  workouts,
+  workoutSessions,
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 
@@ -66,27 +64,36 @@ export async function GET() {
     .where(
       and(
         eq(movements.isValidated, true),
-        or(isNull(movements.createdBy), eq(movements.createdBy, user.id))!,
-      ),
+        or(isNull(movements.createdBy), eq(movements.createdBy, user.id))!
+      )
     )
     .orderBy(movements.canonicalName);
 
+  // Stats join: score_movement_details → crossfit_workout_movements →
+  // crossfit_workout_parts → workout_sessions. Pre-cutover rows that lack
+  // a crossfitWorkoutMovementId fall out of the join; they're picked up
+  // again via the dual-FK union after the legacy drop migration retires
+  // both columns into one canonical FK.
   const statsRows = await db
     .select({
-      movementId: workoutMovements.movementId,
+      movementId: crossfitWorkoutMovements.movementId,
       logCount: sql<number>`count(*)::int`,
       rxCount: sql<number>`sum(case when ${scoreMovementDetails.wasRx} then 1 else 0 end)::int`,
-      lastLoggedAt: sql<string | null>`max(${workouts.workoutDate})::text`,
+      lastLoggedAt: sql<string | null>`max(${workoutSessions.workoutDate})::text`,
     })
     .from(scoreMovementDetails)
     .innerJoin(scores, eq(scores.id, scoreMovementDetails.scoreId))
     .innerJoin(
-      workoutMovements,
-      eq(workoutMovements.id, scoreMovementDetails.workoutMovementId),
+      crossfitWorkoutMovements,
+      eq(crossfitWorkoutMovements.id, scoreMovementDetails.crossfitWorkoutMovementId)
     )
-    .innerJoin(workouts, eq(workouts.id, workoutMovements.workoutId))
+    .innerJoin(
+      crossfitWorkoutParts,
+      eq(crossfitWorkoutParts.id, crossfitWorkoutMovements.crossfitWorkoutPartId)
+    )
+    .innerJoin(workoutSessions, eq(workoutSessions.id, scores.workoutSessionId))
     .where(eq(scores.userId, user.id))
-    .groupBy(workoutMovements.movementId);
+    .groupBy(crossfitWorkoutMovements.movementId);
 
   const statsByMovement = new Map(statsRows.map((r) => [r.movementId, r]));
 

@@ -2,7 +2,7 @@ import type { WorkoutType } from "@/types/crossfit";
 
 export interface ScoreRow {
   scoreId: string;
-  workoutId: string;
+  sessionId: string | null;
   workoutDate: string;
   division: string;
   timeSeconds: number | null;

@@ -11,8 +11,8 @@ import { db } from "@/db";
 import {
   scores,
   scoreMovementDetails,
-  workoutMovements,
-  workouts,
+  crossfitWorkoutMovements,
+  workoutSessions,
   movements,
 } from "@/db/schema";
 import { and, eq, gte } from "drizzle-orm";
@@ -70,26 +70,29 @@ async function fetchDetails(
   const rows = await db
     .select({
       scoreId: scores.id,
-      workoutDate: workouts.workoutDate,
+      workoutDate: workoutSessions.workoutDate,
       division: scores.division,
       movementId: movements.id,
       movementName: movements.canonicalName,
       wasRx: scoreMovementDetails.wasRx,
       modification: scoreMovementDetails.modification,
-      rxStandard: workoutMovements.rxStandard,
-      prescribedWeightMale: workoutMovements.prescribedWeightMale,
-      prescribedWeightFemale: workoutMovements.prescribedWeightFemale,
+      rxStandard: crossfitWorkoutMovements.rxStandard,
+      prescribedWeightMale: crossfitWorkoutMovements.prescribedWeightMale,
+      prescribedWeightFemale: crossfitWorkoutMovements.prescribedWeightFemale,
     })
     .from(scoreMovementDetails)
     .innerJoin(scores, eq(scores.id, scoreMovementDetails.scoreId))
     .innerJoin(
-      workoutMovements,
-      eq(workoutMovements.id, scoreMovementDetails.workoutMovementId)
+      crossfitWorkoutMovements,
+      eq(
+        crossfitWorkoutMovements.id,
+        scoreMovementDetails.crossfitWorkoutMovementId
+      )
     )
-    .innerJoin(workouts, eq(workouts.id, scores.workoutId))
-    .innerJoin(movements, eq(movements.id, workoutMovements.movementId))
+    .innerJoin(workoutSessions, eq(workoutSessions.id, scores.workoutSessionId))
+    .innerJoin(movements, eq(movements.id, crossfitWorkoutMovements.movementId))
     .where(
-      and(eq(scores.userId, userId), gte(workouts.workoutDate, since))
+      and(eq(scores.userId, userId), gte(workoutSessions.workoutDate, since))
     );
 
   return rows.map((r) => ({

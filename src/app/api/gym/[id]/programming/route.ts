@@ -1,19 +1,25 @@
 // GET /api/gym/[id]/programming?weekStart=YYYY-MM-DD
 //
-// Returns the programming release + its 7 days of workouts (and their
-// sections) for a single week. Coach/admin only.
+// Returns the programming release for the week + every session in that
+// week, grouped by date. Each date = a "workout day" with N sections
+// (workout_sessions rows). Coach/admin only.
+//
+// Unified-schema cutover: sections ARE workout_sessions rows. Templates
+// (crossfit_workouts + crossfit_workout_parts/_blocks/_movements) are
+// joined per section so the admin Programming card can render its inline
+// preview without round-tripping per day.
 
 import { NextRequest, NextResponse } from "next/server";
 import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  crossfitWorkoutBlocks,
+  crossfitWorkoutMovements,
+  crossfitWorkoutParts,
+  crossfitWorkouts,
   movements,
   programmingReleases,
-  workoutBlocks,
-  workoutSections,
-  workouts,
-  workoutMovements,
-  workoutParts,
+  workoutSessions,
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canManageGym } from "@/lib/authz/community";
@@ -61,150 +67,155 @@ export async function GET(
     )
     .limit(1);
 
-  // Workouts in this week for the gym, whether or not they're tied to the
-  // release (legacy gym workouts pre-§1.6 won't be).
-  const workoutRows = await db
+  // Sessions for this week + gym.
+  const sessionRows = await db
     .select({
-      id: workouts.id,
-      title: workouts.title,
-      description: workouts.description,
-      workoutDate: workouts.workoutDate,
-      workoutType: workouts.workoutType,
-      programmingReleaseId: workouts.programmingReleaseId,
-      reviewedAt: workouts.reviewedAt,
+      id: workoutSessions.id,
+      crossfitWorkoutId: workoutSessions.crossfitWorkoutId,
+      workoutDate: workoutSessions.workoutDate,
+      kind: workoutSessions.kind,
+      subKind: workoutSessions.subKind,
+      position: workoutSessions.position,
+      title: workoutSessions.title,
+      body: workoutSessions.body,
+      coachNotes: workoutSessions.coachNotes,
+      isScored: workoutSessions.isScored,
+      scoreType: workoutSessions.scoreType,
+      programmingReleaseId: workoutSessions.programmingReleaseId,
+      reviewedAt: workoutSessions.reviewedAt,
+      sourceTrackId: workoutSessions.sourceTrackId,
     })
-    .from(workouts)
+    .from(workoutSessions)
     .where(
       and(
-        eq(workouts.communityId, communityId),
-        gte(workouts.workoutDate, weekStart),
-        lte(workouts.workoutDate, weekEnd)
+        eq(workoutSessions.communityId, communityId),
+        gte(workoutSessions.workoutDate, weekStart),
+        lte(workoutSessions.workoutDate, weekEnd)
       )
     )
-    .orderBy(asc(workouts.workoutDate));
+    .orderBy(asc(workoutSessions.workoutDate), asc(workoutSessions.position));
 
-  const workoutIds = workoutRows.map((w) => w.id);
-  const sectionRows =
-    workoutIds.length > 0
-      ? await db
-          .select()
-          .from(workoutSections)
-          .where(inArray(workoutSections.workoutId, workoutIds))
-          .orderBy(asc(workoutSections.position))
-      : [];
+  const templateIds = Array.from(
+    new Set(
+      sessionRows
+        .map((s) => s.crossfitWorkoutId)
+        .filter((id): id is string => !!id)
+    )
+  );
+  const templates = templateIds.length
+    ? await db
+        .select({
+          id: crossfitWorkouts.id,
+          title: crossfitWorkouts.title,
+          description: crossfitWorkouts.description,
+          isBenchmark: crossfitWorkouts.isBenchmark,
+        })
+        .from(crossfitWorkouts)
+        .where(inArray(crossfitWorkouts.id, templateIds))
+    : [];
+  const templateById = new Map(templates.map((t) => [t.id, t]));
 
-  const sectionsByWorkout = new Map<string, typeof sectionRows>();
-  for (const s of sectionRows) {
-    const list = sectionsByWorkout.get(s.workoutId) ?? [];
-    list.push(s);
-    sectionsByWorkout.set(s.workoutId, list);
+  const partRows = templateIds.length
+    ? await db
+        .select({
+          id: crossfitWorkoutParts.id,
+          crossfitWorkoutId: crossfitWorkoutParts.crossfitWorkoutId,
+          label: crossfitWorkoutParts.label,
+          orderIndex: crossfitWorkoutParts.orderIndex,
+          notes: crossfitWorkoutParts.notes,
+          workoutType: crossfitWorkoutParts.workoutType,
+          timeCapSeconds: crossfitWorkoutParts.timeCapSeconds,
+          amrapDurationSeconds: crossfitWorkoutParts.amrapDurationSeconds,
+          emomIntervalSeconds: crossfitWorkoutParts.emomIntervalSeconds,
+          intervalWorkSeconds: crossfitWorkoutParts.intervalWorkSeconds,
+          intervalRestSeconds: crossfitWorkoutParts.intervalRestSeconds,
+          intervalRounds: crossfitWorkoutParts.intervalRounds,
+          sideCadenceIntervalSeconds:
+            crossfitWorkoutParts.sideCadenceIntervalSeconds,
+          sideCadenceOpenEnded: crossfitWorkoutParts.sideCadenceOpenEnded,
+          repScheme: crossfitWorkoutParts.repScheme,
+          rounds: crossfitWorkoutParts.rounds,
+          structure: crossfitWorkoutParts.structure,
+        })
+        .from(crossfitWorkoutParts)
+        .where(inArray(crossfitWorkoutParts.crossfitWorkoutId, templateIds))
+        .orderBy(asc(crossfitWorkoutParts.orderIndex))
+    : [];
+  const partsByTemplate = new Map<string, typeof partRows>();
+  for (const p of partRows) {
+    const list = partsByTemplate.get(p.crossfitWorkoutId) ?? [];
+    list.push(p);
+    partsByTemplate.set(p.crossfitWorkoutId, list);
   }
-
-  const partRows =
-    workoutIds.length > 0
-      ? await db
-          .select({
-            id: workoutParts.id,
-            workoutId: workoutParts.workoutId,
-            workoutSectionId: workoutParts.workoutSectionId,
-            label: workoutParts.label,
-            orderIndex: workoutParts.orderIndex,
-            notes: workoutParts.notes,
-            workoutType: workoutParts.workoutType,
-            timeCapSeconds: workoutParts.timeCapSeconds,
-            amrapDurationSeconds: workoutParts.amrapDurationSeconds,
-            emomIntervalSeconds: workoutParts.emomIntervalSeconds,
-            intervalWorkSeconds: workoutParts.intervalWorkSeconds,
-            intervalRestSeconds: workoutParts.intervalRestSeconds,
-            intervalRounds: workoutParts.intervalRounds,
-            sideCadenceIntervalSeconds:
-              workoutParts.sideCadenceIntervalSeconds,
-            sideCadenceOpenEnded: workoutParts.sideCadenceOpenEnded,
-            repScheme: workoutParts.repScheme,
-            rounds: workoutParts.rounds,
-            structure: workoutParts.structure,
-          })
-          .from(workoutParts)
-          .where(inArray(workoutParts.workoutId, workoutIds))
-          .orderBy(asc(workoutParts.orderIndex))
-      : [];
 
   const partIds = partRows.map((p) => p.id);
-
-  // Fetch movements + blocks for all parts so the admin day card can render
-  // an inline preview without a separate per-workout round trip. Joined to
-  // movements for the canonical name + metric type that the prescription
-  // formatter needs.
-  const movementRows =
-    partIds.length > 0
-      ? await db
-          .select({
-            id: workoutMovements.id,
-            workoutPartId: workoutMovements.workoutPartId,
-            workoutBlockId: workoutMovements.workoutBlockId,
-            orderIndex: workoutMovements.orderIndex,
-            prescribedReps: workoutMovements.prescribedReps,
-            prescribedWeightMale: workoutMovements.prescribedWeightMale,
-            prescribedWeightFemale: workoutMovements.prescribedWeightFemale,
-            prescribedCaloriesMale: workoutMovements.prescribedCaloriesMale,
-            prescribedCaloriesFemale:
-              workoutMovements.prescribedCaloriesFemale,
-            prescribedDistanceMale: workoutMovements.prescribedDistanceMale,
-            prescribedDistanceFemale: workoutMovements.prescribedDistanceFemale,
-            prescribedDurationSecondsMale:
-              workoutMovements.prescribedDurationSecondsMale,
-            prescribedDurationSecondsFemale:
-              workoutMovements.prescribedDurationSecondsFemale,
-            prescribedHeightInches: workoutMovements.prescribedHeightInches,
-            prescribedHeightInchesMale:
-              workoutMovements.prescribedHeightInchesMale,
-            prescribedHeightInchesFemale:
-              workoutMovements.prescribedHeightInchesFemale,
-            prescribedWeightMaleBwMultiplier:
-              workoutMovements.prescribedWeightMaleBwMultiplier,
-            prescribedWeightFemaleBwMultiplier:
-              workoutMovements.prescribedWeightFemaleBwMultiplier,
-            prescribedWeightPct: workoutMovements.prescribedWeightPct,
-            tempo: workoutMovements.tempo,
-            isMaxReps: workoutMovements.isMaxReps,
-            isSideCadence: workoutMovements.isSideCadence,
-            equipmentCount: workoutMovements.equipmentCount,
-            movementName: movements.canonicalName,
-            metricType: movements.metricType,
-          })
-          .from(workoutMovements)
-          .innerJoin(movements, eq(movements.id, workoutMovements.movementId))
-          .where(inArray(workoutMovements.workoutPartId, partIds))
-          .orderBy(asc(workoutMovements.orderIndex))
-      : [];
-
-  const blockRows =
-    partIds.length > 0
-      ? await db
-          .select({
-            id: workoutBlocks.id,
-            workoutPartId: workoutBlocks.workoutPartId,
-            orderIndex: workoutBlocks.orderIndex,
-            title: workoutBlocks.title,
-          })
-          .from(workoutBlocks)
-          .where(inArray(workoutBlocks.workoutPartId, partIds))
-          .orderBy(asc(workoutBlocks.orderIndex))
-      : [];
-
+  const movementRows = partIds.length
+    ? await db
+        .select({
+          id: crossfitWorkoutMovements.id,
+          crossfitWorkoutPartId: crossfitWorkoutMovements.crossfitWorkoutPartId,
+          crossfitWorkoutBlockId: crossfitWorkoutMovements.crossfitWorkoutBlockId,
+          orderIndex: crossfitWorkoutMovements.orderIndex,
+          prescribedReps: crossfitWorkoutMovements.prescribedReps,
+          prescribedWeightMale: crossfitWorkoutMovements.prescribedWeightMale,
+          prescribedWeightFemale: crossfitWorkoutMovements.prescribedWeightFemale,
+          prescribedCaloriesMale: crossfitWorkoutMovements.prescribedCaloriesMale,
+          prescribedCaloriesFemale:
+            crossfitWorkoutMovements.prescribedCaloriesFemale,
+          prescribedDistanceMale: crossfitWorkoutMovements.prescribedDistanceMale,
+          prescribedDistanceFemale: crossfitWorkoutMovements.prescribedDistanceFemale,
+          prescribedDurationSecondsMale:
+            crossfitWorkoutMovements.prescribedDurationSecondsMale,
+          prescribedDurationSecondsFemale:
+            crossfitWorkoutMovements.prescribedDurationSecondsFemale,
+          prescribedHeightInches: crossfitWorkoutMovements.prescribedHeightInches,
+          prescribedHeightInchesMale:
+            crossfitWorkoutMovements.prescribedHeightInchesMale,
+          prescribedHeightInchesFemale:
+            crossfitWorkoutMovements.prescribedHeightInchesFemale,
+          prescribedWeightMaleBwMultiplier:
+            crossfitWorkoutMovements.prescribedWeightMaleBwMultiplier,
+          prescribedWeightFemaleBwMultiplier:
+            crossfitWorkoutMovements.prescribedWeightFemaleBwMultiplier,
+          prescribedWeightPct: crossfitWorkoutMovements.prescribedWeightPct,
+          tempo: crossfitWorkoutMovements.tempo,
+          isMaxReps: crossfitWorkoutMovements.isMaxReps,
+          captureDurationPerRound:
+            crossfitWorkoutMovements.captureDurationPerRound,
+          isSideCadence: crossfitWorkoutMovements.isSideCadence,
+          equipmentCount: crossfitWorkoutMovements.equipmentCount,
+          movementName: movements.canonicalName,
+          metricType: movements.metricType,
+        })
+        .from(crossfitWorkoutMovements)
+        .innerJoin(movements, eq(movements.id, crossfitWorkoutMovements.movementId))
+        .where(inArray(crossfitWorkoutMovements.crossfitWorkoutPartId, partIds))
+        .orderBy(asc(crossfitWorkoutMovements.orderIndex))
+    : [];
   const movementsByPart = new Map<string, typeof movementRows>();
   for (const m of movementRows) {
-    if (!m.workoutPartId) continue;
-    const list = movementsByPart.get(m.workoutPartId) ?? [];
+    const list = movementsByPart.get(m.crossfitWorkoutPartId) ?? [];
     list.push(m);
-    movementsByPart.set(m.workoutPartId, list);
+    movementsByPart.set(m.crossfitWorkoutPartId, list);
   }
 
+  const blockRows = partIds.length
+    ? await db
+        .select({
+          id: crossfitWorkoutBlocks.id,
+          crossfitWorkoutPartId: crossfitWorkoutBlocks.crossfitWorkoutPartId,
+          orderIndex: crossfitWorkoutBlocks.orderIndex,
+          title: crossfitWorkoutBlocks.title,
+        })
+        .from(crossfitWorkoutBlocks)
+        .where(inArray(crossfitWorkoutBlocks.crossfitWorkoutPartId, partIds))
+        .orderBy(asc(crossfitWorkoutBlocks.orderIndex))
+    : [];
   const blocksByPart = new Map<string, typeof blockRows>();
   for (const b of blockRows) {
-    const list = blocksByPart.get(b.workoutPartId) ?? [];
+    const list = blocksByPart.get(b.crossfitWorkoutPartId) ?? [];
     list.push(b);
-    blocksByPart.set(b.workoutPartId, list);
+    blocksByPart.set(b.crossfitWorkoutPartId, list);
   }
 
   function mapPart(p: (typeof partRows)[number]) {
@@ -235,7 +246,7 @@ export async function GET(
         movementName: m.movementName,
         metricType: m.metricType,
         orderIndex: m.orderIndex,
-        workoutBlockId: m.workoutBlockId,
+        workoutBlockId: m.crossfitWorkoutBlockId,
         prescribedReps: m.prescribedReps,
         prescribedWeightMale: m.prescribedWeightMale,
         prescribedWeightFemale: m.prescribedWeightFemale,
@@ -248,59 +259,104 @@ export async function GET(
         prescribedHeightInches: m.prescribedHeightInches,
         prescribedHeightInchesMale: m.prescribedHeightInchesMale,
         prescribedHeightInchesFemale: m.prescribedHeightInchesFemale,
-        prescribedWeightMaleBwMultiplier:
-          m.prescribedWeightMaleBwMultiplier,
+        prescribedWeightMaleBwMultiplier: m.prescribedWeightMaleBwMultiplier,
         prescribedWeightFemaleBwMultiplier:
           m.prescribedWeightFemaleBwMultiplier,
         prescribedWeightPct: m.prescribedWeightPct,
         tempo: m.tempo,
         isMaxReps: m.isMaxReps,
+        captureDurationPerRound: m.captureDurationPerRound,
         isSideCadence: m.isSideCadence,
         equipmentCount: m.equipmentCount,
       })),
     };
   }
 
-  const partsBySection = new Map<string, typeof partRows>();
-  const partsByWorkout = new Map<string, typeof partRows>();
-  for (const p of partRows) {
-    if (p.workoutSectionId) {
-      const list = partsBySection.get(p.workoutSectionId) ?? [];
-      list.push(p);
-      partsBySection.set(p.workoutSectionId, list);
+  // Bucket sessions by (workoutDate, releaseId). Programmed sessions
+  // (release id set) on the same date merge into one "day" bucket — that
+  // matches the legacy `workouts` row the admin UI treats as the day. A
+  // manual session (release id null, added from the CrossFit tab as a
+  // gym admin) is its own one-session bucket; the week-view then renders
+  // it under the amber "manual workouts" banner instead of silently
+  // mixing it into the programmed day's `sections[]` (which dropped the
+  // manual/programmed boundary when we collapsed `workouts` away).
+  type Bucket = {
+    workoutDate: string;
+    releaseId: string | null;
+    sessions: typeof sessionRows;
+  };
+  const programmedBucketByKey = new Map<string, Bucket>();
+  const buckets: Bucket[] = [];
+  for (const s of sessionRows) {
+    if (s.programmingReleaseId) {
+      const key = `${s.workoutDate}:${s.programmingReleaseId}`;
+      let b = programmedBucketByKey.get(key);
+      if (!b) {
+        b = {
+          workoutDate: s.workoutDate,
+          releaseId: s.programmingReleaseId,
+          sessions: [],
+        };
+        programmedBucketByKey.set(key, b);
+        buckets.push(b);
+      }
+      b.sessions.push(s);
+    } else {
+      buckets.push({
+        workoutDate: s.workoutDate,
+        releaseId: null,
+        sessions: [s],
+      });
     }
-    const wlist = partsByWorkout.get(p.workoutId) ?? [];
-    wlist.push(p);
-    partsByWorkout.set(p.workoutId, wlist);
   }
 
-  return NextResponse.json({
-    weekStart,
-    release: release ?? null,
-    workouts: workoutRows.map((w) => ({
-      id: w.id,
-      title: w.title,
-      description: w.description,
-      workoutDate: w.workoutDate,
-      workoutType: w.workoutType,
-      programmingReleaseId: w.programmingReleaseId,
-      reviewedAt: w.reviewedAt,
-      sections: (sectionsByWorkout.get(w.id) ?? []).map((s) => ({
+  const workoutsPayload = buckets.map((bucket) => {
+    const first = bucket.sessions[0];
+    // Owner section: prefer benchmark > wod > scored > first. Mirrors the
+    // selection in session-reader so the day-level title/description point
+    // at the real workout (e.g. Murph) instead of section 0's warmup, which
+    // typically has no template description.
+    const templateForSession = (s: (typeof bucket.sessions)[number]) =>
+      s.crossfitWorkoutId ? templateById.get(s.crossfitWorkoutId) ?? null : null;
+    const benchmarkSession = bucket.sessions.find(
+      (s) => templateForSession(s)?.isBenchmark
+    );
+    const wodSession = bucket.sessions.find((s) => s.kind === "wod");
+    const scoredSession = bucket.sessions.find((s) => s.isScored);
+    const ownerSession =
+      benchmarkSession ?? wodSession ?? scoredSession ?? first;
+    const ownerTemplate = templateForSession(ownerSession);
+    return {
+      id: first.id,
+      title: ownerTemplate?.title ?? null,
+      description: ownerTemplate?.description ?? null,
+      workoutDate: bucket.workoutDate,
+      workoutType: null, // legacy field; derived per-section in the new schema
+      programmingReleaseId: bucket.releaseId,
+      reviewedAt: first.reviewedAt,
+      sections: bucket.sessions.map((s) => ({
         id: s.id,
         kind: s.kind,
         subKind: s.subKind,
         position: s.position,
         title: s.title,
         body: s.body,
+        notes: s.coachNotes,
         isScored: s.isScored,
         scoreType: s.scoreType,
         reviewedAt: s.reviewedAt,
         sourceTrackId: s.sourceTrackId,
-        parts: (partsBySection.get(s.id) ?? []).map(mapPart),
+        parts: s.crossfitWorkoutId
+          ? (partsByTemplate.get(s.crossfitWorkoutId) ?? []).map(mapPart)
+          : [],
       })),
-      partsWithoutSection: (partsByWorkout.get(w.id) ?? [])
-        .filter((p) => !p.workoutSectionId)
-        .map(mapPart),
-    })),
+      partsWithoutSection: [],
+    };
+  });
+
+  return NextResponse.json({
+    weekStart,
+    release: release ?? null,
+    workouts: workoutsPayload,
   });
 }

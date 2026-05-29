@@ -1,26 +1,31 @@
 // POST /api/gym/[id]/programming/cap-paste
 //
 // Takes raw CAP-style text, parses it via lib/cap-parser, and creates (or
-// upserts) a draft release for the week along with one workout per day
-// and one workout_section per parsed section.
+// upserts) a draft release for the week along with one workout_sessions
+// row per parsed (day, section). Coach/admin only.
 //
-// Coach/admin only. Re-paste overwrite rule (per spec §1.7): sections with
-// reviewed_at set are preserved; sections without are replaced. Workouts
-// without sections are left alone.
+// In the unified schema there is no `workouts` container; each parsed
+// section directly maps to a workout_sessions row. CAP-paste re-runs are
+// idempotent by (community_id, workout_date, position): sessions with
+// `reviewed_at` set are preserved (the coach customized them); sessions
+// without are replaced by the new paste. This mirrors the legacy
+// per-section re-paste guard, just on the unified table.
 
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  FREEFORM_SESSION_KINDS,
+  WORKOUT_SESSION_KINDS,
   programmingReleases,
-  workouts,
-  workoutSections,
-  workoutParts,
+  workoutSessions,
+  type WorkoutSessionKind,
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canManageGym } from "@/lib/authz/community";
 import { isFlagOn } from "@/lib/feature-flags";
 import { parseCapPaste } from "@/lib/cap-parser";
+import { createSession } from "@/lib/crossfit/session-writer";
 
 function isIsoDate(s: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
@@ -30,6 +35,16 @@ function addDays(iso: string, days: number): string {
   const d = new Date(iso + "T00:00:00Z");
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
+}
+
+function normalizeKind(kind: string): WorkoutSessionKind {
+  if ((WORKOUT_SESSION_KINDS as readonly string[]).includes(kind)) {
+    return kind as WorkoutSessionKind;
+  }
+  // CAP parser may emit kinds outside the canonical session kind set
+  // (e.g. legacy section kinds). Fall back to `custom` so the row clears
+  // the DB CHECK constraint. The coach can re-kind it in admin.
+  return "custom";
 }
 
 export async function POST(
@@ -44,8 +59,6 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // CAP paste is gated by its own flag so we can ship the programming UI
-  // first and turn on paste import per-gym when the parser is validated.
   if (!(await isFlagOn("cap_paste_import", { userId: user.id, communityId }))) {
     return NextResponse.json(
       { error: "CAP paste import is disabled for this gym" },
@@ -76,10 +89,9 @@ export async function POST(
   }
 
   const result = await db.transaction(async (tx) => {
-    // Upsert the release. If one already exists in draft, we re-use it; if
-    // it's already published, we still re-use it (the coach is patching).
-    const existingRelease = await tx
-      .select()
+    // Upsert the release for the week.
+    const [existingRelease] = await tx
+      .select({ id: programmingReleases.id })
       .from(programmingReleases)
       .where(
         and(
@@ -90,8 +102,8 @@ export async function POST(
       .limit(1);
 
     let releaseId: string;
-    if (existingRelease.length > 0) {
-      releaseId = existingRelease[0].id;
+    if (existingRelease) {
+      releaseId = existingRelease.id;
       await tx
         .update(programmingReleases)
         .set({
@@ -114,110 +126,80 @@ export async function POST(
       releaseId = created.id;
     }
 
-    // Each parsed day → one workout (upsert by date).
-    const workoutIdByDayIndex = new Map<number, string>();
+    let totalSessions = 0;
     for (const day of parsed.days) {
       const workoutDate = addDays(body.weekStart!, day.dayIndex);
-      // Only reuse a workout if it already belongs to a programmed release.
-      // Legacy single WODs (no programmingReleaseId) stay independent so a
-      // CAP paste never absorbs a coach's ad-hoc workout.
-      const existing = await tx
-        .select({ id: workouts.id, reviewedAt: workouts.reviewedAt })
-        .from(workouts)
+
+      // Reviewed sessions on this day stay (the coach customized them);
+      // unreviewed sessions are dropped and re-created from the paste.
+      const dayExisting = await tx
+        .select({
+          id: workoutSessions.id,
+          kind: workoutSessions.kind,
+          reviewedAt: workoutSessions.reviewedAt,
+        })
+        .from(workoutSessions)
         .where(
           and(
-            eq(workouts.communityId, communityId),
-            eq(workouts.workoutDate, workoutDate),
-            isNotNull(workouts.programmingReleaseId)
+            eq(workoutSessions.communityId, communityId),
+            eq(workoutSessions.workoutDate, workoutDate)
           )
-        )
-        .limit(1);
+        );
 
-      let workoutId: string;
-      if (existing.length > 0) {
-        workoutId = existing[0].id;
-        await tx
-          .update(workouts)
-          .set({
-            programmingReleaseId: releaseId,
-            updatedAt: new Date(),
-          })
-          .where(eq(workouts.id, workoutId));
-      } else {
-        const [created] = await tx
-          .insert(workouts)
-          .values({
-            createdBy: user.id,
-            communityId,
-            workoutDate,
-            workoutType: "other",
-            programmingReleaseId: releaseId,
-            published: false,
-            source: "parsed",
-            title: day.headerText ?? null,
-          })
-          .returning({ id: workouts.id });
-        workoutId = created.id;
-      }
-      workoutIdByDayIndex.set(day.dayIndex, workoutId);
-
-      // Section replacement: keep any section with reviewed_at set; replace
-      // the rest. Detach parts from sections-being-deleted first so the
-      // cascade doesn't take the parts with it.
-      const existingSections = await tx
-        .select()
-        .from(workoutSections)
-        .where(eq(workoutSections.workoutId, workoutId));
-      const reviewedSectionIds = new Set(
-        existingSections
-          .filter((s) => s.reviewedAt)
-          .map((s) => s.id)
-      );
-      const toDeleteIds = existingSections
-        .filter((s) => !reviewedSectionIds.has(s.id))
-        .map((s) => s.id);
-
-      if (toDeleteIds.length > 0) {
-        // Detach parts from the about-to-be-deleted sections.
-        await tx
-          .update(workoutParts)
-          .set({ workoutSectionId: null })
-          .where(inArray(workoutParts.workoutSectionId, toDeleteIds));
-        await tx
-          .delete(workoutSections)
-          .where(inArray(workoutSections.id, toDeleteIds));
-      }
-
-      // Insert one section per parsed section, skipping kinds already
-      // present in the reviewed set (so we don't double up).
       const reviewedKinds = new Set(
-        existingSections
-          .filter((s) => reviewedSectionIds.has(s.id))
+        dayExisting
+          .filter((s) => !!s.reviewedAt)
           .map((s) => s.kind)
       );
+      const dropIds = dayExisting
+        .filter((s) => !s.reviewedAt)
+        .map((s) => s.id);
+      if (dropIds.length > 0) {
+        await tx
+          .delete(workoutSessions)
+          .where(inArray(workoutSessions.id, dropIds));
+      }
 
-      let position = reviewedSectionIds.size; // append after preserved sections
+      let position = reviewedKinds.size; // append after preserved sessions
       for (const section of day.sections) {
         if (reviewedKinds.has(section.kind)) continue;
-        // The parser populates `body` with the raw section text. Persist it
-        // so freeform sections (warm-ups, stretching) survive the paste —
-        // otherwise the coach has to retype text that was already on screen.
+
+        const kind = normalizeKind(section.kind);
+        const isFreeform = (FREEFORM_SESSION_KINDS as readonly string[]).includes(
+          kind
+        );
         const trimmedBody = section.body?.trim() ?? "";
-        await tx.insert(workoutSections).values({
-          workoutId,
-          kind: section.kind,
+        // Freeform kinds need a body; for structured kinds the body is
+        // the placeholder until a coach swaps the section into Smart
+        // Builder. The unified CHECK requires one or the other.
+        const bodyText =
+          isFreeform && trimmedBody.length === 0
+            ? "(empty)"
+            : trimmedBody.length > 0
+              ? section.body
+              : "(empty)";
+
+        await createSession(tx, {
+          crossfitWorkoutId: null,
+          body: bodyText,
+          communityId,
+          workoutDate,
+          kind,
           position,
-          title: section.title,
-          body: trimmedBody || null,
+          title: section.title ?? null,
           isScored: section.isScored,
           scoreType: section.scoreType ?? null,
+          source: "parsed",
+          programmingReleaseId: releaseId,
         });
         position += 1;
+        totalSessions += 1;
       }
     }
 
-    return { releaseId, days: parsed.days.length };
+    return { releaseId, days: parsed.days.length, sessions: totalSessions };
   });
 
   return NextResponse.json(result);
 }
+

@@ -13,7 +13,7 @@ import {
   programmingTrackParticipations,
   scores,
   trackDayScores,
-  workoutSections,
+  workoutSessions,
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canManageGym } from "@/lib/authz/community";
@@ -172,17 +172,20 @@ export async function DELETE(
       eq(trackDayScores.trackDayId, programmingTrackDays.id)
     )
     .where(eq(programmingTrackDays.trackId, trackId));
-  const dayWorkoutIds = await db
-    .select({ id: programmingTrackDays.workoutId })
+  // Unified-schema: track days link to sessions via
+  // programming_track_days.workout_session_id post-cutover. Count any
+  // score whose session is one of those linked sessions.
+  const daySessionIds = await db
+    .select({ id: programmingTrackDays.workoutSessionId })
     .from(programmingTrackDays)
     .where(eq(programmingTrackDays.trackId, trackId));
   let wodScoreCount = 0;
-  for (const row of dayWorkoutIds) {
+  for (const row of daySessionIds) {
     if (!row.id) continue;
     const [r] = await db
       .select({ c: sql<number>`count(*)::int` })
       .from(scores)
-      .where(eq(scores.workoutId, row.id));
+      .where(eq(scores.workoutSessionId, row.id));
     wodScoreCount += r?.c ?? 0;
   }
 
@@ -194,11 +197,11 @@ export async function DELETE(
       .set({ status: "archived", updatedAt: new Date() })
       .where(eq(programmingTracks.id, trackId))
       .returning();
-    // Also clear any inline sections pointing at this track so they
+    // Also clear any inline sessions sourced from this track so they
     // stop rendering on the CrossFit tab.
     await db
-      .delete(workoutSections)
-      .where(eq(workoutSections.sourceTrackId, trackId));
+      .delete(workoutSessions)
+      .where(eq(workoutSessions.sourceTrackId, trackId));
     return NextResponse.json({ status: "archived", track: archived });
   }
 

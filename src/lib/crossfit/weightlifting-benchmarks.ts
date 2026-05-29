@@ -2,24 +2,33 @@
 // Weightlifting benchmarks: shared helpers
 // ---------------------------------------------------------------------------
 //
-// One benchmark per 1RM-applicable movement (anchored via
-// benchmark_workouts.weightlifting_movement_id). The "1RM / 2RM / 3RM / 5RM"
+// One benchmark template per 1RM-applicable movement (anchored via
+// crossfit_workouts.weightlifting_movement_id). The "1RM / 2RM / 3RM / 5RM"
 // views are derived at query time from the athlete's for_load history.
+//
+// Unified-schema version: every weightlifting benchmark is a system template
+// in `crossfit_workouts` with `is_benchmark = true, is_system = true`, a
+// single for_load part, and a single movement on that part. Sessions logged
+// against the template carry the athlete's score; the rep target is derived
+// from each session's prescription rather than baked into the benchmark.
 //
 // See claude_code_instructions/weightlifting_benchmarks_spec.md.
 
 import { and, eq, isNotNull } from "drizzle-orm";
 import {
-  benchmarkWorkouts,
-  benchmarkWorkoutMovements,
-  benchmarkWorkoutParts,
+  crossfitWorkoutMovements,
+  crossfitWorkoutParts,
+  crossfitWorkouts,
   movements,
 } from "@/db/schema";
 import {
   parseRepScheme,
   type RepSchemeParsed,
 } from "@/lib/crossfit/rep-scheme-parser";
+import { computeWorkoutFingerprint } from "@/lib/crossfit/fingerprint";
+import { buildFingerprintInput } from "@/lib/crossfit/upsert-template";
 import type { DB } from "@/db";
+import type { SetEntry } from "@/types/crossfit";
 
 // A Drizzle transaction object has the same query surface as the db client
 // for our purposes (select/insert/update/delete). Helpers accept either.
@@ -95,23 +104,23 @@ interface InferencePart {
 
 /**
  * Determine whether the built workout qualifies for auto-linking to a
- * weightlifting benchmark. Returns the matched benchmark id + rep target,
- * or null when no rule fires.
+ * weightlifting benchmark template. Returns the matched template id + rep
+ * target, or null when no rule fires.
  *
  * Qualifying shape (all must hold):
  *   - exactly one part, workoutType = 'for_load'
  *   - exactly one movement on that part, and that movement has
  *     is_1rm_applicable = true
  *   - rep scheme classifies to {1, 2, 3, 5} via inferRepMaxTarget
- *   - a benchmark row exists with weightlifting_movement_id = movement.id
+ *   - a system template exists with weightlifting_movement_id = movement.id
  *
  * A single read confirms both the movement's applicability and the
- * benchmark's existence — callers don't need to pre-fetch movement state.
+ * template's existence — callers don't need to pre-fetch movement state.
  */
 export async function inferWeightliftingBenchmark(
   tx: TxOrDb,
   parts: InferencePart[]
-): Promise<{ benchmarkId: string; repTarget: RepMaxTarget } | null> {
+): Promise<{ templateId: string; repTarget: RepMaxTarget } | null> {
   if (parts.length !== 1) return null;
   const part = parts[0];
   if (part.workoutType !== "for_load") return null;
@@ -127,26 +136,28 @@ export async function inferWeightliftingBenchmark(
   const movementId = part.movementIds[0];
 
   const [match] = await tx
-    .select({ benchmarkId: benchmarkWorkouts.id })
-    .from(benchmarkWorkouts)
+    .select({ templateId: crossfitWorkouts.id })
+    .from(crossfitWorkouts)
     .innerJoin(
       movements,
-      eq(movements.id, benchmarkWorkouts.weightliftingMovementId)
+      eq(movements.id, crossfitWorkouts.weightliftingMovementId)
     )
     .where(
       and(
-        eq(benchmarkWorkouts.weightliftingMovementId, movementId),
+        eq(crossfitWorkouts.weightliftingMovementId, movementId),
+        eq(crossfitWorkouts.isSystem, true),
+        eq(crossfitWorkouts.isBenchmark, true),
         eq(movements.is1rmApplicable, true)
       )
     )
     .limit(1);
 
   if (!match) return null;
-  return { benchmarkId: match.benchmarkId, repTarget };
+  return { templateId: match.templateId, repTarget };
 }
 
 // ---------------------------------------------------------------------------
-// Upsert: ensure a weightlifting benchmark row exists for a movement
+// Upsert: ensure a weightlifting benchmark template exists for a movement
 // ---------------------------------------------------------------------------
 
 interface MovementSeed {
@@ -155,84 +166,113 @@ interface MovementSeed {
 }
 
 /**
- * Idempotent upsert. Creates (or refreshes) the single benchmark row
- * anchored to `movement.id` plus its single part (workoutType=for_load,
- * no rep scheme — the rep target is per-workout, not per-benchmark) plus
- * its single movement row.
+ * Idempotent upsert. Creates (or refreshes) the single template anchored to
+ * `movement.id` plus its single for_load part plus its single movement row.
  *
  * Wrap callers in a transaction so an admin write that flips
- * is_1rm_applicable and the dependent benchmark upsert succeed or fail
+ * is_1rm_applicable and the dependent template upsert succeed or fail
  * together.
  */
 export async function ensureWeightliftingBenchmark(
   tx: TxOrDb,
   movement: MovementSeed
 ): Promise<string> {
+  // Look up by movement id — a weightlifting benchmark is uniquely anchored
+  // to a single movement.
   const [existing] = await tx
-    .select({ id: benchmarkWorkouts.id })
-    .from(benchmarkWorkouts)
-    .where(eq(benchmarkWorkouts.weightliftingMovementId, movement.id))
+    .select({ id: crossfitWorkouts.id })
+    .from(crossfitWorkouts)
+    .where(
+      and(
+        eq(crossfitWorkouts.weightliftingMovementId, movement.id),
+        eq(crossfitWorkouts.isSystem, true),
+        eq(crossfitWorkouts.isBenchmark, true)
+      )
+    )
     .limit(1);
 
-  let benchmarkId: string;
+  // The content fingerprint of a weightlifting benchmark: one for_load part
+  // with one movement, no rep scheme, no prescribed weight. Stable across
+  // every movement (only the movementId varies).
+  const fingerprint = computeWorkoutFingerprint(
+    buildFingerprintInput({
+      title: movement.canonicalName,
+      scope: { kind: "system" },
+      workoutType: "for_load",
+      isBenchmark: true,
+      isSystem: true,
+      weightliftingMovementId: movement.id,
+      parts: [
+        {
+          workoutType: "for_load",
+          movements: [{ movementId: movement.id }],
+        },
+      ],
+    })
+  );
+
+  let templateId: string;
+
+  const description = `Rep-max benchmark for ${movement.canonicalName} — track your 1RM, 2RM, 3RM, and 5RM in one place.`;
 
   if (existing) {
-    benchmarkId = existing.id;
+    templateId = existing.id;
     await tx
-      .update(benchmarkWorkouts)
+      .update(crossfitWorkouts)
       .set({
-        name: movement.canonicalName,
-        description: `Rep-max benchmark for ${movement.canonicalName} — track your 1RM, 2RM, 3RM, and 5RM in one place.`,
+        title: movement.canonicalName,
+        description,
         workoutType: "for_load",
         category: "weightlifting",
         repScheme: null,
         isSystem: true,
+        isBenchmark: true,
         weightliftingMovementId: movement.id,
+        contentFingerprint: fingerprint,
         updatedAt: new Date(),
       })
-      .where(eq(benchmarkWorkouts.id, benchmarkId));
+      .where(eq(crossfitWorkouts.id, templateId));
 
     // Rebuild parts + movements idempotently. Cascade removes the
-    // benchmark_workout_movements rows.
+    // crossfit_workout_movements rows attached to the deleted parts.
     await tx
-      .delete(benchmarkWorkoutParts)
-      .where(eq(benchmarkWorkoutParts.benchmarkWorkoutId, benchmarkId));
-    await tx
-      .delete(benchmarkWorkoutMovements)
-      .where(eq(benchmarkWorkoutMovements.benchmarkWorkoutId, benchmarkId));
+      .delete(crossfitWorkoutParts)
+      .where(eq(crossfitWorkoutParts.crossfitWorkoutId, templateId));
   } else {
     const [inserted] = await tx
-      .insert(benchmarkWorkouts)
+      .insert(crossfitWorkouts)
       .values({
-        name: movement.canonicalName,
-        description: `Rep-max benchmark for ${movement.canonicalName} — track your 1RM, 2RM, 3RM, and 5RM in one place.`,
+        title: movement.canonicalName,
+        description,
         workoutType: "for_load",
         category: "weightlifting",
         repScheme: null,
         isSystem: true,
+        isBenchmark: true,
         weightliftingMovementId: movement.id,
+        contentFingerprint: fingerprint,
       })
-      .returning({ id: benchmarkWorkouts.id });
-    benchmarkId = inserted.id;
+      .returning({ id: crossfitWorkouts.id });
+    templateId = inserted.id;
   }
 
   const [part] = await tx
-    .insert(benchmarkWorkoutParts)
+    .insert(crossfitWorkoutParts)
     .values({
-      benchmarkWorkoutId: benchmarkId,
+      crossfitWorkoutId: templateId,
       orderIndex: 0,
       workoutType: "for_load",
     })
-    .returning({ id: benchmarkWorkoutParts.id });
+    .returning({ id: crossfitWorkoutParts.id });
 
-  await tx.insert(benchmarkWorkoutMovements).values({
-    benchmarkWorkoutId: benchmarkId,
-    benchmarkWorkoutPartId: part.id,
+  await tx.insert(crossfitWorkoutMovements).values({
+    crossfitWorkoutId: templateId,
+    crossfitWorkoutPartId: part.id,
     movementId: movement.id,
     orderIndex: 0,
   });
 
-  return benchmarkId;
+  return templateId;
 }
 
 // ---------------------------------------------------------------------------
@@ -244,6 +284,53 @@ export interface RepTargetScore {
   workoutDate: string;
   weightLbs: number | null;
   repTarget: RepMaxTarget;
+}
+
+/**
+ * Classify per-set entries on a single (score, movement) pair into rep-max
+ * buckets and return the heaviest weight per target. A ladder workout like
+ * 3-3-2-2-1-1-1 contributes to 1RM, 2RM, AND 3RM from one score; a uniform
+ * piece like "5x5" contributes only to 5RM. When per-set entries are
+ * present, each entry's own `reps` wins; otherwise we fall back to the
+ * prescription's uniform reps. When no entries exist at all (legacy logs
+ * without per-set data), classify the score's summary weight by the
+ * prescription.
+ */
+export function classifyRepMaxSets(input: {
+  setEntries: SetEntry[];
+  scoreWeightLbs: number | null;
+  actualWeight: number | null;
+  movementPrescribedReps: string | null;
+  partRepScheme: string | null;
+}): Map<RepMaxTarget, number> {
+  const prescriptionTarget = inferRepMaxTarget(
+    input.movementPrescribedReps ?? input.partRepScheme ?? null
+  );
+
+  const bestPerTarget = new Map<RepMaxTarget, number>();
+
+  if (input.setEntries.length > 0) {
+    for (const e of input.setEntries) {
+      let target: RepMaxTarget | null = null;
+      if (e.reps != null && REP_MAX_SET.has(e.reps)) {
+        target = e.reps as RepMaxTarget;
+      } else if (e.reps == null && prescriptionTarget != null) {
+        target = prescriptionTarget;
+      }
+      if (target == null) continue;
+      if (!Number.isFinite(e.weight) || e.weight <= 0) continue;
+      const cur = bestPerTarget.get(target);
+      if (cur == null || e.weight > cur) bestPerTarget.set(target, e.weight);
+    }
+    return bestPerTarget;
+  }
+
+  if (prescriptionTarget == null) return bestPerTarget;
+  const weight = input.scoreWeightLbs ?? input.actualWeight ?? null;
+  if (weight == null || !Number.isFinite(weight) || weight <= 0)
+    return bestPerTarget;
+  bestPerTarget.set(prescriptionTarget, weight);
+  return bestPerTarget;
 }
 
 /**
@@ -275,30 +362,31 @@ export function pickBestPerRepTarget(
 }
 
 // ---------------------------------------------------------------------------
-// List helper — every weightlifting benchmark with its anchor movement id
+// List helper — every weightlifting benchmark template with its anchor movement id
 // ---------------------------------------------------------------------------
 
 /**
- * Pulls the (benchmarkId, movementId) pairs for every weightlifting
- * benchmark. Used by the list/detail endpoints to enrich the response with
- * per-rep-max stats without N+1 queries.
+ * Pulls the (templateId, movementId) pairs for every weightlifting
+ * benchmark template. Used by the list/detail endpoints to enrich the
+ * response with per-rep-max stats without N+1 queries.
  */
 export async function listWeightliftingBenchmarkAnchors(
   tx: TxOrDb
-): Promise<Array<{ benchmarkId: string; movementId: string }>> {
+): Promise<Array<{ templateId: string; movementId: string }>> {
   const rows = await tx
     .select({
-      benchmarkId: benchmarkWorkouts.id,
-      movementId: benchmarkWorkouts.weightliftingMovementId,
+      templateId: crossfitWorkouts.id,
+      movementId: crossfitWorkouts.weightliftingMovementId,
     })
-    .from(benchmarkWorkouts)
+    .from(crossfitWorkouts)
     .where(
       and(
-        isNotNull(benchmarkWorkouts.weightliftingMovementId),
-        eq(benchmarkWorkouts.isSystem, true)
+        isNotNull(crossfitWorkouts.weightliftingMovementId),
+        eq(crossfitWorkouts.isSystem, true),
+        eq(crossfitWorkouts.isBenchmark, true)
       )
     );
   return rows
-    .filter((r): r is { benchmarkId: string; movementId: string } => !!r.movementId)
-    .map((r) => ({ benchmarkId: r.benchmarkId, movementId: r.movementId }));
+    .filter((r): r is { templateId: string; movementId: string } => !!r.movementId)
+    .map((r) => ({ templateId: r.templateId, movementId: r.movementId }));
 }

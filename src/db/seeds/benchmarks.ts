@@ -5,6 +5,12 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import { eq, and } from "drizzle-orm";
 import { fileURLToPath } from "url";
 import * as schema from "../schema";
+import {
+  buildFingerprintInput,
+  insertTemplateParts,
+  type TemplatePartInput,
+} from "../../lib/crossfit/upsert-template";
+import { computeWorkoutFingerprint } from "../../lib/crossfit/fingerprint";
 
 // ============================================
 // Benchmark definitions keyed by movement canonical names
@@ -492,8 +498,12 @@ const benchmarkSeeds: BenchmarkSeed[] = [
 ];
 
 // ============================================
-// Idempotent upsert helper
+// Idempotent upsert helper — writes to the unified crossfit_workouts tree
 // ============================================
+//
+// Identifies the canonical row by (title, is_system = true). The seed
+// rebuilds parts/blocks/movements on every run; the fingerprint is
+// recomputed so dedup queries continue to find the canonical template.
 
 async function upsertBenchmark(
   db: ReturnType<typeof drizzle<typeof schema>>,
@@ -512,32 +522,71 @@ async function upsertBenchmark(
     return "skipped";
   }
 
-  // Mirror the first part to the legacy top-level columns so older read
-  // paths still resolve a single workoutType / repScheme. Multi-part shape
-  // is the source of truth on read; this is just the fallback.
   const firstPart = parts[0];
+
+  // Build the TemplatePartInput[] shape from the seed parts so the
+  // fingerprint and the insertion helper see the same coercion rules
+  // every other write path uses.
+  const templateParts: TemplatePartInput[] = parts.map((p) => ({
+    label: p.label ?? null,
+    workoutType: p.workoutType as TemplatePartInput["workoutType"],
+    timeCapSeconds: p.timeCapSeconds ?? null,
+    amrapDurationSeconds: p.amrapDurationSeconds ?? null,
+    emomIntervalSeconds: p.emomIntervalSeconds ?? null,
+    repScheme: p.repScheme ?? null,
+    rounds: p.rounds ?? null,
+    notes: p.notes ?? null,
+    movements: p.movements.map((m) => ({
+      movementId: movementMap.get(m.canonicalName)!,
+      prescribedReps: m.prescribedReps,
+      prescribedWeightMale: m.prescribedWeightMale,
+      prescribedWeightFemale: m.prescribedWeightFemale,
+      rxStandard: m.rxStandard,
+      notes: m.notes ?? null,
+    })),
+  }));
+
+  const fingerprint = computeWorkoutFingerprint(
+    buildFingerprintInput({
+      title: benchmark.name,
+      scope: { kind: "system" },
+      workoutType: firstPart.workoutType as TemplatePartInput["workoutType"],
+      timeCapSeconds: firstPart.timeCapSeconds ?? null,
+      amrapDurationSeconds: firstPart.amrapDurationSeconds ?? null,
+      repScheme: firstPart.repScheme ?? null,
+      isBenchmark: true,
+      isSystem: true,
+      requiresVest: !!benchmark.requiresVest,
+      vestWeightMaleLb: benchmark.vestWeightMaleLb ?? null,
+      vestWeightFemaleLb: benchmark.vestWeightFemaleLb ?? null,
+      isPartner: !!benchmark.isPartner,
+      partnerCount: benchmark.partnerCount ?? null,
+      parts: templateParts,
+    })
+  );
 
   return db.transaction(async (tx) => {
     const existing = await tx
-      .select()
-      .from(schema.benchmarkWorkouts)
+      .select({ id: schema.crossfitWorkouts.id })
+      .from(schema.crossfitWorkouts)
       .where(
         and(
-          eq(schema.benchmarkWorkouts.name, benchmark.name),
-          eq(schema.benchmarkWorkouts.isSystem, true)
+          eq(schema.crossfitWorkouts.title, benchmark.name),
+          eq(schema.crossfitWorkouts.isSystem, true),
+          eq(schema.crossfitWorkouts.isBenchmark, true)
         )
       )
       .limit(1);
 
     let status: "created" | "updated";
-    let benchmarkId: string;
+    let templateId: string;
 
     if (existing.length > 0) {
-      benchmarkId = existing[0].id;
+      templateId = existing[0].id;
       status = "updated";
 
       await tx
-        .update(schema.benchmarkWorkouts)
+        .update(schema.crossfitWorkouts)
         .set({
           description: benchmark.description || null,
           workoutType: firstPart.workoutType,
@@ -545,6 +594,7 @@ async function upsertBenchmark(
           timeCapSeconds: firstPart.timeCapSeconds || null,
           amrapDurationSeconds: firstPart.amrapDurationSeconds || null,
           repScheme: firstPart.repScheme || null,
+          contentFingerprint: fingerprint,
           requiresVest: !!benchmark.requiresVest,
           vestWeightMaleLb:
             benchmark.vestWeightMaleLb != null
@@ -558,32 +608,24 @@ async function upsertBenchmark(
           partnerCount: benchmark.partnerCount ?? null,
           updatedAt: new Date(),
         })
-        .where(eq(schema.benchmarkWorkouts.id, benchmarkId));
+        .where(eq(schema.crossfitWorkouts.id, templateId));
 
-      // Cascade clears parts → movements thanks to the FK ON DELETE CASCADE
-      // on benchmark_workout_movements. Idempotent rebuild on every run.
+      // Cascade clears parts → movements via FK ON DELETE CASCADE.
       await tx
-        .delete(schema.benchmarkWorkoutParts)
-        .where(eq(schema.benchmarkWorkoutParts.benchmarkWorkoutId, benchmarkId));
-      // Defensive: drop any movements still attached to the benchmark
-      // directly (e.g. legacy rows with NULL part FK from before the
-      // migration backfill).
-      await tx
-        .delete(schema.benchmarkWorkoutMovements)
-        .where(
-          eq(schema.benchmarkWorkoutMovements.benchmarkWorkoutId, benchmarkId)
-        );
+        .delete(schema.crossfitWorkoutParts)
+        .where(eq(schema.crossfitWorkoutParts.crossfitWorkoutId, templateId));
     } else {
-      const [bw] = await tx
-        .insert(schema.benchmarkWorkouts)
+      const [tmpl] = await tx
+        .insert(schema.crossfitWorkouts)
         .values({
-          name: benchmark.name,
+          title: benchmark.name,
           description: benchmark.description || null,
-          workoutType: firstPart.workoutType,
           category: benchmark.category,
+          workoutType: firstPart.workoutType,
           timeCapSeconds: firstPart.timeCapSeconds || null,
           amrapDurationSeconds: firstPart.amrapDurationSeconds || null,
           repScheme: firstPart.repScheme || null,
+          contentFingerprint: fingerprint,
           requiresVest: !!benchmark.requiresVest,
           vestWeightMaleLb:
             benchmark.vestWeightMaleLb != null
@@ -595,49 +637,15 @@ async function upsertBenchmark(
               : null,
           isPartner: !!benchmark.isPartner,
           partnerCount: benchmark.partnerCount ?? null,
-          createdBy: null,
-          communityId: null,
+          isBenchmark: true,
           isSystem: true,
         })
         .returning();
-      benchmarkId = bw.id;
+      templateId = tmpl.id;
       status = "created";
     }
 
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i];
-      const [insertedPart] = await tx
-        .insert(schema.benchmarkWorkoutParts)
-        .values({
-          benchmarkWorkoutId: benchmarkId,
-          orderIndex: i,
-          label: part.label || null,
-          workoutType: part.workoutType,
-          timeCapSeconds: part.timeCapSeconds || null,
-          amrapDurationSeconds: part.amrapDurationSeconds || null,
-          emomIntervalSeconds: part.emomIntervalSeconds || null,
-          repScheme: part.repScheme || null,
-          rounds: part.rounds || null,
-          notes: part.notes || null,
-        })
-        .returning();
-
-      if (part.movements.length > 0) {
-        await tx.insert(schema.benchmarkWorkoutMovements).values(
-          part.movements.map((m, j) => ({
-            benchmarkWorkoutId: benchmarkId,
-            benchmarkWorkoutPartId: insertedPart.id,
-            movementId: movementMap.get(m.canonicalName)!,
-            orderIndex: j,
-            prescribedReps: m.prescribedReps || null,
-            prescribedWeightMale: m.prescribedWeightMale?.toString() || null,
-            prescribedWeightFemale: m.prescribedWeightFemale?.toString() || null,
-            rxStandard: m.rxStandard || null,
-            notes: m.notes || null,
-          }))
-        );
-      }
-    }
+    await insertTemplateParts(tx, templateId, templateParts);
 
     return status;
   });

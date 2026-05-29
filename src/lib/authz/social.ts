@@ -8,22 +8,24 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  scores,
-  workouts,
-  workoutParts,
   communityMemberships,
+  crossfitWorkoutParts,
+  scores,
+  workoutSessions,
 } from "@/db/schema";
 import { canViewGym, isSuperAdmin } from "./community";
 
 export interface ScoreContext {
   scoreId: string;
   userId: string;
-  workoutId: string;
+  /** Unified-schema: the session id (was legacy workouts.id). */
+  workoutId: string | null;
+  /** Unified-schema: the crossfit_workout_parts.id (was legacy workoutParts.id). */
   workoutPartId: string | null;
   communityId: string | null;
 }
 
-/** Lookup the workout / gym context for a score. Returns null if missing. */
+/** Lookup the session / gym context for a score. Returns null if missing. */
 export async function loadScoreContext(
   scoreId: string
 ): Promise<ScoreContext | null> {
@@ -31,12 +33,12 @@ export async function loadScoreContext(
     .select({
       scoreId: scores.id,
       userId: scores.userId,
-      workoutId: scores.workoutId,
-      workoutPartId: scores.workoutPartId,
-      communityId: workouts.communityId,
+      workoutId: scores.workoutSessionId,
+      workoutPartId: scores.crossfitWorkoutPartId,
+      communityId: workoutSessions.communityId,
     })
     .from(scores)
-    .innerJoin(workouts, eq(workouts.id, scores.workoutId))
+    .innerJoin(workoutSessions, eq(workoutSessions.id, scores.workoutSessionId))
     .where(eq(scores.id, scoreId))
     .limit(1);
   return row ?? null;
@@ -103,4 +105,4 @@ export async function validateMentionTargets(
 }
 
 // Re-exported here so importers don't need to pull from multiple modules.
-export { workoutParts };
+export { crossfitWorkoutParts };

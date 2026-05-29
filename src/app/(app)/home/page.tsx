@@ -1,9 +1,11 @@
-// Home tab (spec §2.1). Server component. Fetches in parallel and renders
-// cards based on what data resolves. Flag-gated cards no-op when the
-// feature is off, the user is in solo mode, or the gym hasn't created the
-// underlying entity yet — so solo users see a coherent "today's workout +
-// quick stats" view without empty placeholders.
+// Home tab (spec §2.1). Server component. Each card streams independently
+// behind its own Suspense boundary so a slow fetcher only delays that one
+// card — a transient DB stall on (say) the QuickStats query no longer blocks
+// the rest of the page from rendering, and combined with per-fetcher
+// try/catch the slow card eventually degrades to nothing rather than hanging
+// the whole Vercel function for the full 300s timeout.
 
+import { Suspense } from "react";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { communities, users } from "@/db/schema";
@@ -31,6 +33,14 @@ import { GymHeaderStrip } from "@/components/home/GymHeaderStrip";
 import { PendingDocumentsBanner } from "@/components/home/PendingDocumentsBanner";
 
 export const dynamic = "force-dynamic";
+
+function CardSkeleton({ height = "h-16" }: { height?: string }) {
+  return (
+    <div
+      className={`${height} w-full animate-pulse rounded-2xl bg-white/[0.04]`}
+    />
+  );
+}
 
 export default async function HomePage() {
   const user = await getSessionUser();
@@ -62,7 +72,6 @@ export default async function HomePage() {
 
   // Solo mode — no gym-scoped cards.
   if (!activeCommunityId) {
-    const quickStats = await fetchQuickStats(user.id, null, gymTimezone);
     return (
       <div className="space-y-4">
         <div>
@@ -70,48 +79,199 @@ export default async function HomePage() {
           <p className="text-sm text-muted-foreground">Your day at a glance.</p>
         </div>
         <TodaysWorkoutCard data={null} />
-        <QuickStatsStrip data={quickStats} />
+        <Suspense fallback={<CardSkeleton height="h-20" />}>
+          <SoloQuickStats userId={user.id} gymTimezone={gymTimezone} />
+        </Suspense>
       </div>
     );
   }
 
-  const [
-    header,
-    pendingDocs,
-    todaysClass,
-    todaysWorkout,
-    challenge,
-    murph,
-    committedClub,
-    socialPosts,
-    quickStats,
-  ] = await Promise.all([
-    fetchGymHeaderStrip(activeCommunityId),
-    fetchPendingDocuments(user.id, activeCommunityId),
-    fetchTodaysClass(user.id, activeCommunityId, gymTimezone),
-    fetchTodaysWorkout(activeCommunityId, gymTimezone),
-    fetchActiveChallenge(user.id, activeCommunityId, gymTimezone),
-    fetchMurphPrep(user.id, activeCommunityId, gymTimezone),
-    fetchCommittedClub(user.id, activeCommunityId),
-    fetchSocialFeedTeaser(user.id, activeCommunityId),
-    fetchQuickStats(user.id, activeCommunityId, gymTimezone),
-  ]);
-
+  const cid = activeCommunityId;
   return (
     <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-bold">Home</h1>
         <p className="text-sm text-muted-foreground">Your day at a glance.</p>
       </div>
-      <GymHeaderStrip data={header} />
-      <PendingDocumentsBanner data={pendingDocs} />
-      <TodaysClassCard data={todaysClass} />
-      <TodaysWorkoutCard data={todaysWorkout} />
-      <ChallengeCard data={challenge} />
-      <MurphPrepCard data={murph} />
-      <CommittedClubWidget data={committedClub} />
-      <SocialFeedTeaser posts={socialPosts} />
-      <QuickStatsStrip data={quickStats} />
+      <Suspense fallback={<CardSkeleton />}>
+        <GymHeaderAsync communityId={cid} />
+      </Suspense>
+      <Suspense fallback={null}>
+        <PendingDocsAsync userId={user.id} communityId={cid} />
+      </Suspense>
+      <Suspense fallback={<CardSkeleton />}>
+        <TodaysClassAsync userId={user.id} communityId={cid} tz={gymTimezone} />
+      </Suspense>
+      <Suspense fallback={<CardSkeleton />}>
+        <TodaysWorkoutAsync communityId={cid} tz={gymTimezone} />
+      </Suspense>
+      <Suspense fallback={<CardSkeleton />}>
+        <ChallengeAsync userId={user.id} communityId={cid} tz={gymTimezone} />
+      </Suspense>
+      <Suspense fallback={<CardSkeleton />}>
+        <MurphPrepAsync userId={user.id} communityId={cid} tz={gymTimezone} />
+      </Suspense>
+      <Suspense fallback={<CardSkeleton />}>
+        <CommittedClubAsync userId={user.id} communityId={cid} />
+      </Suspense>
+      <Suspense fallback={<CardSkeleton height="h-24" />}>
+        <SocialFeedAsync userId={user.id} communityId={cid} />
+      </Suspense>
+      <Suspense fallback={<CardSkeleton height="h-20" />}>
+        <QuickStatsAsync userId={user.id} communityId={cid} tz={gymTimezone} />
+      </Suspense>
     </div>
   );
+}
+
+// Each Async helper wraps its fetcher in try/catch and renders `null` on
+// failure so a single broken card never bubbles up to the route-level
+// error.tsx and replaces the whole page. The Suspense boundary above each
+// card is what isolates the latency; this is what isolates the failure mode.
+async function safeFetch<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
+  try {
+    return await fn();
+  } catch (err) {
+    console.error(`[home] ${label} failed`, err);
+    return null;
+  }
+}
+
+async function GymHeaderAsync({ communityId }: { communityId: string }) {
+  const data = await safeFetch("GymHeader", () => fetchGymHeaderStrip(communityId));
+  if (!data) return null;
+  return <GymHeaderStrip data={data} />;
+}
+
+async function PendingDocsAsync({
+  userId,
+  communityId,
+}: {
+  userId: string;
+  communityId: string;
+}) {
+  const data = await safeFetch("PendingDocs", () =>
+    fetchPendingDocuments(userId, communityId)
+  );
+  if (!data) return null;
+  return <PendingDocumentsBanner data={data} />;
+}
+
+async function TodaysClassAsync({
+  userId,
+  communityId,
+  tz,
+}: {
+  userId: string;
+  communityId: string;
+  tz: string;
+}) {
+  const data = await safeFetch("TodaysClass", () =>
+    fetchTodaysClass(userId, communityId, tz)
+  );
+  if (data === null) return null;
+  return <TodaysClassCard data={data} />;
+}
+
+async function TodaysWorkoutAsync({
+  communityId,
+  tz,
+}: {
+  communityId: string;
+  tz: string;
+}) {
+  const data = await safeFetch("TodaysWorkout", () =>
+    fetchTodaysWorkout(communityId, tz)
+  );
+  return <TodaysWorkoutCard data={data} />;
+}
+
+async function ChallengeAsync({
+  userId,
+  communityId,
+  tz,
+}: {
+  userId: string;
+  communityId: string;
+  tz: string;
+}) {
+  const data = await safeFetch("Challenge", () =>
+    fetchActiveChallenge(userId, communityId, tz)
+  );
+  if (data === null) return null;
+  return <ChallengeCard data={data} />;
+}
+
+async function MurphPrepAsync({
+  userId,
+  communityId,
+  tz,
+}: {
+  userId: string;
+  communityId: string;
+  tz: string;
+}) {
+  const data = await safeFetch("MurphPrep", () =>
+    fetchMurphPrep(userId, communityId, tz)
+  );
+  if (data === null) return null;
+  return <MurphPrepCard data={data} />;
+}
+
+async function CommittedClubAsync({
+  userId,
+  communityId,
+}: {
+  userId: string;
+  communityId: string;
+}) {
+  const data = await safeFetch("CommittedClub", () =>
+    fetchCommittedClub(userId, communityId)
+  );
+  if (data === null) return null;
+  return <CommittedClubWidget data={data} />;
+}
+
+async function SocialFeedAsync({
+  userId,
+  communityId,
+}: {
+  userId: string;
+  communityId: string;
+}) {
+  const posts = await safeFetch("SocialFeed", () =>
+    fetchSocialFeedTeaser(userId, communityId)
+  );
+  if (posts === null) return null;
+  return <SocialFeedTeaser posts={posts} />;
+}
+
+async function QuickStatsAsync({
+  userId,
+  communityId,
+  tz,
+}: {
+  userId: string;
+  communityId: string;
+  tz: string;
+}) {
+  const data = await safeFetch("QuickStats", () =>
+    fetchQuickStats(userId, communityId, tz)
+  );
+  if (data === null) return null;
+  return <QuickStatsStrip data={data} />;
+}
+
+async function SoloQuickStats({
+  userId,
+  gymTimezone,
+}: {
+  userId: string;
+  gymTimezone: string;
+}) {
+  const data = await safeFetch("SoloQuickStats", () =>
+    fetchQuickStats(userId, null, gymTimezone)
+  );
+  if (data === null) return null;
+  return <QuickStatsStrip data={data} />;
 }

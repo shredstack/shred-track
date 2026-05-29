@@ -110,7 +110,10 @@ export async function GET(req: NextRequest) {
       dayNumber,
       inlinePosition: t.inlinePosition,
       body: d.body,
-      workoutId: d.workoutId,
+      // Wire-field name kept as `workoutId` for client backwards-compat;
+      // post-cutover it's a workout_sessions.id. Falls back to the legacy
+      // column only for un-backfilled rows.
+      workoutId: d.workoutSessionId ?? d.workoutId,
       isScored: d.isScored,
       scoreType: d.scoreType,
       scoringConfig: t.scoringConfig,

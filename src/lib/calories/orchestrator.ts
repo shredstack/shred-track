@@ -12,10 +12,10 @@
 
 import { db } from "@/db";
 import {
-  workouts,
-  workoutParts,
-  scores,
+  crossfitWorkoutParts,
+  crossfitWorkouts,
   scoreMovementDetails,
+  scores,
   users,
 } from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -47,9 +47,11 @@ export async function computeAndStoreWorkoutEstimate(
   };
   const estimate = estimateCalories(input);
 
+  // Persist the estimate. The Inngest job now passes a
+  // `crossfit_workouts.id` post-cutover; we write to the unified tables.
   await db.transaction(async (tx) => {
     await tx
-      .update(workouts)
+      .update(crossfitWorkouts)
       .set({
         estimatedKcalLow: estimate.low,
         estimatedKcalHigh: estimate.high,
@@ -57,18 +59,18 @@ export async function computeAndStoreWorkoutEstimate(
         estimatedKcalConfidence: estimate.confidence,
         estimatedKcalComputedAt: new Date(),
       })
-      .where(eq(workouts.id, workoutId));
+      .where(eq(crossfitWorkouts.id, workoutId));
 
     for (const part of estimate.parts) {
       const partActive = part.kcalActive;
       await tx
-        .update(workoutParts)
+        .update(crossfitWorkoutParts)
         .set({
           estimatedKcalLow: Math.round(partActive * 0.85),
           estimatedKcalHigh: Math.round(partActive * 1.15),
           estimatedKcalConfidence: part.confidence,
         })
-        .where(eq(workoutParts.id, part.partId));
+        .where(eq(crossfitWorkoutParts.id, part.partId));
     }
   });
 
@@ -79,6 +81,7 @@ export async function computeAndStoreWorkoutEstimate(
 
 export interface ComputeScoreEstimateInput {
   scoreId?: string;
+  /** A `crossfit_workouts.id` post-cutover (template id). */
   workoutId: string;
   /**
    * The part this score is logged against. A score is always for one part —
@@ -198,8 +201,7 @@ export async function recomputeScoreEstimate(scoreId: string): Promise<void> {
     .select({
       id: scores.id,
       userId: scores.userId,
-      workoutId: scores.workoutId,
-      workoutPartId: scores.workoutPartId,
+      crossfitWorkoutPartId: scores.crossfitWorkoutPartId,
       timeSeconds: scores.timeSeconds,
       hitTimeCap: scores.hitTimeCap,
       woreVest: scores.woreVest,
@@ -214,12 +216,22 @@ export async function recomputeScoreEstimate(scoreId: string): Promise<void> {
     .limit(1);
 
   if (!row) return;
+  if (!row.crossfitWorkoutPartId) return;
+
+  // Resolve the template id from the part — canonical link via the part's
+  // `crossfit_workout_id` FK.
+  const [partRow] = await db
+    .select({ templateId: crossfitWorkoutParts.crossfitWorkoutId })
+    .from(crossfitWorkoutParts)
+    .where(eq(crossfitWorkoutParts.id, row.crossfitWorkoutPartId))
+    .limit(1);
+  if (!partRow?.templateId) return;
 
   // Rebuild the per-movement working weights from the persisted detail rows
   // so a recompute reproduces the load-relative modifier.
   const details = await db
     .select({
-      workoutMovementId: scoreMovementDetails.workoutMovementId,
+      crossfitWorkoutMovementId: scoreMovementDetails.crossfitWorkoutMovementId,
       actualWeight: scoreMovementDetails.actualWeight,
       setEntries: scoreMovementDetails.setEntries,
     })
@@ -228,13 +240,15 @@ export async function recomputeScoreEstimate(scoreId: string): Promise<void> {
   const movementWeights = new Map<string, number>();
   for (const d of details) {
     const w = workingWeightFromSetData(d.actualWeight, d.setEntries);
-    if (w != null) movementWeights.set(d.workoutMovementId, w);
+    if (w != null && d.crossfitWorkoutMovementId) {
+      movementWeights.set(d.crossfitWorkoutMovementId, w);
+    }
   }
 
   const result = await computeScoreEstimate({
     scoreId: row.id,
-    workoutId: row.workoutId,
-    workoutPartId: row.workoutPartId,
+    workoutId: partRow.templateId,
+    workoutPartId: row.crossfitWorkoutPartId,
     userId: row.userId,
     movementWeights,
     score: {

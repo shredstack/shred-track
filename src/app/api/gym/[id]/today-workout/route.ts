@@ -1,12 +1,20 @@
 // GET /api/gym/[id]/today-workout
 //
-// Returns the published workout for today in the gym's timezone, or nulls.
+// Returns the published session for today in the gym's timezone, or nulls.
 // Used by the social composer's "link to today's WOD" toggle.
+//
+// Unified-schema: pulls the first published WOD-kind session for the day.
+// The returned `workoutId` is a session id (the day-level handle the UI
+// uses after the cutover).
 
 import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { communities, workouts } from "@/db/schema";
+import {
+  communities,
+  crossfitWorkouts,
+  workoutSessions,
+} from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canViewGym } from "@/lib/authz/community";
 import { resolveGymTimezone } from "@/lib/timezone";
@@ -34,29 +42,55 @@ export async function GET(
   if (!(await canViewGym(user.id, communityId))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
   const [c] = await db
     .select({ tz: communities.gymTimezone })
     .from(communities)
     .where(eq(communities.id, communityId))
     .limit(1);
   const today = todayInTz(resolveGymTimezone(c?.tz));
+
+  // Prefer a WOD-kind session; fall back to the first session of the day.
+  // Title comes from the session's template when present.
   const [w] = await db
     .select({
-      workoutId: workouts.id,
-      title: workouts.title,
-      workoutDate: workouts.workoutDate,
+      workoutId: workoutSessions.id,
+      sessionTitle: workoutSessions.title,
+      templateTitle: crossfitWorkouts.title,
+      workoutDate: workoutSessions.workoutDate,
+      position: workoutSessions.position,
+      kind: workoutSessions.kind,
     })
-    .from(workouts)
+    .from(workoutSessions)
+    .leftJoin(
+      crossfitWorkouts,
+      eq(crossfitWorkouts.id, workoutSessions.crossfitWorkoutId)
+    )
     .where(
       and(
-        eq(workouts.communityId, communityId),
-        eq(workouts.workoutDate, today),
-        eq(workouts.published, true)
+        eq(workoutSessions.communityId, communityId),
+        eq(workoutSessions.workoutDate, today),
+        eq(workoutSessions.published, true)
       )
     )
-    .orderBy(desc(workouts.updatedAt))
+    .orderBy(
+      // wod kind first; then earliest position; then most recent update.
+      desc(eq(workoutSessions.kind, "wod")),
+      asc(workoutSessions.position),
+      desc(workoutSessions.updatedAt)
+    )
     .limit(1);
-  return NextResponse.json(
-    w ?? { workoutId: null, title: null, workoutDate: null }
-  );
+
+  if (!w) {
+    return NextResponse.json({
+      workoutId: null,
+      title: null,
+      workoutDate: null,
+    });
+  }
+  return NextResponse.json({
+    workoutId: w.workoutId,
+    title: w.sessionTitle ?? w.templateTitle ?? null,
+    workoutDate: w.workoutDate,
+  });
 }

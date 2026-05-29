@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/db";
 import {
-  benchmarkWorkouts,
-  benchmarkWorkoutMovements,
+  crossfitWorkoutMovements,
+  crossfitWorkouts,
   movements,
 } from "@/db/schema";
 import { eq, inArray, and, isNull } from "drizzle-orm";
@@ -82,21 +82,28 @@ async function findBenchmarkMatch(
 ): Promise<{ exact?: { id: string; name: string }; near?: { id: string; name: string } }> {
   if (part.movementIds.length === 0) return {};
 
-  // Skip weightlifting benchmarks. Those are auto-generated stat-trackers
-  // (one per 1RM-applicable movement) with null repScheme — any single-
-  // movement for_load submission with no part-level repScheme would
-  // false-positive against them, and the POST handler would then take the
-  // benchmark fast-path and discard the user's typed prescribedReps. The
-  // workout creation path links to weightlifting benchmarks separately via
-  // inferWeightliftingBenchmark after the user-typed parts are inserted,
-  // so excluding them here loses nothing.
+  // Unified-schema lookup against `crossfit_workouts` where is_benchmark =
+  // true. We skip weightlifting benchmarks — those are auto-generated
+  // stat-trackers (one per 1RM-applicable movement) with null repScheme,
+  // and any single-movement for_load submission with no part-level
+  // repScheme would false-positive against them. The auto-link goes
+  // through inferWeightliftingBenchmark separately.
   const candidates = await db
-    .select()
-    .from(benchmarkWorkouts)
+    .select({
+      id: crossfitWorkouts.id,
+      name: crossfitWorkouts.title,
+      workoutType: crossfitWorkouts.workoutType,
+      repScheme: crossfitWorkouts.repScheme,
+      requiresVest: crossfitWorkouts.requiresVest,
+      vestWeightMaleLb: crossfitWorkouts.vestWeightMaleLb,
+      vestWeightFemaleLb: crossfitWorkouts.vestWeightFemaleLb,
+    })
+    .from(crossfitWorkouts)
     .where(
       and(
-        eq(benchmarkWorkouts.workoutType, part.workoutType),
-        isNull(benchmarkWorkouts.weightliftingMovementId)
+        eq(crossfitWorkouts.workoutType, part.workoutType),
+        eq(crossfitWorkouts.isBenchmark, true),
+        isNull(crossfitWorkouts.weightliftingMovementId)
       )
     );
 
@@ -105,11 +112,13 @@ async function findBenchmarkMatch(
   const candidateIds = candidates.map((c) => c.id);
   const candidateMovementRows = await db
     .select({
-      benchmarkWorkoutId: benchmarkWorkoutMovements.benchmarkWorkoutId,
-      movementId: benchmarkWorkoutMovements.movementId,
+      benchmarkWorkoutId: crossfitWorkoutMovements.crossfitWorkoutId,
+      movementId: crossfitWorkoutMovements.movementId,
     })
-    .from(benchmarkWorkoutMovements)
-    .where(inArray(benchmarkWorkoutMovements.benchmarkWorkoutId, candidateIds));
+    .from(crossfitWorkoutMovements)
+    .where(
+      inArray(crossfitWorkoutMovements.crossfitWorkoutId, candidateIds)
+    );
 
   const movementsByBenchmark = new Map<string, string[]>();
   for (const row of candidateMovementRows) {

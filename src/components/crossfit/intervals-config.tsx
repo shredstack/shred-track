@@ -120,7 +120,7 @@ export function IntervalsConfig({
               <DurationInput
                 value={intervalWorkInput}
                 onChange={(v) => onChange({ intervalWorkInput: v })}
-                placeholder="e.g. 1:00"
+                placeholder="e.g. 1:00 (optional)"
                 className={inputHeight}
                 ariaLabel="Work duration per round"
               />
@@ -138,6 +138,12 @@ export function IntervalsConfig({
           </>
         )}
       </div>
+      {!perRound && (
+        <p className="text-[11px] text-muted-foreground">
+          Leave work blank for distance- or rep-bounded efforts (e.g. 3 × 400m
+          run with 2:00 rest). At least one of work or rest is required.
+        </p>
+      )}
 
       <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
         <input
