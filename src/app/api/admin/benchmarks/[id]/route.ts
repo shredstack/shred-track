@@ -4,18 +4,16 @@ import {
   crossfitWorkoutParts,
   crossfitWorkouts,
 } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getAdminUser } from "@/lib/admin";
 import { getAdminAccess } from "@/lib/admin/access";
 import { type BenchmarkPartInput } from "@/lib/crossfit/benchmark-parts";
 import {
+  buildFingerprintInput,
   insertTemplateParts,
   type TemplatePartInput,
 } from "@/lib/crossfit/upsert-template";
 import { computeWorkoutFingerprint } from "@/lib/crossfit/fingerprint";
-import {
-  buildFingerprintInput,
-} from "@/lib/crossfit/upsert-template";
 
 // PUT /api/admin/benchmarks/[id] — update a benchmark template in place.
 //
@@ -216,6 +214,13 @@ export async function DELETE(
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
-  await db.delete(crossfitWorkouts).where(eq(crossfitWorkouts.id, id));
+  // Scope to benchmark templates only. `crossfit_workouts` also holds personal
+  // and gym templates in the unified schema; deleting a row by raw id would
+  // either nuke a user's template or hit the `workout_sessions` FK restrict
+  // and error confusingly. Explicit predicate keeps the admin route's blast
+  // radius bounded to what it claims to manage.
+  await db
+    .delete(crossfitWorkouts)
+    .where(and(eq(crossfitWorkouts.id, id), eq(crossfitWorkouts.isBenchmark, true)));
   return NextResponse.json({ success: true });
 }

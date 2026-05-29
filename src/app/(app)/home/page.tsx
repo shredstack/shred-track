@@ -124,8 +124,22 @@ export default async function HomePage() {
   );
 }
 
+// Each Async helper wraps its fetcher in try/catch and renders `null` on
+// failure so a single broken card never bubbles up to the route-level
+// error.tsx and replaces the whole page. The Suspense boundary above each
+// card is what isolates the latency; this is what isolates the failure mode.
+async function safeFetch<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
+  try {
+    return await fn();
+  } catch (err) {
+    console.error(`[home] ${label} failed`, err);
+    return null;
+  }
+}
+
 async function GymHeaderAsync({ communityId }: { communityId: string }) {
-  const data = await fetchGymHeaderStrip(communityId);
+  const data = await safeFetch("GymHeader", () => fetchGymHeaderStrip(communityId));
+  if (!data) return null;
   return <GymHeaderStrip data={data} />;
 }
 
@@ -136,7 +150,10 @@ async function PendingDocsAsync({
   userId: string;
   communityId: string;
 }) {
-  const data = await fetchPendingDocuments(userId, communityId);
+  const data = await safeFetch("PendingDocs", () =>
+    fetchPendingDocuments(userId, communityId)
+  );
+  if (!data) return null;
   return <PendingDocumentsBanner data={data} />;
 }
 
@@ -149,7 +166,10 @@ async function TodaysClassAsync({
   communityId: string;
   tz: string;
 }) {
-  const data = await fetchTodaysClass(userId, communityId, tz);
+  const data = await safeFetch("TodaysClass", () =>
+    fetchTodaysClass(userId, communityId, tz)
+  );
+  if (data === null) return null;
   return <TodaysClassCard data={data} />;
 }
 
@@ -160,7 +180,9 @@ async function TodaysWorkoutAsync({
   communityId: string;
   tz: string;
 }) {
-  const data = await fetchTodaysWorkout(communityId, tz);
+  const data = await safeFetch("TodaysWorkout", () =>
+    fetchTodaysWorkout(communityId, tz)
+  );
   return <TodaysWorkoutCard data={data} />;
 }
 
@@ -173,7 +195,10 @@ async function ChallengeAsync({
   communityId: string;
   tz: string;
 }) {
-  const data = await fetchActiveChallenge(userId, communityId, tz);
+  const data = await safeFetch("Challenge", () =>
+    fetchActiveChallenge(userId, communityId, tz)
+  );
+  if (data === null) return null;
   return <ChallengeCard data={data} />;
 }
 
@@ -186,7 +211,10 @@ async function MurphPrepAsync({
   communityId: string;
   tz: string;
 }) {
-  const data = await fetchMurphPrep(userId, communityId, tz);
+  const data = await safeFetch("MurphPrep", () =>
+    fetchMurphPrep(userId, communityId, tz)
+  );
+  if (data === null) return null;
   return <MurphPrepCard data={data} />;
 }
 
@@ -197,7 +225,10 @@ async function CommittedClubAsync({
   userId: string;
   communityId: string;
 }) {
-  const data = await fetchCommittedClub(userId, communityId);
+  const data = await safeFetch("CommittedClub", () =>
+    fetchCommittedClub(userId, communityId)
+  );
+  if (data === null) return null;
   return <CommittedClubWidget data={data} />;
 }
 
@@ -208,7 +239,10 @@ async function SocialFeedAsync({
   userId: string;
   communityId: string;
 }) {
-  const posts = await fetchSocialFeedTeaser(userId, communityId);
+  const posts = await safeFetch("SocialFeed", () =>
+    fetchSocialFeedTeaser(userId, communityId)
+  );
+  if (posts === null) return null;
   return <SocialFeedTeaser posts={posts} />;
 }
 
@@ -221,7 +255,10 @@ async function QuickStatsAsync({
   communityId: string;
   tz: string;
 }) {
-  const data = await fetchQuickStats(userId, communityId, tz);
+  const data = await safeFetch("QuickStats", () =>
+    fetchQuickStats(userId, communityId, tz)
+  );
+  if (data === null) return null;
   return <QuickStatsStrip data={data} />;
 }
 
@@ -232,6 +269,9 @@ async function SoloQuickStats({
   userId: string;
   gymTimezone: string;
 }) {
-  const data = await fetchQuickStats(userId, null, gymTimezone);
+  const data = await safeFetch("SoloQuickStats", () =>
+    fetchQuickStats(userId, null, gymTimezone)
+  );
+  if (data === null) return null;
   return <QuickStatsStrip data={data} />;
 }
