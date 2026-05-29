@@ -1581,13 +1581,14 @@ async function reFKScoreMovementDetails(tx: Tx): Promise<void> {
 
   let resolved = 0;
   let resolvedByPosition = 0;
-  let skipped = 0;
+  let skippedFreeform = 0;
+  let skippedDivergent = 0;
   for (const r of rows) {
     if (!r.crossfit_workout_part_id) {
       // Score's part wasn't migrated (freeform section). Per the
       // orphanedPartFK verify exemption, these SMD rows can legitimately
       // stay unmapped.
-      skipped += 1;
+      skippedFreeform += 1;
       continue;
     }
     let cwMovementId = cwByKey.get(
@@ -1612,9 +1613,23 @@ async function reFKScoreMovementDetails(tx: Tx): Promise<void> {
     }
 
     if (!cwMovementId) {
-      throw new Error(
-        `reFKScoreMovementDetails: could not resolve crossfit_workout_movement for SMD ${r.smd_id} (legacy wm=${r.workout_movement_id}, cwPart=${r.crossfit_workout_part_id}, movement=${r.movement_id}, orderIndex=${r.order_index})`
+      // Unresolvable. Most common cause: the legacy workout was tagged to a
+      // benchmark (or fingerprint-deduped to an existing template) but its
+      // movements diverged from that template's movements — so the cwPart
+      // either has no cwm for this movement_id at all, or has fewer copies
+      // of it than the legacy part did. Log and skip; the verify check
+      // below exempts orphans that match this exact rule (cwPart's cwm
+      // count for the movement < legacy part's wm count), so genuine bugs
+      // still trip the assertion.
+      const cwListForDiagnostics =
+        cwByPosition.get(
+          `${r.crossfit_workout_part_id}::${r.movement_id}`
+        ) ?? [];
+      console.warn(
+        `  ⚠ reFKScoreMovementDetails: SMD ${r.smd_id} unresolved — cwPart ${r.crossfit_workout_part_id} has ${cwListForDiagnostics.length} cwm for movement ${r.movement_id} (legacy wm=${r.workout_movement_id}, legacy part=${r.workout_part_id ?? "null"}, orderIndex=${r.order_index})`
       );
+      skippedDivergent += 1;
+      continue;
     }
     await tx
       .update(scoreMovementDetails)
@@ -1624,7 +1639,7 @@ async function reFKScoreMovementDetails(tx: Tx): Promise<void> {
   }
 
   console.log(
-    `  → reFKScoreMovementDetails: ${resolved} resolved (${resolvedByPosition} via position fallback), ${skipped} skipped (freeform-section parts)`
+    `  → reFKScoreMovementDetails: ${resolved} resolved (${resolvedByPosition} via position fallback), ${skippedFreeform} skipped (freeform-section parts), ${skippedDivergent} skipped (divergent — cwPart lacks the movement)`
   );
 }
 
@@ -1794,8 +1809,14 @@ async function runVerifyAssertions(
 
   // Every SMD whose score has a non-null crossfit_workout_part_id and a
   // legacy workout_movement_id has a non-null crossfit_workout_movement_id.
-  // SMDs on freeform-section parts are exempt for the same reason as the
-  // score-level orphanedPartFK check above.
+  // Two exemptions:
+  //   (a) SMDs on freeform-section parts (same reason as the score-level
+  //       orphanedPartFK check above).
+  //   (b) SMDs whose legacy workout diverged from the cwPart's template —
+  //       the legacy part had more wm rows for this movement_id than the
+  //       cwPart has cwm rows, so reFKScoreMovementDetails couldn't pick a
+  //       target. This narrowly captures the divergent-workout case
+  //       without papering over genuine resolution bugs.
   const [orphanedSmd] = await tx
     .select({ c: sql<number>`count(*)::int` })
     .from(scoreMovementDetails)
@@ -1807,6 +1828,38 @@ async function runVerifyAssertions(
           select 1 from scores s
           where s.id = score_movement_details.score_id
             and s.crossfit_workout_part_id is not null
+        )
+        and not exists (
+          -- Exempt either:
+          --   (i)  legacy wm has no workout_part_id, so we can't compute a
+          --        position-within-part rank to map it onto a cwm; or
+          --   (ii) cwPart has fewer cwm of this movement_id than the
+          --        legacy part has wm of it (divergent template / count
+          --        mismatch — workout was tagged to a benchmark whose
+          --        movements diverged from the legacy workout's).
+          -- Anything else (cwm_count >= wm_count AND workout_part_id set)
+          -- should have resolved via the position fallback in
+          -- reFKScoreMovementDetails — failure there is a real bug.
+          select 1
+          from scores s
+          join workout_movements wm
+            on wm.id = score_movement_details.workout_movement_id
+          where s.id = score_movement_details.score_id
+            and s.crossfit_workout_part_id is not null
+            and (
+              wm.workout_part_id is null
+              or (
+                select count(*)
+                from crossfit_workout_movements cwm
+                where cwm.crossfit_workout_part_id = s.crossfit_workout_part_id
+                  and cwm.movement_id = wm.movement_id
+              ) < (
+                select count(*)
+                from workout_movements wm2
+                where wm2.workout_part_id = wm.workout_part_id
+                  and wm2.movement_id = wm.movement_id
+              )
+            )
         )
       `
     );
