@@ -273,7 +273,7 @@ export async function GET(
 
     const displayScore = formatBestScore(workoutType, {
       scoreId: row.scoreId,
-      workoutId: sessionId,
+      sessionId: sessionId,
       workoutDate: "",
       division: row.division,
       timeSeconds: row.timeSeconds,

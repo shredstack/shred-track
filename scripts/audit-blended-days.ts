@@ -7,8 +7,8 @@
 // historical blended days you may want to inspect / reconcile by hand.
 //
 // Usage:
-//   npx tsx src/db/audit-blended-days.ts
-//   npx tsx src/db/audit-blended-days.ts <communityId>
+//   npx tsx scripts/audit-blended-days.ts
+//   npx tsx scripts/audit-blended-days.ts <communityId>
 //
 // Output: one line per blended day with the community id, date, the
 // programmed sessions' release id + section kinds, and the manual
@@ -19,8 +19,8 @@ config({ path: ".env.local" });
 
 import { fileURLToPath } from "node:url";
 import { eq, isNotNull, sql } from "drizzle-orm";
-import { db } from "./index";
-import { communities, workoutSessions } from "./schema";
+import { db } from "@/db";
+import { communities, workoutSessions } from "@/db/schema";
 
 interface SessionRow {
   id: string;

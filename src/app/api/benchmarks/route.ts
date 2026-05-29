@@ -243,7 +243,7 @@ export async function GET(req: NextRequest) {
       const list = grouped.get(r.templateId) ?? [];
       list.push({
         scoreId: r.scoreId,
-        workoutId: r.sessionId,
+        sessionId: r.sessionId,
         workoutDate: r.workoutDate,
         division: r.division,
         timeSeconds: r.timeSeconds,

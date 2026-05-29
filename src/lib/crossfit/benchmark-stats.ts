@@ -2,9 +2,7 @@ import type { WorkoutType } from "@/types/crossfit";
 
 export interface ScoreRow {
   scoreId: string;
-  // Nullable post-cutover — unified-schema score rows leave workout_id null.
-  // The benchmark-history loader cuts over to workoutSessionId in commit #6.
-  workoutId: string | null;
+  sessionId: string | null;
   workoutDate: string;
   division: string;
   timeSeconds: number | null;

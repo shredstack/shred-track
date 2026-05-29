@@ -98,7 +98,7 @@ export async function GET(
 
   const normalized: ScoreRow[] = rows.map((r) => ({
     scoreId: r.scoreId,
-    workoutId: r.sessionId,
+    sessionId: r.sessionId,
     workoutDate: r.workoutDate,
     division: r.division,
     timeSeconds: r.timeSeconds,
@@ -115,7 +115,7 @@ export async function GET(
 
   const attempts = rows.map((r, i) => ({
     scoreId: r.scoreId,
-    workoutId: r.sessionId,
+    sessionId: r.sessionId,
     workoutDate: r.workoutDate,
     division: r.division,
     timeSeconds: r.timeSeconds,
@@ -219,7 +219,7 @@ async function weightliftingHistory(
       const list = buckets.get(target) ?? [];
       list.push({
         scoreId: r.scoreId,
-        workoutId: r.sessionId,
+        sessionId: r.sessionId,
         workoutDate: r.workoutDate,
         division: r.division,
         timeSeconds: r.timeSeconds,
