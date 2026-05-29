@@ -1461,6 +1461,7 @@ async function reFKScoreMovementDetails(tx: Tx): Promise<void> {
     select
       smd.id as smd_id,
       smd.workout_movement_id,
+      wm.workout_part_id,
       wm.movement_id,
       wm.order_index,
       s.crossfit_workout_part_id
@@ -1473,18 +1474,33 @@ async function reFKScoreMovementDetails(tx: Tx): Promise<void> {
   const rows = (result?.rows ?? result ?? []) as Array<{
     smd_id: string;
     workout_movement_id: string;
+    workout_part_id: string | null;
     movement_id: string;
     order_index: number;
     crossfit_workout_part_id: string | null;
   }>;
   if (rows.length === 0) return;
 
-  // Bulk-fetch crossfit_workout_movements only for the parts we need.
+  // Bulk-fetch crossfit_workout_movements only for the parts we need. Build
+  // two indexes:
+  //   1. (cwPart, movement, orderIndex) → cwm.id — fast path when the legacy
+  //      workout_movement.order_index happens to match the new
+  //      crossfit_workout_movement.order_index. True when the cwPart was
+  //      built from the score's own legacy part.
+  //   2. (cwPart, movement) → cwm.id[] sorted by orderIndex — fallback when
+  //      the cwPart was sourced from somewhere else (benchmark template,
+  //      fingerprint-deduped existing template). The benchmark's raw
+  //      order_index values aren't required to match the legacy workout's,
+  //      so the strict lookup misses even though the right cwm exists in
+  //      the part at a different position.
   const cwPartIds = new Set<string>();
+  const legacyPartIds = new Set<string>();
   for (const r of rows) {
     if (r.crossfit_workout_part_id) cwPartIds.add(r.crossfit_workout_part_id);
+    if (r.workout_part_id) legacyPartIds.add(r.workout_part_id);
   }
   const cwByKey = new Map<string, string>();
+  const cwByPosition = new Map<string, string[]>();
   if (cwPartIds.size > 0) {
     const cwm = await tx
       .select({
@@ -1500,15 +1516,71 @@ async function reFKScoreMovementDetails(tx: Tx): Promise<void> {
           Array.from(cwPartIds)
         )
       );
+    // Sort so the position arrays are stable: by (part, movement, orderIndex).
+    cwm.sort(
+      (
+        a: { crossfitWorkoutPartId: string; movementId: string; orderIndex: number },
+        b: { crossfitWorkoutPartId: string; movementId: string; orderIndex: number }
+      ) => {
+        if (a.crossfitWorkoutPartId !== b.crossfitWorkoutPartId)
+          return a.crossfitWorkoutPartId.localeCompare(b.crossfitWorkoutPartId);
+        if (a.movementId !== b.movementId)
+          return a.movementId.localeCompare(b.movementId);
+        return a.orderIndex - b.orderIndex;
+      }
+    );
     for (const c of cwm) {
       cwByKey.set(
         `${c.crossfitWorkoutPartId}::${c.movementId}::${c.orderIndex}`,
         c.id
       );
+      const posKey = `${c.crossfitWorkoutPartId}::${c.movementId}`;
+      const arr = cwByPosition.get(posKey) ?? [];
+      arr.push(c.id);
+      cwByPosition.set(posKey, arr);
+    }
+  }
+
+  // Legacy (workout_part, movement) → wm.id[] sorted by order_index. Used to
+  // compute the rank of a failing wm within its part among same-movement
+  // siblings, so we can pick the cwm at the same rank.
+  const legacyByPosition = new Map<string, string[]>();
+  if (legacyPartIds.size > 0) {
+    const wm = await tx
+      .select({
+        id: workoutMovements.id,
+        workoutPartId: workoutMovements.workoutPartId,
+        movementId: workoutMovements.movementId,
+        orderIndex: workoutMovements.orderIndex,
+      })
+      .from(workoutMovements)
+      .where(
+        inArray(workoutMovements.workoutPartId, Array.from(legacyPartIds))
+      );
+    wm.sort(
+      (
+        a: { workoutPartId: string | null; movementId: string; orderIndex: number },
+        b: { workoutPartId: string | null; movementId: string; orderIndex: number }
+      ) => {
+        const aPart = a.workoutPartId ?? "";
+        const bPart = b.workoutPartId ?? "";
+        if (aPart !== bPart) return aPart.localeCompare(bPart);
+        if (a.movementId !== b.movementId)
+          return a.movementId.localeCompare(b.movementId);
+        return a.orderIndex - b.orderIndex;
+      }
+    );
+    for (const m of wm) {
+      if (!m.workoutPartId) continue;
+      const key = `${m.workoutPartId}::${m.movementId}`;
+      const arr = legacyByPosition.get(key) ?? [];
+      arr.push(m.id);
+      legacyByPosition.set(key, arr);
     }
   }
 
   let resolved = 0;
+  let resolvedByPosition = 0;
   let skipped = 0;
   for (const r of rows) {
     if (!r.crossfit_workout_part_id) {
@@ -1518,8 +1590,27 @@ async function reFKScoreMovementDetails(tx: Tx): Promise<void> {
       skipped += 1;
       continue;
     }
-    const key = `${r.crossfit_workout_part_id}::${r.movement_id}::${r.order_index}`;
-    const cwMovementId = cwByKey.get(key);
+    let cwMovementId = cwByKey.get(
+      `${r.crossfit_workout_part_id}::${r.movement_id}::${r.order_index}`
+    );
+
+    // Position-based fallback (see index-construction comment above).
+    if (!cwMovementId && r.workout_part_id) {
+      const legacyList =
+        legacyByPosition.get(`${r.workout_part_id}::${r.movement_id}`) ?? [];
+      const posInLegacy = legacyList.indexOf(r.workout_movement_id);
+      if (posInLegacy >= 0) {
+        const cwList =
+          cwByPosition.get(
+            `${r.crossfit_workout_part_id}::${r.movement_id}`
+          ) ?? [];
+        if (posInLegacy < cwList.length) {
+          cwMovementId = cwList[posInLegacy];
+          resolvedByPosition += 1;
+        }
+      }
+    }
+
     if (!cwMovementId) {
       throw new Error(
         `reFKScoreMovementDetails: could not resolve crossfit_workout_movement for SMD ${r.smd_id} (legacy wm=${r.workout_movement_id}, cwPart=${r.crossfit_workout_part_id}, movement=${r.movement_id}, orderIndex=${r.order_index})`
@@ -1533,7 +1624,7 @@ async function reFKScoreMovementDetails(tx: Tx): Promise<void> {
   }
 
   console.log(
-    `  → reFKScoreMovementDetails: ${resolved} resolved, ${skipped} skipped (freeform-section parts)`
+    `  → reFKScoreMovementDetails: ${resolved} resolved (${resolvedByPosition} via position fallback), ${skipped} skipped (freeform-section parts)`
   );
 }
 
