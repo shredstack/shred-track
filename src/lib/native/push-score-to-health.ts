@@ -29,6 +29,10 @@ export interface PushScoreInput {
    *  ring matches our number. */
   activeEnergyKcal: number;
   pushPrefEnabled: boolean;
+  /** Server-built HKWorkout metadata: WOD title, format, movements, score
+   *  text, RPE, notes, etc. Apple Health renders these in the workout detail
+   *  view; some third-party readers (Oura, etc.) may also surface them. */
+  metadata?: Record<string, string | number>;
 }
 
 function activityTypeFor(workoutType?: string): number {
@@ -77,6 +81,7 @@ export async function pushScoreToAppleHealth(
     toMs: input.toMs,
     activeEnergyKcal: input.activeEnergyKcal,
     activityType: activityTypeFor(input.workoutType),
+    metadata: input.metadata,
   });
   if (!uuid) return { status: "denied" };
 

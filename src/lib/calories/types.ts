@@ -75,6 +75,12 @@ export interface CalorieEstimatorInput {
   scoreContext?: CalorieScoreContext | null;
   /** EPOC multiplier resolved upstream. 1.0 disables. */
   epocMultiplier: number;
+  /**
+   * True for the workout-template estimate at the 75 kg reference. The template
+   * path never loads per-user paces, so the "missing user pace" demotion would
+   * fire on every movement — meaningless quality signal at this level. Skip it.
+   */
+  isTemplateLevel?: boolean;
 }
 
 export interface PartEstimate {

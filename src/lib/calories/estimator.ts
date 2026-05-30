@@ -333,7 +333,8 @@ function resolveDurationSec(
 
 function confidenceFor(
   part: CaloriePartInput,
-  usedFallback: boolean
+  usedFallback: boolean,
+  skipUserPaceDemotion: boolean
 ): Confidence {
   let c: Confidence = "high";
   const hasEstimatedMovement = part.movements.some(
@@ -341,14 +342,17 @@ function confidenceFor(
   );
   if (hasEstimatedMovement) c = downgrade(c);
   // Per-movement rep-time-default demotion, capped at one demotion per part.
-  const usingPopulationPace = part.movements.some(
-    (m) =>
-      !m.isSideCadence &&
-      !m.movement.isPacedRun &&
-      !m.movement.isPacedErg &&
-      m.userRepSecondsObserved == null
-  );
-  if (usingPopulationPace) c = downgrade(c);
+  // Skipped at template level since paces are inherently per-user.
+  if (!skipUserPaceDemotion) {
+    const usingPopulationPace = part.movements.some(
+      (m) =>
+        !m.isSideCadence &&
+        !m.movement.isPacedRun &&
+        !m.movement.isPacedErg &&
+        m.userRepSecondsObserved == null
+    );
+    if (usingPopulationPace) c = downgrade(c);
+  }
   if (usedFallback) c = downgrade(c);
   return c;
 }
@@ -363,7 +367,7 @@ function estimateForTime(part: CaloriePartInput, input: CalorieEstimatorInput) {
   const out = applyMet(blended, input.bodyweightKg, sessionSec);
   return {
     ...out,
-    confidence: confidenceFor(part, false),
+    confidence: confidenceFor(part, false, input.isTemplateLevel ?? false),
   };
 }
 
@@ -373,7 +377,7 @@ function estimateAmrap(part: CaloriePartInput, input: CalorieEstimatorInput) {
   const weightedMet = weightedMovementMet(part, score, sessionSec);
   const blended = 0.85 * weightedMet + 0.15 * MET_ACTIVE_REST;
   const out = applyMet(blended, input.bodyweightKg, sessionSec);
-  return { ...out, confidence: confidenceFor(part, false) };
+  return { ...out, confidence: confidenceFor(part, false, input.isTemplateLevel ?? false) };
 }
 
 function estimateEmom(part: CaloriePartInput, input: CalorieEstimatorInput) {
@@ -395,7 +399,7 @@ function estimateEmom(part: CaloriePartInput, input: CalorieEstimatorInput) {
   return {
     kcalTotal: work.kcalTotal + rest.kcalTotal,
     kcalActive: work.kcalActive + rest.kcalActive,
-    confidence: confidenceFor(part, false),
+    confidence: confidenceFor(part, false, input.isTemplateLevel ?? false),
   };
 }
 
@@ -417,7 +421,7 @@ function estimateIntervals(part: CaloriePartInput, input: CalorieEstimatorInput)
     kcalTotal += w.kcalTotal + rest.kcalTotal;
     kcalActive += w.kcalActive + rest.kcalActive;
   }
-  return { kcalTotal, kcalActive, confidence: confidenceFor(part, false) };
+  return { kcalTotal, kcalActive, confidence: confidenceFor(part, false, input.isTemplateLevel ?? false) };
 }
 
 function estimateTabata(part: CaloriePartInput, input: CalorieEstimatorInput) {
@@ -478,8 +482,8 @@ function estimateForLoad(part: CaloriePartInput, input: CalorieEstimatorInput) {
   const work = applyMet(workMet, input.bodyweightKg, workPerSet * setCount);
   const rest = applyMet(restMet, input.bodyweightKg, restPerSet * setCount);
   const confidence: Confidence = score?.rpe != null
-    ? confidenceFor(part, false)
-    : downgrade(confidenceFor(part, false));
+    ? confidenceFor(part, false, input.isTemplateLevel ?? false)
+    : downgrade(confidenceFor(part, false, input.isTemplateLevel ?? false));
   return {
     kcalTotal: work.kcalTotal + rest.kcalTotal,
     kcalActive: work.kcalActive + rest.kcalActive,

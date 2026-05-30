@@ -9,6 +9,9 @@ on:
       - 'src/lib/hyrox-generic-plans/**'
       - 'src/lib/crossfit/weightlifting-benchmarks.ts'
       - 'src/lib/calories/met-seed.ts'
+      - 'src/lib/calories/orchestrator.ts'
+      - 'src/lib/calories/estimator.ts'
+      - 'src/lib/calories/loader.ts'
 
   # Allow manual trigger from GitHub UI
   workflow_dispatch:
@@ -40,6 +43,9 @@ jobs:
               - 'src/lib/hyrox-generic-plans/**'
               - 'src/lib/crossfit/weightlifting-benchmarks.ts'
               - 'src/lib/calories/met-seed.ts'
+              - 'src/lib/calories/orchestrator.ts'
+              - 'src/lib/calories/estimator.ts'
+              - 'src/lib/calories/loader.ts'
 
   deploy-migrations:
     needs: changes

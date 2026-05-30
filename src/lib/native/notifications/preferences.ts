@@ -22,6 +22,19 @@ export interface TodayNotificationPrefs {
   includeHyrox: boolean;
   includeCrossfit: boolean;
   includeRecovery: boolean;
+
+  // CrossFit log-by-deadline nudge (opt-in). Fires at
+  // (class start + offset) only if today's WOD is still unlogged.
+  // Class start is taken from the user's registered class instance
+  // for today; if none, we fall back to crossfitClassTime{Hour,Minute}.
+  crossfitLogNudgeEnabled: boolean;
+  crossfitClassTimeHour: number;
+  crossfitClassTimeMinute: number;
+  crossfitLogByOffsetHours: number; // e.g. 6 → 6 AM class ⇒ noon deadline
+
+  // Arnold voice opt-in — when true, all three notifications use
+  // Schwarzenegger-flavored copy.
+  arnoldVoice: boolean;
 }
 
 export const DEFAULT_PREFS: TodayNotificationPrefs = {
@@ -34,6 +47,11 @@ export const DEFAULT_PREFS: TodayNotificationPrefs = {
   includeHyrox: true,
   includeCrossfit: true,
   includeRecovery: true,
+  crossfitLogNudgeEnabled: false,
+  crossfitClassTimeHour: 6,
+  crossfitClassTimeMinute: 0,
+  crossfitLogByOffsetHours: 6,
+  arnoldVoice: false,
 };
 
 export async function getTodayNotificationPrefs(): Promise<TodayNotificationPrefs> {
