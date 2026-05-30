@@ -155,7 +155,6 @@ export default function MovementDetailPage({
   // exist yet — keeps existing seeded movements playable without forcing a
   // backfill migration.
   const legacy = movement.videoUrl ? parseExternalVideo(movement.videoUrl) : null;
-  const legacyEmbed = legacy ? externalEmbedUrl(legacy.provider, legacy.videoId) : null;
   const legacyThumb = legacy ? externalThumbnailUrl(legacy.provider, legacy.videoId) : null;
   const showLegacy = videos.length === 0 && !!movement.videoUrl;
 
@@ -228,7 +227,6 @@ export default function MovementDetailPage({
               <LegacyVideoTile
                 videoUrl={movement.videoUrl!}
                 thumb={legacyThumb}
-                hasEmbed={!!legacyEmbed}
                 onPlay={() => setPlayingLegacyUrl(movement.videoUrl)}
               />
             )}
@@ -413,7 +411,6 @@ function VideoTile(props: {
 function LegacyVideoTile(props: {
   videoUrl: string;
   thumb: string | null;
-  hasEmbed: boolean;
   onPlay: () => void;
 }) {
   return (

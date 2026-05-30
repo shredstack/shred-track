@@ -166,6 +166,25 @@ export async function POST(
       );
     }
 
+    // Bind the registered row to the path that `upload` would have issued
+    // for this same (visibility, communityId, uploader, movement, videoId).
+    // Without this the client could register an arbitrary storage path it
+    // happens to control. We extract the ext from the supplied path so the
+    // rebuild is deterministic, then require strict equality.
+    const extMatch = /\.([a-z0-9]+)$/i.exec(storagePath);
+    const ext = extMatch ? extMatch[1] : "";
+    const expectedPath = buildStoragePath({
+      visibility,
+      communityId,
+      uploadedBy: user.id,
+      movementId: id,
+      videoId,
+      ext,
+    });
+    if (storagePath !== expectedPath) {
+      return NextResponse.json({ error: "storagePath does not match the issued upload path" }, { status: 400 });
+    }
+
     const [row] = await db
       .insert(crossfitMovementVideos)
       .values({
