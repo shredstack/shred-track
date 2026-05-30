@@ -16,6 +16,7 @@ import { invalidateCrossfitInsightsCache } from "@/lib/crossfit/insights/cache";
 import type { SetEntry } from "@/types/crossfit";
 import { computeScoreEstimate } from "@/lib/calories/orchestrator";
 import { workingWeightFromSetData } from "@/lib/calories/one-rep-max";
+import { buildAppleHealthMetadata } from "@/lib/apple-health/build-metadata";
 
 // ============================================
 // Request types
@@ -433,7 +434,22 @@ export async function POST(req: NextRequest) {
     // Invalidate insights cache for whichever user the score belongs to.
     await invalidateCrossfitInsightsCache(effectiveUserId);
 
-    return NextResponse.json(score, { status: 201 });
+    // Build the Apple Health metadata dict so the client can attach it to
+    // the HKWorkout. Best-effort — failures must never block the score
+    // response.
+    let appleHealthMetadata: Awaited<
+      ReturnType<typeof buildAppleHealthMetadata>
+    > = null;
+    try {
+      appleHealthMetadata = await buildAppleHealthMetadata(score.id);
+    } catch (err) {
+      console.error("[apple-health] metadata build failed for score POST", err);
+    }
+
+    return NextResponse.json(
+      { ...score, appleHealthMetadata },
+      { status: 201 }
+    );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "";
     if (message.includes("unique") || message.includes("duplicate")) {

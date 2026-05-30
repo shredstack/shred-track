@@ -1863,6 +1863,31 @@ export const recoveryMovements = pgTable(
   ]
 );
 
+export const crossfitMovementVideos = pgTable(
+  "crossfit_movement_videos",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    movementId: uuid("movement_id").notNull().references(() => movements.id, { onDelete: "cascade" }),
+    sourceType: text("source_type").notNull(), // 'upload' | 'external'
+    storagePath: text("storage_path"),
+    externalUrl: text("external_url"),
+    externalProvider: text("external_provider"),
+    externalVideoId: text("external_video_id"),
+    visibility: text("visibility").notNull(), // 'public' | 'gym' | 'private'
+    communityId: uuid("community_id").references(() => communities.id, { onDelete: "cascade" }),
+    label: text("label"),
+    durationSeconds: integer("duration_seconds"),
+    posterStoragePath: text("poster_storage_path"),
+    rightsConfirmed: boolean("rights_confirmed").default(false).notNull(),
+    orderIndex: integer("order_index").default(0).notNull(),
+    uploadedBy: uuid("uploaded_by").notNull().references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_crossfit_videos_movement").on(table.movementId, table.orderIndex),
+  ]
+);
+
 export const recoveryMovementVideos = pgTable(
   "recovery_movement_videos",
   {

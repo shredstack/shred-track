@@ -946,3 +946,29 @@ export interface NotesExtraction {
   scalingRationale: NotesScalingReason[];
   milestones: NotesMilestone[];
 }
+
+// ============================================
+// Movement Videos
+// ============================================
+
+export type CrossfitVideoVisibility = "public" | "gym" | "private";
+export type CrossfitVideoSource = "upload" | "external";
+
+export interface CrossfitMovementVideo {
+  id: string;
+  movementId: string;
+  sourceType: CrossfitVideoSource;
+  storagePath: string | null;
+  externalUrl: string | null;
+  externalProvider: string | null;
+  externalVideoId: string | null;
+  visibility: CrossfitVideoVisibility;
+  communityId: string | null;
+  label: string | null;
+  durationSeconds: number | null;
+  posterStoragePath: string | null;
+  rightsConfirmed: boolean;
+  orderIndex: number;
+  uploadedBy: string;
+  createdAt: string;
+}

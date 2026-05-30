@@ -180,6 +180,11 @@ public class HealthKitTimer: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
+        // Server-built metadata describing the WOD (title, format, movements,
+        // score, RPE, notes). JS sends string/number only; we coerce to the
+        // NSString / NSNumber that HealthKit accepts.
+        let metadata = sanitizedMetadata(call.getObject("metadata"))
+
         let config = HKWorkoutConfiguration()
         config.activityType = activity
 
@@ -188,34 +193,63 @@ public class HealthKitTimer: CAPPlugin, CAPBridgedPlugin {
             configuration: config,
             device: nil
         )
-        builder.beginCollection(withStart: start) { [self] beginOk, beginErr in
+        builder.beginCollection(withStart: start) { beginOk, beginErr in
             guard beginOk else {
                 call.reject(beginErr?.localizedDescription ?? "beginCollection failed")
                 return
             }
-            let energySample = HKQuantitySample(
-                type: active,
-                quantity: HKQuantity(unit: .kilocalorie(), doubleValue: activeKcal),
-                start: start,
-                end: end
-            )
-            builder.add([energySample]) { _, _ in
-                builder.endCollection(withEnd: end) { _, endErr in
-                    if let endErr = endErr {
-                        call.reject(endErr.localizedDescription)
-                        return
-                    }
-                    builder.finishWorkout { workout, finishErr in
-                        if let finishErr = finishErr {
-                            call.reject(finishErr.localizedDescription)
+
+            let finishCollection: () -> Void = {
+                let energySample = HKQuantitySample(
+                    type: active,
+                    quantity: HKQuantity(unit: .kilocalorie(), doubleValue: activeKcal),
+                    start: start,
+                    end: end
+                )
+                builder.add([energySample]) { _, _ in
+                    builder.endCollection(withEnd: end) { _, endErr in
+                        if let endErr = endErr {
+                            call.reject(endErr.localizedDescription)
                             return
                         }
-                        call.resolve([
-                            "workoutUuid": workout?.uuid.uuidString ?? "",
-                        ])
+                        builder.finishWorkout { workout, finishErr in
+                            if let finishErr = finishErr {
+                                call.reject(finishErr.localizedDescription)
+                                return
+                            }
+                            call.resolve([
+                                "workoutUuid": workout?.uuid.uuidString ?? "",
+                            ])
+                        }
                     }
                 }
             }
+
+            if metadata.isEmpty {
+                finishCollection()
+            } else {
+                builder.addMetadata(metadata) { _, _ in
+                    // Don't block the workout save on a metadata-attach
+                    // failure — the energy sample is still useful on its own.
+                    finishCollection()
+                }
+            }
         }
+    }
+
+    // HealthKit metadata values must be NSString / NSNumber / NSDate /
+    // HKQuantity. Anything else gets dropped so a stray null / bool doesn't
+    // poison the dict.
+    private func sanitizedMetadata(_ raw: JSObject?) -> [String: Any] {
+        guard let raw = raw else { return [:] }
+        var out: [String: Any] = [:]
+        for (key, value) in raw {
+            if let s = value as? String {
+                out[key] = s
+            } else if let n = value as? NSNumber {
+                out[key] = n
+            }
+        }
+        return out
     }
 }

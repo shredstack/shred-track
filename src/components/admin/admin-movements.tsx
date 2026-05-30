@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,7 +21,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Search, Plus, Pencil, Trash2, Video, Loader2, CheckCircle2, ShieldAlert } from "lucide-react";
+import { ExternalLink, Search, Plus, Pencil, Trash2, Video, Loader2, CheckCircle2, ShieldAlert } from "lucide-react";
+import {
+  useMovementVideos,
+  useDeleteMovementVideo,
+} from "@/hooks/useMovementVideos";
 import {
   CATEGORY_FILTER_OPTIONS,
   MOVEMENT_CATEGORIES,
@@ -635,7 +640,7 @@ export function AdminMovements() {
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="am-video">Video URL</Label>
+              <Label htmlFor="am-video">Video URL (legacy)</Label>
               <Input
                 id="am-video"
                 type="url"
@@ -645,7 +650,12 @@ export function AdminMovements() {
                 }
                 placeholder="https://youtube.com/watch?v=..."
               />
+              <p className="text-[10px] text-muted-foreground">
+                Shown only when no embedded videos exist below.
+              </p>
             </div>
+
+            {editingId && <VideosSection movementId={editingId} />}
 
             {error && (
               <p className="text-sm text-destructive">{error}</p>
@@ -670,6 +680,89 @@ export function AdminMovements() {
           </form>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// Lightweight in-dialog video list. Adding new videos (upload or external)
+// happens on the public movement detail page, which already has the file
+// picker + visibility selector. Deleting + at-a-glance review live here.
+function VideosSection({ movementId }: { movementId: string }) {
+  const { data: videos, isLoading } = useMovementVideos(movementId);
+  const deleteMutation = useDeleteMovementVideo();
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border/50 bg-muted/20 p-3">
+      <div className="flex items-center justify-between">
+        <Label className="text-xs uppercase tracking-wide">
+          Embedded videos ({videos?.length ?? 0})
+        </Label>
+        <Link
+          href={`/crossfit/movements/${movementId}`}
+          target="_blank"
+          className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+        >
+          Add new
+          <ExternalLink className="size-3" />
+        </Link>
+      </div>
+      {isLoading ? (
+        <div className="flex justify-center py-2">
+          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+        </div>
+      ) : !videos || videos.length === 0 ? (
+        <p className="text-[11px] text-muted-foreground">
+          No embedded videos yet. Use the &ldquo;Add new&rdquo; link above to
+          upload a file or attach a YouTube / Vimeo link.
+        </p>
+      ) : (
+        <div className="space-y-1">
+          {videos.map((v) => (
+            <div
+              key={v.id}
+              className="flex items-center gap-2 rounded-md border border-border/40 bg-background/40 px-2 py-1.5"
+            >
+              <div className="flex-1 min-w-0 space-y-0.5">
+                <p className="text-xs truncate">
+                  {v.label || (
+                    <span className="text-muted-foreground italic">
+                      Untitled video
+                    </span>
+                  )}
+                </p>
+                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <Badge variant="outline" className="text-[9px] capitalize">
+                    {v.sourceType}
+                  </Badge>
+                  <Badge variant="outline" className="text-[9px] capitalize">
+                    {v.visibility}
+                  </Badge>
+                  {v.durationSeconds != null && (
+                    <span>{v.durationSeconds}s</span>
+                  )}
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="text-destructive hover:text-destructive"
+                title="Delete video"
+                onClick={() => {
+                  if (confirm("Delete this video?")) {
+                    deleteMutation.mutate(
+                      { movementId, videoId: v.id },
+                      { onError: (err) => alert(err.message) }
+                    );
+                  }
+                }}
+              >
+                <Trash2 className="size-3" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

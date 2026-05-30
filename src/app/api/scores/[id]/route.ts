@@ -8,6 +8,7 @@ import { invalidateCrossfitInsightsCache } from "@/lib/crossfit/insights/cache";
 import type { SetEntry } from "@/types/crossfit";
 import { computeScoreEstimate } from "@/lib/calories/orchestrator";
 import { workingWeightFromSetData } from "@/lib/calories/one-rep-max";
+import { buildAppleHealthMetadata } from "@/lib/apple-health/build-metadata";
 
 interface MovementDetailInput {
   workoutMovementId: string;
@@ -227,7 +228,21 @@ export async function PUT(
 
   await invalidateCrossfitInsightsCache(user.id);
 
-  return NextResponse.json(updated);
+  // Apple Health metadata — only useful when the score hasn't been pushed
+  // yet (the client guards on `appleHealthWorkoutUuid`, but no point
+  // building the dict otherwise).
+  let appleHealthMetadata: Awaited<
+    ReturnType<typeof buildAppleHealthMetadata>
+  > = null;
+  if (!updated.appleHealthWorkoutUuid) {
+    try {
+      appleHealthMetadata = await buildAppleHealthMetadata(updated.id);
+    } catch (err) {
+      console.error("[apple-health] metadata build failed for score PUT", err);
+    }
+  }
+
+  return NextResponse.json({ ...updated, appleHealthMetadata });
 }
 
 // DELETE /api/scores/[id]

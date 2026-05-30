@@ -44,6 +44,7 @@ export async function computeAndStoreWorkoutEstimate(
     isDefaultBodyweight: false, // 75 kg is a stated reference, not a fallback
     scoreContext: null,
     epocMultiplier: 1.0,
+    isTemplateLevel: true,
   };
   const estimate = estimateCalories(input);
 

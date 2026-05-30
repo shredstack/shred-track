@@ -39,6 +39,9 @@ interface HealthKitTimerPlugin {
     to: number;
     activeEnergyKcal: number;
     activityType?: number;
+    /** HK workout metadata. Keys are arbitrary; values must be string or
+     *  number — the Swift side maps to `NSString` / `NSNumber`. */
+    metadata?: Record<string, string | number>;
   }): Promise<{ workoutUuid: string }>;
 }
 
@@ -173,6 +176,7 @@ export async function saveHealthKitWorkout(opts: {
   toMs: number;
   activeEnergyKcal: number;
   activityType?: number;
+  metadata?: Record<string, string | number>;
 }): Promise<string | null> {
   const plugin = getPlugin();
   if (!plugin?.saveWorkout) return null;
@@ -182,6 +186,7 @@ export async function saveHealthKitWorkout(opts: {
       to: opts.toMs,
       activeEnergyKcal: opts.activeEnergyKcal,
       activityType: opts.activityType ?? HK_ACTIVITY_TYPE.highIntensityIntervalTraining,
+      metadata: opts.metadata,
     });
     return r?.workoutUuid || null;
   } catch (err) {

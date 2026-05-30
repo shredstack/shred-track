@@ -333,6 +333,30 @@ describe("estimator — canonical workouts at 75 kg", () => {
     const order = { high: 0, medium: 1, low: 2 };
     expect(order[lowConf.confidence]).toBeGreaterThanOrEqual(order[high.confidence]);
   });
+
+  it("Template-level skips the missing-user-pace demotion", () => {
+    const part: CaloriePartInput = {
+      id: "p",
+      workoutType: "amrap",
+      timeCapSeconds: null,
+      amrapDurationSeconds: 600,
+      emomIntervalSeconds: null,
+      intervalWorkSeconds: null,
+      intervalRestSeconds: null,
+      intervalRounds: null,
+      rounds: null,
+      repScheme: null,
+      repSchemeParsed: null,
+      structure: null,
+      // metIsEstimated defaults to false so the only possible demotion is the
+      // population-pace one.
+      movements: [partMv(mv("Burpee", { metValue: 11 }))],
+    };
+    const personalized = estimateCalories(baseInput([part]));
+    const template = estimateCalories({ ...baseInput([part]), isTemplateLevel: true });
+    expect(personalized.confidence).toBe("medium");
+    expect(template.confidence).toBe("high");
+  });
 });
 
 describe("estimator — load-relative MET scaling", () => {

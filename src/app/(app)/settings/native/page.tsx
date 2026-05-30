@@ -1,8 +1,8 @@
 "use client";
 
 // /settings/native — notification preferences for the iOS Today
-// notifications: morning brief + midday score nudge (spec
-// watch_today_view_and_nudges_spec.md §5.4).
+// notifications: morning brief, midday score nudge, and the opt-in
+// CrossFit log-by-deadline nudge.
 //
 // Capacitor-only. On web we render the same page in a "not available"
 // state so the route doesn't 404, but most users won't reach it from
@@ -22,9 +22,11 @@ import {
   setTodayNotificationPrefs,
 } from "@/lib/native/notifications/preferences";
 import {
+  buildNotificationDiagnostic,
+  cancelAllTodayNotifications,
   ensureNotificationPermission,
   rescheduleTodayNotifications,
-  cancelAllTodayNotifications,
+  type NotificationDiagnostic,
 } from "@/lib/native/notifications/today-notifications";
 
 export default function NativeSettingsPage() {
@@ -54,7 +56,11 @@ export default function NativeSettingsPage() {
     setBusy(true);
     try {
       await setTodayNotificationPrefs(next);
-      if (!next.morningBriefEnabled && !next.middayNudgeEnabled) {
+      if (
+        !next.morningBriefEnabled &&
+        !next.middayNudgeEnabled &&
+        !next.crossfitLogNudgeEnabled
+      ) {
         await cancelAllTodayNotifications();
       } else {
         await rescheduleTodayNotifications();
@@ -95,7 +101,7 @@ export default function NativeSettingsPage() {
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold">Notifications</h1>
         <p className="text-sm text-muted-foreground">
-          Two reminders a day — no spam, no marketing pushes.
+          Daily reminders for today&apos;s training — no marketing pushes.
         </p>
       </header>
 
@@ -190,6 +196,64 @@ export default function NativeSettingsPage() {
         )}
       </section>
 
+      {/* CrossFit log-by-deadline nudge (opt-in) */}
+      <section className="space-y-3 rounded-lg border border-border/60 bg-card/40 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-medium">CrossFit log reminder</h2>
+            <p className="text-xs text-muted-foreground">
+              Reminds you to log your WOD after class. Uses your registered
+              class for today, or your default time below.
+            </p>
+          </div>
+          <Switch
+            checked={prefs.crossfitLogNudgeEnabled}
+            onCheckedChange={(checked: boolean) =>
+              void persist({ ...prefs, crossfitLogNudgeEnabled: !!checked })
+            }
+          />
+        </div>
+        {prefs.crossfitLogNudgeEnabled && (
+          <div className="space-y-3 pt-1">
+            <TimeRow
+              icon={<Clock className="size-4 text-muted-foreground" />}
+              label="Default class time"
+              hour={prefs.crossfitClassTimeHour}
+              minute={prefs.crossfitClassTimeMinute}
+              onChange={(h, m) =>
+                void persist({
+                  ...prefs,
+                  crossfitClassTimeHour: h,
+                  crossfitClassTimeMinute: m,
+                })
+              }
+            />
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Clock className="size-4" />
+                <span>Remind me this many hours after class</span>
+              </div>
+              <input
+                type="number"
+                min={1}
+                max={23}
+                value={prefs.crossfitLogByOffsetHours}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (!Number.isFinite(n) || n < 1 || n > 23) return;
+                  void persist({ ...prefs, crossfitLogByOffsetHours: n });
+                }}
+                className="w-16 rounded-md border border-border bg-background px-2 py-1 text-sm tabular-nums"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Example: 6 AM class + 6 hours = noon deadline. The reminder only
+              fires if today&apos;s WOD is still unlogged.
+            </p>
+          </div>
+        )}
+      </section>
+
       {/* Per-content toggles */}
       <section className="space-y-3 rounded-lg border border-border/60 bg-card/40 p-4">
         <h2 className="text-base font-medium">Include in reminders</h2>
@@ -215,6 +279,28 @@ export default function NativeSettingsPage() {
           }
         />
       </section>
+
+      {/* Arnold voice (opt-in) */}
+      <section className="space-y-3 rounded-lg border border-border/60 bg-card/40 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-medium">Arnold mode</h2>
+            <p className="text-xs text-muted-foreground">
+              For fun. Rewrites all notification text in a Schwarzenegger-flavored
+              tone. Off by default.
+            </p>
+          </div>
+          <Switch
+            checked={prefs.arnoldVoice}
+            onCheckedChange={(checked: boolean) =>
+              void persist({ ...prefs, arnoldVoice: !!checked })
+            }
+          />
+        </div>
+      </section>
+
+      {/* Diagnostic panel */}
+      <DiagnosticPanel />
 
       <p className="text-xs text-muted-foreground">
         Defaults: morning brief at {fmt(DEFAULT_PREFS.morningBriefHour, DEFAULT_PREFS.morningBriefMinute)},
@@ -277,6 +363,199 @@ function TimeRow({
         }}
         className="rounded-md border border-border bg-background px-2 py-1 text-sm tabular-nums"
       />
+    </div>
+  );
+}
+
+function DiagnosticPanel() {
+  const [expanded, setExpanded] = useState(false);
+  const [data, setData] = useState<NotificationDiagnostic | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function refresh() {
+    setLoading(true);
+    try {
+      const d = await buildNotificationDiagnostic();
+      setData(d);
+    } catch (err) {
+      console.warn("[diagnostic] failed", err);
+      toast.error("Couldn't load diagnostic data");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (expanded && !data) void refresh();
+  }, [expanded, data]);
+
+  return (
+    <section className="space-y-3 rounded-lg border border-border/60 bg-card/40 p-4">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 text-left"
+        onClick={() => setExpanded((e) => !e)}
+      >
+        <div>
+          <h2 className="text-base font-medium">
+            Why isn&apos;t my CrossFit showing up?
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Shows what the scheduler would send right now, without scheduling.
+          </p>
+        </div>
+        <span className="text-sm text-muted-foreground">
+          {expanded ? "Hide" : "Show"}
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="space-y-3 pt-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">
+              Last refreshed: {data?.fetchedAt
+                ? new Date(data.fetchedAt).toLocaleTimeString("en-US")
+                : "—"}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void refresh()}
+              disabled={loading}
+            >
+              {loading ? "Loading…" : "Refresh"}
+            </Button>
+          </div>
+
+          {data && (
+            <div className="space-y-3 text-xs">
+              <DiagRow
+                label="Running in native iOS app"
+                value={data.isNative ? "yes" : "no — only the web shell"}
+                ok={data.isNative}
+              />
+              <DiagRow
+                label="CrossFit WODs found for today"
+                value={String(data.wodCount)}
+                ok={data.wodCount > 0}
+              />
+              <DiagRow
+                label="Unlogged WODs"
+                value={String(data.unloggedWodCount)}
+              />
+              <DiagRow
+                label="Class registrations for today"
+                value={String(data.registrationCount)}
+              />
+              <DiagRow
+                label="Include CrossFit in reminders?"
+                value={data.prefs.includeCrossfit ? "yes" : "no — toggled off"}
+                ok={data.prefs.includeCrossfit}
+              />
+
+              <div className="rounded-md border border-border/60 bg-background/40 p-3 space-y-2">
+                <div className="font-medium">
+                  Morning brief — {data.morningBrief.at}
+                </div>
+                <DiagRow
+                  label="Would fire today"
+                  value={data.morningBrief.wouldSchedule ? "yes" : "no"}
+                  ok={data.morningBrief.wouldSchedule}
+                />
+                <div>
+                  <div className="text-muted-foreground">Body</div>
+                  <div className="text-foreground/90 italic">
+                    {data.morningBrief.body ?? "(empty — nothing programmed)"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-md border border-border/60 bg-background/40 p-3 space-y-2">
+                <div className="font-medium">
+                  Midday nudge — {data.middayNudge.at}
+                </div>
+                <DiagRow
+                  label="Would fire today"
+                  value={data.middayNudge.wouldSchedule ? "yes" : "no"}
+                  ok={data.middayNudge.wouldSchedule}
+                />
+                <div>
+                  <div className="text-muted-foreground">Body</div>
+                  <div className="text-foreground/90 italic">
+                    {data.middayNudge.body || "(nothing to nudge about)"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-md border border-border/60 bg-background/40 p-3 space-y-2">
+                <div className="font-medium">
+                  CrossFit log nudge — {data.crossfitLogNudge.at}
+                </div>
+                <DiagRow
+                  label="Would fire today"
+                  value={data.crossfitLogNudge.wouldSchedule ? "yes" : "no"}
+                  ok={data.crossfitLogNudge.wouldSchedule}
+                />
+                <DiagRow
+                  label="Time source"
+                  value={
+                    data.crossfitLogNudge.source === "class-registration"
+                      ? "today's registered class"
+                      : data.crossfitLogNudge.source === "preference"
+                      ? "your default class time"
+                      : "n/a (disabled or nothing to nudge)"
+                  }
+                />
+                <div>
+                  <div className="text-muted-foreground">Body</div>
+                  <div className="text-foreground/90 italic">
+                    {data.crossfitLogNudge.body || "(disabled)"}
+                  </div>
+                </div>
+              </div>
+
+              <details className="rounded-md border border-border/60 bg-background/40 p-3">
+                <summary className="cursor-pointer text-muted-foreground">
+                  Raw fetch results
+                </summary>
+                <pre className="mt-2 overflow-x-auto text-[10px] leading-tight">
+                  {JSON.stringify(
+                    {
+                      crossfit: data.state?.crossfit ?? null,
+                      classes: data.state?.classes ?? null,
+                    },
+                    null,
+                    2,
+                  )}
+                </pre>
+              </details>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DiagRow({
+  label,
+  value,
+  ok,
+}: {
+  label: string;
+  value: string;
+  ok?: boolean;
+}) {
+  const color =
+    ok === true
+      ? "text-emerald-500"
+      : ok === false
+      ? "text-red-500"
+      : "text-foreground/90";
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={`tabular-nums ${color}`}>{value}</span>
     </div>
   );
 }

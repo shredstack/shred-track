@@ -626,6 +626,7 @@ async function maybePushToAppleHealth(
     durationSeconds?: number | null;
     estimatedKcalActiveWithEpoc?: number | null;
     appleHealthWorkoutUuid?: string | null;
+    appleHealthMetadata?: Record<string, string | number> | null;
   },
   queryClient: QueryClient,
 ): Promise<void> {
@@ -664,6 +665,7 @@ async function maybePushToAppleHealth(
     toMs,
     activeEnergyKcal: active,
     pushPrefEnabled: pushPref,
+    metadata: saved.appleHealthMetadata ?? undefined,
   });
 
   // Surface the outcome so the user knows their workout reached Apple Health.
