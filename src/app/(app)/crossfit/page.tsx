@@ -165,6 +165,7 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
         repScheme: p.repScheme ?? "",
         rounds: p.rounds ? String(p.rounds) : "",
         structure: p.structure,
+        scoreType: p.scoreType ?? undefined,
         movements: p.movements.map(
           (m): WorkoutBuilderMovement => ({
             tempId: generateTempId(),
@@ -242,6 +243,7 @@ function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
             equipmentCount: m.equipmentCount,
             rxStandard: m.rxStandard ?? "",
             notes: m.notes ?? "",
+            weightSource: m.weightSource ?? "prescribed",
             blockId: m.workoutBlockId ?? null,
             blockTempRef: m.workoutBlockId
               ? blockTempRefByDbId.get(m.workoutBlockId) ?? null

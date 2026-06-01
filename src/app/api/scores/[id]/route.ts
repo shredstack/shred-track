@@ -22,6 +22,7 @@ interface MovementDetailInput {
   actualHeightInches?: number;
   actualRepsPerRound?: number[];
   actualDurationSecondsPerRound?: number[];
+  actualWeightLbsPerRound?: number[];
   notes?: string;
 }
 
@@ -56,12 +57,14 @@ export async function PUT(
 
   let weightLbs = body.weightLbs;
   if (weightLbs == null && normalizedDetails) {
-    const max = Math.max(
+    const setMax = Math.max(
       0,
       ...normalizedDetails.flatMap((d) => (d.setEntries ?? []).map((e) => e.weight))
     );
-    if (max > 0) weightLbs = max;
+    if (setMax > 0) weightLbs = setMax;
   }
+  // Athlete-weight per-round arrays are intentionally NOT derived into
+  // scores.weightLbs — see scores/route.ts for the rationale.
 
   // Recompute the calorie estimate against the merged shape. We rebuild the
   // score context from `body` + the existing row so unrelated edits (notes,
@@ -215,6 +218,15 @@ export async function PUT(
                 d.actualDurationSecondsPerRound.length > 0
                   ? d.actualDurationSecondsPerRound.map((n) =>
                       Math.max(0, Math.round(n))
+                    )
+                  : null,
+              // Per-round athlete weight (lb). Drizzle accepts string[] for
+              // numeric[]. numeric preserves half-pound entries from kg→lb.
+              actualWeightLbsPerRound:
+                Array.isArray(d.actualWeightLbsPerRound) &&
+                d.actualWeightLbsPerRound.length > 0
+                  ? d.actualWeightLbsPerRound.map((n) =>
+                      String(Math.max(0, Number.isFinite(n) ? n : 0))
                     )
                   : null,
               notes: d.notes ?? null,

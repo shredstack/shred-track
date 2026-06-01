@@ -493,6 +493,7 @@ export const workoutParts = pgTable(
     estimatedKcalLow: integer("estimated_kcal_low"),
     estimatedKcalHigh: integer("estimated_kcal_high"),
     estimatedKcalConfidence: text("estimated_kcal_confidence"),
+    scoreType: text("score_type"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -579,6 +580,7 @@ export const workoutMovements = pgTable("workout_movements", {
   equipmentCount: integer("equipment_count"),
   rxStandard: text("rx_standard"),
   notes: text("notes"),
+  weightSource: text("weight_source").default("prescribed").notNull(),
 });
 
 // ============================================
@@ -742,6 +744,11 @@ export const scoreMovementDetails = pgTable("score_movement_details", {
   actualDurationSecondsPerRound: integer(
     "actual_duration_seconds_per_round"
   ).array(),
+  // Per-round captured weight (lb) for athlete-picked-weight movements
+  // (weight_source = 'athlete'). Length matches part.rounds; empty slots
+  // round-trip as 0. numeric (not integer) preserves half-pound values from
+  // kg->lb conversions.
+  actualWeightLbsPerRound: numeric("actual_weight_lbs_per_round").array(),
   notes: text("notes"),
 }, (table) => [
   foreignKey({
@@ -835,6 +842,7 @@ export const benchmarkWorkoutParts = pgTable(
     intervalRounds: jsonb("interval_rounds"),
     sideCadenceIntervalSeconds: integer("side_cadence_interval_seconds"),
     sideCadenceOpenEnded: boolean("side_cadence_open_ended").default(false).notNull(),
+    scoreType: text("score_type"),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -908,6 +916,7 @@ export const benchmarkWorkoutMovements = pgTable("benchmark_workout_movements", 
   equipmentCount: integer("equipment_count"),
   rxStandard: text("rx_standard"),
   notes: text("notes"),
+  weightSource: text("weight_source").default("prescribed").notNull(),
 });
 
 // ============================================
@@ -1019,6 +1028,7 @@ export const crossfitWorkoutParts = pgTable(
     estimatedKcalLow: integer("estimated_kcal_low"),
     estimatedKcalHigh: integer("estimated_kcal_high"),
     estimatedKcalConfidence: text("estimated_kcal_confidence"),
+    scoreType: text("score_type"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -1106,6 +1116,7 @@ export const crossfitWorkoutMovements = pgTable(
     equipmentCount: integer("equipment_count"),
     rxStandard: text("rx_standard"),
     notes: text("notes"),
+    weightSource: text("weight_source").default("prescribed").notNull(),
   },
   (table) => [
     index("crossfit_workout_movements_workout_idx").on(table.crossfitWorkoutId),

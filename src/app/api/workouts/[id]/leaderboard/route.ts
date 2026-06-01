@@ -42,8 +42,23 @@ function computeSortValue(
     remainderReps: number | null;
     weightLbs: number | null;
     hitTimeCap: boolean;
+    // Set per-score when the part has at least one athlete-weight movement.
+    heaviestAthleteWeightLb?: number | null;
+    // The part's effective scoreType. 'load' flips ambiguous workout types
+    // (for_reps/amrap/intervals) to rank by heaviest weight instead of reps.
+    partScoreType?: "reps" | "load" | null;
   }
 ): number {
+  // Athlete-picked weight + scoreType === "load": rank by heaviest weight
+  // across rounds. Branches BEFORE the legacy switch so existing rows
+  // (partScoreType undefined / null) hit the same code path they did
+  // before this feature shipped — no regression possible.
+  if (row.partScoreType === "load") {
+    // Score has no logged weight (athlete left it blank) — rank at the
+    // bottom rather than falling through to e.g. totalReps for a for_reps
+    // part, which would let weightless entries outrank heavier ones.
+    return row.heaviestAthleteWeightLb ?? 0;
+  }
   switch (workoutType) {
     case "for_time":
       return row.timeSeconds ?? Number.POSITIVE_INFINITY;
@@ -105,6 +120,7 @@ export async function GET(
     .select({
       id: crossfitWorkoutParts.id,
       workoutType: crossfitWorkoutParts.workoutType,
+      scoreType: crossfitWorkoutParts.scoreType,
     })
     .from(crossfitWorkoutParts)
     .where(eq(crossfitWorkoutParts.crossfitWorkoutId, s.crossfitWorkoutId))
@@ -115,7 +131,32 @@ export async function GET(
   const partTypeById = new Map<string, WorkoutType>(
     parts.map((p) => [p.id, p.workoutType as WorkoutType])
   );
+  const partScoreTypeById = new Map<string, "reps" | "load" | null>(
+    parts.map((p) => [p.id, (p.scoreType as "reps" | "load" | null) ?? null])
+  );
   const partIds = parts.map((p) => p.id);
+
+  // Which parts have at least one athlete-weight movement? Drives whether
+  // we emit `heaviestAthleteWeightLb` on entries (and whether the sort
+  // branch can fire).
+  const athleteWeightPartRows = partIds.length
+    ? await db
+        .select({
+          crossfitWorkoutPartId: crossfitWorkoutMovements.crossfitWorkoutPartId,
+        })
+        .from(crossfitWorkoutMovements)
+        .where(
+          and(
+            inArray(crossfitWorkoutMovements.crossfitWorkoutPartId, partIds),
+            eq(crossfitWorkoutMovements.weightSource, "athlete")
+          )
+        )
+    : [];
+  const partHasAthleteWeight = new Set<string>(
+    athleteWeightPartRows
+      .map((r) => r.crossfitWorkoutPartId)
+      .filter((id): id is string => !!id)
+  );
 
   // Sessions to include in the leaderboard: the gym-day session (this
   // one) plus any session for the same gym + date referencing the same
@@ -205,6 +246,7 @@ export async function GET(
     actualReps: string | null;
     modification: string | null;
     substitutionName: string | null;
+    actualWeightLbsPerRound: string[] | null;
   };
   let scalingDetails: ScalingDetail[] = [];
   if (scoreIds.length > 0) {
@@ -218,6 +260,7 @@ export async function GET(
         actualReps: scoreMovementDetails.actualReps,
         modification: scoreMovementDetails.modification,
         substitutionName: substitutionMovements.canonicalName,
+        actualWeightLbsPerRound: scoreMovementDetails.actualWeightLbsPerRound,
       })
       .from(scoreMovementDetails)
       .innerJoin(
@@ -245,6 +288,9 @@ export async function GET(
     string,
     LeaderboardEntry["scalingDetails"]
   >();
+  // Heaviest weight (lb) per score across all athlete-weight occurrences.
+  // Drizzle returns numeric[] as string[] — coerce inline.
+  const heaviestWeightByScore = new Map<string, number>();
   for (const d of scalingDetails) {
     const list = detailsByScore.get(d.scoreId) ?? [];
     list.push({
@@ -257,6 +303,17 @@ export async function GET(
       substitutionName: d.substitutionName ?? undefined,
     });
     detailsByScore.set(d.scoreId, list);
+    if (
+      Array.isArray(d.actualWeightLbsPerRound) &&
+      d.actualWeightLbsPerRound.length > 0
+    ) {
+      const max = d.actualWeightLbsPerRound.reduce((acc, raw) => {
+        const n = typeof raw === "number" ? raw : Number(raw);
+        return Number.isFinite(n) && n > acc ? n : acc;
+      }, 0);
+      const prev = heaviestWeightByScore.get(d.scoreId) ?? 0;
+      if (max > prev) heaviestWeightByScore.set(d.scoreId, max);
+    }
   }
 
   const result: Record<string, LeaderboardEntry[]> = {};
@@ -271,20 +328,31 @@ export async function GET(
     const weightLbsNumber =
       row.weightLbs != null ? Number(row.weightLbs) : null;
 
-    const displayScore = formatBestScore(workoutType, {
-      scoreId: row.scoreId,
-      sessionId: sessionId,
-      workoutDate: "",
-      division: row.division,
-      timeSeconds: row.timeSeconds,
-      rounds: row.rounds,
-      remainderReps: row.remainderReps,
-      weightLbs: weightLbsNumber,
-      totalReps: row.totalReps,
-      scoreText: row.scoreText,
-      hitTimeCap: row.hitTimeCap,
-      createdAt: row.createdAt.toISOString(),
-    });
+    const partScoreType = partScoreTypeById.get(partId) ?? null;
+    const hasAthleteWeight = partHasAthleteWeight.has(partId);
+    const heaviestAthleteWeightLb = hasAthleteWeight
+      ? heaviestWeightByScore.get(row.scoreId) ?? null
+      : null;
+
+    const displayScore = formatBestScore(
+      workoutType,
+      {
+        scoreId: row.scoreId,
+        sessionId: sessionId,
+        workoutDate: "",
+        division: row.division,
+        timeSeconds: row.timeSeconds,
+        rounds: row.rounds,
+        remainderReps: row.remainderReps,
+        weightLbs: weightLbsNumber,
+        totalReps: row.totalReps,
+        scoreText: row.scoreText,
+        hitTimeCap: row.hitTimeCap,
+        createdAt: row.createdAt.toISOString(),
+      },
+      partScoreType,
+      heaviestAthleteWeightLb
+    );
 
     const sortValue = computeSortValue(workoutType, {
       timeSeconds: row.timeSeconds,
@@ -293,7 +361,17 @@ export async function GET(
       remainderReps: row.remainderReps,
       weightLbs: weightLbsNumber,
       hitTimeCap: row.hitTimeCap,
+      heaviestAthleteWeightLb,
+      partScoreType,
     });
+
+    // Chip emission: only when scoreType !== 'load' (otherwise the displayScore
+    // already shows the weight — chip would duplicate it). Athlete-weight
+    // movements MUST be present, else the chip is meaningless.
+    const chipWeight =
+      hasAthleteWeight && partScoreType !== "load"
+        ? heaviestAthleteWeightLb
+        : null;
 
     const entry: LeaderboardEntry = {
       scoreId: row.scoreId,
@@ -313,6 +391,7 @@ export async function GET(
       hitTimeCap: row.hitTimeCap,
       rpe: row.rpe ?? undefined,
       scalingDetails: detailsByScore.get(row.scoreId),
+      heaviestAthleteWeightLb: chipWeight,
       reactionCount: row.reactionCount,
       commentCount: row.commentCount,
       viewerReacted: !!row.viewerReacted,

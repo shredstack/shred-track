@@ -60,6 +60,7 @@ export type TemplatePartMovementInput = {
   isMaxReps?: boolean;
   captureDurationPerRound?: boolean;
   isSideCadence?: boolean;
+  weightSource?: "prescribed" | "athlete";
   blockId?: string | null;
   blockTempRef?: string | null;
 };
@@ -89,6 +90,7 @@ export type TemplatePartInput = {
   repScheme?: string | null;
   rounds?: number | null;
   structure?: string | null;
+  scoreType?: "reps" | "load" | null;
   notes?: string | null;
   movements: TemplatePartMovementInput[];
   blocks?: TemplatePartBlockInput[];
@@ -289,6 +291,9 @@ export function buildFingerprintInput(
         isSideCadence: !!m.isSideCadence,
         equipmentCount: m.equipmentCount ?? null,
         rxStandard: m.rxStandard ?? null,
+        // Conditional-emit inside fingerprint.ts means 'prescribed' / null
+        // values DO NOT alter the legacy hash. Forwarded raw here.
+        weightSource: m.weightSource ?? null,
       };
     });
     return {
@@ -307,6 +312,7 @@ export function buildFingerprintInput(
         p.sideCadenceIntervalSeconds
       ),
       sideCadenceOpenEnded: !!p.sideCadenceOpenEnded,
+      scoreType: p.scoreType ?? null,
       movements,
     };
   });
@@ -490,6 +496,7 @@ export async function insertTemplateParts(
         repScheme: p.repScheme ?? null,
         rounds: toIntOrNull(p.rounds ?? null),
         structure: p.structure ?? null,
+        scoreType: p.scoreType ?? null,
         notes: p.notes ?? null,
       })
       .returning({ id: crossfitWorkoutParts.id });
@@ -578,6 +585,7 @@ export async function insertTemplateParts(
           equipmentCount: m.equipmentCount ?? null,
           rxStandard: m.rxStandard || null,
           notes: m.notes ?? null,
+          weightSource: m.weightSource ?? "prescribed",
         }))
       );
     }

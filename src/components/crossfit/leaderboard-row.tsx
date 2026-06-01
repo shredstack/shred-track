@@ -101,6 +101,11 @@ export interface WorkoutLeaderboardRowEntry extends BaseLeaderboardRowEntry {
     modification?: string;
     substitutionName?: string;
   }>;
+  // Heaviest weight (lb) the athlete used across rounds on an
+  // athlete-picked-weight movement. Set only when the part scores by
+  // reps (chip is a secondary signal); null/undefined when the part
+  // scores by load (the weight is already in displayScore).
+  heaviestAthleteWeightLb?: number | null;
   // Social — workout-only for now.
   reactionCount: number;
   commentCount: number;
@@ -175,6 +180,14 @@ export function LeaderboardRow({
           </span>
           {entry.kind === "workout" && (
             <>
+              {entry.heaviestAthleteWeightLb != null && (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] bg-sky-500/10 text-sky-300 border-sky-500/30"
+                >
+                  {entry.heaviestAthleteWeightLb} lb
+                </Badge>
+              )}
               <Badge
                 variant="outline"
                 className={`text-[10px] ${DIVISION_STYLES[entry.division]}`}

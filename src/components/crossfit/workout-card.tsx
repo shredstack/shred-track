@@ -105,8 +105,26 @@ function ScoreRow({
     ? s.estimatedKcalActiveWithEpoc
     : s.estimatedKcalActive;
 
+  // When the part is athlete-weight-and-load-scored, prefer the heaviest
+  // captured weight so the quick view matches the leaderboard rank key.
+  // Derived from the per-round arrays (the canonical store) rather than
+  // scores.weightLbs, which is reserved for for_load set-entries.
+  const loadScoredHeaviest =
+    part.scoreType === "load"
+      ? (s.movementDetails ?? []).reduce((acc, d) => {
+          const arr = d.actualWeightLbsPerRound ?? [];
+          const movMax = arr.reduce(
+            (a, n) => (Number.isFinite(n) && n > a ? n : a),
+            0
+          );
+          return movMax > acc ? movMax : acc;
+        }, 0)
+      : 0;
+
   let scoreDisplay = "";
-  if (s.timeSeconds) {
+  if (loadScoredHeaviest > 0) {
+    scoreDisplay = `${loadScoredHeaviest} lb`;
+  } else if (s.timeSeconds) {
     scoreDisplay = formatTime(s.timeSeconds);
     if (s.hitTimeCap) scoreDisplay += " (cap)";
   } else if (s.rounds !== undefined) {

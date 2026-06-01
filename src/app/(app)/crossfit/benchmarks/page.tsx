@@ -50,6 +50,7 @@ import type {
 } from "@/types/crossfit";
 import { WeightliftingBenchmarkTabs } from "@/components/crossfit/weightlifting-benchmark-tabs";
 import { formatShortDate } from "@/lib/format-date";
+import { formatBenchmarkAttempt } from "@/lib/crossfit/format-attempt";
 
 // Pills mix two filter axes:
 //   - "all" / "custom" filter by ownership (the existing /api/benchmarks
@@ -680,7 +681,7 @@ function AttemptRow({
   attempt: BenchmarkAttempt;
   workoutType: WorkoutType;
 }) {
-  const display = formatAttemptDisplay(workoutType, attempt);
+  const display = formatBenchmarkAttempt(workoutType, attempt);
   return (
     <div className="flex items-center justify-between gap-2 rounded-md border border-border/40 bg-muted/20 px-3 py-2">
       <div className="flex flex-col">
@@ -719,36 +720,3 @@ function AttemptRow({
   );
 }
 
-function formatAttemptDisplay(
-  workoutType: WorkoutType,
-  a: BenchmarkAttempt
-): string {
-  if (a.scoreText) return a.scoreText;
-  if (workoutType === "for_time" && a.timeSeconds != null) {
-    const m = Math.floor(a.timeSeconds / 60);
-    const s = a.timeSeconds % 60;
-    return `${m}:${s.toString().padStart(2, "0")}`;
-  }
-  if (workoutType === "amrap") {
-    if (a.totalReps != null) return `${a.totalReps} reps`;
-    if (a.rounds != null) return `${a.rounds}+${a.remainderReps ?? 0}`;
-  }
-  if (workoutType === "for_load" || workoutType === "max_effort") {
-    if (a.weightLbs != null) return `${a.weightLbs} lb`;
-  }
-  if (
-    workoutType === "for_reps" ||
-    workoutType === "for_calories" ||
-    workoutType === "tabata"
-  ) {
-    if (a.totalReps != null) return `${a.totalReps} reps`;
-  }
-  if (a.timeSeconds != null) {
-    const m = Math.floor(a.timeSeconds / 60);
-    const s = a.timeSeconds % 60;
-    return `${m}:${s.toString().padStart(2, "0")}`;
-  }
-  if (a.totalReps != null) return `${a.totalReps} reps`;
-  if (a.weightLbs != null) return `${a.weightLbs} lb`;
-  return "—";
-}

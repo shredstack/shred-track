@@ -153,6 +153,50 @@ export function WorkoutPartConfig({
         </div>
       )}
 
+      {/* Score-by picker — only meaningful when the workout type is
+          ambiguous (for_reps/amrap/intervals) AND at least one movement
+          in the part is athlete-picked weight. for_time/for_load already
+          have unambiguous scoring (time / heaviest load) so the picker
+          stays hidden there. */}
+      {(part.workoutType === "for_reps" ||
+        part.workoutType === "amrap" ||
+        part.workoutType === "intervals") &&
+        part.movements.some((m) => m.weightSource === "athlete") && (
+          <div className="space-y-1.5">
+            <Label className={labelClass}>Score by</Label>
+            <div className="flex gap-1">
+              {(
+                [
+                  { key: "reps", label: "Reps" },
+                  { key: "load", label: "Load" },
+                ] as const
+              ).map((opt) => {
+                const current = part.scoreType ?? "reps";
+                const selected = current === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => onChange({ scoreType: opt.key })}
+                    className={`rounded-md px-2 py-0.5 text-xs font-medium ${
+                      selected
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted/50 text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-muted-foreground pt-1">
+              {(part.scoreType ?? "reps") === "reps"
+                ? "Ranks by total reps; heaviest weight shows as a chip."
+                : "Ranks by the heaviest weight used across rounds."}
+            </p>
+          </div>
+        )}
+
       {part.workoutType === "amrap" && (
         <div className="space-y-1.5">
           <Label className={labelClass}>AMRAP Duration (mm:ss)</Label>

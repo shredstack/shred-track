@@ -278,4 +278,61 @@ describe("computeWorkoutFingerprint", () => {
     };
     expect(computeWorkoutFingerprint(a)).toBe(computeWorkoutFingerprint(b));
   });
+
+  // Athlete-picked weight: legacy hashes must NOT change when new keys are
+  // their default (weightSource omitted/"prescribed", scoreType omitted).
+  // See claude_code_instructions/athlete_picked_weight_spec.md §6b.
+  describe("athlete-weight backwards compatibility", () => {
+    it("default-value rows hash the same as before the new keys existed", () => {
+      // Snapshot of the Fran-like prescription's hash, captured before the
+      // weightSource / scoreType keys were added. Conditional-emit MUST
+      // preserve this exact hash for prescribed-only rows.
+      const expected = computeWorkoutFingerprint(franLike());
+
+      // Same prescription, but supplying explicit defaults — should hash
+      // identically because conditional emit drops "prescribed" / undefined
+      // before they reach the hashed object.
+      const withDefaults = computeWorkoutFingerprint({
+        ...franLike(),
+        parts: franLike().parts.map((p) => ({
+          ...p,
+          scoreType: null,
+          movements: p.movements.map((m) => ({
+            ...m,
+            weightSource: "prescribed",
+          })),
+        })),
+      });
+
+      expect(withDefaults).toBe(expected);
+    });
+
+    it("athlete weightSource changes the hash", () => {
+      const prescribed = computeWorkoutFingerprint(franLike());
+      const athlete = computeWorkoutFingerprint({
+        ...franLike(),
+        parts: franLike().parts.map((p) => ({
+          ...p,
+          movements: p.movements.map((m, i) =>
+            i === 0 ? { ...m, weightSource: "athlete" } : m
+          ),
+        })),
+      });
+      expect(athlete).not.toBe(prescribed);
+    });
+
+    it("scoreType 'load' changes the hash; null does not", () => {
+      const base = computeWorkoutFingerprint(franLike());
+      const withNull = computeWorkoutFingerprint({
+        ...franLike(),
+        parts: franLike().parts.map((p) => ({ ...p, scoreType: null })),
+      });
+      const withLoad = computeWorkoutFingerprint({
+        ...franLike(),
+        parts: franLike().parts.map((p) => ({ ...p, scoreType: "load" })),
+      });
+      expect(withNull).toBe(base);
+      expect(withLoad).not.toBe(base);
+    });
+  });
 });

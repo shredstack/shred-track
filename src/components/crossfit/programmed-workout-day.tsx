@@ -13,6 +13,7 @@ import {
 import { WorkoutSectionBlock } from "@/components/crossfit/workout-section-block";
 import { PartSection } from "@/components/crossfit/workout-card";
 import { CalorieBadge } from "@/components/crossfit/calorie-badge";
+import { BenchmarkPrPill } from "@/components/crossfit/benchmark-pr-pill";
 import type { WorkoutDisplay } from "@/types/crossfit";
 
 interface ProgrammedWorkoutDayProps {
@@ -211,6 +212,14 @@ export function ProgrammedWorkoutDay({
             sectionHasScore={sectionHasScore}
             sectionIsMultiPart={sectionParts.length > 1}
           >
+            {section.benchmarkWorkoutId && (
+              <div className="-mt-1 flex flex-wrap gap-2">
+                <BenchmarkPrPill
+                  benchmarkWorkoutId={section.benchmarkWorkoutId}
+                  fallbackName={section.title ?? undefined}
+                />
+              </div>
+            )}
             {isOwnerSection && workout.description && (
               <p className="whitespace-pre-wrap text-sm italic leading-relaxed text-muted-foreground">
                 {workout.description}

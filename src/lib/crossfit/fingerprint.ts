@@ -58,6 +58,7 @@ export type FingerprintMovement = {
   isSideCadence?: boolean | null;
   equipmentCount?: number | null;
   rxStandard?: string | null;
+  weightSource?: string | null;
 };
 
 export type FingerprintPart = {
@@ -74,6 +75,7 @@ export type FingerprintPart = {
   intervalRounds?: unknown;
   sideCadenceIntervalSeconds?: number | null;
   sideCadenceOpenEnded?: boolean | null;
+  scoreType?: string | null;
   movements: FingerprintMovement[];
 };
 
@@ -139,7 +141,11 @@ function pickWorkoutLevel(w: FingerprintWorkoutLevel): Record<string, unknown> {
 }
 
 function pickPartLevel(p: FingerprintPart): Record<string, unknown> {
-  return {
+  // Conditional emit: scoreType is only added to the hashed object when
+  // non-null. A null value would mutate every legacy row's hash and break
+  // crossfit_workouts.contentFingerprint dedup on first re-save. See
+  // claude_code_instructions/athlete_picked_weight_spec.md §6b.
+  const out: Record<string, unknown> = {
     orderIndex: p.orderIndex,
     workoutType: p.workoutType,
     timeCapSeconds: p.timeCapSeconds ?? null,
@@ -154,10 +160,16 @@ function pickPartLevel(p: FingerprintPart): Record<string, unknown> {
     sideCadenceIntervalSeconds: p.sideCadenceIntervalSeconds ?? null,
     sideCadenceOpenEnded: p.sideCadenceOpenEnded ?? false,
   };
+  if (p.scoreType) out.scoreType = p.scoreType;
+  return out;
 }
 
 function pickMovementLevel(m: FingerprintMovement): Record<string, unknown> {
-  return {
+  // Conditional emit: weightSource is only added when 'athlete'. Default
+  // ('prescribed') must NOT add a key to the hashed object — that would
+  // mutate every legacy row's hash and break crossfit_workouts dedup on
+  // first re-save. See claude_code_instructions/athlete_picked_weight_spec.md §6b.
+  const out: Record<string, unknown> = {
     movementId: m.movementId,
     orderIndex: m.orderIndex,
     blockOrderIndex: m.blockOrderIndex ?? null,
@@ -185,6 +197,8 @@ function pickMovementLevel(m: FingerprintMovement): Record<string, unknown> {
     equipmentCount: m.equipmentCount ?? null,
     rxStandard: m.rxStandard ?? null,
   };
+  if (m.weightSource === "athlete") out.weightSource = "athlete";
+  return out;
 }
 
 function compareMovements(a: FingerprintMovement, b: FingerprintMovement): number {

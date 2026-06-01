@@ -96,6 +96,7 @@ export function Leaderboard({
               hitTimeCap: entry.hitTimeCap,
               rpe: entry.rpe,
               scalingDetails: entry.scalingDetails,
+              heaviestAthleteWeightLb: entry.heaviestAthleteWeightLb,
               reactionCount: entry.reactionCount,
               commentCount: entry.commentCount,
               viewerReacted: entry.viewerReacted,

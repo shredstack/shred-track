@@ -18,6 +18,20 @@ export const MOVEMENT_METRIC_TYPES = [
 export type MovementMetricType = (typeof MOVEMENT_METRIC_TYPES)[number];
 
 // ============================================
+// Weight Source (athlete-picked vs prescribed)
+// ============================================
+
+export const WEIGHT_SOURCES = ["prescribed", "athlete"] as const;
+export type WeightSource = (typeof WEIGHT_SOURCES)[number];
+
+// ============================================
+// Part Score Type Override
+// ============================================
+
+export const PART_SCORE_TYPES = ["reps", "load"] as const;
+export type PartScoreType = (typeof PART_SCORE_TYPES)[number];
+
+// ============================================
 // Workout Types
 // ============================================
 
@@ -335,6 +349,7 @@ export interface BenchmarkWorkoutPart {
   intervalRounds: IntervalRoundSpec[] | null;
   sideCadenceIntervalSeconds: number | null;
   sideCadenceOpenEnded: boolean;
+  scoreType?: PartScoreType | null;
   notes: string | null;
   movements: BenchmarkMovement[];
   // Optional named groupings under this part. Empty array = no grouping
@@ -388,6 +403,7 @@ export interface BenchmarkMovement {
   equipmentCount?: number | null;
   rxStandard: string | null;
   notes?: string | null;
+  weightSource?: WeightSource;
 }
 
 export type BenchmarkCategory = "system" | "custom" | "community";
@@ -436,6 +452,7 @@ export interface WorkoutMovementDisplay {
   isWeighted: boolean;
   metricType: MovementMetricType;
   repSchemeParsed?: RepSchemeParsed | null;
+  weightSource: WeightSource;
 }
 
 // Structural pattern modifier for a part. `tabata` is a For Reps cadence
@@ -470,6 +487,7 @@ export interface WorkoutPartDisplay {
   // are performed on this cadence while the others form the main task.
   sideCadenceIntervalSeconds?: number;
   sideCadenceOpenEnded?: boolean;
+  scoreType?: PartScoreType | null;
   notes?: string;
   movements: WorkoutMovementDisplay[];
   // Optional named groupings under this part. Empty = no grouping.
@@ -625,6 +643,10 @@ export interface ScoreMovementDetailDisplay {
   // Per-round durations (seconds) when this is a captureDurationPerRound
   // movement. Length matches part.rounds.
   actualDurationSecondsPerRound?: number[];
+  // Per-round captured weight (lb) when this movement is athlete-weight
+  // (weightSource === "athlete"). Length matches part.rounds; empty slots
+  // round-trip as 0.
+  actualWeightLbsPerRound?: number[];
   notes?: string;
 }
 
@@ -676,6 +698,7 @@ export interface MovementScaling {
   actualHeightInches?: number;
   actualRepsPerRound?: number[];
   actualDurationSecondsPerRound?: number[];
+  actualWeightLbsPerRound?: number[];
   notes?: string;
 }
 
@@ -749,6 +772,10 @@ export interface WorkoutBuilderMovement {
   equipmentCount?: number;
   rxStandard: string;
   notes: string;
+  // 'prescribed' (default): builder shows M/F Rx weight inputs.
+  // 'athlete': weight is captured at score time per round; M/F Rx fields
+  // are hidden and not emitted on save. Only meaningful when isWeighted.
+  weightSource: WeightSource;
   // Optional block membership. `blockTempRef` references a
   // WorkoutBuilderBlock.tempId on the same part — newly-created blocks are
   // wired to movements via tempRef and resolved to a real block id on save.
@@ -804,6 +831,13 @@ export interface WorkoutBuilderPart {
   repScheme: string;
   rounds: string;
   structure?: WorkoutPartStructure;
+  // Admin override for parts where the workout type is ambiguous
+  // (for_reps / amrap / intervals) AND at least one movement has
+  // weightSource === "athlete". 'reps' (default when picker shown) ranks
+  // the leaderboard by total reps and shows heaviest weight as a chip;
+  // 'load' ranks by heaviest weight used. Undefined elsewhere — reader
+  // treats undefined as "derive from workout_type" (legacy behavior).
+  scoreType?: PartScoreType;
   movements: WorkoutBuilderMovement[];
   // Named groupings under this part. Empty = ungrouped flat rendering.
   // Each movement either references a block via `blockTempRef`/`blockId`
@@ -848,6 +882,12 @@ export interface LeaderboardEntry {
   hitTimeCap: boolean;
   rpe?: number;
   scalingDetails?: MovementScalingDisplay[];
+  /** Heaviest weight (lb) the athlete used across rounds. Set only when
+   *  the part has at least one `weightSource: "athlete"` movement AND
+   *  the part's effective scoreType is "reps" (i.e. the chip is a
+   *  secondary signal, not the rank key). When scoreType === "load" the
+   *  weight is the displayScore + sort key and this stays unset. */
+  heaviestAthleteWeightLb?: number | null;
   // Social — added per spec §7.
   reactionCount: number;
   commentCount: number;

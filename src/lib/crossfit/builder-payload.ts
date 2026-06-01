@@ -74,6 +74,7 @@ export function benchmarkPartToBuilderPart(
     repScheme: part.repScheme ?? "",
     rounds: part.rounds != null ? String(part.rounds) : "",
     structure: part.structure ?? undefined,
+    scoreType: part.scoreType ?? undefined,
     movements: part.movements.map((m): WorkoutBuilderMovement => {
       const isWeighted =
         m.isWeighted ??
@@ -149,6 +150,7 @@ export function benchmarkPartToBuilderPart(
         equipmentCount: m.equipmentCount ?? undefined,
         rxStandard: m.rxStandard ?? "",
         notes: m.notes ?? "",
+        weightSource: m.weightSource ?? "prescribed",
         blockId: m.blockId ?? null,
         blockTempRef: m.blockId ? blockTempByDbId.get(m.blockId) ?? null : null,
       };
@@ -210,20 +212,36 @@ export function builderPartToPayload(
       (part.workoutType === "for_load" && part.structure === "complex")
         ? part.structure
         : undefined,
-    movements: movements.map((m, i) => ({
+    // scoreType picker only fires for for_reps / amrap / intervals; if the
+    // workout type was switched after the user picked one, drop the stale
+    // value. Sent through as null when unset so the API can clear an old row.
+    scoreType:
+      (part.workoutType === "for_reps" ||
+        part.workoutType === "amrap" ||
+        part.workoutType === "intervals") &&
+      (part.scoreType === "reps" || part.scoreType === "load")
+        ? part.scoreType
+        : null,
+    movements: movements.map((m, i) => {
+      // Athlete-picked weight: hide every prescribed-weight notation
+      // (absolute, BW%, %1RM). Mirrors the existing for_load short-circuit
+      // so all three weight notations are skipped together — never partial.
+      const skipPrescribedWeight =
+        stripRxWeights || m.weightSource === "athlete";
+      return ({
       id: m.id,
       movementId: m.movementId!,
       orderIndex: i,
       prescribedReps: m.prescribedReps || undefined,
       prescribedWeightMale:
-        !stripRxWeights &&
+        !skipPrescribedWeight &&
         !m.useBwMultiplier &&
         !m.useWeightPct &&
         m.prescribedWeightMale
           ? parseFloat(m.prescribedWeightMale)
           : undefined,
       prescribedWeightFemale:
-        !stripRxWeights &&
+        !skipPrescribedWeight &&
         !m.useBwMultiplier &&
         !m.useWeightPct &&
         m.prescribedWeightFemale
@@ -242,13 +260,13 @@ export function builderPartToPayload(
       prescribedHeightInchesFemale:
         m.prescribedHeightInchesFemale || undefined,
       prescribedWeightMaleBwMultiplier:
-        !stripRxWeights &&
+        !skipPrescribedWeight &&
         m.useBwMultiplier &&
         m.prescribedWeightMaleBwMultiplier
           ? parseFloat(m.prescribedWeightMaleBwMultiplier)
           : undefined,
       prescribedWeightFemaleBwMultiplier:
-        !stripRxWeights &&
+        !skipPrescribedWeight &&
         m.useBwMultiplier &&
         m.prescribedWeightFemaleBwMultiplier
           ? parseFloat(m.prescribedWeightFemaleBwMultiplier)
@@ -256,14 +274,14 @@ export function builderPartToPayload(
       // weight_pct — the percentage plus the source part's builder tempId.
       // Only emitted when the movement is in % mode and anchored to a part.
       prescribedWeightPct:
-        !stripRxWeights &&
+        !skipPrescribedWeight &&
         m.useWeightPct &&
         m.weightPctSourcePartTempRef &&
         m.prescribedWeightPct
           ? parseFloat(m.prescribedWeightPct)
           : undefined,
       weightPctSourcePartTempRef:
-        !stripRxWeights && m.useWeightPct
+        !skipPrescribedWeight && m.useWeightPct
           ? m.weightPctSourcePartTempRef ?? null
           : null,
       tempo: m.tempo?.trim() || undefined,
@@ -273,9 +291,14 @@ export function builderPartToPayload(
       promoteSequenceToLadder: m.promoteSequenceToLadder || undefined,
       equipmentCount: m.equipmentCount,
       rxStandard: m.rxStandard || undefined,
+      // Only emit when 'athlete' — the wire schema defaults absent / undefined
+      // to 'prescribed' on the server, which keeps legacy fingerprints stable.
+      weightSource:
+        m.weightSource === "athlete" ? ("athlete" as const) : undefined,
       blockId: m.blockId ?? null,
       blockTempRef: m.blockTempRef ?? null,
-    })),
+    });
+    }),
     blocks:
       part.blocks.length > 0
         ? part.blocks.map((b, i) => ({
