@@ -31,7 +31,11 @@ interface HealthKitTimerPlugin {
     available: boolean;
     error?: string;
   }>;
-  hasOverlappingWorkout?(opts: { from: number; to: number }): Promise<{
+  hasOverlappingWorkout?(opts: {
+    from: number;
+    to: number;
+    excludeUuid?: string;
+  }): Promise<{
     overlap: boolean;
   }>;
   saveWorkout?(opts: {
@@ -172,15 +176,23 @@ export async function requestHealthKitWritePermission(): Promise<boolean> {
  * because the user's Apple Watch ran the Workout app concurrently. Callers
  * should skip the push and surface the "Apple Watch already logged this"
  * toast to avoid double-rings.
+ *
+ * Pass `excludeUuid` on edit flows to exclude the score's prior ShredTrack
+ * record from the overlap check so it doesn't self-overlap.
  */
 export async function healthKitHasOverlappingWorkout(
   fromMs: number,
   toMs: number,
+  excludeUuid?: string,
 ): Promise<boolean> {
   const plugin = getPlugin();
   if (!plugin?.hasOverlappingWorkout) return false;
   try {
-    const r = await plugin.hasOverlappingWorkout({ from: fromMs, to: toMs });
+    const r = await plugin.hasOverlappingWorkout({
+      from: fromMs,
+      to: toMs,
+      excludeUuid,
+    });
     return Boolean(r?.overlap);
   } catch {
     return false;

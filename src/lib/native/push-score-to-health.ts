@@ -72,21 +72,24 @@ export async function pushScoreToAppleHealth(
 
   // Edit case: previous push wrote an HK record (or hit the Watch-overlap
   // sentinel). HK records are immutable, so to reflect the edit we delete
-  // the old one before writing a fresh one. We must delete before the
-  // overlap check too — otherwise our own old workout shows up as a
-  // self-overlap and we'd bail.
+  // the old one before writing a fresh one.
   const isReplace = Boolean(input.existingWorkoutUuid);
-  if (
+  const priorRealUuid =
     input.existingWorkoutUuid &&
     input.existingWorkoutUuid !== APPLE_WATCH_OVERLAP_SENTINEL
-  ) {
-    await deleteHealthKitWorkout(input.existingWorkoutUuid);
-  }
+      ? input.existingWorkoutUuid
+      : null;
 
-  // Apple Watch double-count guard. If the Watch already logged this window,
-  // skip our push and let the server know so the UI can render a "Apple Watch
-  // already logged this — we won't double-count" badge.
-  const overlap = await healthKitHasOverlappingWorkout(input.fromMs, input.toMs);
+  // Apple Watch double-count guard. Check overlap BEFORE deleting our prior
+  // record — otherwise an Apple Watch workout that appeared after the original
+  // push would be detected as an overlap, we'd bail, and the user would be
+  // left with neither the old ShredTrack record nor a new one. Exclude our
+  // own prior UUID so it doesn't self-overlap.
+  const overlap = await healthKitHasOverlappingWorkout(
+    input.fromMs,
+    input.toMs,
+    priorRealUuid ?? undefined,
+  );
   if (overlap) {
     await fetch(`/api/scores/${input.scoreId}/push-to-apple-health`, {
       method: "POST",
@@ -100,6 +103,12 @@ export async function pushScoreToAppleHealth(
       }),
     }).catch(() => null);
     return { status: "overlap" };
+  }
+
+  // Safe to delete the old record now that we know we'll be writing a fresh
+  // one (no Apple Watch overlap blocking us).
+  if (priorRealUuid) {
+    await deleteHealthKitWorkout(priorRealUuid);
   }
 
   const uuid = await saveHealthKitWorkout({

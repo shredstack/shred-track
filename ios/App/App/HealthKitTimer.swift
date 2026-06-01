@@ -146,9 +146,21 @@ public class HealthKitTimer: CAPPlugin, CAPBridgedPlugin {
         }
         let start = Date(timeIntervalSince1970: fromMs / 1000.0)
         let end = Date(timeIntervalSince1970: toMs / 1000.0)
-        let predicate = HKQuery.predicateForSamples(
-            withStart: start, end: end, options: []
-        )
+        var predicates: [NSPredicate] = [
+            HKQuery.predicateForSamples(withStart: start, end: end, options: []),
+        ]
+        // Edit flow: caller passes the prior ShredTrack workout's UUID so it
+        // doesn't show up as an overlap and bail the re-push. Without this,
+        // every edit would self-overlap.
+        if
+            let excludeStr = call.getString("excludeUuid"),
+            let excludeUuid = UUID(uuidString: excludeStr)
+        {
+            predicates.append(NSCompoundPredicate(
+                notPredicateWithSubpredicate: HKQuery.predicateForObject(with: excludeUuid)
+            ))
+        }
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
         let query = HKSampleQuery(
             sampleType: HKObjectType.workoutType(),
             predicate: predicate,
@@ -269,13 +281,23 @@ public class HealthKitTimer: CAPPlugin, CAPBridgedPlugin {
                 ])
                 return
             }
+            // Plugin deallocated mid-query (theoretical: the Capacitor bridge
+            // holds the plugin for app lifetime, but if it ever happens we'd
+            // hang the JS promise on the silent no-op below).
+            guard let self else {
+                call.resolve([
+                    "deleted": false,
+                    "error": "plugin deallocated",
+                ])
+                return
+            }
             guard let sample = samples?.first else {
                 // Already gone (user deleted it in Health, or never existed)
                 // — treat as success so the edit path can proceed.
                 call.resolve(["deleted": false, "notFound": true])
                 return
             }
-            self?.healthStore.delete([sample]) { ok, deleteErr in
+            self.healthStore.delete([sample]) { ok, deleteErr in
                 if let deleteErr = deleteErr {
                     call.resolve([
                         "deleted": false,
