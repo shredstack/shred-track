@@ -25,6 +25,10 @@ import {
 } from "@/lib/crossfit/upsert-template";
 import { createSession } from "@/lib/crossfit/session-writer";
 import { upsertTrackDay } from "@/lib/programming/track-day-upserts";
+import {
+  resolveInlinePosition,
+  type InlinePosition,
+} from "@/lib/programming/track-position";
 import type {
   WorkoutSessionScoreType,
 } from "@/db/schema";
@@ -115,11 +119,24 @@ export async function POST(
     // PUT route) propagates published=true to all sourced sessions.
     const sessionPublished = track.status === "active";
 
+    // Position the section per the track's inlinePosition (e.g.
+    // before_stretching for monthly challenges) instead of dropping it
+    // at the top of the day. Shifts existing sessions as needed.
+    const insertPosition = (track.inlinePosition ??
+      "end_of_day") as InlinePosition;
+    const position = await resolveInlinePosition(tx, {
+      communityId,
+      workoutDate: date,
+      inlinePosition: insertPosition,
+    });
+
     const session = await createSession(tx, {
       crossfitWorkoutId: upsertResult.templateId,
       communityId,
       workoutDate: date,
       kind: sectionKind,
+      position,
+      title: track.name,
       source: "manual",
       sourceTrackId: trackId,
       published: sessionPublished,

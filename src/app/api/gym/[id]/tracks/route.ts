@@ -28,6 +28,7 @@ const VALID_DISPLAY = new Set([
 const VALID_INLINE_POS = new Set([
   "top",
   "after_wod",
+  "before_stretching",
   "before_at_home",
   "end_of_day",
 ]);

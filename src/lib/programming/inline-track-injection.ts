@@ -6,13 +6,17 @@
 // linked to its sourceTrackId and positioned according to the track's
 // inlinePosition rule.
 
-import { and, asc, eq, gte, lte, or, sql } from "drizzle-orm";
+import { and, eq, gte, lte, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
   programmingTrackDays,
   programmingTracks,
   workoutSessions,
 } from "@/db/schema";
+import {
+  resolveInlinePosition,
+  type InlinePosition,
+} from "@/lib/programming/track-position";
 
 export async function injectInlineTrackSections(opts: {
   communityId: string;
@@ -72,14 +76,17 @@ export async function injectInlineTrackSections(opts: {
   for (const track of tracks) {
     const sectionKind: "monthly_challenge" | "custom" =
       track.kind === "monthly_challenge" ? "monthly_challenge" : "custom";
-    const insertPosition = track.inlinePosition ?? "end_of_day";
+    const insertPosition = (track.inlinePosition ??
+      "end_of_day") as InlinePosition;
 
     for (const workoutDate of weekDates) {
       const td = dayByKey.get(`${track.id}|${workoutDate}`);
       if (!td) continue;
 
       // Idempotency: skip if a session already exists for this gym + date
-      // sourced from the track.
+      // sourced from the track. (The smart-builder and free-text write
+      // paths now create sessions eagerly when the track is active, so
+      // most inserts here are no-ops post-cutover.)
       const existing = await db
         .select({ id: workoutSessions.id })
         .from(workoutSessions)
@@ -93,111 +100,40 @@ export async function injectInlineTrackSections(opts: {
         .limit(1);
       if (existing.length) continue;
 
-      // Pick the position based on inlinePosition.
-      let position: number;
-      if (insertPosition === "top") {
-        await db.execute(
-          sql`update workout_sessions set position = position + 1
-              where community_id = ${opts.communityId}
-                and workout_date = ${workoutDate}`
-        );
-        position = 0;
-      } else if (insertPosition === "after_wod") {
-        const wod = await db
-          .select({ position: workoutSessions.position })
-          .from(workoutSessions)
-          .where(
-            and(
-              eq(workoutSessions.communityId, opts.communityId),
-              eq(workoutSessions.workoutDate, workoutDate),
-              eq(workoutSessions.kind, "wod")
-            )
-          )
-          .orderBy(asc(workoutSessions.position))
-          .limit(1);
-        position = (wod[0]?.position ?? 0) + 1;
-        await db.execute(
-          sql`update workout_sessions set position = position + 1
-              where community_id = ${opts.communityId}
-                and workout_date = ${workoutDate}
-                and position >= ${position}`
-        );
-      } else if (insertPosition === "before_at_home") {
-        const atHome = await db
-          .select({ position: workoutSessions.position })
-          .from(workoutSessions)
-          .where(
-            and(
-              eq(workoutSessions.communityId, opts.communityId),
-              eq(workoutSessions.workoutDate, workoutDate),
-              eq(workoutSessions.kind, "at_home")
-            )
-          )
-          .orderBy(asc(workoutSessions.position))
-          .limit(1);
-        if (atHome.length > 0) {
-          position = atHome[0].position;
-          await db.execute(
-            sql`update workout_sessions set position = position + 1
-                where community_id = ${opts.communityId}
-                  and workout_date = ${workoutDate}
-                  and position >= ${position}`
-          );
-        } else {
-          const [maxRow] = await db
-            .select({
-              max: sql<number>`coalesce(max(${workoutSessions.position}), -1)::int`,
-            })
-            .from(workoutSessions)
-            .where(
-              and(
-                eq(workoutSessions.communityId, opts.communityId),
-                eq(workoutSessions.workoutDate, workoutDate)
-              )
-            );
-          position = (maxRow?.max ?? -1) + 1;
-        }
-      } else {
-        const [maxRow] = await db
-          .select({
-            max: sql<number>`coalesce(max(${workoutSessions.position}), -1)::int`,
-          })
-          .from(workoutSessions)
-          .where(
-            and(
-              eq(workoutSessions.communityId, opts.communityId),
-              eq(workoutSessions.workoutDate, workoutDate)
-            )
-          );
-        position = (maxRow?.max ?? -1) + 1;
-      }
-
-      // Insert the track session. body holds the track-day's text (when
-      // present); no template id — track-driven sections are freeform.
-      const trackBody = (td.body ?? "").trim();
-      const [inserted_row] = await db
-        .insert(workoutSessions)
-        .values({
+      // Insert in a transaction so the position resolver's shift step
+      // can't race a concurrent inject for the same day.
+      const newSessionId = await db.transaction(async (tx) => {
+        const position = await resolveInlinePosition(tx, {
           communityId: opts.communityId,
           workoutDate,
-          kind: sectionKind,
-          position,
-          title: track.name,
-          body: trackBody.length > 0 ? td.body : "(track)",
-          isScored: td.isScored,
-          scoreType: td.scoreType ?? null,
-          sourceTrackId: track.id,
-          source: "programming",
-          published: true,
-        })
-        .returning({ id: workoutSessions.id });
+          inlinePosition: insertPosition,
+        });
 
-      // Cross-link the track day back to the new session.
-      await db
-        .update(programmingTrackDays)
-        .set({ workoutSessionId: inserted_row.id })
-        .where(eq(programmingTrackDays.id, td.id));
-      inserted++;
+        const trackBody = (td.body ?? "").trim();
+        const [row] = await tx
+          .insert(workoutSessions)
+          .values({
+            communityId: opts.communityId,
+            workoutDate,
+            kind: sectionKind,
+            position,
+            title: track.name,
+            body: trackBody.length > 0 ? td.body : "(track)",
+            isScored: td.isScored,
+            scoreType: td.scoreType ?? null,
+            sourceTrackId: track.id,
+            source: "programming",
+            published: true,
+          })
+          .returning({ id: workoutSessions.id });
+
+        await tx
+          .update(programmingTrackDays)
+          .set({ workoutSessionId: row.id })
+          .where(eq(programmingTrackDays.id, td.id));
+        return row.id;
+      });
+      if (newSessionId) inserted++;
     }
   }
   return { inserted };

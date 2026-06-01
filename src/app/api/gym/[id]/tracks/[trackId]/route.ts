@@ -17,6 +17,7 @@ import {
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canManageGym } from "@/lib/authz/community";
+import { syncAllFreeTextDaysForTrack } from "@/lib/programming/track-day-session-sync";
 
 const VALID_DISPLAY = new Set([
   "inline",
@@ -26,6 +27,7 @@ const VALID_DISPLAY = new Set([
 const VALID_INLINE_POS = new Set([
   "top",
   "after_wod",
+  "before_stretching",
   "before_at_home",
   "end_of_day",
 ]);
@@ -129,22 +131,34 @@ export async function PUT(
     typeof patch.status === "string" && patch.status !== track.status;
   const newStatus = statusChanged ? (patch.status as string) : null;
 
-  const [updated] = await db
-    .update(programmingTracks)
-    .set(patch)
-    .where(eq(programmingTracks.id, trackId))
-    .returning();
+  const updated = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(programmingTracks)
+      .set(patch)
+      .where(eq(programmingTracks.id, trackId))
+      .returning();
 
-  // Sourced sessions follow the track's publish state. Flip them in lockstep
-  // so smart-builder-created days appear for members the moment the track
-  // is activated, and disappear if it's moved back to draft/archived.
-  if (statusChanged) {
-    const shouldPublish = newStatus === "active";
-    await db
-      .update(workoutSessions)
-      .set({ published: shouldPublish, updatedAt: new Date() })
-      .where(eq(workoutSessions.sourceTrackId, trackId));
-  }
+    // Sourced sessions follow the track's publish state. Flip them in
+    // lockstep so smart-builder-created days appear for members the
+    // moment the track is activated, and disappear if it's moved back
+    // to draft/archived.
+    if (statusChanged) {
+      const shouldPublish = newStatus === "active";
+      await tx
+        .update(workoutSessions)
+        .set({ published: shouldPublish, updatedAt: new Date() })
+        .where(eq(workoutSessions.sourceTrackId, trackId));
+
+      // On activation, also materialize sessions for any free-text days
+      // that don't have one yet. Otherwise those days stay invisible to
+      // members until a release publish runs against the week.
+      if (shouldPublish) {
+        await syncAllFreeTextDaysForTrack(tx, row);
+      }
+    }
+
+    return row;
+  });
 
   return NextResponse.json({ track: updated });
 }

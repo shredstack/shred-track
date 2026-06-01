@@ -10,6 +10,7 @@ import {
   programmingTrackDays,
   programmingTracks,
   workoutSessions,
+  type ProgrammingTrack,
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canManageGym } from "@/lib/authz/community";
@@ -17,6 +18,7 @@ import {
   upsertTrackDay,
   validateTrackDayUpsertInput,
 } from "@/lib/programming/track-day-upserts";
+import { syncFreeTextTrackDaySession } from "@/lib/programming/track-day-session-sync";
 
 function isIsoDate(s: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
@@ -25,9 +27,12 @@ function isIsoDate(s: string): boolean {
 async function loadTrackOrError(
   communityId: string,
   trackId: string
-): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+): Promise<
+  | { ok: true; track: ProgrammingTrack }
+  | { ok: false; status: number; error: string }
+> {
   const [track] = await db
-    .select({ id: programmingTracks.id })
+    .select()
     .from(programmingTracks)
     .where(
       and(
@@ -37,7 +42,7 @@ async function loadTrackOrError(
     )
     .limit(1);
   if (!track) return { ok: false, status: 404, error: "Track not found" };
-  return { ok: true };
+  return { ok: true, track };
 }
 
 export async function PUT(
@@ -75,7 +80,23 @@ export async function PUT(
 
   try {
     const day = await db.transaction(async (tx) => {
-      return upsertTrackDay(trackId, { date, ...input }, tx);
+      const upserted = await upsertTrackDay(trackId, { date, ...input }, tx);
+      // Surface free-text days to members the moment they're saved on an
+      // active track. Without this, the body only lives on
+      // programming_track_days and members never see it until a release
+      // publish runs against the week.
+      await syncFreeTextTrackDaySession(tx, {
+        track: guard.track,
+        day: {
+          id: upserted.id,
+          date: upserted.date,
+          body: upserted.body,
+          workoutSessionId: upserted.workoutSessionId,
+          isScored: upserted.isScored,
+          scoreType: upserted.scoreType,
+        },
+      });
+      return upserted;
     });
     return NextResponse.json({ day });
   } catch (err) {
