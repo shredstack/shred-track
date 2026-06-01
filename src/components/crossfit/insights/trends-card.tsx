@@ -26,6 +26,13 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useTrends } from "@/hooks/useCrossfitInsights";
 import type {
   StrengthTrend,
@@ -199,21 +206,39 @@ function MovementPicker({
   selectedId: string;
   onChange: (id: string) => void;
 }) {
+  // Base UI <Select> needs an `items` map so the trigger renders the label,
+  // not the raw id. See project memory: project_base_ui_select.
+  const items = useMemo(
+    () =>
+      Object.fromEntries(
+        trends.map((t) => [
+          t.movementId,
+          `${t.movementName} (${t.points.length} session${t.points.length === 1 ? "" : "s"})`,
+        ])
+      ),
+    [trends]
+  );
+
   return (
     <div className="flex items-center gap-2">
       <label className="text-[11px] text-muted-foreground">Movement</label>
-      <select
-        className="flex-1 rounded-md border border-border/60 bg-muted/30 px-2 py-1 text-xs"
+      <Select
         value={selectedId}
-        onChange={(e) => onChange(e.target.value)}
+        items={items}
+        onValueChange={(v) => v && onChange(v)}
       >
-        {trends.map((t) => (
-          <option key={t.movementId} value={t.movementId}>
-            {t.movementName} ({t.points.length} session
-            {t.points.length === 1 ? "" : "s"})
-          </option>
-        ))}
-      </select>
+        <SelectTrigger className="h-7 flex-1 text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {trends.map((t) => (
+            <SelectItem key={t.movementId} value={t.movementId}>
+              {t.movementName} ({t.points.length} session
+              {t.points.length === 1 ? "" : "s"})
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }
@@ -396,21 +421,39 @@ function BenchmarkPicker({
   selectedId: string;
   onChange: (id: string) => void;
 }) {
+  // Base UI <Select> needs an `items` map so the trigger renders the label,
+  // not the raw id. See project memory: project_base_ui_select.
+  const items = useMemo(
+    () =>
+      Object.fromEntries(
+        trends.map((t) => [
+          t.benchmarkId,
+          `${t.benchmarkName} (${t.points.length} log${t.points.length === 1 ? "" : "s"})`,
+        ])
+      ),
+    [trends]
+  );
+
   return (
     <div className="flex items-center gap-2">
       <label className="text-[11px] text-muted-foreground">Workout</label>
-      <select
-        className="flex-1 rounded-md border border-border/60 bg-muted/30 px-2 py-1 text-xs"
+      <Select
         value={selectedId}
-        onChange={(e) => onChange(e.target.value)}
+        items={items}
+        onValueChange={(v) => v && onChange(v)}
       >
-        {trends.map((t) => (
-          <option key={t.benchmarkId} value={t.benchmarkId}>
-            {t.benchmarkName} ({t.points.length} log
-            {t.points.length === 1 ? "" : "s"})
-          </option>
-        ))}
-      </select>
+        <SelectTrigger className="h-7 flex-1 text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {trends.map((t) => (
+            <SelectItem key={t.benchmarkId} value={t.benchmarkId}>
+              {t.benchmarkName} ({t.points.length} log
+              {t.points.length === 1 ? "" : "s"})
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }

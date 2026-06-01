@@ -53,8 +53,11 @@ function computeSortValue(
   // across rounds. Branches BEFORE the legacy switch so existing rows
   // (partScoreType undefined / null) hit the same code path they did
   // before this feature shipped — no regression possible.
-  if (row.partScoreType === "load" && row.heaviestAthleteWeightLb != null) {
-    return row.heaviestAthleteWeightLb;
+  if (row.partScoreType === "load") {
+    // Score has no logged weight (athlete left it blank) — rank at the
+    // bottom rather than falling through to e.g. totalReps for a for_reps
+    // part, which would let weightless entries outrank heavier ones.
+    return row.heaviestAthleteWeightLb ?? 0;
   }
   switch (workoutType) {
     case "for_time":
