@@ -209,6 +209,10 @@ interface PartState {
   // movements (e.g. "Run 400m × 3 as fast as possible"). Held as mm:ss
   // strings; parsed to seconds on save. One slot per round.
   durationPerRoundDrafts: Record<string, string[]>;
+  // Per-occurrence per-round weight (lb) drafts for athlete-picked
+  // movements (weightSource === "athlete"). Held as strings so the user
+  // can type freely; parsed to numbers on save. One slot per round.
+  weightPerRoundDrafts: Record<string, string[]>;
 }
 
 export interface SetEntryDraft {
@@ -227,6 +231,7 @@ function emptyPartState(
   const heightDrafts: Record<string, string> = {};
   const maxRepsDrafts: Record<string, string[]> = {};
   const durationPerRoundDrafts: Record<string, string[]> = {};
+  const weightPerRoundDrafts: Record<string, string[]> = {};
 
   // Walk existing movementDetails (keyed by workout_movement_id) and collapse
   // down to one entry per movement_id. Different occurrences of the same
@@ -273,6 +278,16 @@ function emptyPartState(
       ) {
         durationPerRoundDrafts[d.workoutMovementId] =
           d.actualDurationSecondsPerRound.map((s) => formatSecondsAsClock(s));
+      }
+      if (
+        d.actualWeightLbsPerRound &&
+        d.actualWeightLbsPerRound.length > 0
+      ) {
+        // Per-occurrence (workout_movement_id) — different occurrences of
+        // the same athlete-weight movement keep separate weight arrays
+        // (see open design note #8 in the spec).
+        weightPerRoundDrafts[d.workoutMovementId] =
+          d.actualWeightLbsPerRound.map((n) => String(n));
       }
     }
   }
@@ -336,6 +351,7 @@ function emptyPartState(
     heightDrafts,
     maxRepsDrafts,
     durationPerRoundDrafts,
+    weightPerRoundDrafts,
   };
 }
 
@@ -836,6 +852,21 @@ export function ScoreEntry({
             return sec != null && sec >= 0 ? sec : 0;
           });
         }
+        // Per-round athlete weight drafts → numeric[] (lb). Empty rounds
+        // become 0 (mirror max-reps / duration pattern). Only emitted
+        // when the movement is athlete-weight in the prescription.
+        const perRoundWeightDrafts = st.weightPerRoundDrafts[mov.id];
+        let actualWeightLbsPerRound: number[] | undefined;
+        if (
+          mov.weightSource === "athlete" &&
+          perRoundWeightDrafts &&
+          perRoundWeightDrafts.length > 0
+        ) {
+          actualWeightLbsPerRound = perRoundWeightDrafts.map((s) => {
+            const n = parseFloat(s);
+            return Number.isFinite(n) && n >= 0 ? n : 0;
+          });
+        }
         // Duration / height are only meaningful when the athlete deviated
         // from the prescription. The scaling card surfaces these inputs
         // exclusively when the movement is flagged scaled, so we mirror
@@ -866,6 +897,7 @@ export function ScoreEntry({
               : undefined,
           actualRepsPerRound,
           actualDurationSecondsPerRound,
+          actualWeightLbsPerRound,
           notes: includeScalingDetails ? scaling.notes : undefined,
         };
       });
@@ -1002,6 +1034,11 @@ export function ScoreEntry({
             // count those as data so the part still gets submitted.
             Object.values(st.maxRepsDrafts).some((rounds) =>
               rounds.some((r) => parseInt(r, 10) > 0)
+            ) ||
+            // Per-round athlete weight inputs count as data too — same
+            // shape as the max-reps clause.
+            Object.values(st.weightPerRoundDrafts).some((rounds) =>
+              rounds.some((s) => parseFloat(s) > 0)
             )
           );
         case "for_load":
@@ -1031,6 +1068,10 @@ export function ScoreEntry({
             // input when they've been clicking through round inputs.
             Object.values(st.maxRepsDrafts).some((rounds) =>
               rounds.some((r) => parseInt(r, 10) > 0)
+            ) ||
+            // Per-round athlete-weight entries — same rationale.
+            Object.values(st.weightPerRoundDrafts).some((rounds) =>
+              rounds.some((s) => parseFloat(s) > 0)
             )
           );
         default:
@@ -1805,6 +1846,116 @@ export function ScoreEntry({
                 <p className="text-[10px] text-muted-foreground">
                   Sum auto-fills the workout total. Type a value in &quot;Total
                   Reps&quot; above to override.
+                </p>
+              </div>
+            );
+          })()}
+
+          {/* Per-round athlete-picked weight — for movements prescribed
+              with weightSource: "athlete". The athlete enters one lb per
+              round; the running max becomes the leaderboard chip (or rank
+              key when the part's scoreType === "load"). Iterated per
+              workout_movement_id (per occurrence) so two wall-balls in the
+              same part each get their own input grid. */}
+          {(() => {
+            const athleteWeightMovements = activePart.movements.filter(
+              (m) => m.weightSource === "athlete"
+            );
+            if (athleteWeightMovements.length === 0) return null;
+            const rounds =
+              activePart.rounds && activePart.rounds > 0
+                ? activePart.rounds
+                : 1;
+            const heaviestAcross = athleteWeightMovements.reduce((acc, mov) => {
+              const drafts = state.weightPerRoundDrafts[mov.id] ?? [];
+              const movMax = drafts.reduce((a, s) => {
+                const n = parseFloat(s);
+                return Number.isFinite(n) && n > a ? n : a;
+              }, 0);
+              return movMax > acc ? movMax : acc;
+            }, 0);
+            const isLoadScored = activePart.scoreType === "load";
+            return (
+              <div className="space-y-2 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm font-medium flex-1">
+                    Weight {rounds > 1 ? "per round" : ""} (lb)
+                  </Label>
+                  <span className="font-mono text-sm font-bold text-sky-300">
+                    Heaviest: {heaviestAcross > 0 ? `${heaviestAcross} lb` : "--"}
+                  </span>
+                </div>
+                {athleteWeightMovements.map((mov) => {
+                  const drafts = state.weightPerRoundDrafts[mov.id] ?? [];
+                  const movMax = drafts.reduce((a, s) => {
+                    const n = parseFloat(s);
+                    return Number.isFinite(n) && n > a ? n : a;
+                  }, 0);
+                  return (
+                    <div key={mov.id} className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-medium">
+                          {mov.movementName}
+                        </Label>
+                        {athleteWeightMovements.length > 1 && movMax > 0 && (
+                          <span className="text-[10px] text-muted-foreground font-mono">
+                            heaviest: {movMax} lb
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        className="grid gap-1.5"
+                        style={{
+                          gridTemplateColumns: `repeat(${Math.min(rounds, 5)}, minmax(0, 1fr))`,
+                        }}
+                      >
+                        {Array.from({ length: rounds }, (_, i) => (
+                          <div key={i} className="space-y-0.5">
+                            <Label className="text-[10px] text-muted-foreground text-center block">
+                              {rounds > 1 ? `R${i + 1}` : "Weight"}
+                            </Label>
+                            <Input
+                              type="number"
+                              inputMode="decimal"
+                              min={0}
+                              value={drafts[i] ?? ""}
+                              onChange={(e) =>
+                                setPartStates((prev) => {
+                                  const current =
+                                    prev[activePart.id]
+                                      .weightPerRoundDrafts[mov.id] ?? [];
+                                  const updated = [...current];
+                                  for (let j = updated.length; j <= i; j++) {
+                                    updated[j] = "";
+                                  }
+                                  updated[i] = e.target.value;
+                                  return {
+                                    ...prev,
+                                    [activePart.id]: {
+                                      ...prev[activePart.id],
+                                      weightPerRoundDrafts: {
+                                        ...prev[activePart.id]
+                                          .weightPerRoundDrafts,
+                                        [mov.id]: updated,
+                                      },
+                                    },
+                                  };
+                                })
+                              }
+                              placeholder="0"
+                              className="h-8 text-center font-mono text-xs"
+                              aria-label={`${mov.movementName} round ${i + 1} weight`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+                <p className="text-[10px] text-muted-foreground">
+                  {isLoadScored
+                    ? "Heaviest weight across rounds ranks the leaderboard."
+                    : "Heaviest weight across rounds shows on the leaderboard."}
                 </p>
               </div>
             );

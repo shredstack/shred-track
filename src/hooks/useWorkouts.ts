@@ -58,6 +58,7 @@ interface WireMovement {
   rxStandard: string | null;
   notes: string | null;
   workoutBlockId: string | null;
+  weightSource?: "prescribed" | "athlete" | null;
 }
 
 interface WireBlock {
@@ -74,6 +75,11 @@ interface WireMovementDetail {
   modification?: string;
   substitutionMovementId?: string;
   setEntries?: SetEntry[];
+  actualDurationSeconds?: number;
+  actualHeightInches?: number;
+  actualRepsPerRound?: number[];
+  actualDurationSecondsPerRound?: number[];
+  actualWeightLbsPerRound?: number[];
   notes?: string;
 }
 
@@ -116,6 +122,7 @@ interface WirePart {
   repScheme: string | null;
   rounds: number | null;
   structure: string | null;
+  scoreType?: "reps" | "load" | null;
   notes: string | null;
   movements: WireMovement[];
   blocks: WireBlock[];
@@ -211,6 +218,7 @@ function wireMovementToDisplay(m: WireMovement): WorkoutMovementDisplay {
     rxStandard: m.rxStandard ?? undefined,
     notes: m.notes ?? undefined,
     workoutBlockId: m.workoutBlockId ?? null,
+    weightSource: m.weightSource ?? "prescribed",
   };
 }
 
@@ -260,6 +268,7 @@ function wirePartToDisplay(p: WirePart): WorkoutPartDisplay {
     repScheme: p.repScheme ?? undefined,
     rounds: p.rounds ?? undefined,
     structure: (p.structure as WorkoutPartStructure | null) ?? undefined,
+    scoreType: p.scoreType ?? undefined,
     notes: p.notes ?? undefined,
     movements: p.movements.map(wireMovementToDisplay),
     blocks: (p.blocks ?? []).map(wireBlockToDisplay),
@@ -408,6 +417,7 @@ export interface CreatePartMovementInput {
   equipmentCount?: number;
   rxStandard?: string;
   notes?: string;
+  weightSource?: "prescribed" | "athlete";
   // Block membership. `blockId` is a round-tripped DB id (edit flow);
   // `blockTempRef` references a CreatePartBlockInput.tempRef on the same
   // part for newly-created blocks. Either may be null = ungrouped.
@@ -441,6 +451,7 @@ export interface CreatePartInput {
   repScheme?: string;
   rounds?: number;
   structure?: WorkoutPartStructure;
+  scoreType?: "reps" | "load" | null;
   notes?: string;
   movements: CreatePartMovementInput[];
   blocks?: CreatePartBlockInput[];

@@ -241,6 +241,7 @@ export async function readSessionWorkouts(
           equipmentCount: crossfitWorkoutMovements.equipmentCount,
           rxStandard: crossfitWorkoutMovements.rxStandard,
           notes: crossfitWorkoutMovements.notes,
+          weightSource: crossfitWorkoutMovements.weightSource,
           movementName: movements.canonicalName,
           movementCategory: movements.category,
           isWeighted: movements.isWeighted,
@@ -402,6 +403,7 @@ export async function readSessionWorkouts(
           intervalRounds: p.intervalRounds,
           sideCadenceIntervalSeconds: p.sideCadenceIntervalSeconds,
           sideCadenceOpenEnded: p.sideCadenceOpenEnded,
+          scoreType: p.scoreType,
           repScheme: p.repScheme,
           rounds: p.rounds,
           structure: p.structure,
@@ -463,6 +465,7 @@ export async function readSessionWorkouts(
             equipmentCount: m.equipmentCount,
             rxStandard: m.rxStandard,
             notes: m.notes,
+            weightSource: m.weightSource,
           })),
           score: score
             ? {
@@ -528,6 +531,15 @@ export async function readSessionWorkouts(
                         d.actualDurationSecondsPerRound &&
                         d.actualDurationSecondsPerRound.length > 0
                           ? d.actualDurationSecondsPerRound
+                          : undefined,
+                      // Drizzle returns `numeric[]` as `string[]`; coerce here
+                      // so the wire shape carries proper numbers.
+                      actualWeightLbsPerRound:
+                        d.actualWeightLbsPerRound &&
+                        d.actualWeightLbsPerRound.length > 0
+                          ? d.actualWeightLbsPerRound.map((s: string | number) =>
+                              typeof s === "number" ? s : Number(s)
+                            )
                           : undefined,
                       notes: d.notes ?? undefined,
                     };
@@ -649,6 +661,7 @@ export interface SyntheticWorkoutMovementScore {
   actualHeightInches?: number;
   actualRepsPerRound?: number[];
   actualDurationSecondsPerRound?: number[];
+  actualWeightLbsPerRound?: number[];
   notes?: string;
 }
 
@@ -692,6 +705,7 @@ export interface SyntheticWorkoutPart {
   repScheme: string | null;
   rounds: number | null;
   structure: string | null;
+  scoreType: string | null;
   notes: string | null;
   blocks: { id: string; orderIndex: number; title: string }[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

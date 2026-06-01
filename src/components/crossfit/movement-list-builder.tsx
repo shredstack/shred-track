@@ -213,6 +213,7 @@ function makeBuilderMovement(option: MovementOption): WorkoutBuilderMovement {
     isSideCadence: false,
     rxStandard: "",
     notes: "",
+    weightSource: "prescribed",
   };
 }
 
@@ -1042,6 +1043,7 @@ function MovementCard({
             <WeightOrBwInputs
               movement={mov}
               earlierLoadParts={earlierLoadParts}
+              workoutType={workoutType}
               onUpdate={(updates) => onUpdate(mov.tempId, updates)}
             />
           )}
@@ -1092,6 +1094,7 @@ function MovementCard({
             <WeightOrBwInputs
               movement={mov}
               earlierLoadParts={earlierLoadParts}
+              workoutType={workoutType}
               onUpdate={(updates) => onUpdate(mov.tempId, updates)}
             />
           )}
@@ -1335,25 +1338,55 @@ function WeightOrBwInputs({
   movement,
   onUpdate,
   earlierLoadParts,
-}: MovementInputProps & { earlierLoadParts: EarlierLoadPart[] }) {
+  workoutType,
+}: MovementInputProps & {
+  earlierLoadParts: EarlierLoadPart[];
+  workoutType?: WorkoutType;
+}) {
   const useBw = !!movement.useBwMultiplier;
   const useWeightPct = !!movement.useWeightPct;
+  const isAthlete = movement.weightSource === "athlete";
   // BW multiplier notation only makes sense on barbell 1RMs ("1.5× BW
   // back squat"). Hide the toggle elsewhere so users don't tag a
   // pull-up as "1.5× BW".
   const canUseBw = !!movement.is1rmApplicable;
   // % of an earlier max needs an earlier for_load part to anchor to.
   const canUsePct = earlierLoadParts.length > 0;
+  // Athlete-picked weight is meaningful for parts where the WEIGHT is not
+  // the score (it's the chip/secondary). for_load is excluded because the
+  // weight IS the score there. for_time/for_reps/amrap/intervals = visible.
+  const canUseAthlete =
+    workoutType === "for_time" ||
+    workoutType === "for_reps" ||
+    workoutType === "amrap" ||
+    workoutType === "intervals";
 
-  const mode: "lb" | "bw" | "pct" = useWeightPct
-    ? "pct"
-    : useBw
-      ? "bw"
-      : "lb";
+  const mode: "lb" | "bw" | "pct" | "athlete" = isAthlete
+    ? "athlete"
+    : useWeightPct
+      ? "pct"
+      : useBw
+        ? "bw"
+        : "lb";
 
-  const switchTo = (next: "lb" | "bw" | "pct") => {
-    if (next === "bw") {
+  const switchTo = (next: "lb" | "bw" | "pct" | "athlete") => {
+    if (next === "athlete") {
+      // Athlete mode owns the weight prescription — clear every
+      // prescribed-weight notation so saved state is unambiguous.
       onUpdate({
+        weightSource: "athlete",
+        useBwMultiplier: false,
+        useWeightPct: false,
+        prescribedWeightMale: "",
+        prescribedWeightFemale: "",
+        prescribedWeightMaleBwMultiplier: "",
+        prescribedWeightFemaleBwMultiplier: "",
+        prescribedWeightPct: "",
+        weightPctSourcePartTempRef: null,
+      });
+    } else if (next === "bw") {
+      onUpdate({
+        weightSource: "prescribed",
         useBwMultiplier: true,
         useWeightPct: false,
         prescribedWeightMale: "",
@@ -1363,6 +1396,7 @@ function WeightOrBwInputs({
       });
     } else if (next === "pct") {
       onUpdate({
+        weightSource: "prescribed",
         useWeightPct: true,
         useBwMultiplier: false,
         prescribedWeightMale: "",
@@ -1378,6 +1412,7 @@ function WeightOrBwInputs({
       });
     } else {
       onUpdate({
+        weightSource: "prescribed",
         useBwMultiplier: false,
         useWeightPct: false,
         prescribedWeightMaleBwMultiplier: "",
@@ -1430,7 +1465,12 @@ function WeightOrBwInputs({
           earlierLoadParts={earlierLoadParts}
         />
       )}
-      {(canUseBw || canUsePct) && (
+      {mode === "athlete" && (
+        <div className="rounded-md border border-sky-500/30 bg-sky-500/5 px-2 py-1.5 text-[11px] text-sky-200">
+          Athletes will enter the weight they used at score time.
+        </div>
+      )}
+      {(canUseBw || canUsePct || canUseAthlete) && (
         <div className="flex flex-wrap gap-x-3 gap-y-1">
           {canUseBw && (
             <button
@@ -1448,6 +1488,17 @@ function WeightOrBwInputs({
               className="text-[11px] text-primary/80 hover:text-primary"
             >
               {mode === "pct" ? "Use lb instead" : "Use % of earlier part"}
+            </button>
+          )}
+          {canUseAthlete && (
+            <button
+              type="button"
+              onClick={() => switchTo(mode === "athlete" ? "lb" : "athlete")}
+              className="text-[11px] text-primary/80 hover:text-primary"
+            >
+              {mode === "athlete"
+                ? "Use prescribed weight"
+                : "Use athlete-picked weight"}
             </button>
           )}
         </div>

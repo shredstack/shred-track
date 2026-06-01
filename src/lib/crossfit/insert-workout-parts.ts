@@ -43,6 +43,7 @@ export interface PartMovementInput {
   isMaxReps?: boolean;
   captureDurationPerRound?: boolean;
   isSideCadence?: boolean;
+  weightSource?: "prescribed" | "athlete";
   blockId?: string | null;
   blockTempRef?: string | null;
 }
@@ -71,6 +72,7 @@ export interface PartInput {
   repScheme?: string;
   rounds?: number;
   structure?: string;
+  scoreType?: "reps" | "load" | null;
   notes?: string;
   movements: PartMovementInput[];
   blocks?: PartBlockInput[];
@@ -212,6 +214,7 @@ export async function insertWorkoutParts(
         repScheme: p.repScheme || null,
         rounds: toIntOrNull(p.rounds ?? null),
         structure: p.structure || null,
+        scoreType: p.scoreType ?? null,
         notes: p.notes || null,
       })
       .returning();
@@ -293,6 +296,7 @@ export async function insertWorkoutParts(
           equipmentCount: m.equipmentCount ?? null,
           rxStandard: m.rxStandard || null,
           notes: m.notes || null,
+          weightSource: m.weightSource ?? "prescribed",
         }))
       );
     }

@@ -36,6 +36,7 @@ interface MovementDetailInput {
   actualHeightInches?: number;
   actualRepsPerRound?: number[];
   actualDurationSecondsPerRound?: number[];
+  actualWeightLbsPerRound?: number[];
   notes?: string;
 }
 
@@ -281,11 +282,24 @@ export async function POST(req: NextRequest) {
   // scoreMovementDetails; scores.weightLbs is a summary for legacy queries.
   let weightLbs = body.weightLbs;
   if (weightLbs == null) {
-    const max = Math.max(
+    const setMax = Math.max(
       0,
       ...normalizedDetails.flatMap((d) => (d.setEntries ?? []).map((e) => e.weight))
     );
-    if (max > 0) weightLbs = max;
+    if (setMax > 0) weightLbs = setMax;
+  }
+  // Athlete-picked weight fallback: when no setEntries-derived value won,
+  // fall back to the max across per-round arrays. for_load parts can't
+  // have athlete-weight movements (builder hides the toggle), so this
+  // path only fires for for_reps/amrap/intervals scores. Setting
+  // scores.weightLbs lets the leaderboard sort by it for free when
+  // partScoreType === 'load'.
+  if (weightLbs == null) {
+    const perRoundMax = Math.max(
+      0,
+      ...normalizedDetails.flatMap((d) => d.actualWeightLbsPerRound ?? [])
+    );
+    if (perRoundMax > 0) weightLbs = perRoundMax;
   }
 
   const startedAt = body.startedAt ? new Date(body.startedAt) : null;
@@ -421,6 +435,17 @@ export async function POST(req: NextRequest) {
                 d.actualDurationSecondsPerRound.length > 0
                   ? d.actualDurationSecondsPerRound.map((n) =>
                       Math.max(0, Math.round(n))
+                    )
+                  : null,
+              // Per-round captured weight (lb) for athlete-picked
+              // movements. numeric (not integer) — preserves half-pound
+              // values from kg→lb conversion on kettlebells / dumbbells.
+              // Drizzle accepts string[] for numeric[] columns.
+              actualWeightLbsPerRound:
+                Array.isArray(d.actualWeightLbsPerRound) &&
+                d.actualWeightLbsPerRound.length > 0
+                  ? d.actualWeightLbsPerRound.map((n) =>
+                      String(Math.max(0, Number.isFinite(n) ? n : 0))
                     )
                   : null,
               notes: d.notes ?? null,

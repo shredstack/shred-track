@@ -69,11 +69,21 @@ export function pickBestScore(
 }
 
 // Format a score row into a short display string suited for the workout type.
+//
+// `scoreType` is the part-level scoring override (athlete-picked-weight
+// feature). When 'load' on an otherwise reps/amrap/intervals part, the
+// display flips to show the heaviest weight used — keeping the displayScore
+// in sync with `computeSortValue`'s rank key. Default-undefined → legacy
+// behavior, so every existing call site keeps working unchanged.
 export function formatBestScore(
   workoutType: WorkoutType,
-  score: ScoreRow
+  score: ScoreRow,
+  scoreType?: "reps" | "load" | null
 ): string {
   if (score.scoreText) return score.scoreText;
+  if (scoreType === "load" && score.weightLbs != null) {
+    return `${score.weightLbs} lb`;
+  }
   switch (workoutType) {
     case "for_time": {
       if (score.timeSeconds == null) return "—";
