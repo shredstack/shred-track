@@ -631,10 +631,11 @@ async function maybePushToAppleHealth(
   queryClient: QueryClient,
 ): Promise<void> {
   if (!saved?.id) return;
-  // Score already pushed — server-side guard would no-op anyway, but skipping
-  // here avoids creating an orphaned HK workout if the user edited the time
-  // bracket between saves.
-  if (saved.appleHealthWorkoutUuid) return;
+  // Note: we used to bail when `appleHealthWorkoutUuid` was set, but that
+  // dropped score-edit changes (RPE, calorie tweaks, etc.) on the floor.
+  // The push call now treats an existing UUID as a "replace" signal —
+  // delete the old HK record, write a fresh one, and tell the server to
+  // overwrite the stored UUID.
   const active = saved.estimatedKcalActiveWithEpoc;
   if (active == null || active <= 0) return;
 
@@ -666,6 +667,7 @@ async function maybePushToAppleHealth(
     activeEnergyKcal: active,
     pushPrefEnabled: pushPref,
     metadata: saved.appleHealthMetadata ?? undefined,
+    existingWorkoutUuid: saved.appleHealthWorkoutUuid ?? null,
   });
 
   // Surface the outcome so the user knows their workout reached Apple Health.
@@ -675,6 +677,10 @@ async function maybePushToAppleHealth(
   if (status === "ok") {
     toast.success("Added to Apple Health", {
       description: `~${Math.round(active)} kcal logged to your Move ring.`,
+    });
+  } else if (status === "updated") {
+    toast.success("Updated in Apple Health", {
+      description: `~${Math.round(active)} kcal — your Move ring now reflects the edit.`,
     });
   } else if (status === "overlap") {
     toast.info("Apple Watch already logged this", {

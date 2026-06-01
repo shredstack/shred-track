@@ -1,8 +1,10 @@
 "use client";
 
 import {
+  forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
@@ -15,7 +17,6 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
   useCreateComment,
@@ -23,7 +24,7 @@ import {
   useMentionSearch,
   useScoreComments,
 } from "@/hooks/useComments";
-import { tokenizeBody, mentionsMatch } from "@/lib/social/mentions";
+import { tokenizeBody } from "@/lib/social/mentions";
 import type { CommentDisplay, MentionMember } from "@/types/social";
 
 // NOTE: emoji-mart picker is deferred to a follow-up commit per the spec.
@@ -154,15 +155,264 @@ function CommentRow({
   );
 }
 
-// CommentInput
+// MentionEditor
 //
-// Maintains its own "body draft" and parallel list of mention chips. When
-// the user types `@`, we track the trigger position and the partial token
-// after it; the popover below shows matching members and inserting one
-// replaces the partial token with `[mention:<userId>]`. The visible body
-// in the textarea shows the raw token text — we don't (yet) render styled
-// chips inside the textarea, which simplifies the cursor model. Mentions
-// are still rendered as styled chips in the *posted* comment.
+// contentEditable input that renders @mentions as inline chips so the user
+// sees `@sarah` instead of `[mention:<uuid>]` while typing. The element is
+// uncontrolled — React never re-renders its children; the editor owns its
+// DOM. Parent receives serialized state via `onChange` and drives clearing
+// or mention insertion through the imperative handle.
+//
+// Each chip is `<span data-mention-id="…" contenteditable="false">@name</span>`,
+// which most browsers treat as atomic for cursor + backspace.
+
+interface MentionEditorHandle {
+  clear: () => void;
+  insertMention: (member: MentionMember) => void;
+  focus: () => void;
+}
+
+interface MentionEditorState {
+  body: string;
+  mentionedUserIds: string[];
+  isEmpty: boolean;
+  mentionQuery: string | null;
+}
+
+interface MentionEditorProps {
+  onChange: (state: MentionEditorState) => void;
+  placeholder: string;
+}
+
+const MENTION_CHIP_CLASS =
+  "rounded bg-primary/10 px-1 text-primary";
+
+const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>(
+  function MentionEditor({ onChange, placeholder }, ref) {
+    const editorRef = useRef<HTMLDivElement>(null);
+    const [isEmpty, setIsEmpty] = useState(true);
+
+    const serialize = useCallback((): {
+      body: string;
+      mentionedUserIds: string[];
+    } => {
+      const el = editorRef.current;
+      if (!el) return { body: "", mentionedUserIds: [] };
+      let body = "";
+      const ids: string[] = [];
+      const walk = (node: Node, isRootChild: boolean) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+          body += node.textContent ?? "";
+          return;
+        }
+        if (!(node instanceof HTMLElement)) return;
+        if (node.dataset.mentionId) {
+          body += `[mention:${node.dataset.mentionId}]`;
+          ids.push(node.dataset.mentionId);
+          return;
+        }
+        if (node.nodeName === "BR") {
+          body += "\n";
+          return;
+        }
+        // Some browsers wrap soft-line-breaks in <div>; treat each non-first
+        // root-level <div> as a line break.
+        if (
+          node.nodeName === "DIV" &&
+          isRootChild &&
+          body.length > 0 &&
+          !body.endsWith("\n")
+        ) {
+          body += "\n";
+        }
+        node.childNodes.forEach((child) => walk(child, false));
+      };
+      el.childNodes.forEach((child) => walk(child, true));
+      return { body, mentionedUserIds: ids };
+    }, []);
+
+    // Plaintext from editor start up to caret. Mention chips contribute a
+    // single space so the `@` inside a chip never registers as a new trigger.
+    const textBeforeCaret = useCallback((): string => {
+      const sel = typeof window !== "undefined" ? window.getSelection() : null;
+      const el = editorRef.current;
+      if (!sel || sel.rangeCount === 0 || !el) return "";
+      const range = sel.getRangeAt(0);
+      if (!range.collapsed) return "";
+      if (!el.contains(range.endContainer)) return "";
+
+      let text = "";
+      let stopped = false;
+      const visit = (node: Node) => {
+        if (stopped) return;
+        if (node === range.endContainer) {
+          if (node.nodeType === Node.TEXT_NODE) {
+            text += (node.textContent ?? "").slice(0, range.endOffset);
+          } else {
+            for (let i = 0; i < range.endOffset && !stopped; i++) {
+              visit(node.childNodes[i]);
+            }
+          }
+          stopped = true;
+          return;
+        }
+        if (node.nodeType === Node.TEXT_NODE) {
+          text += node.textContent ?? "";
+          return;
+        }
+        if (!(node instanceof HTMLElement)) return;
+        if (node.dataset.mentionId) {
+          text += " ";
+          return;
+        }
+        if (node.nodeName === "BR") {
+          text += "\n";
+          return;
+        }
+        node.childNodes.forEach(visit);
+      };
+      el.childNodes.forEach(visit);
+      return text;
+    }, []);
+
+    const detectTrigger = useCallback((): string | null => {
+      const text = textBeforeCaret();
+      let i = text.length - 1;
+      while (i >= 0) {
+        const ch = text[i];
+        if (ch === "@") {
+          if (i === 0 || /\s/.test(text[i - 1])) {
+            return text.slice(i + 1);
+          }
+          return null;
+        }
+        if (/\s/.test(ch)) return null;
+        i -= 1;
+      }
+      return null;
+    }, [textBeforeCaret]);
+
+    const fireChange = useCallback(() => {
+      const { body, mentionedUserIds } = serialize();
+      const empty = body.trim().length === 0;
+      setIsEmpty(empty);
+      onChange({
+        body,
+        mentionedUserIds,
+        isEmpty: empty,
+        mentionQuery: detectTrigger(),
+      });
+    }, [serialize, detectTrigger, onChange]);
+
+    const insertMention = useCallback(
+      (member: MentionMember) => {
+        const el = editorRef.current;
+        const sel =
+          typeof window !== "undefined" ? window.getSelection() : null;
+        if (!el || !sel || sel.rangeCount === 0) return;
+        const range = sel.getRangeAt(0);
+        const container = range.endContainer;
+        if (container.nodeType !== Node.TEXT_NODE) return;
+        if (!el.contains(container)) return;
+        const text = container.textContent ?? "";
+        let atIdx = -1;
+        for (let i = range.endOffset - 1; i >= 0; i--) {
+          if (text[i] === "@") {
+            atIdx = i;
+            break;
+          }
+          if (/\s/.test(text[i])) return;
+        }
+        if (atIdx === -1) return;
+
+        const replaceRange = document.createRange();
+        replaceRange.setStart(container, atIdx);
+        replaceRange.setEnd(container, range.endOffset);
+        replaceRange.deleteContents();
+
+        const chip = document.createElement("span");
+        chip.setAttribute("contenteditable", "false");
+        chip.dataset.mentionId = member.userId;
+        chip.className = MENTION_CHIP_CLASS;
+        chip.textContent = `@${member.username || member.name}`;
+
+        const space = document.createTextNode(" ");
+        replaceRange.insertNode(space);
+        replaceRange.insertNode(chip);
+
+        const newRange = document.createRange();
+        newRange.setStartAfter(space);
+        newRange.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+        el.focus();
+        fireChange();
+      },
+      [fireChange]
+    );
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        clear: () => {
+          const el = editorRef.current;
+          if (!el) return;
+          el.innerHTML = "";
+          setIsEmpty(true);
+          onChange({
+            body: "",
+            mentionedUserIds: [],
+            isEmpty: true,
+            mentionQuery: null,
+          });
+        },
+        insertMention,
+        focus: () => editorRef.current?.focus(),
+      }),
+      [insertMention, onChange]
+    );
+
+    const handlePaste = useCallback((e: React.ClipboardEvent) => {
+      e.preventDefault();
+      const text = e.clipboardData.getData("text/plain");
+      if (!text) return;
+      document.execCommand("insertText", false, text);
+    }, []);
+
+    // Force a <br> on Enter rather than the browser default (which can wrap
+    // the new line in a <div>), keeping serialize()'s DOM walk predictable.
+    const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        document.execCommand("insertLineBreak");
+      }
+    }, []);
+
+    return (
+      <div className="relative flex-1">
+        <div
+          ref={editorRef}
+          contentEditable
+          suppressContentEditableWarning
+          onInput={fireChange}
+          onKeyUp={fireChange}
+          onKeyDown={handleKeyDown}
+          onMouseUp={fireChange}
+          onPaste={handlePaste}
+          role="textbox"
+          aria-multiline="true"
+          aria-label="Comment"
+          className="flex min-h-9 w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30 whitespace-pre-wrap break-words"
+        />
+        {isEmpty && (
+          <span className="pointer-events-none absolute left-2.5 top-2 text-base text-muted-foreground md:text-sm">
+            {placeholder}
+          </span>
+        )}
+      </div>
+    );
+  }
+);
 
 function CommentInput({
   scoreId,
@@ -175,92 +425,23 @@ function CommentInput({
   communityId: string;
   onPosted: () => void;
 }) {
-  const [body, setBody] = useState("");
-  const [mentionedUserIds, setMentionedUserIds] = useState<string[]>([]);
-  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
-  const debouncedQuery = useDebouncedValue(mentionQuery ?? "", 150);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<MentionEditorHandle>(null);
+  const [editorState, setEditorState] = useState<MentionEditorState>({
+    body: "",
+    mentionedUserIds: [],
+    isEmpty: true,
+    mentionQuery: null,
+  });
+  const debouncedQuery = useDebouncedValue(editorState.mentionQuery ?? "", 150);
   const createComment = useCreateComment();
 
   const { data: searchData } = useMentionSearch(
-    mentionQuery !== null ? communityId : null,
+    editorState.mentionQuery !== null ? communityId : null,
     debouncedQuery,
-    { enabled: mentionQuery !== null }
+    { enabled: editorState.mentionQuery !== null }
   );
 
-  const detectMentionTrigger = useCallback(
-    (text: string, cursor: number) => {
-      // Walk backward from the cursor looking for `@` preceded by start-of-
-      // string or whitespace. Stop at whitespace mid-token.
-      let start = cursor - 1;
-      while (start >= 0) {
-        const ch = text[start];
-        if (ch === "@") {
-          if (start === 0 || /\s/.test(text[start - 1])) {
-            return { start, query: text.slice(start + 1, cursor) };
-          }
-          break;
-        }
-        if (/\s/.test(ch)) break;
-        start -= 1;
-      }
-      return null;
-    },
-    []
-  );
-
-  const handleBodyChange = useCallback(
-    (next: string) => {
-      setBody(next);
-      const cursor = textareaRef.current?.selectionStart ?? next.length;
-      const trigger = detectMentionTrigger(next, cursor);
-      setMentionQuery(trigger ? trigger.query : null);
-    },
-    [detectMentionTrigger]
-  );
-
-  const insertMention = useCallback(
-    (member: MentionMember) => {
-      const el = textareaRef.current;
-      const cursor = el?.selectionStart ?? body.length;
-      const trigger = detectMentionTrigger(body, cursor);
-      if (!trigger) return;
-      const token = `[mention:${member.userId}]`;
-      const before = body.slice(0, trigger.start);
-      const after = body.slice(cursor);
-      // Pad the token with a trailing space so the cursor lands cleanly
-      // and the next character isn't merged into the chip.
-      const next = `${before}${token} ${after}`;
-      setBody(next);
-      setMentionedUserIds((prev) =>
-        prev.includes(member.userId) ? prev : [...prev, member.userId]
-      );
-      setMentionQuery(null);
-      // Restore focus and place cursor after the inserted token.
-      requestAnimationFrame(() => {
-        const newCursor = before.length + token.length + 1;
-        el?.focus();
-        el?.setSelectionRange(newCursor, newCursor);
-      });
-    },
-    [body, detectMentionTrigger]
-  );
-
-  const cleanMentionIds = useMemo(() => {
-    // Drop any ids whose token no longer appears in the body — user typed
-    // an @x and then deleted it. mentionsMatch needs the lists to align
-    // exactly, so we filter here on every render.
-    const set = new Set<string>();
-    for (const m of body.matchAll(/\[mention:([0-9a-f-]{36})\]/gi)) {
-      set.add(m[1].toLowerCase());
-    }
-    return mentionedUserIds.filter((id) => set.has(id.toLowerCase()));
-  }, [body, mentionedUserIds]);
-
-  const canSubmit =
-    body.trim().length > 0 &&
-    !createComment.isPending &&
-    mentionsMatch(body, cleanMentionIds);
+  const canSubmit = !editorState.isEmpty && !createComment.isPending;
 
   const handleSubmit = useCallback(() => {
     if (!canSubmit) return;
@@ -268,14 +449,12 @@ function CommentInput({
       {
         scoreId,
         workoutId,
-        body: body.trimEnd(),
-        mentionedUserIds: cleanMentionIds,
+        body: editorState.body.trimEnd(),
+        mentionedUserIds: editorState.mentionedUserIds,
       },
       {
         onSuccess: () => {
-          setBody("");
-          setMentionedUserIds([]);
-          setMentionQuery(null);
+          editorRef.current?.clear();
           onPosted();
         },
       }
@@ -285,48 +464,46 @@ function CommentInput({
     createComment,
     scoreId,
     workoutId,
-    body,
-    cleanMentionIds,
+    editorState.body,
+    editorState.mentionedUserIds,
     onPosted,
   ]);
 
   return (
     <div className="border-t border-border/40 bg-background p-3">
-      {mentionQuery !== null && searchData?.members && searchData.members.length > 0 && (
-        <div className="mb-2 max-h-40 overflow-y-auto rounded-md border border-border/60 bg-popover shadow-sm">
-          {searchData.members.map((m) => (
-            <button
-              key={m.userId}
-              type="button"
-              onClick={() => insertMention(m)}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
-            >
-              <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted">
-                <User className="size-3 text-muted-foreground" />
-              </div>
-              <span className="truncate">{m.name}</span>
-              {m.username && (
-                <span className="truncate text-xs text-muted-foreground">
-                  @{m.username}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
+      {editorState.mentionQuery !== null &&
+        searchData?.members &&
+        searchData.members.length > 0 && (
+          <div className="mb-2 max-h-40 overflow-y-auto rounded-md border border-border/60 bg-popover shadow-sm">
+            {searchData.members.map((m) => (
+              <button
+                key={m.userId}
+                type="button"
+                // Prevent the editor losing focus / its selection when the
+                // user taps a popover row — without this, mobile Safari
+                // collapses the range before insertMention can fire.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => editorRef.current?.insertMention(m)}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+              >
+                <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted">
+                  <User className="size-3 text-muted-foreground" />
+                </div>
+                <span className="truncate">{m.name}</span>
+                {m.username && (
+                  <span className="truncate text-xs text-muted-foreground">
+                    @{m.username}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
       <div className="flex items-end gap-2">
-        <Textarea
-          ref={textareaRef}
-          value={body}
-          onChange={(e) => handleBodyChange(e.target.value)}
-          onSelect={(e) => {
-            const cursor = (e.target as HTMLTextAreaElement).selectionStart;
-            const trigger = detectMentionTrigger(body, cursor);
-            setMentionQuery(trigger ? trigger.query : null);
-          }}
+        <MentionEditor
+          ref={editorRef}
+          onChange={setEditorState}
           placeholder="Add a comment… type @ to mention"
-          className="min-h-9 resize-none"
-          rows={2}
         />
         <Button
           type="button"

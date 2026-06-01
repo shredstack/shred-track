@@ -12,6 +12,17 @@ import { createClient } from "@/lib/supabase/client";
 import { SignInWithAppleButton } from "@/components/auth/sign-in-with-apple-button";
 import { SignInWithGoogleButton } from "@/components/auth/sign-in-with-google-button";
 
+function humanizeAuthError(message: string | undefined): string {
+  const trimmed = (message ?? "").trim();
+  // "{}" / "[]" or empty mean Supabase returned no structured error body —
+  // typically the auth endpoint is unreachable (local Supabase not running)
+  // or env vars are misconfigured.
+  if (!trimmed || trimmed === "{}" || trimmed === "[]") {
+    return "Sign-in failed. Check that local Supabase is running and the auth env vars are set. See console for details.";
+  }
+  return trimmed;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -32,7 +43,12 @@ export default function LoginPage() {
     });
 
     if (error) {
-      setError(error.message);
+      // supabase-js falls back to the raw response body for `error.message`
+      // when the endpoint returns no structured error (e.g. local Supabase
+      // is down) — that surfaces as literal "{}". Show something useful and
+      // log the full error so it's debuggable.
+      console.error("[login] signInWithPassword failed:", error);
+      setError(humanizeAuthError(error.message));
       setIsLoading(false);
       return;
     }
@@ -82,8 +98,15 @@ export default function LoginPage() {
               </div>
 
               {/* Email/Password form */}
-              <form onSubmit={handleEmailLogin} className="flex flex-col gap-4">
-                <div className="flex flex-col gap-2">
+              {/* suppressHydrationWarning on the form + field wrappers: password-manager
+                  extensions (ProtonPass, 1Password, LastPass) inject DOM nodes as siblings
+                  to inputs after SSR, which otherwise trips React's hydration check. */}
+              <form
+                onSubmit={handleEmailLogin}
+                className="flex flex-col gap-4"
+                suppressHydrationWarning
+              >
+                <div className="flex flex-col gap-2" suppressHydrationWarning>
                   <Label htmlFor="email" className="text-xs text-muted-foreground">
                     Email
                   </Label>
@@ -100,7 +123,7 @@ export default function LoginPage() {
                     className="h-11 bg-white/[0.03] border-white/[0.08]"
                   />
                 </div>
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-2" suppressHydrationWarning>
                   <div className="flex items-center justify-between">
                     <Label htmlFor="password" className="text-xs text-muted-foreground">
                       Password
@@ -112,7 +135,7 @@ export default function LoginPage() {
                       Forgot?
                     </a>
                   </div>
-                  <div className="relative">
+                  <div className="relative" suppressHydrationWarning>
                     <Input
                       id="password"
                       type={showPassword ? "text" : "password"}

@@ -127,6 +127,9 @@ export function TrackDayEditorSheet({
     }
   }
 
+  const hasLinkedWorkout =
+    !!existingDay?.workoutSessionId || !!existingDay?.workoutId;
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -141,7 +144,26 @@ export function TrackDayEditorSheet({
           </SheetDescription>
         </SheetHeader>
 
-        <Tabs defaultValue={existingDay?.workoutId ? "builder" : "text"} className="mt-4">
+        {existingDay && (
+          <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs">
+            <span className="text-muted-foreground">
+              {hasLinkedWorkout
+                ? "This day has a linked workout."
+                : "This day has free-text content."}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={clearDay}
+              disabled={deleteDay.isPending}
+              className="text-destructive"
+            >
+              {deleteDay.isPending ? "Deleting…" : "Delete day"}
+            </Button>
+          </div>
+        )}
+
+        <Tabs defaultValue={hasLinkedWorkout ? "builder" : "text"} className="mt-4">
           <TabsList className="w-full">
             <TabsTrigger value="text" className="flex-1">
               Free text
@@ -182,16 +204,6 @@ export function TrackDayEditorSheet({
               >
                 {upsert.isPending ? "Saving…" : "Save"}
               </Button>
-              {existingDay && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={clearDay}
-                  disabled={deleteDay.isPending}
-                >
-                  Clear day
-                </Button>
-              )}
             </div>
           </TabsContent>
 

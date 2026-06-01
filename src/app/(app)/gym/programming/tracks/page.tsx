@@ -133,8 +133,9 @@ function NewTrackForm({
   const [startsOn, setStartsOn] = useState("");
   const [endsOn, setEndsOn] = useState("");
 
-  // Monthly challenges lock to inline + before_at_home (spec §2.1) since
-  // no other configuration makes sense for them.
+  // Monthly challenges lock to inline + before_stretching since no other
+  // configuration makes sense for them (they should land just before
+  // the gym's cool-down).
   const isMonthly = kind === "monthly_challenge";
 
   return (
@@ -206,10 +207,11 @@ function NewTrackForm({
             name,
             kind,
             displayMode,
-            // Monthly challenges land between Stretching and At-Home; other
-            // kinds default to end_of_day. Coaches can override on the
-            // detail page.
-            inlinePosition: isMonthly ? "before_at_home" : "end_of_day",
+            // Monthly challenges slot in just before the stretching
+            // section so they're the last "do this with your gym" item
+            // before cooldown. Other kinds default to end_of_day.
+            // Coaches can override on the detail page.
+            inlinePosition: isMonthly ? "before_stretching" : "end_of_day",
             startsOn,
             endsOn,
             status: "draft",

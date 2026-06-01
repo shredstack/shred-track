@@ -31,7 +31,11 @@ interface HealthKitTimerPlugin {
     available: boolean;
     error?: string;
   }>;
-  hasOverlappingWorkout?(opts: { from: number; to: number }): Promise<{
+  hasOverlappingWorkout?(opts: {
+    from: number;
+    to: number;
+    excludeUuid?: string;
+  }): Promise<{
     overlap: boolean;
   }>;
   saveWorkout?(opts: {
@@ -43,6 +47,11 @@ interface HealthKitTimerPlugin {
      *  number — the Swift side maps to `NSString` / `NSNumber`. */
     metadata?: Record<string, string | number>;
   }): Promise<{ workoutUuid: string }>;
+  deleteWorkout?(opts: { workoutUuid: string }): Promise<{
+    deleted: boolean;
+    notFound?: boolean;
+    error?: string;
+  }>;
 }
 
 function getPlugin(): HealthKitTimerPlugin | null {
@@ -131,13 +140,24 @@ export async function getHealthKitDistanceMeters(
   }
 }
 
-// HKWorkoutActivityType raw values we care about. Full list:
-// https://developer.apple.com/documentation/healthkit/hkworkoutactivitytype
+// HKWorkoutActivityType raw values. Source of truth is the actual SDK
+// header (`HKWorkout.h`), not Apple's docs site — the enum's NS_ENUM
+// auto-incrementing values shifted as new types were added in iOS 10+, so
+// some older third-party references show wrong numbers.
+//
+// Verify any new entry by counting cases in
+// `Xcode.app/.../HealthKit.framework/Headers/HKWorkout.h` — and never tweak
+// these unless you've also checked the live header.
 export const HK_ACTIVITY_TYPE = {
-  highIntensityIntervalTraining: 64,
+  // Section 1 (iOS 8 originals — values 1..57)
   functionalStrengthTraining: 20,
   running: 37,
   traditionalStrengthTraining: 50,
+  // Section 2 (iOS 10 additions — values 58..)
+  // ⚠️ JumpRope is 64. HIIT is 63. Don't swap these — got Sarah's CrossFit
+  // WODs logged as "Jump Rope" for months.
+  highIntensityIntervalTraining: 63,
+  jumpRope: 64,
 } as const;
 
 export async function requestHealthKitWritePermission(): Promise<boolean> {
@@ -156,17 +176,43 @@ export async function requestHealthKitWritePermission(): Promise<boolean> {
  * because the user's Apple Watch ran the Workout app concurrently. Callers
  * should skip the push and surface the "Apple Watch already logged this"
  * toast to avoid double-rings.
+ *
+ * Pass `excludeUuid` on edit flows to exclude the score's prior ShredTrack
+ * record from the overlap check so it doesn't self-overlap.
  */
 export async function healthKitHasOverlappingWorkout(
   fromMs: number,
   toMs: number,
+  excludeUuid?: string,
 ): Promise<boolean> {
   const plugin = getPlugin();
   if (!plugin?.hasOverlappingWorkout) return false;
   try {
-    const r = await plugin.hasOverlappingWorkout({ from: fromMs, to: toMs });
+    const r = await plugin.hasOverlappingWorkout({
+      from: fromMs,
+      to: toMs,
+      excludeUuid,
+    });
     return Boolean(r?.overlap);
   } catch {
+    return false;
+  }
+}
+
+/**
+ * Delete a previously-written HKWorkout by UUID. Used on score edit — HK
+ * records are immutable, so updating the data requires a delete + re-write.
+ * Best-effort: returns `false` if the workout was already gone (e.g. user
+ * deleted it in the Health app) so callers can proceed with the rewrite.
+ */
+export async function deleteHealthKitWorkout(uuid: string): Promise<boolean> {
+  const plugin = getPlugin();
+  if (!plugin?.deleteWorkout) return false;
+  try {
+    const r = await plugin.deleteWorkout({ workoutUuid: uuid });
+    return Boolean(r?.deleted);
+  } catch (err) {
+    console.error("[healthkit] deleteWorkout failed", err);
     return false;
   }
 }

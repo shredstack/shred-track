@@ -2200,7 +2200,7 @@ export const programmingTracks = pgTable("programming_tracks", {
   startsOn: date("starts_on").notNull(),
   endsOn: date("ends_on").notNull(),
   displayMode: text("display_mode").notNull(), // 'inline' | 'standalone' | 'inline_and_standalone'
-  inlinePosition: text("inline_position"), // 'top' | 'after_wod' | 'before_at_home' | 'end_of_day'
+  inlinePosition: text("inline_position"), // 'top' | 'after_wod' | 'before_stretching' | 'before_at_home' | 'end_of_day'
   optInRequired: boolean("opt_in_required").default(false).notNull(),
   scoringConfig: jsonb("scoring_config"),
   status: text("status").default("draft").notNull(), // 'draft' | 'active' | 'archived'

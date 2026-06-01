@@ -277,11 +277,53 @@ function emptyPartState(
     }
   }
 
+  // If the part has max-reps movements and the saved totalReps matches the
+  // sum of per-round inputs, treat it as auto-summed (not an explicit
+  // override). Leaving st.totalReps empty lets the auto-sum re-run on save
+  // so edits to per-round inputs flow through to the part-level total.
+  // Likewise for timeSeconds when per-round durations sum to the saved time.
+  const partHasMaxRepsMovements =
+    part?.movements.some((m) => m.isMaxReps) ?? false;
+  const sumFromMaxRepsOnLoad = partHasMaxRepsMovements
+    ? Object.values(maxRepsDrafts).reduce(
+        (acc, rounds) =>
+          acc +
+          rounds.reduce((a, s) => {
+            const n = parseInt(s, 10);
+            return a + (Number.isFinite(n) && n > 0 ? n : 0);
+          }, 0),
+        0
+      )
+    : 0;
+  const totalRepsWasAutoSummed =
+    partHasMaxRepsMovements &&
+    sumFromMaxRepsOnLoad > 0 &&
+    existing?.totalReps === sumFromMaxRepsOnLoad;
+  const partHasPerRoundDurationMovements =
+    part?.movements.some((m) => m.captureDurationPerRound) ?? false;
+  const sumFromPerRoundDurationsOnLoad = partHasPerRoundDurationMovements
+    ? Object.values(durationPerRoundDrafts).reduce(
+        (acc, rounds) =>
+          acc +
+          rounds.reduce((a, s) => {
+            const sec = parseDurationToSeconds(s);
+            return a + (sec != null && sec > 0 ? sec : 0);
+          }, 0),
+        0
+      )
+    : 0;
+  const timeSecondsWasAutoSummed =
+    partHasPerRoundDurationMovements &&
+    sumFromPerRoundDurationsOnLoad > 0 &&
+    existing?.timeSeconds === sumFromPerRoundDurationsOnLoad;
+
   return {
     division: existing?.division ?? null,
-    timeSeconds: existing?.timeSeconds,
+    timeSeconds: timeSecondsWasAutoSummed ? undefined : existing?.timeSeconds,
     hitTimeCap: existing?.hitTimeCap ?? false,
-    totalReps: existing?.totalReps?.toString() ?? "",
+    totalReps: totalRepsWasAutoSummed
+      ? ""
+      : (existing?.totalReps?.toString() ?? ""),
     rounds: existing?.rounds?.toString() ?? "",
     remainderReps: existing?.remainderReps?.toString() ?? "",
     weightLbs: existing?.weightLbs ?? "",
@@ -903,7 +945,11 @@ export function ScoreEntry({
             0,
             ...scalings.flatMap((s) => (s.setEntries ?? []).map((e) => e.weight))
           );
-          score.weightLbs = explicit ?? (maxFromSets > 0 ? maxFromSets : undefined);
+          // Set entries are the canonical record of what was lifted, so their
+          // max wins. The explicit field isn't editable when per-set inputs
+          // render (loadMovements.length > 0); on edit it gets seeded from
+          // the prior save and would otherwise mask a lowered max.
+          score.weightLbs = maxFromSets > 0 ? maxFromSets : explicit;
           break;
         }
         case "for_reps":

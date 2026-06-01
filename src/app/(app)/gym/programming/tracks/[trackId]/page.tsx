@@ -256,11 +256,13 @@ export default function TrackDetailPage({
                     <select
                       value={track.inlinePosition ?? "end_of_day"}
                       onChange={(e) => setInlinePosition(e.target.value)}
-                      disabled={inlinePositionLocked}
                       className="w-full rounded-md border border-white/10 bg-background px-2 py-1 text-sm disabled:opacity-50"
                     >
                       <option value="top">top</option>
                       <option value="after_wod">after_wod</option>
+                      <option value="before_stretching">
+                        before_stretching
+                      </option>
                       <option value="before_at_home">before_at_home</option>
                       <option value="end_of_day">end_of_day</option>
                     </select>
