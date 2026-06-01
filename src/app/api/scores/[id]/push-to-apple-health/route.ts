@@ -62,7 +62,7 @@ export async function POST(
     .where(eq(scores.id, id));
 
   return NextResponse.json({
-    status: replace ? "replaced" : "ok",
+    status: replace ? "updated" : "ok",
     workoutUuid,
   });
 }
