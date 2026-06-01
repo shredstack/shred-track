@@ -280,6 +280,11 @@ export async function POST(req: NextRequest) {
   // Derive weightLbs from per-set entries for for_load parts when not
   // explicitly provided. The canonical per-set data lives in
   // scoreMovementDetails; scores.weightLbs is a summary for legacy queries.
+  // Intentionally NOT populated from athlete-weight per-round arrays —
+  // those parts are reps-scored by default, and surfacing the heaviest
+  // weight as `scores.weightLbs` would make the quick-view score card
+  // display "X lb" instead of the rep count. The leaderboard derives
+  // heaviest weight directly from the per-round arrays at read time.
   let weightLbs = body.weightLbs;
   if (weightLbs == null) {
     const setMax = Math.max(
@@ -287,19 +292,6 @@ export async function POST(req: NextRequest) {
       ...normalizedDetails.flatMap((d) => (d.setEntries ?? []).map((e) => e.weight))
     );
     if (setMax > 0) weightLbs = setMax;
-  }
-  // Athlete-picked weight fallback: when no setEntries-derived value won,
-  // fall back to the max across per-round arrays. for_load parts can't
-  // have athlete-weight movements (builder hides the toggle), so this
-  // path only fires for for_reps/amrap/intervals scores. Setting
-  // scores.weightLbs lets the leaderboard sort by it for free when
-  // partScoreType === 'load'.
-  if (weightLbs == null) {
-    const perRoundMax = Math.max(
-      0,
-      ...normalizedDetails.flatMap((d) => d.actualWeightLbsPerRound ?? [])
-    );
-    if (perRoundMax > 0) weightLbs = perRoundMax;
   }
 
   const startedAt = body.startedAt ? new Date(body.startedAt) : null;

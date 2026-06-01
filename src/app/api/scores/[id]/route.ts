@@ -63,15 +63,8 @@ export async function PUT(
     );
     if (setMax > 0) weightLbs = setMax;
   }
-  // Athlete-picked weight fallback — mirrors the POST route. setEntries
-  // path wins; per-round path only fires when setEntries produced nothing.
-  if (weightLbs == null && normalizedDetails) {
-    const perRoundMax = Math.max(
-      0,
-      ...normalizedDetails.flatMap((d) => d.actualWeightLbsPerRound ?? [])
-    );
-    if (perRoundMax > 0) weightLbs = perRoundMax;
-  }
+  // Athlete-weight per-round arrays are intentionally NOT derived into
+  // scores.weightLbs — see scores/route.ts for the rationale.
 
   // Recompute the calorie estimate against the merged shape. We rebuild the
   // score context from `body` + the existing row so unrelated edits (notes,
