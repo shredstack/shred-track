@@ -20,6 +20,7 @@ public class HealthKitTimer: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "requestWritePermission", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "hasOverlappingWorkout", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "saveWorkout", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "deleteWorkout", returnType: CAPPluginReturnPromise),
     ]
 
     private let healthStore = HKHealthStore()
@@ -235,6 +236,57 @@ public class HealthKitTimer: CAPPlugin, CAPBridgedPlugin {
                 }
             }
         }
+    }
+
+    // Delete a previously-written HKWorkout by UUID. Used when a score is
+    // edited in ShredTrack: HK records are immutable, so updating the
+    // calorie/RPE/metadata story requires delete + re-write. Apple only
+    // lets an app delete samples it wrote, which is exactly what we want.
+    @objc func deleteWorkout(_ call: CAPPluginCall) {
+        guard Self.isAvailable else {
+            call.resolve(["deleted": false, "available": false])
+            return
+        }
+        guard
+            let uuidString = call.getString("workoutUuid"),
+            let uuid = UUID(uuidString: uuidString)
+        else {
+            call.reject("Missing or invalid workoutUuid")
+            return
+        }
+
+        let predicate = HKQuery.predicateForObject(with: uuid)
+        let query = HKSampleQuery(
+            sampleType: HKObjectType.workoutType(),
+            predicate: predicate,
+            limit: 1,
+            sortDescriptors: nil
+        ) { [weak self] _, samples, queryErr in
+            if let queryErr = queryErr {
+                call.resolve([
+                    "deleted": false,
+                    "error": queryErr.localizedDescription,
+                ])
+                return
+            }
+            guard let sample = samples?.first else {
+                // Already gone (user deleted it in Health, or never existed)
+                // — treat as success so the edit path can proceed.
+                call.resolve(["deleted": false, "notFound": true])
+                return
+            }
+            self?.healthStore.delete([sample]) { ok, deleteErr in
+                if let deleteErr = deleteErr {
+                    call.resolve([
+                        "deleted": false,
+                        "error": deleteErr.localizedDescription,
+                    ])
+                    return
+                }
+                call.resolve(["deleted": ok])
+            }
+        }
+        healthStore.execute(query)
     }
 
     // HealthKit metadata values must be NSString / NSNumber / NSDate /

@@ -106,14 +106,23 @@ export async function POST(
       parts: body.parts!,
     });
 
+    // Section kind mirrors the publish-time injector: monthly_challenge
+    // tracks render as monthly_challenge sections; everything else as custom.
+    const sectionKind: "monthly_challenge" | "custom" =
+      track.kind === "monthly_challenge" ? "monthly_challenge" : "custom";
+    // Inherit publish state from the track. Draft tracks keep sessions
+    // hidden from members; flipping the track to 'active' (in the track
+    // PUT route) propagates published=true to all sourced sessions.
+    const sessionPublished = track.status === "active";
+
     const session = await createSession(tx, {
       crossfitWorkoutId: upsertResult.templateId,
       communityId,
       workoutDate: date,
-      kind: "wod",
+      kind: sectionKind,
       source: "manual",
       sourceTrackId: trackId,
-      published: true,
+      published: sessionPublished,
       isScored: body.isScored ?? true,
       scoreType: body.scoreType ?? null,
     });

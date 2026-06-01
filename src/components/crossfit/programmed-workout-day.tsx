@@ -184,10 +184,11 @@ export function ProgrammedWorkoutDay({
         // Any section with Smart-Builder parts is scoreable. The
         // `is_scored` field is currently never set by the programming
         // admin (the toggle isn't exposed in the UI), so gating on it
-        // would hide the button on every published section. Track-day
-        // sections render their own input via TrackDayScoreInput.
-        const showSectionScoring =
-          sectionHasParts && !section.sourceTrackId && !!onLogScore;
+        // would hide the button on every published section.
+        // TrackDayScoreInput only renders for *free-form* track sections
+        // (no parts) — so parts-based track sessions (built via Smart
+        // Builder on a track day) need the regular Log Score CTA too.
+        const showSectionScoring = sectionHasParts && !!onLogScore;
         const showSectionLeaderboard =
           showSectionScoring && !!onViewLeaderboard && !!workout.communityId;
         const isOwnerSection = hasOwnerMetadata && section.id === ownerSectionId;

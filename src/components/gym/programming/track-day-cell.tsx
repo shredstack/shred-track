@@ -23,13 +23,18 @@ function statusFor(day: TrackDayRow | null): {
       className: "border-dashed border-white/10 text-muted-foreground/60",
     };
   }
-  if (day.workoutId && (day.body?.trim() ?? "")) {
+  // workoutSessionId is the unified-schema field new writes populate;
+  // workoutId is the legacy column. Either signals "this day has a linked
+  // workout" — without checking both, smart-builder-added days appear
+  // empty in the calendar.
+  const hasLinkedWorkout = !!day.workoutSessionId || !!day.workoutId;
+  if (hasLinkedWorkout && (day.body?.trim() ?? "")) {
     return {
       label: "wod + body",
       className: "border-emerald-500/40 text-emerald-300",
     };
   }
-  if (day.workoutId) {
+  if (hasLinkedWorkout) {
     return {
       label: "workout",
       className: "border-emerald-500/40 text-emerald-300",

@@ -125,11 +125,27 @@ export async function PUT(
   }
   patch.updatedAt = new Date();
 
+  const statusChanged =
+    typeof patch.status === "string" && patch.status !== track.status;
+  const newStatus = statusChanged ? (patch.status as string) : null;
+
   const [updated] = await db
     .update(programmingTracks)
     .set(patch)
     .where(eq(programmingTracks.id, trackId))
     .returning();
+
+  // Sourced sessions follow the track's publish state. Flip them in lockstep
+  // so smart-builder-created days appear for members the moment the track
+  // is activated, and disappear if it's moved back to draft/archived.
+  if (statusChanged) {
+    const shouldPublish = newStatus === "active";
+    await db
+      .update(workoutSessions)
+      .set({ published: shouldPublish, updatedAt: new Date() })
+      .where(eq(workoutSessions.sourceTrackId, trackId));
+  }
+
   return NextResponse.json({ track: updated });
 }
 

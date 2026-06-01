@@ -37,7 +37,12 @@ export interface TrackDayRow {
   trackId: string;
   date: string;
   body: string | null;
+  // Legacy column (always null for unified-schema writes). Kept on the
+  // type because the GET endpoint still returns it.
   workoutId: string | null;
+  // Unified-schema link to workout_sessions.id — this is what new writes
+  // (smart builder, progression generator, publish injector) populate.
+  workoutSessionId: string | null;
   isScored: boolean;
   scoreType: string | null;
 }

@@ -11,7 +11,13 @@ import { getSessionUser } from "@/lib/session";
 // — the iOS bridge checks this server-side flag before issuing a new
 // HealthKit write to avoid double-rings.
 //
-// Body: { workoutUuid: string } — UUID returned by HKWorkoutBuilder.finishWorkout()
+// Body:
+//   { workoutUuid: string, source?: 'model' | 'apple_health_user', replace?: boolean }
+//
+// `replace: true` means the client just deleted the previous HK record and
+// wrote a fresh one (e.g. the score was edited). Without it the server
+// short-circuits when a UUID is already stored, so edits would silently
+// drop on the floor.
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -22,7 +28,8 @@ export async function POST(
   const { id } = await params;
   const body = await req.json().catch(() => null);
   const workoutUuid: string | undefined = body?.workoutUuid;
-  const source: string | undefined = body?.source; // 'model' | 'apple_health_user' (skip on overlap)
+  const source: string | undefined = body?.source;
+  const replace: boolean = body?.replace === true;
 
   if (!workoutUuid || !/^[0-9a-fA-F-]{36}$/.test(workoutUuid)) {
     return NextResponse.json(
@@ -41,7 +48,7 @@ export async function POST(
     .limit(1);
 
   if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (row.existingUuid) {
+  if (row.existingUuid && !replace) {
     return NextResponse.json({ status: "already_pushed", workoutUuid: row.existingUuid });
   }
 
@@ -54,5 +61,8 @@ export async function POST(
     })
     .where(eq(scores.id, id));
 
-  return NextResponse.json({ status: "ok", workoutUuid });
+  return NextResponse.json({
+    status: replace ? "replaced" : "ok",
+    workoutUuid,
+  });
 }

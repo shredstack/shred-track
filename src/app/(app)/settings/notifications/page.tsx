@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useIsFeatureOn } from "@/hooks/useFeatureFlag";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
+import { LocalNotificationSettings } from "@/components/settings/local-notification-settings";
 
 interface PrefValue {
   inAppEnabled: boolean;
@@ -133,11 +134,17 @@ export default function NotificationsPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <h1 className="text-2xl font-bold">Notifications</h1>
-      <p className="text-sm text-muted-foreground">
-        Turn off any category you don&apos;t want as a push or in-app.
-      </p>
+
+      <LocalNotificationSettings />
+
+      <div className="space-y-2">
+        <h2 className="text-base font-medium">Per-category push & in-app</h2>
+        <p className="text-sm text-muted-foreground">
+          Turn off any category you don&apos;t want as a push or in-app.
+        </p>
+      </div>
       {GROUPS.map((g) => {
         if (g.flag && !featureGate[g.flag]) return null;
         return (

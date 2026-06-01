@@ -9,6 +9,7 @@ import { db } from "@/db";
 import {
   programmingTrackDays,
   programmingTracks,
+  workoutSessions,
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canManageGym } from "@/lib/authz/community";
@@ -107,13 +108,27 @@ export async function DELETE(
   if (!guard.ok)
     return NextResponse.json({ error: guard.error }, { status: guard.status });
 
-  await db
-    .delete(programmingTrackDays)
-    .where(
-      and(
-        eq(programmingTrackDays.trackId, trackId),
-        eq(programmingTrackDays.date, date)
-      )
-    );
+  // Tear down the day and any session that was sourced from it. We scope
+  // the session delete by sourceTrackId + workoutDate so we can never
+  // accidentally remove a session that belongs to a different track or
+  // a member's own log.
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(programmingTrackDays)
+      .where(
+        and(
+          eq(programmingTrackDays.trackId, trackId),
+          eq(programmingTrackDays.date, date)
+        )
+      );
+    await tx
+      .delete(workoutSessions)
+      .where(
+        and(
+          eq(workoutSessions.sourceTrackId, trackId),
+          eq(workoutSessions.workoutDate, date)
+        )
+      );
+  });
   return NextResponse.json({ status: "deleted" });
 }
