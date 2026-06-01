@@ -57,7 +57,7 @@ export function TrendsCard() {
           <div className="min-w-0 flex-1">
             <p className="font-semibold">Trends over time</p>
             <p className="text-xs text-muted-foreground">
-              Your strength, speed, and volume across the last year.
+              Your strength and speed all-time; volume across recent weeks.
             </p>
           </div>
         </div>
@@ -347,6 +347,10 @@ function SpeedTab({
   trends: BenchmarkTrend[];
   retests: BenchmarkRetest[];
 }) {
+  const [selectedId, setSelectedId] = useState<string | null>(
+    trends[0]?.benchmarkId ?? null
+  );
+
   if (trends.length === 0 && retests.length === 0) {
     return (
       <EmptyState
@@ -357,17 +361,61 @@ function SpeedTab({
     );
   }
 
+  // Athletes who've logged 1+ benchmarks but never twice see only retests —
+  // skip the picker entirely and surface the CTA list.
+  if (trends.length === 0) {
+    return (
+      <div className="space-y-3">
+        <RetestList items={retests} />
+      </div>
+    );
+  }
+
+  const selected =
+    trends.find((t) => t.benchmarkId === selectedId) ?? trends[0];
+
   return (
     <div className="space-y-3">
-      {trends.map((t) => (
-        <BenchmarkTrendRow key={t.benchmarkId} trend={t} />
-      ))}
+      <BenchmarkPicker
+        trends={trends}
+        selectedId={selected.benchmarkId}
+        onChange={setSelectedId}
+      />
+      <BenchmarkTrendDetail trend={selected} />
       {retests.length > 0 && <RetestList items={retests} />}
     </div>
   );
 }
 
-function BenchmarkTrendRow({ trend }: { trend: BenchmarkTrend }) {
+function BenchmarkPicker({
+  trends,
+  selectedId,
+  onChange,
+}: {
+  trends: BenchmarkTrend[];
+  selectedId: string;
+  onChange: (id: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <label className="text-[11px] text-muted-foreground">Workout</label>
+      <select
+        className="flex-1 rounded-md border border-border/60 bg-muted/30 px-2 py-1 text-xs"
+        value={selectedId}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {trends.map((t) => (
+          <option key={t.benchmarkId} value={t.benchmarkId}>
+            {t.benchmarkName} ({t.points.length} log
+            {t.points.length === 1 ? "" : "s"})
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function BenchmarkTrendDetail({ trend }: { trend: BenchmarkTrend }) {
   const summary = summarizeBenchmark(trend);
 
   return (

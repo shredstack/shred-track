@@ -28,8 +28,12 @@ import type { SetEntry } from "@/types/crossfit";
 import type { DomainKey } from "./domain-profile";
 import { DOMAIN_KEYS } from "./domain-profile";
 
-const STRENGTH_WINDOW_DAYS = 365;
-const BENCHMARK_WINDOW_DAYS = 365;
+// Strength + benchmark trends pull all-time history — these are long-tail
+// signals where a 1-year window throws away the most interesting data
+// (athletes often repeat a benchmark only every 6-18 months). Volume is
+// still windowed because it's a "recent training load" signal, not a PR
+// history. Retest CTA stays at 90 days — that's about *recency*, not
+// trend length.
 const RETEST_PROMPT_DAYS = 90;
 const DEFAULT_VOLUME_WEEKS = 12;
 const MIN_BENCHMARK_LOGS_FOR_TREND = 2;
@@ -204,12 +208,7 @@ function bucketFor(category: string, isWeighted: boolean): DomainKey {
 // Strength trends
 // ============================================
 
-async function fetchStrengthRows(
-  userId: string,
-  windowDays: number
-): Promise<StrengthTrendRow[]> {
-  const since = toIsoDate(daysAgoFrom(new Date(), windowDays));
-
+async function fetchStrengthRows(userId: string): Promise<StrengthTrendRow[]> {
   const rows = await db
     .select({
       scoreId: scores.id,
@@ -236,11 +235,7 @@ async function fetchStrengthRows(
     )
     .innerJoin(movements, eq(movements.id, crossfitWorkoutMovements.movementId))
     .where(
-      and(
-        eq(scores.userId, userId),
-        eq(movements.is1rmApplicable, true),
-        gte(workoutSessions.workoutDate, since)
-      )
+      and(eq(scores.userId, userId), eq(movements.is1rmApplicable, true))
     );
 
   return rows.map((r) => ({
@@ -361,11 +356,9 @@ export function computeStrengthTrendsFromRows(
 }
 
 export async function computeStrengthTrends(
-  userId: string,
-  opts?: { windowDays?: number }
+  userId: string
 ): Promise<StrengthTrend[]> {
-  const windowDays = opts?.windowDays ?? STRENGTH_WINDOW_DAYS;
-  const rows = await fetchStrengthRows(userId, windowDays);
+  const rows = await fetchStrengthRows(userId);
   return computeStrengthTrendsFromRows(rows);
 }
 
@@ -374,11 +367,8 @@ export async function computeStrengthTrends(
 // ============================================
 
 async function fetchBenchmarkRows(
-  userId: string,
-  windowDays: number
+  userId: string
 ): Promise<BenchmarkTrendRow[]> {
-  const since = toIsoDate(daysAgoFrom(new Date(), windowDays));
-
   // A score is "against a benchmark" when its session points at a template
   // marked is_benchmark = true. One join, one predicate — the legacy
   // section-or-workout COALESCE union goes away with the unified schema.
@@ -405,11 +395,7 @@ async function fetchBenchmarkRows(
       eq(crossfitWorkouts.id, workoutSessions.crossfitWorkoutId)
     )
     .where(
-      and(
-        eq(scores.userId, userId),
-        eq(crossfitWorkouts.isBenchmark, true),
-        gte(workoutSessions.workoutDate, since)
-      )
+      and(eq(scores.userId, userId), eq(crossfitWorkouts.isBenchmark, true))
     );
 
   return rows.map((r) => ({
@@ -570,10 +556,9 @@ export function computeBenchmarkTrendsFromRows(
 
 export async function computeBenchmarkTrends(
   userId: string,
-  opts?: { windowDays?: number; now?: Date }
+  opts?: { now?: Date }
 ): Promise<{ trends: BenchmarkTrend[]; retests: BenchmarkRetest[] }> {
-  const windowDays = opts?.windowDays ?? BENCHMARK_WINDOW_DAYS;
-  const rows = await fetchBenchmarkRows(userId, windowDays);
+  const rows = await fetchBenchmarkRows(userId);
   return computeBenchmarkTrendsFromRows(rows, opts);
 }
 
@@ -728,20 +713,13 @@ export async function computeVolumeTrends(
 export async function computeTrends(
   userId: string,
   opts?: {
-    strengthWindowDays?: number;
-    benchmarkWindowDays?: number;
     volumeWeeks?: number;
     now?: Date;
   }
 ): Promise<TrendsResult> {
   const [strength, benchmarks, volume] = await Promise.all([
-    computeStrengthTrends(userId, {
-      windowDays: opts?.strengthWindowDays,
-    }),
-    computeBenchmarkTrends(userId, {
-      windowDays: opts?.benchmarkWindowDays,
-      now: opts?.now,
-    }),
+    computeStrengthTrends(userId),
+    computeBenchmarkTrends(userId, { now: opts?.now }),
     computeVolumeTrends(userId, {
       weeks: opts?.volumeWeeks,
       now: opts?.now,
