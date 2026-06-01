@@ -350,7 +350,8 @@ export async function GET(
         hitTimeCap: row.hitTimeCap,
         createdAt: row.createdAt.toISOString(),
       },
-      partScoreType
+      partScoreType,
+      heaviestAthleteWeightLb
     );
 
     const sortValue = computeSortValue(workoutType, {

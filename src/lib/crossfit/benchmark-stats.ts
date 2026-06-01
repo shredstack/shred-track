@@ -75,14 +75,24 @@ export function pickBestScore(
 // display flips to show the heaviest weight used — keeping the displayScore
 // in sync with `computeSortValue`'s rank key. Default-undefined → legacy
 // behavior, so every existing call site keeps working unchanged.
+//
+// `heaviestAthleteWeightLb` is the fallback when `scoreType === "load"` and
+// `score.weightLbs` is null. This happens for athlete-picked-weight parts —
+// `scores.weightLbs` is intentionally NOT populated from per-round arrays
+// (see scores/route.ts), so callers must pass the derived heaviest weight
+// to get a correct display.
 export function formatBestScore(
   workoutType: WorkoutType,
   score: ScoreRow,
-  scoreType?: "reps" | "load" | null
+  scoreType?: "reps" | "load" | null,
+  heaviestAthleteWeightLb?: number | null
 ): string {
   if (score.scoreText) return score.scoreText;
-  if (scoreType === "load" && score.weightLbs != null) {
-    return `${score.weightLbs} lb`;
+  if (scoreType === "load") {
+    if (score.weightLbs != null) return `${score.weightLbs} lb`;
+    if (heaviestAthleteWeightLb != null && heaviestAthleteWeightLb > 0) {
+      return `${heaviestAthleteWeightLb} lb`;
+    }
   }
   switch (workoutType) {
     case "for_time": {
