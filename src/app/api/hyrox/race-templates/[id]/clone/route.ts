@@ -72,6 +72,7 @@ export async function POST(
       name: source.name,
       divisionKey: source.divisionKey,
       simulateRoxzone: source.simulateRoxzone,
+      countdownSeconds: source.countdownSeconds,
       segments: source.segments,
       communityId: null,
       clonedFromId: source.id,

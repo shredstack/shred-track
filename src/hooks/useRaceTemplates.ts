@@ -13,6 +13,9 @@ export interface RaceTemplate {
   name: string;
   divisionKey: string | null;
   simulateRoxzone: boolean;
+  /** Pre-race countdown the template was saved with. NULL = use the
+   *  device's standing preference at race start. */
+  countdownSeconds: number | null;
   segments: RaceTemplateSegment[];
   communityId: string | null;
   clonedFromId: string | null;
@@ -26,6 +29,7 @@ export interface GymRaceTemplate {
   name: string;
   divisionKey: string | null;
   simulateRoxzone: boolean;
+  countdownSeconds: number | null;
   segments: RaceTemplateSegment[];
   communityId: string;
   authorId: string;
@@ -43,6 +47,9 @@ export interface CreateRaceTemplateInput {
   name: string;
   divisionKey?: string | null;
   simulateRoxzone?: boolean;
+  /** Pre-race countdown to bake into the template. NULL or omitted = no
+   *  template-specified value (readers fall back to the device default). */
+  countdownSeconds?: number | null;
   segments: RaceTemplateSegment[];
   /** When set, the template is shared with that gym (must be a member). */
   communityId?: string | null;

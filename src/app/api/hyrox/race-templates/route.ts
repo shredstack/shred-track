@@ -55,6 +55,7 @@ export async function GET() {
     name: string;
     divisionKey: string | null;
     simulateRoxzone: boolean;
+    countdownSeconds: number | null;
     segments: RaceTemplateSegment[];
     communityId: string;
     authorId: string;
@@ -70,6 +71,7 @@ export async function GET() {
         name: hyroxRaceTemplates.name,
         divisionKey: hyroxRaceTemplates.divisionKey,
         simulateRoxzone: hyroxRaceTemplates.simulateRoxzone,
+        countdownSeconds: hyroxRaceTemplates.countdownSeconds,
         segments: hyroxRaceTemplates.segments,
         communityId: hyroxRaceTemplates.communityId,
         authorId: hyroxRaceTemplates.userId,
@@ -124,12 +126,14 @@ interface CreatePayload {
   name?: string;
   divisionKey?: string;
   simulateRoxzone?: boolean;
+  countdownSeconds?: number | null;
   segments?: RaceTemplateSegment[];
   communityId?: string | null;
 }
 
 const MAX_NAME_LENGTH = 60;
 const MAX_SEGMENTS = 60;
+const ALLOWED_COUNTDOWN_SECONDS = [0, 3, 5, 10] as const;
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
@@ -163,6 +167,23 @@ export async function POST(request: Request) {
       { error: `Templates are limited to ${MAX_SEGMENTS} segments` },
       { status: 400 },
     );
+  }
+
+  let countdownSeconds: number | null = null;
+  if (body.countdownSeconds !== undefined && body.countdownSeconds !== null) {
+    if (
+      !(ALLOWED_COUNTDOWN_SECONDS as readonly number[]).includes(
+        body.countdownSeconds,
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error: `countdownSeconds must be one of ${ALLOWED_COUNTDOWN_SECONDS.join(", ")}`,
+        },
+        { status: 400 },
+      );
+    }
+    countdownSeconds = body.countdownSeconds;
   }
 
   // If the caller wants to share with a gym, verify membership before writing.
@@ -210,6 +231,7 @@ export async function POST(request: Request) {
       name,
       divisionKey: body.divisionKey ?? null,
       simulateRoxzone: body.simulateRoxzone ?? false,
+      countdownSeconds,
       segments,
       communityId,
     })

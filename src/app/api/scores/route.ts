@@ -310,9 +310,15 @@ export async function POST(req: NextRequest) {
   // Compute the personalized calorie estimate before opening the
   // transaction. Resolve the session's template id — the estimator reads
   // from crossfit_workout_parts keyed by templateId, not the session.
+  // workoutDate is also returned here so the response can include it,
+  // letting the Apple Health push decide whether the score is recent
+  // enough to write to the Move ring.
   const [sessionForTemplate] = workoutSessionId
     ? await db
-        .select({ crossfitWorkoutId: workoutSessions.crossfitWorkoutId })
+        .select({
+          crossfitWorkoutId: workoutSessions.crossfitWorkoutId,
+          workoutDate: workoutSessions.workoutDate,
+        })
         .from(workoutSessions)
         .where(eq(workoutSessions.id, workoutSessionId))
         .limit(1)
@@ -464,7 +470,11 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json(
-      { ...score, appleHealthMetadata },
+      {
+        ...score,
+        workoutDate: sessionForTemplate?.workoutDate ?? null,
+        appleHealthMetadata,
+      },
       { status: 201 }
     );
   } catch (err: unknown) {

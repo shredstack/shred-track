@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { crossfitWorkoutParts, scores, scoreMovementDetails } from "@/db/schema";
+import {
+  crossfitWorkoutParts,
+  scores,
+  scoreMovementDetails,
+  workoutSessions,
+} from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
@@ -254,7 +259,19 @@ export async function PUT(
     }
   }
 
-  return NextResponse.json({ ...updated, appleHealthMetadata });
+  // Pull the session's programmed date so the client can decide whether
+  // this score is recent enough to push to Apple Health's Move ring.
+  let workoutDate: string | null = null;
+  if (updated.workoutSessionId) {
+    const [session] = await db
+      .select({ workoutDate: workoutSessions.workoutDate })
+      .from(workoutSessions)
+      .where(eq(workoutSessions.id, updated.workoutSessionId))
+      .limit(1);
+    workoutDate = session?.workoutDate ?? null;
+  }
+
+  return NextResponse.json({ ...updated, workoutDate, appleHealthMetadata });
 }
 
 // DELETE /api/scores/[id]
