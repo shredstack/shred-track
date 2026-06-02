@@ -50,8 +50,19 @@ export interface ScheduleBuilderInitial {
   isActive: boolean;
   // null = every day; otherwise array of 0..6 (0=Sun).
   activeDaysOfWeek: number[] | null;
+  // "Every N days" recurrence — when set, supersedes activeDaysOfWeek.
+  intervalDays: number | null;
+  intervalStartsOn: string | null;
   daySlots: DraftSlot[][]; // index = dayIndex - 1
   freqSlots: DraftSlot[];
+}
+
+function todayDateString(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 const DAY_OF_WEEK_LABELS: Array<{ value: number; short: string }> = [
@@ -82,7 +93,12 @@ export function ScheduleBuilderForm({
   const [kind, setKind] = useState<RecoveryScheduleKind>(
     initial?.kind ?? "day_keyed"
   );
-  const [rotationDays, setRotationDays] = useState(initial?.rotationDays ?? 3);
+  // Interval-mode schedules always collapse to a single rotation day — the
+  // recurrence comes from intervalDays, not the day rotation.
+  const isInitialInterval = !!(initial?.intervalDays && initial.intervalStartsOn);
+  const [rotationDays, setRotationDays] = useState(
+    isInitialInterval ? 1 : initial?.rotationDays ?? 3
+  );
   const [weeklyTarget, setWeeklyTarget] = useState(initial?.weeklyTarget ?? 2);
   const [scope, setScope] = useState<"personal" | "gym">(
     initial?.communityId ? "gym" : "personal"
@@ -90,13 +106,23 @@ export function ScheduleBuilderForm({
   const [activeDay, setActiveDay] = useState(1);
   const [isActive, setIsActive] = useState(initial?.isActive ?? true);
   // "every" = no day-of-week restriction (stored as null); "specific" lets
-  // the user pick days. We track local UI state separately so toggling
-  // between modes doesn't lose the user's selection.
-  const [dowMode, setDowMode] = useState<"every" | "specific">(
-    initial?.activeDaysOfWeek && initial.activeDaysOfWeek.length > 0 ? "specific" : "every"
-  );
+  // the user pick days; "interval" = every N days from a start date. Tracked
+  // separately so toggling between modes doesn't lose state.
+  const initialDowMode: "every" | "specific" | "interval" =
+    initial?.intervalDays && initial.intervalStartsOn
+      ? "interval"
+      : initial?.activeDaysOfWeek && initial.activeDaysOfWeek.length > 0
+        ? "specific"
+        : "every";
+  const [dowMode, setDowMode] = useState<"every" | "specific" | "interval">(initialDowMode);
   const [selectedDays, setSelectedDays] = useState<number[]>(
     initial?.activeDaysOfWeek ?? []
+  );
+  const [intervalDays, setIntervalDays] = useState<number>(
+    initial?.intervalDays ?? 3
+  );
+  const [intervalStartsOn, setIntervalStartsOn] = useState<string>(
+    initial?.intervalStartsOn ?? todayDateString()
   );
 
   const toggleDay = (d: number) => {
@@ -112,7 +138,10 @@ export function ScheduleBuilderForm({
     }));
 
   const [days, setDays] = useState<DraftDay[]>(
-    initDays(initial?.rotationDays ?? 3, initial?.daySlots)
+    initDays(
+      isInitialInterval ? 1 : initial?.rotationDays ?? 3,
+      initial?.daySlots
+    )
   );
   const [freqSlots, setFreqSlots] = useState<DraftSlot[]>(
     initial?.freqSlots ?? []
@@ -169,11 +198,29 @@ export function ScheduleBuilderForm({
       return;
     }
 
-    // Resolve day-of-week selection: "every" → null, "specific" → array
-    // (empty array also means every day server-side, but we coerce to null
-    // so the data shape stays consistent).
+    // Resolve recurrence: "every" → both null; "specific" → activeDaysOfWeek
+    // array (empty coerces to null = every day); "interval" → intervalDays +
+    // intervalStartsOn (activeDaysOfWeek cleared). Interval is day_keyed-only.
+    const effectiveDowMode = kind === "day_keyed" ? dowMode : (dowMode === "interval" ? "every" : dowMode);
     const activeDaysOfWeek =
-      dowMode === "every" || selectedDays.length === 0 ? null : selectedDays;
+      effectiveDowMode === "specific" && selectedDays.length > 0
+        ? selectedDays
+        : null;
+    const effectiveIntervalDays =
+      effectiveDowMode === "interval" ? intervalDays : null;
+    const effectiveIntervalStartsOn =
+      effectiveDowMode === "interval" ? intervalStartsOn : null;
+
+    if (effectiveDowMode === "interval") {
+      if (!Number.isInteger(intervalDays) || intervalDays < 1) {
+        toast.error("Interval must be 1 or more days");
+        return;
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(intervalStartsOn)) {
+        toast.error("Pick a valid start date");
+        return;
+      }
+    }
 
     try {
       if (editing && initial?.id) {
@@ -186,6 +233,8 @@ export function ScheduleBuilderForm({
             weeklyTarget: kind === "frequency_keyed" ? weeklyTarget : undefined,
             isActive,
             activeDaysOfWeek,
+            intervalDays: effectiveIntervalDays,
+            intervalStartsOn: effectiveIntervalStartsOn,
             slots,
           },
         });
@@ -204,6 +253,8 @@ export function ScheduleBuilderForm({
               : null,
           isActive,
           activeDaysOfWeek,
+          intervalDays: effectiveIntervalDays,
+          intervalStartsOn: effectiveIntervalStartsOn,
           slots,
         });
         toast.success("Schedule created");
@@ -275,7 +326,12 @@ export function ScheduleBuilderForm({
                   Day rotation
                 </button>
                 <button
-                  onClick={() => setKind("frequency_keyed")}
+                  onClick={() => {
+                    setKind("frequency_keyed");
+                    // Interval recurrence is day-rotation only; fall back to
+                    // the every-day option when switching to frequency mode.
+                    if (dowMode === "interval") setDowMode("every");
+                  }}
                   className={`flex-1 rounded-md border px-3 py-2 text-sm ${kind === "frequency_keyed" ? "border-primary bg-primary/10 text-primary" : "border-input"}`}
                 >
                   X × per week
@@ -284,20 +340,25 @@ export function ScheduleBuilderForm({
             </div>
           )}
           {kind === "day_keyed" ? (
-            <div>
-              <Label className="text-xs">Rotation days</Label>
-              <Input
-                type="number"
-                min={1}
-                max={14}
-                value={rotationDays}
-                onChange={(e) =>
-                  updateRotationDays(
-                    Math.max(1, Math.min(14, Number(e.target.value) || 1))
-                  )
-                }
-              />
-            </div>
+            // In interval ("Every N days") mode the routine is a single
+            // shared list, so the rotation-days input is hidden — N comes
+            // from intervalDays instead.
+            dowMode !== "interval" && (
+              <div>
+                <Label className="text-xs">Rotation days</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={14}
+                  value={rotationDays}
+                  onChange={(e) =>
+                    updateRotationDays(
+                      Math.max(1, Math.min(14, Number(e.target.value) || 1))
+                    )
+                  }
+                />
+              </div>
+            )
           ) : (
             <div>
               <Label className="text-xs">Sessions per week</Label>
@@ -338,22 +399,38 @@ export function ScheduleBuilderForm({
           </div>
           {isActive && (
             <div>
-              <Label className="text-xs">Days of week</Label>
+              <Label className="text-xs">Recurrence</Label>
               <div className="flex gap-2 mt-1">
                 <button
                   type="button"
                   onClick={() => setDowMode("every")}
-                  className={`flex-1 rounded-md border px-3 py-2 text-sm ${dowMode === "every" ? "border-primary bg-primary/10 text-primary" : "border-input"}`}
+                  className={`flex-1 rounded-md border px-2 py-2 text-xs ${dowMode === "every" ? "border-primary bg-primary/10 text-primary" : "border-input"}`}
                 >
                   Every day
                 </button>
                 <button
                   type="button"
                   onClick={() => setDowMode("specific")}
-                  className={`flex-1 rounded-md border px-3 py-2 text-sm ${dowMode === "specific" ? "border-primary bg-primary/10 text-primary" : "border-input"}`}
+                  className={`flex-1 rounded-md border px-2 py-2 text-xs ${dowMode === "specific" ? "border-primary bg-primary/10 text-primary" : "border-input"}`}
                 >
                   Specific days
                 </button>
+                {kind === "day_keyed" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDowMode("interval");
+                      // Interval mode = single shared list of movements that
+                      // repeats every N days. Collapse the rotation to a
+                      // single day so users don't have to re-add movements
+                      // to Day 1 / Day 2 / Day 3.
+                      if (rotationDays !== 1) updateRotationDays(1);
+                    }}
+                    className={`flex-1 rounded-md border px-2 py-2 text-xs ${dowMode === "interval" ? "border-primary bg-primary/10 text-primary" : "border-input"}`}
+                  >
+                    Every N days
+                  </button>
+                )}
               </div>
               {dowMode === "specific" && (
                 <div className="flex gap-1 mt-2">
@@ -376,6 +453,44 @@ export function ScheduleBuilderForm({
                 <p className="text-[11px] text-muted-foreground mt-1">
                   No days selected — schedule will show every day.
                 </p>
+              )}
+              {dowMode === "interval" && (
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">
+                      Every
+                    </Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        max={365}
+                        value={intervalDays}
+                        onChange={(e) =>
+                          setIntervalDays(
+                            Math.max(
+                              1,
+                              Math.min(365, Number(e.target.value) || 1)
+                            )
+                          )
+                        }
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        day{intervalDays === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-[11px] text-muted-foreground">
+                      Starting
+                    </Label>
+                    <Input
+                      type="date"
+                      value={intervalStartsOn}
+                      onChange={(e) => setIntervalStartsOn(e.target.value)}
+                    />
+                  </div>
+                </div>
               )}
             </div>
           )}
@@ -401,7 +516,7 @@ export function ScheduleBuilderForm({
         </CardContent>
       </Card>
 
-      {kind === "day_keyed" && (
+      {kind === "day_keyed" && dowMode !== "interval" && (
         <div className="flex gap-1 overflow-x-auto -mx-1 px-1">
           {days.map((d) => (
             <button

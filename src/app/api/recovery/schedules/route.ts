@@ -80,6 +80,26 @@ export async function POST(req: NextRequest) {
     ).sort((a, b) => a - b);
   }
 
+  // "Every N days" recurrence. Only meaningful for day_keyed schedules.
+  // Both fields must be set together (DB also enforces this).
+  let intervalDays: number | null = null;
+  let intervalStartsOn: string | null = null;
+  if (
+    kind === "day_keyed" &&
+    typeof body.intervalDays === "number" &&
+    Number.isInteger(body.intervalDays) &&
+    body.intervalDays >= 1 &&
+    typeof body.intervalStartsOn === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(body.intervalStartsOn)
+  ) {
+    intervalDays = body.intervalDays;
+    intervalStartsOn = body.intervalStartsOn;
+    // Interval mode supersedes the day-of-week filter — clear it to keep the
+    // data unambiguous (the resolver also ignores activeDaysOfWeek when
+    // interval is set, but we don't want to leave stale state lying around).
+    activeDaysOfWeek = null;
+  }
+
   const result = await db.transaction(async (tx) => {
     const [schedule] = await tx
       .insert(recoverySchedules)
@@ -94,6 +114,8 @@ export async function POST(req: NextRequest) {
         createdBy: user.id,
         isActive,
         activeDaysOfWeek,
+        intervalDays,
+        intervalStartsOn,
       })
       .returning();
 

@@ -88,6 +88,24 @@ export async function PATCH(
     ).sort((a, b) => a - b);
     updates.activeDaysOfWeek = filtered;
   }
+
+  // Interval recurrence — accept either an explicit clear (both fields null)
+  // or a valid pair. Mutually exclusive with activeDaysOfWeek; when interval
+  // is set we also clear activeDaysOfWeek to keep the row unambiguous.
+  if (body.intervalDays === null && body.intervalStartsOn === null) {
+    updates.intervalDays = null;
+    updates.intervalStartsOn = null;
+  } else if (
+    typeof body.intervalDays === "number" &&
+    Number.isInteger(body.intervalDays) &&
+    body.intervalDays >= 1 &&
+    typeof body.intervalStartsOn === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(body.intervalStartsOn)
+  ) {
+    updates.intervalDays = body.intervalDays;
+    updates.intervalStartsOn = body.intervalStartsOn;
+    updates.activeDaysOfWeek = null;
+  }
   updates.updatedAt = new Date();
 
   await db.transaction(async (tx) => {

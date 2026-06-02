@@ -42,7 +42,23 @@ public enum RaceSegmentFactory {
         divisionKey: String,
         simulateRoxzone: Bool = false
     ) -> [RaceSegment] {
-        let runDistanceM = 1000  // adult divisions are 1 km runs
+        let segments = buildBaseRace(runDistanceM: 1000)
+        return simulateRoxzone ? insertRoxzoneSegments(segments) : segments
+    }
+
+    /// Half race — all 8 runs + all 8 stations, every distance cut in
+    /// half. Weights are unchanged. Roxzone, when enabled, keeps its
+    /// full 100 m transition distance (it models the physical floor
+    /// crossing, not the station volume).
+    public static func buildHalfRace(
+        divisionKey: String,
+        simulateRoxzone: Bool = false
+    ) -> [RaceSegment] {
+        let segments = buildBaseRace(runDistanceM: 500)
+        return simulateRoxzone ? insertRoxzoneSegments(segments) : segments
+    }
+
+    private static func buildBaseRace(runDistanceM: Int) -> [RaceSegment] {
         var segments: [RaceSegment] = []
         for i in 0..<8 {
             segments.append(
@@ -60,17 +76,7 @@ public enum RaceSegmentFactory {
                 )
             )
         }
-        return simulateRoxzone ? insertRoxzoneSegments(segments) : segments
-    }
-
-    public static func buildHalfRace(
-        divisionKey: String,
-        simulateRoxzone: Bool = false
-    ) -> [RaceSegment] {
-        // Build the half WITHOUT roxzone first, then insert — keeps the
-        // "no Roxzone after the final station" rule automatic.
-        let half = Array(buildFullRace(divisionKey: divisionKey).prefix(8))
-        return simulateRoxzone ? insertRoxzoneSegments(half) : half
+        return segments
     }
 
     /// Insert a 100m Roxzone segment after every station that is

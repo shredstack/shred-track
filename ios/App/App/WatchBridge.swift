@@ -9,6 +9,7 @@ import WatchConnectivity
 //   Capacitor.Plugins.WatchBridge.setToken({ accessToken, expiresAt, userId })
 //   Capacitor.Plugins.WatchBridge.clearToken()
 //   Capacitor.Plugins.WatchBridge.pushTodaySnapshot({ json })
+//   Capacitor.Plugins.WatchBridge.pushRaceTemplates({ json })
 //   Capacitor.Plugins.WatchBridge.ackRaceSync({ raceLocalId })
 //   Capacitor.Plugins.WatchBridge.sendRaceStart({ raceId, divisionKey,
 //     template, simulateRoxzone, startAt, segments })
@@ -35,6 +36,7 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
         CAPPluginMethod(name: "clearToken", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "ackRaceSync", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "pushTodaySnapshot", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "pushRaceTemplates", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "sendRaceStart", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "sendRaceEvent", returnType: CAPPluginReturnPromise),
     ]
@@ -123,10 +125,12 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
     @objc func clearToken(_ call: CAPPluginCall) {
         // Wipe the cached token keys and set the sign-out flag so the
         // Watch's handleApplicationContext path clears AuthSession on
-        // next delivery.
+        // next delivery. Also drop `raceTemplates` — if we left it
+        // behind, the same applicationContext that carries `signOut`
+        // would re-ingest the prior account's templates on the watch.
         switch updateContext(
             sets: ["signOut": true],
-            removes: ["accessToken", "userId", "expiresAt"],
+            removes: ["accessToken", "userId", "expiresAt", "raceTemplates"],
             from: "clearToken"
         ) {
         case .success: call.resolve()
@@ -151,6 +155,22 @@ public class WatchBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
         case .success: call.resolve()
         case .failure(let error):
             call.reject("Failed to push snapshot: \(error.localizedDescription)")
+        }
+    }
+
+    /// Phone → Watch: mirror the user's saved HYROX race templates so
+    /// the watch's setup screen can offer them in a picker. Same
+    /// applicationContext transport as `pushTodaySnapshot` —
+    /// latest-value-wins on the `raceTemplates` key, persists across
+    /// watch cold launches.
+    @objc func pushRaceTemplates(_ call: CAPPluginCall) {
+        guard let json = call.getString("json") else {
+            call.reject("Missing json"); return
+        }
+        switch updateContext(sets: ["raceTemplates": json], from: "pushRaceTemplates") {
+        case .success: call.resolve()
+        case .failure(let error):
+            call.reject("Failed to push race templates: \(error.localizedDescription)")
         }
     }
 

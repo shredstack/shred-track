@@ -158,18 +158,25 @@ export async function GET(
       .filter((id): id is string => !!id)
   );
 
-  // Sessions to include in the leaderboard: the gym-day session (this
-  // one) plus any session for the same gym + date referencing the same
-  // template. The shape collapses members' personal logs of the same
-  // gym WOD into the same scoreboard.
+  // Sessions to include in the leaderboard: every session at this gym on
+  // this date. We deliberately do NOT filter by crossfit_workout_id here
+  // — scores are scoped to the template via crossfit_workout_part_id
+  // (a unique key onto a single template), not via the session they're
+  // attached to. The session is just a date+gym anchor.
+  //
+  // Why this matters: on multi-section days the score row's
+  // workout_session_id can point at the day-group's lead session (often
+  // the warm_up, no template) instead of the WOD section's own session
+  // — both legacy scores logged before the section-scoped fix and the
+  // synthetic-group semantics referenced in scores/[id]/route.ts. The
+  // partId filter on the scores query below is the canonical attribution.
   const peerSessions = await db
     .select({ id: workoutSessions.id })
     .from(workoutSessions)
     .where(
       and(
         eq(workoutSessions.communityId, access.communityId),
-        eq(workoutSessions.workoutDate, s.workoutDate),
-        eq(workoutSessions.crossfitWorkoutId, s.crossfitWorkoutId)
+        eq(workoutSessions.workoutDate, s.workoutDate)
       )
     );
   const sessionIds = peerSessions.map((p) => p.id);

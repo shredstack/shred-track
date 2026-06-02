@@ -40,6 +40,8 @@ export interface CreateScheduleInput {
   rotationStrategy?: "progress" | "calendar";
   isActive?: boolean;
   activeDaysOfWeek?: number[] | null;
+  intervalDays?: number | null;
+  intervalStartsOn?: string | null;
   slots: Array<{
     dayIndex?: number | null;
     orderIndex?: number;

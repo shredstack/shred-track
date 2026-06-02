@@ -106,14 +106,22 @@ export function useUpdatePracticeRace() {
   });
 }
 
+export interface DeletePracticeRaceInput {
+  id: string;
+  /** When true, also delete station benchmark rows derived from this race.
+   *  Defaults to false so a normal delete preserves PRs/best times. */
+  deleteBenchmarks?: boolean;
+}
+
 export function useDeletePracticeRace() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (id: string) => {
-      const response = await fetch(`/api/hyrox/practice-races/${id}`, {
-        method: "DELETE",
-      });
+    mutationFn: async ({ id, deleteBenchmarks = false }: DeletePracticeRaceInput) => {
+      const url = deleteBenchmarks
+        ? `/api/hyrox/practice-races/${id}?deleteBenchmarks=true`
+        : `/api/hyrox/practice-races/${id}`;
+      const response = await fetch(url, { method: "DELETE" });
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
         throw new Error(err.error || "Failed to delete race");

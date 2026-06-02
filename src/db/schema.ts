@@ -12,6 +12,7 @@ import {
   index,
   foreignKey,
   primaryKey,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { TimeLossEntry, FocusEntry } from "@/types/hyrox-race-report";
@@ -1806,6 +1807,12 @@ export const hyroxRaceTemplates = pgTable(
     divisionKey: text("division_key"),
     simulateRoxzone: boolean("simulate_roxzone").notNull().default(false),
     segments: jsonb("segments").$type<RaceTemplateSegment[]>().notNull(),
+    // When non-null, this template is shared with the given gym; every
+    // active member of that community can see and clone it.
+    communityId: uuid("community_id").references(() => communities.id, { onDelete: "set null" }),
+    // For clones, points at the original gym-shared template the user
+    // copied from. Survives deletion of the original (SET NULL).
+    clonedFromId: uuid("cloned_from_id").references((): AnyPgColumn => hyroxRaceTemplates.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -1972,6 +1979,11 @@ export const recoverySchedules = pgTable("recovery_schedules", {
   isActive: boolean("is_active").default(true).notNull(),
   // null = display every day; otherwise array of 0..6 (0=Sunday, matches Date.getDay()).
   activeDaysOfWeek: integer("active_days_of_week").array(),
+  // "Every N days" recurrence. When intervalDays is set, the schedule shows
+  // only on dates where (date - intervalStartsOn) % intervalDays === 0.
+  // Mutually exclusive with activeDaysOfWeek in the UI.
+  intervalDays: integer("interval_days"),
+  intervalStartsOn: date("interval_starts_on"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });

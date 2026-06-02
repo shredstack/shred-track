@@ -57,6 +57,8 @@ export default function EditSchedulePage({
         communityId: data.communityId ?? null,
         isActive: data.isActive ?? true,
         activeDaysOfWeek: data.activeDaysOfWeek ?? null,
+        intervalDays: data.intervalDays ?? null,
+        intervalStartsOn: data.intervalStartsOn ?? null,
         daySlots,
         freqSlots,
       }}

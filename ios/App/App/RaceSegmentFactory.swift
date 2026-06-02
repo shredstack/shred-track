@@ -35,7 +35,18 @@ public enum RaceSegmentFactory {
     ]
 
     public static func buildFullRace(divisionKey: String) -> [RaceSegment] {
-        let runDistanceM = 1000  // adult divisions are 1 km runs
+        buildBaseRace(runDistanceM: 1000)
+    }
+
+    /// Half race — all 8 runs + all 8 stations, runs halved to 500 m.
+    /// Stations carry no distance info in this Swift model, so the
+    /// "halved station volume" only manifests on the JS factory output
+    /// that gets shipped over the bridge.
+    public static func buildHalfRace(divisionKey: String) -> [RaceSegment] {
+        buildBaseRace(runDistanceM: 500)
+    }
+
+    private static func buildBaseRace(runDistanceM: Int) -> [RaceSegment] {
         var segments: [RaceSegment] = []
         for i in 0..<8 {
             segments.append(
@@ -53,10 +64,5 @@ public enum RaceSegmentFactory {
             )
         }
         return segments
-    }
-
-    public static func buildHalfRace(divisionKey: String) -> [RaceSegment] {
-        // First 4 run + 4 station pairs.
-        Array(buildFullRace(divisionKey: divisionKey).prefix(8))
     }
 }

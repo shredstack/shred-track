@@ -32,7 +32,12 @@ private enum TimerDefaultsKey {
     static let divisionKey = "watch.timer.divisionKey"
     static let template = "watch.timer.template"
     static let simulateRoxzone = "watch.timer.simulateRoxzone"
+    static let customTemplateId = "watch.timer.customTemplateId"
 }
+
+/// Raw `templateRaw` value used to mean "race a saved custom template".
+/// The id of which template lives in a separate UserDefaults key.
+private let customTemplateRaw = "custom"
 
 /// Always 10s when started on the watch. The phone has a configurable
 /// preference, but the wrist UX favors a single sensible default.
@@ -41,6 +46,7 @@ private let watchCountdownSeconds = 10
 struct TimerView: View {
     @EnvironmentObject private var vm: RaceTimerViewModel
     @StateObject private var hk = HealthKitWorkoutService.shared
+    @StateObject private var templatesStore = RaceTemplatesStore.shared
 
     // These were previously `@AppStorage`. On a fresh install the first
     // synchronous write through `@AppStorage` blocked the main thread
@@ -58,6 +64,20 @@ struct TimerView: View {
     @State private var simulateRoxzone: Bool = UserDefaults.standard.bool(
         forKey: TimerDefaultsKey.simulateRoxzone
     )
+    /// Selected custom-template id. Non-nil only when `templateRaw ==
+    /// "custom"`. We keep the id rather than the template itself so that
+    /// when the phone pushes an updated copy (rename, segment edit) the
+    /// watch picks up the new version on next race-start.
+    @State private var customTemplateId: String? = {
+        // Treat the missing-key and empty-string cases as nil so the
+        // "no custom template selected" state has a single
+        // representation. We persist a removeObject when clearing so
+        // this branch is rarely hit, but it's cheap insurance.
+        let stored = UserDefaults.standard.string(
+            forKey: TimerDefaultsKey.customTemplateId
+        )
+        return (stored?.isEmpty == false) ? stored : nil
+    }()
 
     @State private var showFinishConfirm: Bool = false
     @State private var showDiscardConfirm: Bool = false
@@ -66,8 +86,20 @@ struct TimerView: View {
 
     private let unit: PaceUnit = .kilometer  // TODO read from App Group
 
-    private var template: RaceTemplate {
-        RaceTemplate(rawValue: templateRaw) ?? .full
+    /// Resolves the currently-selected custom template, or nil if the
+    /// user is on a built-in preset (or the previously-picked custom
+    /// template was deleted on the phone).
+    private var selectedCustomTemplate: SavedRaceTemplate? {
+        guard templateRaw == customTemplateRaw, let id = customTemplateId
+        else { return nil }
+        return templatesStore.template(id: id)
+    }
+
+    /// Built-in preset selection (full/half) — nil when the user is on
+    /// a custom template.
+    private var builtInTemplate: RaceTemplate? {
+        if templateRaw == customTemplateRaw { return nil }
+        return RaceTemplate(rawValue: templateRaw) ?? .full
     }
 
     /// Write a setting to UserDefaults off the main thread so the UI
@@ -75,6 +107,18 @@ struct TimerView: View {
     private func persistSetting(_ key: String, _ value: Any) {
         Task.detached(priority: .utility) {
             UserDefaults.standard.set(value, forKey: key)
+        }
+    }
+
+    /// Optional-string variant: nil/empty removes the key so loads
+    /// have a single "absent" representation.
+    private func persistOptionalString(_ key: String, _ value: String?) {
+        Task.detached(priority: .utility) {
+            if let value, !value.isEmpty {
+                UserDefaults.standard.set(value, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
         }
     }
 
@@ -121,6 +165,37 @@ struct TimerView: View {
                     HStack(spacing: 6) {
                         templateChip(.full, label: "Full")
                         templateChip(.half, label: "Half")
+                    }
+
+                    // Custom-template row — only shown when the phone
+                    // has pushed at least one. Tapping pushes to a
+                    // dedicated picker; the row also doubles as the
+                    // "selected" indicator when a custom template is
+                    // active.
+                    if !templatesStore.templates.isEmpty {
+                        NavigationLink {
+                            CustomTemplatePickerView(
+                                templates: templatesStore.templates,
+                                selectedId: customTemplateId,
+                                onSelect: { id in
+                                    selectCustomTemplate(id: id)
+                                }
+                            )
+                        } label: {
+                            HStack {
+                                Text("Custom")
+                                    .font(.caption)
+                                    .foregroundStyle(
+                                        selectedCustomTemplate != nil
+                                            ? .green : .secondary
+                                    )
+                                Spacer()
+                                Text(selectedCustomTemplate?.name ?? "None")
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                    .foregroundStyle(.primary)
+                            }
+                        }
                     }
 
                     // Division row — pushes to dedicated picker
@@ -182,16 +257,25 @@ struct TimerView: View {
 
     @ViewBuilder
     private func templateChip(_ value: RaceTemplate, label: String) -> some View {
-        let selected = template == value
+        let selected = builtInTemplate == value
         Button(label) {
             templateRaw = value.rawValue
+            customTemplateId = nil
             persistSetting(TimerDefaultsKey.template, value.rawValue)
+            persistOptionalString(TimerDefaultsKey.customTemplateId, nil)
         }
         .font(.caption)
         .frame(maxWidth: .infinity)
         .tint(selected ? .green : .gray)
         .buttonStyle(.borderedProminent)
         .controlSize(.small)
+    }
+
+    private func selectCustomTemplate(id: String) {
+        templateRaw = customTemplateRaw
+        customTemplateId = id
+        persistSetting(TimerDefaultsKey.template, customTemplateRaw)
+        persistOptionalString(TimerDefaultsKey.customTemplateId, id)
     }
 
     private func startRace() {
@@ -205,11 +289,18 @@ struct TimerView: View {
             if hk.permissionState == .notRequested {
                 _ = await hk.requestPermissions()
             }
-            vm.configure(
-                divisionKey: divisionKey,
-                template: template,
-                simulateRoxzone: simulateRoxzone
-            )
+            if let custom = selectedCustomTemplate {
+                vm.configure(
+                    customTemplate: custom,
+                    fallbackDivisionKey: divisionKey
+                )
+            } else {
+                vm.configure(
+                    divisionKey: divisionKey,
+                    template: builtInTemplate ?? .full,
+                    simulateRoxzone: simulateRoxzone
+                )
+            }
             await vm.start(countdownSeconds: watchCountdownSeconds)
             isStarting = false
         }
@@ -534,5 +625,62 @@ private struct DivisionPickerView: View {
         }
         .navigationTitle("Division")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+// MARK: - CustomTemplatePickerView
+
+/// Lists the user's saved race templates (phone-pushed). Tapping a row
+/// selects it and dismisses back to setup. Templates with no segments
+/// are filtered out — they'd produce an empty race and the watch has no
+/// way to fix that locally.
+private struct CustomTemplatePickerView: View {
+    let templates: [SavedRaceTemplate]
+    let selectedId: String?
+    let onSelect: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        List {
+            ForEach(templates.filter { !$0.segments.isEmpty }) { tmpl in
+                Button {
+                    onSelect(tmpl.id)
+                    dismiss()
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(tmpl.name)
+                                .lineLimit(1)
+                            Text(summary(for: tmpl))
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        if selectedId == tmpl.id {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(.green)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Custom")
+        .navigationBarTitleDisplayMode(.inline)
+        .overlay {
+            if templates.allSatisfy({ $0.segments.isEmpty }) {
+                ContentUnavailableView(
+                    "No templates",
+                    systemImage: "list.bullet.rectangle",
+                    description: Text("Save one on your iPhone to race it here.")
+                )
+            }
+        }
+    }
+
+    private func summary(for tmpl: SavedRaceTemplate) -> String {
+        let runs = tmpl.segments.filter { $0.segmentType == .run && $0.segmentSubtype != .roxzone }.count
+        let stations = tmpl.segments.filter { $0.segmentType == .station }.count
+        return "\(runs) runs · \(stations) stations"
     }
 }

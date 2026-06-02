@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/session";
 import { db } from "@/db";
-import { hyroxPracticeRaces, hyroxPracticeRaceSplits } from "@/db/schema";
+import {
+  hyroxPracticeRaces,
+  hyroxPracticeRaceSplits,
+  hyroxStationBenchmarks,
+} from "@/db/schema";
 import { eq, and, asc } from "drizzle-orm";
 
 // ---------------------------------------------------------------------------
@@ -134,11 +138,12 @@ export async function PATCH(
 }
 
 // ---------------------------------------------------------------------------
-// DELETE — race (splits cascade; benchmarks keep history via SET NULL).
+// DELETE — race (splits cascade; benchmarks keep history via SET NULL by
+// default, or are deleted when ?deleteBenchmarks=true).
 // ---------------------------------------------------------------------------
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const user = await getSessionUser();
@@ -147,15 +152,33 @@ export async function DELETE(
   }
 
   const { id } = await params;
+  const deleteBenchmarks =
+    new URL(request.url).searchParams.get("deleteBenchmarks") === "true";
 
-  const deleted = await db
-    .delete(hyroxPracticeRaces)
-    .where(
-      and(eq(hyroxPracticeRaces.id, id), eq(hyroxPracticeRaces.userId, user.id)),
-    )
-    .returning({ id: hyroxPracticeRaces.id });
+  const result = await db.transaction(async (tx) => {
+    if (deleteBenchmarks) {
+      await tx
+        .delete(hyroxStationBenchmarks)
+        .where(
+          and(
+            eq(hyroxStationBenchmarks.sourceRaceId, id),
+            eq(hyroxStationBenchmarks.userId, user.id),
+          ),
+        );
+    }
 
-  if (deleted.length === 0) {
+    return tx
+      .delete(hyroxPracticeRaces)
+      .where(
+        and(
+          eq(hyroxPracticeRaces.id, id),
+          eq(hyroxPracticeRaces.userId, user.id),
+        ),
+      )
+      .returning({ id: hyroxPracticeRaces.id });
+  });
+
+  if (result.length === 0) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 

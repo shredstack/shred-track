@@ -150,6 +150,34 @@ final class RaceTimerViewModel: ObservableObject {
         cleanupAfterRace()
     }
 
+    /// Configure the timer from a phone-synced custom template.
+    /// `template.divisionKey` is reused so HK pacing still has a sensible
+    /// run distance to compare against; if nil we fall back to the
+    /// currently-selected default. Segments come straight from the
+    /// template (no factory rebuild) so the watch races exactly what was
+    /// saved on the phone.
+    func configure(
+        customTemplate template: SavedRaceTemplate,
+        fallbackDivisionKey: String,
+        planSessionId: String? = nil
+    ) {
+        let divisionKey = template.divisionKey ?? fallbackDivisionKey
+        state = RaceState(
+            raceId: nil,
+            source: nil,
+            divisionKey: divisionKey,
+            template: "custom",
+            planSessionId: planSessionId,
+            segments: template.segments,
+            status: .idle
+        )
+        segmentElapsedMs = 0
+        totalElapsedMs = 0
+        countdownRemainingSec = 0
+        liveSegmentDistanceMeters = 0
+        cleanupAfterRace()
+    }
+
     /// Wipes per-race transient state so the next configure/start begins
     /// from a clean slate. Idempotent.
     private func cleanupAfterRace() {

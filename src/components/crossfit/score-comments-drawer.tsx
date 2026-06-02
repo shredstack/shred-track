@@ -307,9 +307,14 @@ const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>(
     const insertMention = useCallback(
       (member: MentionMember) => {
         const el = editorRef.current;
+        if (!el) return;
+        // Restore focus to the editor if a popover button click moved it.
+        // Without this the selection we read below may belong to <body>.
+        if (document.activeElement !== el) el.focus();
+
         const sel =
           typeof window !== "undefined" ? window.getSelection() : null;
-        if (!el || !sel || sel.rangeCount === 0) return;
+        if (!sel || sel.rangeCount === 0) return;
         const range = sel.getRangeAt(0);
         const container = range.endContainer;
         if (container.nodeType !== Node.TEXT_NODE) return;
@@ -336,16 +341,25 @@ const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>(
         chip.className = MENTION_CHIP_CLASS;
         chip.textContent = `@${member.username || member.name}`;
 
-        const space = document.createTextNode(" ");
-        replaceRange.insertNode(space);
-        replaceRange.insertNode(chip);
+        // NBSP after the chip so the caret has a stable anchor it can sit
+        // *inside* (offset 1). A normal space works for layout but iOS
+        // WebKit refuses to render a caret immediately after a
+        // contenteditable=false chip when the trailing position is the end
+        // of the editor's flow — typing then silently no-ops.
+        const space = document.createTextNode(" ");
+        const fragment = document.createDocumentFragment();
+        fragment.appendChild(chip);
+        fragment.appendChild(space);
+        replaceRange.insertNode(fragment);
 
+        // setStart(space, 1) — inside the text node, after the NBSP.
+        // setStartAfter(space) placed the caret past the text node entirely
+        // and broke further input on iOS.
         const newRange = document.createRange();
-        newRange.setStartAfter(space);
+        newRange.setStart(space, 1);
         newRange.collapse(true);
         sel.removeAllRanges();
         sel.addRange(newRange);
-        el.focus();
         fireChange();
       },
       [fireChange]
@@ -435,6 +449,15 @@ function CommentInput({
   const debouncedQuery = useDebouncedValue(editorState.mentionQuery ?? "", 150);
   const createComment = useCreateComment();
 
+  // Focus the editor once the drawer slide-in animation has settled
+  // (Sheet uses a 200ms transition). Focusing during the animation makes
+  // iOS WKWebView hold off on showing the keyboard until the user taps
+  // again, defeating the point of opening the drawer to comment.
+  useEffect(() => {
+    const t = setTimeout(() => editorRef.current?.focus(), 250);
+    return () => clearTimeout(t);
+  }, []);
+
   const { data: searchData } = useMentionSearch(
     editorState.mentionQuery !== null ? communityId : null,
     debouncedQuery,
@@ -479,11 +502,15 @@ function CommentInput({
               <button
                 key={m.userId}
                 type="button"
-                // Prevent the editor losing focus / its selection when the
-                // user taps a popover row — without this, mobile Safari
-                // collapses the range before insertMention can fire.
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => editorRef.current?.insertMention(m)}
+                // Insert in mousedown (before click → before focus moves to
+                // the button) so the editor's selection is still live.
+                // preventDefault keeps focus in the editor; on iOS WebKit
+                // doing insertion in onClick alone sometimes runs after the
+                // selection has collapsed.
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  editorRef.current?.insertMention(m);
+                }}
                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
               >
                 <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted">
@@ -553,6 +580,10 @@ export function ScoreCommentsDrawer({
       <SheetContent
         side="bottom"
         className="flex max-h-[85vh] flex-col gap-0 overflow-hidden data-[side=bottom]:rounded-t-2xl p-0"
+        // Suppress Base UI's default focus-first-focusable behavior — it
+        // would briefly focus the close button (showing a focus ring) before
+        // CommentInput's mount effect moves focus to the editor.
+        initialFocus={false}
       >
         <SheetHeader className="border-b border-border/40">
           <SheetTitle className="text-sm">

@@ -119,16 +119,34 @@ export function buildFullRaceSegments(
   return options?.simulateRoxzone ? insertRoxzoneSegments(segments) : segments;
 }
 
-/** Build a half race (4 runs + 4 stations, first half of the standard order) */
+/** Build a half race — all 8 runs + all 8 stations, every distance/rep
+ *  cut in half. Weights are unchanged (a 102 kg sled is still 102 kg —
+ *  you just push it half as far). Roxzone segments are inserted after,
+ *  so they keep their full 100 m transition distance. */
 export function buildHalfRaceSegments(
   divisionKey: DivisionKey,
   options?: BuildRaceOptions,
 ): RaceSegment[] {
-  // Build the half WITHOUT roxzone first, then insert — keeps the
-  // "no Roxzone after the final station" rule automatic.
   const full = buildFullRaceSegments(divisionKey);
-  const half = full.slice(0, 8).map((s) => ({ ...s, id: uid() }));
+  const half = full.map(halveSegment);
   return options?.simulateRoxzone ? insertRoxzoneSegments(half) : half;
+}
+
+function halveSegment(seg: RaceSegment): RaceSegment {
+  const out: RaceSegment = { ...seg, id: uid() };
+  if (typeof out.distanceMeters === "number" && out.distanceMeters > 0) {
+    const halved = Math.round(out.distanceMeters / 2);
+    out.distanceMeters = halved;
+    out.distance = formatHalvedDistance(halved);
+  }
+  if (typeof out.reps === "number" && out.reps > 0) {
+    out.reps = Math.round(out.reps / 2);
+  }
+  return out;
+}
+
+function formatHalvedDistance(meters: number): string {
+  return meters >= 1000 ? `${meters / 1000} km` : `${meters}m`;
 }
 
 /** Create a blank run segment */

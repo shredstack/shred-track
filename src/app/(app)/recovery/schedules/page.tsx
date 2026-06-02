@@ -66,6 +66,11 @@ export default function RecoverySchedulesPage() {
                         {formatDays(s.activeDaysOfWeek)}
                       </Badge>
                     )}
+                    {s.intervalDays && s.intervalDays >= 1 && (
+                      <Badge variant="outline" className="text-[10px]">
+                        Every {s.intervalDays} day{s.intervalDays === 1 ? "" : "s"}
+                      </Badge>
+                    )}
                     {s.isArchived && (
                       <Badge variant="outline" className="text-[10px]">
                         Archived

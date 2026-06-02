@@ -149,6 +149,10 @@ export interface RecoverySchedule {
   isActive: boolean;
   // null = displays every day; array of 0..6 (0=Sun) restricts to those days.
   activeDaysOfWeek: number[] | null;
+  // "Every N days" recurrence. Set together: both null = no interval mode;
+  // both set = show only every intervalDays days starting on intervalStartsOn.
+  intervalDays: number | null;
+  intervalStartsOn: string | null;
   createdAt: string;
   updatedAt: string;
   slots?: RecoveryScheduleSlot[];
