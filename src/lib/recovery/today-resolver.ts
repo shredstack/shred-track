@@ -362,8 +362,18 @@ async function pickChoices(
       )
       .orderBy(desc(recoverySchedules.updatedAt));
 
-    const dow = new Date(`${date}T00:00:00`).getDay();
+    const target = new Date(`${date}T00:00:00`);
+    const dow = target.getDay();
     const matched = personals.filter((p) => {
+      // Interval recurrence (every N days) — takes precedence over the
+      // day-of-week filter when set. Show only on dates that land on the
+      // cadence boundary, starting on or after intervalStartsOn.
+      if (p.intervalDays && p.intervalStartsOn) {
+        const start = new Date(`${p.intervalStartsOn}T00:00:00`);
+        const days = Math.floor((target.getTime() - start.getTime()) / 86400000);
+        if (days < 0) return false;
+        return days % p.intervalDays === 0;
+      }
       const days = p.activeDaysOfWeek as number[] | null;
       if (days == null || days.length === 0) return true; // null = every day
       return days.includes(dow);

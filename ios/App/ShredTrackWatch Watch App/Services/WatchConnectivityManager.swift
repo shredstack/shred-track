@@ -287,6 +287,7 @@ extension WatchConnectivityManager: WCSessionDelegate {
         if ctx["signOut"] as? Bool == true {
             AuthSession.shared.clear()
             TodaySnapshotStore.shared.clear()
+            RaceTemplatesStore.shared.clear()
         }
 
         // Opportunistic Today snapshot push from the phone (spec §3.2
@@ -296,6 +297,14 @@ extension WatchConnectivityManager: WCSessionDelegate {
         // of the user logging on the iPhone.
         if let snapshotJson = ctx["todaySnapshot"] as? String {
             TodaySnapshotStore.shared.ingestFromApplicationContext(snapshotJson)
+        }
+
+        // Saved HYROX race templates push from the phone. Mirrors the
+        // user's /api/hyrox/race-templates list onto the watch so the
+        // race-timer setup screen can offer a picker. Watch never
+        // writes to this store — phone owns the truth.
+        if let raceTemplatesJson = ctx["raceTemplates"] as? String {
+            RaceTemplatesStore.shared.ingestFromApplicationContext(raceTemplatesJson)
         }
 
         // Phone-initiated race start (bidirectional sync). The phone

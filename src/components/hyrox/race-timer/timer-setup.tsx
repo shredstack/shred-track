@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import {
   Plus,
@@ -13,11 +13,14 @@ import {
   Save,
   X,
   Hourglass,
+  Users,
+  Star,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -46,8 +49,11 @@ import {
   useRaceTemplates,
   useCreateRaceTemplate,
   useDeleteRaceTemplate,
+  useCloneRaceTemplate,
   type RaceTemplate as SavedRaceTemplate,
+  type GymRaceTemplate,
 } from "@/hooks/useRaceTemplates";
+import { useGymContext } from "@/hooks/useGymContext";
 import {
   useCountdownPreference,
   type CountdownSeconds,
@@ -120,8 +126,13 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
   const templatesQuery = useRaceTemplates();
   const createTemplate = useCreateRaceTemplate();
   const deleteTemplate = useDeleteRaceTemplate();
+  const cloneTemplate = useCloneRaceTemplate();
+  const gymContext = useGymContext();
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [templateName, setTemplateName] = useState("");
+  const [shareWithGym, setShareWithGym] = useState(false);
+  const [shareCommunityId, setShareCommunityId] = useState<string | null>(null);
+  const [templatesTab, setTemplatesTab] = useState<"mine" | "gym">("mine");
 
   // Hydrate persisted Roxzone preference on mount and rebuild segments
   // for the current preset. The deps are intentionally empty — we only
@@ -221,7 +232,7 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
   }, [divisionKey, applyTemplate]);
 
   const handleLoadTemplate = useCallback(
-    (saved: SavedRaceTemplate) => {
+    (saved: SavedRaceTemplate, opts?: { toastMessage?: string }) => {
       if (saved.divisionKey) {
         setDivisionKey(saved.divisionKey as DivisionKey);
       }
@@ -232,15 +243,47 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
       );
       setTemplate("custom");
       setShowAddMenu(false);
-      toast.success(`Loaded "${saved.name}"`);
+      toast.success(opts?.toastMessage ?? `Loaded "${saved.name}"`);
     },
     [],
   );
 
+  // Eligible gyms for sharing/picking — active memberships only.
+  // Sorted oldest-first so the default selection is the user's first gym
+  // (rare multi-gym case: that's a sensible default the user can override).
+  const shareableGyms = useMemo(() => {
+    const all = gymContext.data?.memberships ?? [];
+    return all
+      .filter((m) => m.isActive)
+      .slice()
+      .sort((a, b) => a.joinedAt.localeCompare(b.joinedAt));
+  }, [gymContext.data]);
+
   const handleOpenSaveDialog = useCallback(() => {
     setTemplateName("");
+    setShareWithGym(false);
+    setShareCommunityId(shareableGyms[0]?.communityId ?? null);
     setSaveDialogOpen(true);
-  }, []);
+  }, [shareableGyms]);
+
+  const handleCloneGymTemplate = useCallback(
+    async (gymTpl: GymRaceTemplate) => {
+      try {
+        const clone = await cloneTemplate.mutateAsync(gymTpl.id);
+        // Move to Mine so the user sees the clone land in their list,
+        // then load it into the timer for instant use.
+        setTemplatesTab("mine");
+        handleLoadTemplate(clone, {
+          toastMessage: `Saved "${gymTpl.name}" to your templates`,
+        });
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Couldn't save that template";
+        toast.error(message);
+      }
+    },
+    [cloneTemplate, handleLoadTemplate],
+  );
 
   const handleSaveTemplate = useCallback(async () => {
     const name = templateName.trim();
@@ -263,19 +306,31 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
         ...(typeof s.weightKg === "number" ? { weightKg: s.weightKg } : {}),
         ...(s.weightLabel ? { weightLabel: s.weightLabel } : {}),
       }));
+      const communityId = shareWithGym ? shareCommunityId : null;
       await createTemplate.mutateAsync({
         name,
         divisionKey,
         simulateRoxzone,
         segments: stored,
+        communityId,
       });
       setSaveDialogOpen(false);
-      toast.success(`Saved "${name}"`);
+      toast.success(
+        communityId ? `Saved "${name}" and shared with gym` : `Saved "${name}"`,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Couldn't save template";
       toast.error(message);
     }
-  }, [templateName, segments, divisionKey, simulateRoxzone, createTemplate]);
+  }, [
+    templateName,
+    segments,
+    divisionKey,
+    simulateRoxzone,
+    createTemplate,
+    shareWithGym,
+    shareCommunityId,
+  ]);
 
   const handleDeleteTemplate = useCallback(
     async (id: string, name: string) => {
@@ -289,7 +344,9 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
     [deleteTemplate],
   );
 
-  const savedTemplates = templatesQuery.data ?? [];
+  const savedTemplates = templatesQuery.data?.mine ?? [];
+  const gymTemplates = templatesQuery.data?.gym ?? [];
+  const hasShareableGym = shareableGyms.length > 0;
 
   const totalSegments = segments.length;
   const runCount = segments.filter((s) => s.segmentType === "run").length;
@@ -346,58 +403,131 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
         ))}
       </div>
 
-      {/* Saved templates — only render the row when there's something
-          to show or when the user is on Custom and could save one. */}
-      {(savedTemplates.length > 0 || template === "custom") && (
+      {/* Saved templates — Mine + Gym tabs. The card renders whenever the
+          user has anything to pick from or is on Custom (so the Save
+          button is reachable). Users with no gym membership only see
+          Mine; the Gym tab is hidden entirely. */}
+      {(savedTemplates.length > 0 ||
+        gymTemplates.length > 0 ||
+        template === "custom") && (
         <Card>
           <CardContent className="py-3 flex flex-col gap-2">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5">
-                <Bookmark className="h-3.5 w-3.5 text-muted-foreground" />
-                <span className="text-xs font-medium">My templates</span>
+            <Tabs
+              value={templatesTab}
+              onValueChange={(v) => setTemplatesTab(v as "mine" | "gym")}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <TabsList className="h-7">
+                  <TabsTrigger value="mine" className="text-[11px] px-2.5">
+                    <Bookmark className="h-3 w-3" />
+                    Mine
+                  </TabsTrigger>
+                  {hasShareableGym && (
+                    <TabsTrigger value="gym" className="text-[11px] px-2.5">
+                      <Users className="h-3 w-3" />
+                      Gym{gymTemplates.length > 0 ? ` (${gymTemplates.length})` : ""}
+                    </TabsTrigger>
+                  )}
+                </TabsList>
+                {templatesTab === "mine" &&
+                  template === "custom" &&
+                  segments.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="gap-1 h-7 text-[11px]"
+                      onClick={handleOpenSaveDialog}
+                    >
+                      <Save className="h-3 w-3" />
+                      Save current
+                    </Button>
+                  )}
               </div>
-              {template === "custom" && segments.length > 0 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="gap-1 h-7 text-[11px]"
-                  onClick={handleOpenSaveDialog}
-                >
-                  <Save className="h-3 w-3" />
-                  Save current
-                </Button>
-              )}
-            </div>
 
-            {savedTemplates.length === 0 ? (
-              <p className="text-[10px] text-muted-foreground">
-                Customize the segments below, then tap Save current to reuse
-                this layout later.
-              </p>
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {savedTemplates.map((tpl) => (
-                  <div
-                    key={tpl.id}
-                    className="group inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.03] pl-3 pr-1 py-1 text-[11px] gap-1 hover:bg-white/[0.06] transition-colors"
-                  >
-                    <button
-                      onClick={() => handleLoadTemplate(tpl)}
-                      className="font-medium hover:text-primary transition-colors"
-                    >
-                      {tpl.name}
-                    </button>
-                    <button
-                      onClick={() => handleDeleteTemplate(tpl.id, tpl.name)}
-                      aria-label={`Delete template ${tpl.name}`}
-                      className="ml-0.5 inline-flex items-center justify-center h-5 w-5 rounded-full text-muted-foreground hover:bg-red-500/15 hover:text-red-300 transition-colors"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
+              <TabsContent value="mine" className="mt-2">
+                {savedTemplates.length === 0 ? (
+                  <p className="text-[10px] text-muted-foreground">
+                    Customize the segments below, then tap Save current to reuse
+                    this layout later.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {savedTemplates.map((tpl) => (
+                      <div
+                        key={tpl.id}
+                        className="group inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.03] pl-3 pr-1 py-1 text-[11px] gap-1 hover:bg-white/[0.06] transition-colors"
+                      >
+                        <button
+                          onClick={() => handleLoadTemplate(tpl)}
+                          className="font-medium hover:text-primary transition-colors flex items-center gap-1"
+                        >
+                          {tpl.name}
+                          {tpl.communityId && (
+                            <Users
+                              className="h-2.5 w-2.5 text-primary"
+                              aria-label="Shared with gym"
+                            />
+                          )}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteTemplate(tpl.id, tpl.name)}
+                          aria-label={`Delete template ${tpl.name}`}
+                          className="ml-0.5 inline-flex items-center justify-center h-5 w-5 rounded-full text-muted-foreground hover:bg-red-500/15 hover:text-red-300 transition-colors"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
+                )}
+              </TabsContent>
+
+              {hasShareableGym && (
+                <TabsContent value="gym" className="mt-2">
+                  {gymTemplates.length === 0 ? (
+                    <p className="text-[10px] text-muted-foreground">
+                      No shared templates yet. Toggle “Share with gym” when you
+                      save one and it’ll show up here for everyone.
+                    </p>
+                  ) : (
+                    <div className="flex flex-col gap-1.5">
+                      {gymTemplates.map((tpl) => (
+                        <button
+                          key={tpl.id}
+                          onClick={() => handleCloneGymTemplate(tpl)}
+                          disabled={cloneTemplate.isPending}
+                          className="flex items-center justify-between gap-2 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-left hover:bg-white/[0.06] transition-colors disabled:opacity-50"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              {tpl.authorIsCoach && (
+                                <Star
+                                  className="h-3 w-3 text-amber-300 shrink-0"
+                                  aria-label="Coach"
+                                />
+                              )}
+                              <span className="text-xs font-medium truncate">
+                                {tpl.name}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                              {tpl.authorName.split(" ")[0]}
+                              {tpl.authorIsCoach ? " · Coach" : ""}
+                              {" · "}
+                              {tpl.segments.length} segments
+                              {tpl.simulateRoxzone ? " · Roxzone" : ""}
+                            </p>
+                          </div>
+                          <span className="text-[10px] text-primary shrink-0">
+                            {cloneTemplate.isPending ? "Saving…" : "Use"}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </TabsContent>
+              )}
+            </Tabs>
           </CardContent>
         </Card>
       )}
@@ -583,24 +713,71 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
               you can reuse this layout with one tap.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-2">
-            <label htmlFor="template-name" className="text-xs font-medium">
-              Name
-            </label>
-            <Input
-              id="template-name"
-              value={templateName}
-              onChange={(e) => setTemplateName(e.target.value)}
-              placeholder="e.g. 200m runs, no sled"
-              maxLength={60}
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  handleSaveTemplate();
-                }
-              }}
-            />
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2">
+              <label htmlFor="template-name" className="text-xs font-medium">
+                Name
+              </label>
+              <Input
+                id="template-name"
+                value={templateName}
+                onChange={(e) => setTemplateName(e.target.value)}
+                placeholder="e.g. 200m runs, no sled"
+                maxLength={60}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleSaveTemplate();
+                  }
+                }}
+              />
+            </div>
+
+            {hasShareableGym && (
+              <div className="flex flex-col gap-2 rounded-lg bg-white/[0.03] border border-white/[0.06] px-3 py-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <Users className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="text-xs font-medium">
+                        Share with gym
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Other members can save a copy to use on their phone.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={shareWithGym}
+                    onCheckedChange={setShareWithGym}
+                    aria-label="Share with gym"
+                  />
+                </div>
+
+                {/* Multi-gym picker — only shown when sharing AND the user
+                    belongs to more than one gym. Defaults to their oldest
+                    membership (set when the dialog opens). */}
+                {shareWithGym && shareableGyms.length > 1 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {shareableGyms.map((m) => (
+                      <button
+                        key={m.communityId}
+                        type="button"
+                        onClick={() => setShareCommunityId(m.communityId)}
+                        className={`rounded-full border px-3 py-1 text-[11px] transition-colors ${
+                          shareCommunityId === m.communityId
+                            ? "border-primary/40 bg-primary/15 text-primary"
+                            : "border-white/[0.08] bg-white/[0.03] text-muted-foreground hover:bg-white/[0.06]"
+                        }`}
+                      >
+                        {m.communityName}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button

@@ -98,6 +98,12 @@ export default function ScheduleDetailPage({
                 {formatDays(data.activeDaysOfWeek)}
               </Badge>
             )}
+            {data.intervalDays && data.intervalDays >= 1 && (
+              <Badge variant="outline" className="text-[10px]">
+                Every {data.intervalDays} day{data.intervalDays === 1 ? "" : "s"}
+                {data.intervalStartsOn ? ` from ${data.intervalStartsOn}` : ""}
+              </Badge>
+            )}
           </div>
           {data.description && (
             <p className="text-sm text-muted-foreground mt-2">{data.description}</p>

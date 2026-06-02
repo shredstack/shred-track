@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import {
   usePracticeRace,
   usePracticeRaces,
@@ -55,6 +56,7 @@ export default function RaceDetailPage({
 
   const [compareTo, setCompareTo] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [alsoDeleteBenchmarks, setAlsoDeleteBenchmarks] = useState(false);
   const [raceTypePending, setRaceTypePending] = useState(false);
 
   const compareCandidates = useMemo(() => {
@@ -131,7 +133,10 @@ export default function RaceDetailPage({
   };
 
   const handleDelete = async () => {
-    await deleteRace.mutateAsync(race.id);
+    await deleteRace.mutateAsync({
+      id: race.id,
+      deleteBenchmarks: alsoDeleteBenchmarks,
+    });
     router.push("/hyrox/race-tools/races");
   };
 
@@ -239,15 +244,35 @@ export default function RaceDetailPage({
         Delete race
       </Button>
 
-      <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+      <Dialog
+        open={confirmDelete}
+        onOpenChange={(open) => {
+          setConfirmDelete(open);
+          if (!open) setAlsoDeleteBenchmarks(false);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete this race?</DialogTitle>
             <DialogDescription>
-              Splits will be removed but station best times will remain in your
-              history. This cannot be undone.
+              {alsoDeleteBenchmarks
+                ? "Splits AND station best times derived from this race will be removed. This cannot be undone."
+                : "Splits will be removed but station best times will remain in your history. This cannot be undone."}
             </DialogDescription>
           </DialogHeader>
+          <label className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-xs cursor-pointer">
+            <span className="flex flex-col gap-0.5">
+              <span className="font-medium">Also delete station best times</span>
+              <span className="text-muted-foreground">
+                Use this for cleaning up test races.
+              </span>
+            </span>
+            <Switch
+              checked={alsoDeleteBenchmarks}
+              onCheckedChange={setAlsoDeleteBenchmarks}
+              disabled={deleteRace.isPending}
+            />
+          </label>
           <DialogFooter>
             <Button
               variant="outline"
