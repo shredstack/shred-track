@@ -35,12 +35,17 @@ import {
   useTrackDayDelete,
   type TrackDayRow,
 } from "@/hooks/useTracks";
+import type { TrackKind } from "@/types/programming-tracks";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   communityId: string;
   trackId: string;
+  // Kind of the parent track. Forwarded to the Smart Builder so the title
+  // suggestion knows it's authoring a monthly-challenge day vs a custom
+  // track WOD vs a CAP day, etc.
+  trackKind: TrackKind;
   date: string;
   existingDay: TrackDayRow | null;
 }
@@ -50,6 +55,7 @@ export function TrackDayEditorSheet({
   onOpenChange,
   communityId,
   trackId,
+  trackKind,
   date,
   existingDay,
 }: Props) {
@@ -291,6 +297,7 @@ export function TrackDayEditorSheet({
                 onCancel={() => onOpenChange(false)}
                 defaultWorkoutDate={date}
                 initialForm={builderInitialForm ?? undefined}
+                context={{ trackKind }}
                 saveLabel={
                   linkedWorkoutId
                     ? updateWorkout.isPending

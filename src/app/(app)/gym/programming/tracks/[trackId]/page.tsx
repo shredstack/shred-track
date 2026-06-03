@@ -39,7 +39,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useIsFeatureOn } from "@/hooks/useFeatureFlag";
-import type { TrackScoringConfig } from "@/types/programming-tracks";
+import type { TrackScoringConfig, TrackKind } from "@/types/programming-tracks";
 
 export default function TrackDetailPage({
   params,
@@ -384,6 +384,7 @@ export default function TrackDetailPage({
       <TrackCalendar
         communityId={communityId}
         trackId={trackId}
+        trackKind={track.kind as TrackKind}
         startsOn={track.startsOn}
         endsOn={track.endsOn}
         days={days}
