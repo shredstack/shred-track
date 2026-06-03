@@ -326,6 +326,22 @@ export type WorkoutScopeFilter =
   | { mode: "personal" }
   | { mode: "gym"; communityId: string };
 
+function workoutsByDateScopeKey(scope: WorkoutScopeFilter): string {
+  return scope.mode === "gym" ? `gym:${scope.communityId}` : scope.mode;
+}
+
+/**
+ * Stable React Query key for the workouts-by-date query. Exported so mutation
+ * paths in other components (e.g. the inline gym-admin day programmer) can
+ * invalidate it without copy-pasting the tuple shape.
+ */
+export function workoutsByDateKey(
+  date: string,
+  scope: WorkoutScopeFilter
+): readonly unknown[] {
+  return ["workouts", "by-date", date, workoutsByDateScopeKey(scope)];
+}
+
 /**
  * Fetch workouts for a single date, optionally scoped to a gym or personal-only.
  *
@@ -342,10 +358,8 @@ export function useWorkoutsByDate(
   scope: WorkoutScopeFilter = { mode: "all" },
   options?: { enabled?: boolean }
 ) {
-  const scopeKey =
-    scope.mode === "gym" ? `gym:${scope.communityId}` : scope.mode;
   return useQuery({
-    queryKey: ["workouts", "by-date", date, scopeKey],
+    queryKey: workoutsByDateKey(date, scope),
     enabled: options?.enabled ?? true,
     queryFn: async () => {
       const params = new URLSearchParams();

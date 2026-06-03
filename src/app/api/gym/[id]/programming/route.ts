@@ -10,7 +10,7 @@
 // preview without round-tripping per day.
 
 import { NextRequest, NextResponse } from "next/server";
-import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   crossfitWorkoutBlocks,
@@ -19,6 +19,7 @@ import {
   crossfitWorkouts,
   movements,
   programmingReleases,
+  scores,
   workoutSessions,
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
@@ -211,6 +212,28 @@ export async function GET(
         .where(inArray(crossfitWorkoutBlocks.crossfitWorkoutPartId, partIds))
         .orderBy(asc(crossfitWorkoutBlocks.orderIndex))
     : [];
+
+  // Per-session score counts. Drives the "X athletes have already logged
+  // scores" confirmation when a coach edits or deletes a section. We count
+  // by workout_session_id (the unified-schema FK); legacy workout_part-only
+  // rows aren't surfaced here, but the section reader treats sections as
+  // workout_sessions rows so the legacy gap doesn't matter for the
+  // confirmation prompt.
+  const sessionIds = sessionRows.map((s) => s.id);
+  const scoreCountRows = sessionIds.length
+    ? await db
+        .select({
+          sessionId: scores.workoutSessionId,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(scores)
+        .where(inArray(scores.workoutSessionId, sessionIds))
+        .groupBy(scores.workoutSessionId)
+    : [];
+  const scoreCountBySession = new Map<string, number>();
+  for (const row of scoreCountRows) {
+    if (row.sessionId) scoreCountBySession.set(row.sessionId, row.count);
+  }
   const blocksByPart = new Map<string, typeof blockRows>();
   for (const b of blockRows) {
     const list = blocksByPart.get(b.crossfitWorkoutPartId) ?? [];
@@ -353,6 +376,7 @@ export async function GET(
         scoreType: s.scoreType,
         reviewedAt: s.reviewedAt,
         sourceTrackId: s.sourceTrackId,
+        scoreCount: scoreCountBySession.get(s.id) ?? 0,
         parts: s.crossfitWorkoutId
           ? (partsByTemplate.get(s.crossfitWorkoutId) ?? []).map(mapPart)
           : [],
