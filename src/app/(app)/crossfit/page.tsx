@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Plus, Zap, Trophy, Loader2, Search, Sparkles } from "lucide-react";
+import { Plus, Zap, Trophy, Loader2, Search, Sparkles, Pencil, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -117,6 +117,15 @@ function CrossfitPageBody() {
   const hasMounted = useHasMounted();
   const [selectedDate, setSelectedDate] = useState(
     () => parseLocalDate(searchParams.get("date")) ?? new Date()
+  );
+  // Gym-admin sub-mode within the gym view. "edit" mounts the inline
+  // programming editor; "athlete" renders the same read-only day card
+  // members see (with Log Score + Leaderboard wired up) so the coach can
+  // sanity-check their programming and log their own score without
+  // leaving the tab. Same shared cache, so edits in "edit" mode show up
+  // immediately after toggling to "athlete" mode.
+  const [programmingMode, setProgrammingMode] = useState<"edit" | "athlete">(
+    "edit"
   );
   const [showAddWorkout, setShowAddWorkout] = useState(false);
   const [editingWorkoutId, setEditingWorkoutId] = useState<string | null>(null);
@@ -638,13 +647,49 @@ function CrossfitPageBody() {
         </div>
       )}
 
-      {/* Gym admins/coaches get an inline editable day card right under the
-          info banner — same data model and same endpoints the week editor
-          uses, scoped to the selected date. We render this *instead of*
-          the read-only `ProgrammedWorkoutDay` for the same date (see spec
-          §1 — duplicating the read-only and editable surfaces invites
-          out-of-sync UX). */}
+      {/* Gym admins/coaches get an Edit / View-as-athlete toggle so they
+          can drop back to the member's read-only card (with Log Score +
+          Leaderboard wired up) when they want to sanity-check their
+          programming or log their own score, without leaving the tab.
+          Same shared cache, so flipping back to Edit shows the same
+          state without a refetch. */}
       {canProgramHere && (
+        <div className="flex items-center gap-1.5 rounded-lg border border-white/[0.06] bg-white/[0.02] p-1">
+          <button
+            type="button"
+            onClick={() => setProgrammingMode("edit")}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              programmingMode === "edit"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-white/[0.04]"
+            }`}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={() => setProgrammingMode("athlete")}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              programmingMode === "athlete"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-white/[0.04]"
+            }`}
+          >
+            <Eye className="h-3.5 w-3.5" />
+            View as athlete
+          </button>
+        </div>
+      )}
+
+      {/* Inline editable day card — same data model and same endpoints
+          the week editor uses, scoped to the selected date. We render
+          this *instead of* the read-only `ProgrammedWorkoutDay` for the
+          same date when the coach is in edit mode (see spec §1 —
+          duplicating the read-only and editable surfaces invites
+          out-of-sync UX). The athlete-view toggle below falls back to
+          the member layout. */}
+      {canProgramHere && programmingMode === "edit" && (
         <GymAdminDayProgrammer
           communityId={activeMembership!.communityId}
           communityName={activeMembership!.communityName}
@@ -669,10 +714,12 @@ function CrossfitPageBody() {
       ) : (
         <>
           {/* Hide the read-only programmed workout cards when the inline
-              editor is mounted — they describe the same data the day card
-              above already shows. Track day cards and the empty state
-              still render below. */}
-          {!canProgramHere && workouts.map((workout) => {
+              editor is mounted (edit mode) — they describe the same data
+              the day card above already shows. In athlete-view mode the
+              coach drops back to the member layout so they get Log Score
+              + Leaderboard. Track day cards and the empty state still
+              render below in both modes. */}
+          {(!canProgramHere || programmingMode === "athlete") && workouts.map((workout) => {
             const editable = canEditWorkout({
               createdBy: workout.createdBy,
               communityId: workout.communityId ?? null,
@@ -822,10 +869,11 @@ function CrossfitPageBody() {
               ))}
 
           {/* Suppress the "No workouts" card when the inline programmer is
-              up — the day card has its own placeholder rows
+              up (edit mode) — the day card has its own placeholder rows
               (warm-up → stretching), and showing both at once would
-              double up on emptiness. */}
-          {!canProgramHere &&
+              double up on emptiness. In athlete-view mode the coach sees
+              the member empty state. */}
+          {(!canProgramHere || programmingMode === "athlete") &&
             workouts.length === 0 &&
             myTrackDays.length === 0 && (
               <Card className="border-dashed border-white/[0.06]">
