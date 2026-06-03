@@ -12,6 +12,7 @@ import {
 import { and, eq, desc, asc } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
+import { aggregateRoundDurations } from "@/lib/crossfit/round-aggregation";
 import { invalidateCrossfitInsightsCache } from "@/lib/crossfit/insights/cache";
 import type { SetEntry } from "@/types/crossfit";
 import { computeScoreEstimate } from "@/lib/calories/orchestrator";
@@ -76,33 +77,6 @@ interface ScorePostBody {
   movementDetails?: MovementDetailInput[];
   // Legacy name used by client before multi-part landed.
   movementScalings?: MovementDetailInput[];
-}
-
-// Compute the aggregated score per the part's roundScoreAggregation. For
-// 'average', we round to the nearest whole second when writing to
-// scores.timeSeconds — the un-rounded per-round array is preserved in
-// scores.roundDurationsSeconds for display.
-function aggregateRoundDurations(
-  durations: number[],
-  aggregation: "slowest" | "fastest" | "sum" | "average" | null | undefined
-): number {
-  const sanitized = durations.map((n) =>
-    Number.isFinite(n) && n >= 0 ? Math.round(n) : 0
-  );
-  if (sanitized.length === 0) return 0;
-  switch (aggregation ?? "slowest") {
-    case "fastest":
-      return Math.min(...sanitized);
-    case "sum":
-      return sanitized.reduce((a, b) => a + b, 0);
-    case "average":
-      return Math.round(
-        sanitized.reduce((a, b) => a + b, 0) / sanitized.length
-      );
-    case "slowest":
-    default:
-      return Math.max(...sanitized);
-  }
 }
 
 // GET /api/scores — list user's scores
@@ -317,9 +291,13 @@ export async function POST(req: NextRequest) {
       .limit(1);
 
     if (partRow?.workoutType === "timed_rounds") {
+      // Per-round times must be strictly positive: a 0 means the round
+      // didn't happen, not a real result. Mirrors the client's filter so
+      // the displayed live aggregate matches what the server stores.
       const supplied = Array.isArray(body.roundDurationsSeconds)
         ? body.roundDurationsSeconds.filter(
-            (n): n is number => typeof n === "number" && Number.isFinite(n)
+            (n): n is number =>
+              typeof n === "number" && Number.isFinite(n) && n > 0
           )
         : null;
       if (supplied && supplied.length > 0) {
@@ -327,14 +305,12 @@ export async function POST(req: NextRequest) {
         if (supplied.length !== expectedRounds) {
           return NextResponse.json(
             {
-              error: `roundDurationsSeconds.length (${supplied.length}) must equal part.rounds (${expectedRounds})`,
+              error: `roundDurationsSeconds.length (${supplied.length}) must equal part.rounds (${expectedRounds}); each round must be a positive number of seconds`,
             },
             { status: 400 }
           );
         }
-        timedRoundDurations = supplied.map((n) =>
-          Math.max(0, Math.round(n))
-        );
+        timedRoundDurations = supplied.map((n) => Math.round(n));
         timedRoundsAggregate = aggregateRoundDurations(
           timedRoundDurations,
           partRow.roundScoreAggregation as

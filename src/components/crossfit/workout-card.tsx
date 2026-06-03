@@ -304,9 +304,6 @@ function ScoreRow({
   );
 }
 
-// Returns the "details" portion of a prescription (everything after the
-// movement name). All formatting flows through the single source of
-// truth in `lib/crossfit/prescription.ts`. The reps prefix is filtered
 // Per-round splits for a timed_rounds score. Highlights the round that
 // determined the aggregate (slowest → max; fastest → min). Sum and average
 // have no single "winning" round so no highlight is rendered.

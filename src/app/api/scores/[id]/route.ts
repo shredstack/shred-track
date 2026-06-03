@@ -9,6 +9,7 @@ import {
 import { eq, and } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
+import { aggregateRoundDurations } from "@/lib/crossfit/round-aggregation";
 import { invalidateCrossfitInsightsCache } from "@/lib/crossfit/insights/cache";
 import type { SetEntry } from "@/types/crossfit";
 import { computeScoreEstimate } from "@/lib/calories/orchestrator";
@@ -29,32 +30,6 @@ interface MovementDetailInput {
   actualDurationSecondsPerRound?: number[];
   actualWeightLbsPerRound?: number[];
   notes?: string;
-}
-
-// Mirror of the helper in /api/scores/route.ts — kept in sync because both
-// the create (POST) and update (PUT) paths must compute the same aggregate
-// from the per-round array.
-function aggregateRoundDurations(
-  durations: number[],
-  aggregation: "slowest" | "fastest" | "sum" | "average" | null | undefined
-): number {
-  const sanitized = durations.map((n) =>
-    Number.isFinite(n) && n >= 0 ? Math.round(n) : 0
-  );
-  if (sanitized.length === 0) return 0;
-  switch (aggregation ?? "slowest") {
-    case "fastest":
-      return Math.min(...sanitized);
-    case "sum":
-      return sanitized.reduce((a, b) => a + b, 0);
-    case "average":
-      return Math.round(
-        sanitized.reduce((a, b) => a + b, 0) / sanitized.length
-      );
-    case "slowest":
-    default:
-      return Math.max(...sanitized);
-  }
 }
 
 // PUT /api/scores/[id] — update a score (and replace movement details)
@@ -169,10 +144,13 @@ export async function PUT(
       }
     }
     if (partRow?.workoutType === "timed_rounds") {
+      // Per-round times must be strictly positive: a 0 means the round
+      // didn't happen, not a real result. Mirrors the client's filter so
+      // the displayed live aggregate matches what the server stores.
       const supplied = Array.isArray(body.roundDurationsSeconds)
         ? body.roundDurationsSeconds.filter(
             (n: unknown): n is number =>
-              typeof n === "number" && Number.isFinite(n)
+              typeof n === "number" && Number.isFinite(n) && n > 0
           )
         : null;
       if (supplied && supplied.length > 0) {
@@ -180,14 +158,12 @@ export async function PUT(
         if (supplied.length !== expectedRounds) {
           return NextResponse.json(
             {
-              error: `roundDurationsSeconds.length (${supplied.length}) must equal part.rounds (${expectedRounds})`,
+              error: `roundDurationsSeconds.length (${supplied.length}) must equal part.rounds (${expectedRounds}); each round must be a positive number of seconds`,
             },
             { status: 400 }
           );
         }
-        const rounded = supplied.map((n: number) =>
-          Math.max(0, Math.round(n))
-        );
+        const rounded = supplied.map((n: number) => Math.round(n));
         timedRoundDurations = rounded;
         timedRoundsAggregate = aggregateRoundDurations(
           rounded,
