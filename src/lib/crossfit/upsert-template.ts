@@ -91,6 +91,15 @@ export type TemplatePartInput = {
   rounds?: number | null;
   structure?: string | null;
   scoreType?: "reps" | "load" | null;
+  // Timed Rounds — aggregation strategy + optional per-round window
+  // (seconds, or mm:ss-style string the server parses).
+  roundScoreAggregation?:
+    | "slowest"
+    | "fastest"
+    | "sum"
+    | "average"
+    | null;
+  roundWindowSeconds?: number | string | null;
   notes?: string | null;
   movements: TemplatePartMovementInput[];
   blocks?: TemplatePartBlockInput[];
@@ -313,6 +322,14 @@ export function buildFingerprintInput(
       ),
       sideCadenceOpenEnded: !!p.sideCadenceOpenEnded,
       scoreType: p.scoreType ?? null,
+      roundScoreAggregation:
+        p.workoutType === "timed_rounds"
+          ? p.roundScoreAggregation ?? "slowest"
+          : null,
+      roundWindowSeconds:
+        p.workoutType === "timed_rounds"
+          ? toDurationSecondsOrNull(p.roundWindowSeconds ?? null)
+          : null,
       movements,
     };
   });
@@ -476,6 +493,19 @@ export async function insertTemplateParts(
       }
     }
 
+    if (p.workoutType === "timed_rounds") {
+      if (!p.rounds || toIntOrNull(p.rounds) == null) {
+        throw new Error(
+          "Timed Rounds workouts need a number of rounds. Set the rounds field (e.g. 5)."
+        );
+      }
+      if (p.roundScoreAggregation === null) {
+        throw new Error(
+          "Timed Rounds workouts need a score aggregation (slowest / fastest / sum / average)."
+        );
+      }
+    }
+
     const [part] = await tx
       .insert(crossfitWorkoutParts)
       .values({
@@ -497,6 +527,14 @@ export async function insertTemplateParts(
         rounds: toIntOrNull(p.rounds ?? null),
         structure: p.structure ?? null,
         scoreType: p.scoreType ?? null,
+        roundScoreAggregation:
+          p.workoutType === "timed_rounds"
+            ? p.roundScoreAggregation ?? "slowest"
+            : null,
+        roundWindowSeconds:
+          p.workoutType === "timed_rounds"
+            ? toDurationSecondsOrNull(p.roundWindowSeconds ?? null)
+            : null,
         notes: p.notes ?? null,
       })
       .returning({ id: crossfitWorkoutParts.id });

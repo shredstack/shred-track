@@ -85,6 +85,11 @@ export function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
         rounds: p.rounds ? String(p.rounds) : "",
         structure: p.structure,
         scoreType: p.scoreType ?? undefined,
+        roundScoreAggregation: p.roundScoreAggregation ?? undefined,
+        roundWindowInput:
+          p.roundWindowSeconds != null
+            ? formatSecondsAsClock(p.roundWindowSeconds)
+            : "",
         movements: p.movements.map(
           (m): WorkoutBuilderMovement => ({
             tempId: generateTempId(),

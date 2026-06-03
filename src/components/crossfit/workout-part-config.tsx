@@ -10,6 +10,7 @@ import {
 import { IntervalsConfig } from "@/components/crossfit/intervals-config";
 import { DurationInput } from "@/components/crossfit/duration-input";
 import type {
+  RoundScoreAggregation,
   WorkoutBuilderBlock,
   WorkoutBuilderMovement,
   WorkoutBuilderPart,
@@ -78,7 +79,20 @@ export function WorkoutPartConfig({
           onSelect={(type) =>
             // `structure` is workout-type-specific (tabata→for_reps,
             // complex→for_load), so a type change always clears it.
-            onChange({ workoutType: type, structure: undefined })
+            // For timed_rounds, seed a default rounds count (5) and
+            // aggregation (slowest) when those fields aren't already
+            // populated — saves the user a click for the canonical case.
+            onChange({
+              workoutType: type,
+              structure: undefined,
+              ...(type === "timed_rounds"
+                ? {
+                    rounds: part.rounds || "5",
+                    roundScoreAggregation:
+                      part.roundScoreAggregation ?? "slowest",
+                  }
+                : {}),
+            })
           }
         />
       </div>
@@ -223,6 +237,17 @@ export function WorkoutPartConfig({
         </div>
       )}
 
+      {part.workoutType === "timed_rounds" && (
+        <TimedRoundsConfig
+          rounds={part.rounds}
+          roundWindowInput={part.roundWindowInput ?? ""}
+          roundScoreAggregation={part.roundScoreAggregation ?? "slowest"}
+          onChange={onChange}
+          labelClass={labelClass}
+          inputHeight={inputHeight}
+        />
+      )}
+
       {part.workoutType === "for_time" && (
         <div className="space-y-1.5">
           <Label className={labelClass}>Rounds (optional)</Label>
@@ -340,6 +365,96 @@ export function WorkoutPartConfig({
             part.sideCadenceIntervalInput.trim() !== "")
         }
       />
+    </div>
+  );
+}
+
+// Inline Timed Rounds config block — rounds, optional per-round window,
+// and the score-by aggregation strategy. All four aggregations rank with
+// "lowest aggregate wins" (consistent with for_time), so the explainer
+// makes that explicit to avoid the "what's a good score?" question.
+function TimedRoundsConfig({
+  rounds,
+  roundWindowInput,
+  roundScoreAggregation,
+  onChange,
+  labelClass,
+  inputHeight,
+}: {
+  rounds: string;
+  roundWindowInput: string;
+  roundScoreAggregation: RoundScoreAggregation;
+  onChange: (updates: Partial<WorkoutBuilderPart>) => void;
+  labelClass: string;
+  inputHeight: string;
+}) {
+  const aggregations: { key: RoundScoreAggregation; label: string }[] = [
+    { key: "slowest", label: "Slowest round" },
+    { key: "fastest", label: "Fastest round" },
+    { key: "sum", label: "Sum" },
+    { key: "average", label: "Average" },
+  ];
+  const explainer: Record<RoundScoreAggregation, string> = {
+    slowest:
+      "Lowest aggregate wins. Slowest single round is your score.",
+    fastest:
+      "Lowest aggregate wins. Fastest single round is your score.",
+    sum: "Lowest aggregate wins. Total time across all rounds.",
+    average: "Lowest aggregate wins. Average round time.",
+  };
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <Label className={labelClass}>Rounds</Label>
+        <Input
+          type="number"
+          min={1}
+          max={20}
+          value={rounds}
+          onChange={(e) => onChange({ rounds: e.target.value })}
+          placeholder="e.g. 5"
+          className={inputHeight}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label className={labelClass}>Round window (optional, mm:ss)</Label>
+        <DurationInput
+          value={roundWindowInput}
+          onChange={(v) => onChange({ roundWindowInput: v })}
+          placeholder="e.g. 5:00 (Every 5:00)"
+          className={inputHeight}
+          ariaLabel="Round window"
+        />
+        <p className="text-[11px] text-muted-foreground pt-0.5">
+          When set, the score-entry warns if a round time exceeds the window.
+          Leave blank for sprint-repeat style (no enforced cadence).
+        </p>
+      </div>
+      <div className="space-y-1.5">
+        <Label className={labelClass}>Score by</Label>
+        <div className="flex flex-wrap gap-1">
+          {aggregations.map((opt) => {
+            const selected = roundScoreAggregation === opt.key;
+            return (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => onChange({ roundScoreAggregation: opt.key })}
+                className={`rounded-md px-2 py-0.5 text-xs font-medium ${
+                  selected
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted/50 text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[11px] text-muted-foreground pt-0.5">
+          {explainer[roundScoreAggregation]}
+        </p>
+      </div>
     </div>
   );
 }

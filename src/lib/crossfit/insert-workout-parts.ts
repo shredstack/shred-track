@@ -73,6 +73,8 @@ export interface PartInput {
   rounds?: number;
   structure?: string;
   scoreType?: "reps" | "load" | null;
+  roundScoreAggregation?: "slowest" | "fastest" | "sum" | "average";
+  roundWindowSeconds?: number | string;
   notes?: string;
   movements: PartMovementInput[];
   blocks?: PartBlockInput[];
@@ -193,6 +195,12 @@ export async function insertWorkoutParts(
       }
     }
 
+    if (p.workoutType === "timed_rounds" && !p.rounds) {
+      throw new Error(
+        "Timed Rounds workouts need a number of rounds. Set the rounds field (e.g. 5)."
+      );
+    }
+
     const [part] = await tx
       .insert(workoutParts)
       .values({
@@ -215,6 +223,14 @@ export async function insertWorkoutParts(
         rounds: toIntOrNull(p.rounds ?? null),
         structure: p.structure || null,
         scoreType: p.scoreType ?? null,
+        roundScoreAggregation:
+          p.workoutType === "timed_rounds"
+            ? p.roundScoreAggregation ?? "slowest"
+            : null,
+        roundWindowSeconds:
+          p.workoutType === "timed_rounds"
+            ? toDurationSecondsOrNull(p.roundWindowSeconds ?? null)
+            : null,
         notes: p.notes || null,
       })
       .returning();

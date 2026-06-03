@@ -61,6 +61,14 @@ export interface BenchmarkPartInput {
     | null;
   sideCadenceIntervalSeconds?: number | string | null;
   sideCadenceOpenEnded?: boolean;
+  // Timed Rounds — aggregation strategy + optional per-round window.
+  roundScoreAggregation?:
+    | "slowest"
+    | "fastest"
+    | "sum"
+    | "average"
+    | null;
+  roundWindowSeconds?: number | string | null;
   notes?: string | null;
   movements: BenchmarkPartMovementInput[];
   blocks?: BenchmarkBlockInput[];

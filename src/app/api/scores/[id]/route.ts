@@ -31,6 +31,32 @@ interface MovementDetailInput {
   notes?: string;
 }
 
+// Mirror of the helper in /api/scores/route.ts — kept in sync because both
+// the create (POST) and update (PUT) paths must compute the same aggregate
+// from the per-round array.
+function aggregateRoundDurations(
+  durations: number[],
+  aggregation: "slowest" | "fastest" | "sum" | "average" | null | undefined
+): number {
+  const sanitized = durations.map((n) =>
+    Number.isFinite(n) && n >= 0 ? Math.round(n) : 0
+  );
+  if (sanitized.length === 0) return 0;
+  switch (aggregation ?? "slowest") {
+    case "fastest":
+      return Math.min(...sanitized);
+    case "sum":
+      return sanitized.reduce((a, b) => a + b, 0);
+    case "average":
+      return Math.round(
+        sanitized.reduce((a, b) => a + b, 0) / sanitized.length
+      );
+    case "slowest":
+    default:
+      return Math.max(...sanitized);
+  }
+}
+
 // PUT /api/scores/[id] — update a score (and replace movement details)
 export async function PUT(
   req: NextRequest,
@@ -110,12 +136,21 @@ export async function PUT(
   // is the canonical link, so the estimator works without trusting either
   // the legacy `scores.workoutId` (always null post-cutover) or the score's
   // session (which on multi-section days points at the synthetic group's
-  // first session, not the part's session).
+  // first session, not the part's session). Also pull the timed_rounds
+  // config so an edit recomputes the aggregate cleanly.
   let calorieEstimate: Awaited<ReturnType<typeof computeScoreEstimate>> | null =
     null;
+  let timedRoundsAggregate: number | null = null;
+  let timedRoundDurations: number[] | null = null;
   if (existing.crossfitWorkoutPartId) {
     const [partRow] = await db
-      .select({ templateId: crossfitWorkoutParts.crossfitWorkoutId })
+      .select({
+        templateId: crossfitWorkoutParts.crossfitWorkoutId,
+        workoutType: crossfitWorkoutParts.workoutType,
+        rounds: crossfitWorkoutParts.rounds,
+        roundScoreAggregation:
+          crossfitWorkoutParts.roundScoreAggregation,
+      })
       .from(crossfitWorkoutParts)
       .where(eq(crossfitWorkoutParts.id, existing.crossfitWorkoutPartId))
       .limit(1);
@@ -133,6 +168,38 @@ export async function PUT(
         console.error("[calories] estimator failed for score PUT", err);
       }
     }
+    if (partRow?.workoutType === "timed_rounds") {
+      const supplied = Array.isArray(body.roundDurationsSeconds)
+        ? body.roundDurationsSeconds.filter(
+            (n: unknown): n is number =>
+              typeof n === "number" && Number.isFinite(n)
+          )
+        : null;
+      if (supplied && supplied.length > 0) {
+        const expectedRounds = partRow.rounds ?? supplied.length;
+        if (supplied.length !== expectedRounds) {
+          return NextResponse.json(
+            {
+              error: `roundDurationsSeconds.length (${supplied.length}) must equal part.rounds (${expectedRounds})`,
+            },
+            { status: 400 }
+          );
+        }
+        const rounded = supplied.map((n: number) =>
+          Math.max(0, Math.round(n))
+        );
+        timedRoundDurations = rounded;
+        timedRoundsAggregate = aggregateRoundDurations(
+          rounded,
+          partRow.roundScoreAggregation as
+            | "slowest"
+            | "fastest"
+            | "sum"
+            | "average"
+            | null
+        );
+      }
+    }
   }
 
   const updated = await db.transaction(async (tx) => {
@@ -140,7 +207,13 @@ export async function PUT(
       .update(scores)
       .set({
         division: body.division ?? existing.division,
-        timeSeconds: body.timeSeconds ?? existing.timeSeconds,
+        // Timed Rounds: the aggregate wins over any body.timeSeconds the
+        // client may have sent — they're computed from the same per-round
+        // array but we want the server to be canonical.
+        timeSeconds:
+          timedRoundsAggregate ??
+          body.timeSeconds ??
+          existing.timeSeconds,
         rounds: body.rounds ?? existing.rounds,
         remainderReps: body.remainderReps ?? existing.remainderReps,
         weightLbs: weightLbs != null ? weightLbs.toString() : existing.weightLbs,
@@ -149,6 +222,8 @@ export async function PUT(
         hitTimeCap: body.hitTimeCap ?? existing.hitTimeCap,
         notes: body.notes ?? existing.notes,
         rpe: body.rpe ?? existing.rpe,
+        roundDurationsSeconds:
+          timedRoundDurations ?? existing.roundDurationsSeconds,
         woreVest: body.woreVest !== undefined ? body.woreVest : existing.woreVest,
         vestWeightLb:
           body.vestWeightLb != null

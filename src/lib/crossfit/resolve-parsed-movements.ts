@@ -65,6 +65,12 @@ export async function resolveParsedToCreatePart(
     timeCapSeconds: parsed.timeCapSeconds,
     amrapDurationSeconds: parsed.amrapDurationSeconds,
     repScheme: parsed.repScheme,
+    // Timed Rounds: forward rounds + per-round window + aggregation so the
+    // pasted "Every 5:00 for 5 rounds — score is slowest" survives the
+    // text → API round-trip.
+    rounds: parsed.rounds,
+    roundScoreAggregation: parsed.roundScoreAggregation,
+    roundWindowSeconds: parsed.roundWindowSeconds,
     movements: usable.map((r, i) => ({
       movementId: r.movement!.id,
       orderIndex: i,

@@ -75,6 +75,11 @@ export function benchmarkPartToBuilderPart(
     rounds: part.rounds != null ? String(part.rounds) : "",
     structure: part.structure ?? undefined,
     scoreType: part.scoreType ?? undefined,
+    roundScoreAggregation: part.roundScoreAggregation ?? undefined,
+    roundWindowInput:
+      part.roundWindowSeconds != null
+        ? formatSecondsAsClock(part.roundWindowSeconds)
+        : "",
     movements: part.movements.map((m): WorkoutBuilderMovement => {
       const isWeighted =
         m.isWeighted ??
@@ -201,7 +206,10 @@ export function builderPartToPayload(
       (part.workoutType === "for_time" ||
         part.workoutType === "intervals" ||
         // for_load uses `rounds` as the prescribed set count ("5 sets of…").
-        part.workoutType === "for_load") &&
+        part.workoutType === "for_load" ||
+        // timed_rounds always carries a round count — it's the N in
+        // "Every X:XX for N rounds".
+        part.workoutType === "timed_rounds") &&
       part.rounds
         ? parseInt(part.rounds)
         : undefined,
@@ -222,6 +230,18 @@ export function builderPartToPayload(
       (part.scoreType === "reps" || part.scoreType === "load")
         ? part.scoreType
         : null,
+    // Timed Rounds: aggregation always sent (defaults to slowest if the
+    // builder didn't set it); window only when the user provided a value.
+    // Both fields are dropped for any other workout type so a stale value
+    // can't survive a type switch.
+    roundScoreAggregation:
+      part.workoutType === "timed_rounds"
+        ? part.roundScoreAggregation ?? "slowest"
+        : undefined,
+    roundWindowSeconds:
+      part.workoutType === "timed_rounds" && part.roundWindowInput?.trim()
+        ? part.roundWindowInput.trim()
+        : undefined,
     movements: movements.map((m, i) => {
       // Athlete-picked weight: hide every prescribed-weight notation
       // (absolute, BW%, %1RM). Mirrors the existing for_load short-circuit

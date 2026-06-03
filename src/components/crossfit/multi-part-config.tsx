@@ -77,6 +77,23 @@ function partSummary(part: WorkoutBuilderPart, idx: number): string {
       );
     }
   }
+  if (part.workoutType === "timed_rounds") {
+    if (part.roundWindowInput?.trim() && part.rounds) {
+      segments.push(`Every ${part.roundWindowInput} × ${part.rounds}`);
+    } else if (part.rounds) {
+      segments.push(`${part.rounds} timed rounds`);
+    }
+    const agg = part.roundScoreAggregation ?? "slowest";
+    segments.push(
+      agg === "slowest"
+        ? "Slowest"
+        : agg === "fastest"
+          ? "Fastest"
+          : agg === "sum"
+            ? "Sum"
+            : "Avg"
+    );
+  }
   if (part.repScheme) segments.push(part.repScheme);
   if (part.workoutType === "amrap" && part.amrapDurationInput)
     segments.push(part.amrapDurationInput);

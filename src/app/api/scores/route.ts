@@ -64,6 +64,11 @@ interface ScorePostBody {
   rpe?: number;
   woreVest?: boolean;
   vestWeightLb?: number;
+  // Per-round durations for a timed_rounds part. Length must equal the
+  // part's `rounds` value. The server computes the aggregate per the part's
+  // roundScoreAggregation and writes it to scores.timeSeconds so the
+  // leaderboard's ascending-time sort works without special-case math.
+  roundDurationsSeconds?: number[];
   // Live-logger bracket. When omitted, the calorie estimator falls back to
   // the score's own time fields and (last resort) the part's time cap.
   startedAt?: string;
@@ -71,6 +76,33 @@ interface ScorePostBody {
   movementDetails?: MovementDetailInput[];
   // Legacy name used by client before multi-part landed.
   movementScalings?: MovementDetailInput[];
+}
+
+// Compute the aggregated score per the part's roundScoreAggregation. For
+// 'average', we round to the nearest whole second when writing to
+// scores.timeSeconds — the un-rounded per-round array is preserved in
+// scores.roundDurationsSeconds for display.
+function aggregateRoundDurations(
+  durations: number[],
+  aggregation: "slowest" | "fastest" | "sum" | "average" | null | undefined
+): number {
+  const sanitized = durations.map((n) =>
+    Number.isFinite(n) && n >= 0 ? Math.round(n) : 0
+  );
+  if (sanitized.length === 0) return 0;
+  switch (aggregation ?? "slowest") {
+    case "fastest":
+      return Math.min(...sanitized);
+    case "sum":
+      return sanitized.reduce((a, b) => a + b, 0);
+    case "average":
+      return Math.round(
+        sanitized.reduce((a, b) => a + b, 0) / sanitized.length
+      );
+    case "slowest":
+    default:
+      return Math.max(...sanitized);
+  }
 }
 
 // GET /api/scores — list user's scores
@@ -268,6 +300,54 @@ export async function POST(req: NextRequest) {
     effectiveUserId = body.forUserId;
   }
 
+  // Timed Rounds handling — load the target part so we know how to
+  // aggregate the per-round array into scores.timeSeconds. Done as a single
+  // tiny lookup before the transaction so the txn body stays write-only.
+  let timedRoundsAggregate: number | null = null;
+  let timedRoundDurations: number[] | null = null;
+  if (crossfitWorkoutPartId) {
+    const [partRow] = await db
+      .select({
+        workoutType: crossfitWorkoutParts.workoutType,
+        rounds: crossfitWorkoutParts.rounds,
+        roundScoreAggregation: crossfitWorkoutParts.roundScoreAggregation,
+      })
+      .from(crossfitWorkoutParts)
+      .where(eq(crossfitWorkoutParts.id, crossfitWorkoutPartId))
+      .limit(1);
+
+    if (partRow?.workoutType === "timed_rounds") {
+      const supplied = Array.isArray(body.roundDurationsSeconds)
+        ? body.roundDurationsSeconds.filter(
+            (n): n is number => typeof n === "number" && Number.isFinite(n)
+          )
+        : null;
+      if (supplied && supplied.length > 0) {
+        const expectedRounds = partRow.rounds ?? supplied.length;
+        if (supplied.length !== expectedRounds) {
+          return NextResponse.json(
+            {
+              error: `roundDurationsSeconds.length (${supplied.length}) must equal part.rounds (${expectedRounds})`,
+            },
+            { status: 400 }
+          );
+        }
+        timedRoundDurations = supplied.map((n) =>
+          Math.max(0, Math.round(n))
+        );
+        timedRoundsAggregate = aggregateRoundDurations(
+          timedRoundDurations,
+          partRow.roundScoreAggregation as
+            | "slowest"
+            | "fastest"
+            | "sum"
+            | "average"
+            | null
+        );
+      }
+    }
+  }
+
   const details = body.movementDetails ?? body.movementScalings ?? [];
 
   // Normalize setEntries on every detail up front so downstream code can
@@ -368,7 +448,11 @@ export async function POST(req: NextRequest) {
           crossfitWorkoutPartId,
           userId: effectiveUserId,
           division,
-          timeSeconds: body.timeSeconds ?? null,
+          // For timed_rounds parts, time_seconds is the aggregate (slowest /
+          // fastest / sum / average) computed from the per-round array, so
+          // the leaderboard's existing ascending-time sort just works.
+          timeSeconds:
+            timedRoundsAggregate ?? body.timeSeconds ?? null,
           rounds: body.rounds ?? null,
           remainderReps: body.remainderReps ?? null,
           weightLbs: weightLbs != null ? weightLbs.toString() : null,
@@ -377,6 +461,7 @@ export async function POST(req: NextRequest) {
           hitTimeCap: body.hitTimeCap ?? false,
           notes: body.notes ?? null,
           rpe: body.rpe ?? null,
+          roundDurationsSeconds: timedRoundDurations ?? null,
           woreVest: body.woreVest ?? null,
           vestWeightLb:
             body.vestWeightLb != null ? body.vestWeightLb.toString() : null,

@@ -1006,33 +1006,39 @@ function MovementCard({
         </label>
       )}
 
-      <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
-        <input
-          type="checkbox"
-          checked={!!mov.isMaxReps}
-          onChange={(e) =>
-            onUpdate(mov.tempId, {
-              isMaxReps: e.target.checked,
-              ...(e.target.checked
-                ? { prescribedReps: "", captureDurationPerRound: false }
-                : {}),
-            })
-          }
-          className="size-3 cursor-pointer"
-        />
-        {mov.metricType === "calories"
-          ? "Max calories (score)"
-          : mov.metricType === "distance"
-            ? "Max distance (score)"
-            : mov.metricType === "duration"
-              ? "Max duration (score)"
-              : "Max reps (score)"}
-        {mov.isMaxReps && (
-          <span className="rounded bg-amber-500/15 px-1 py-px text-[10px] font-bold text-amber-300">
-            MAX
-          </span>
-        )}
-      </label>
+      {/* Hide isMaxReps + per-round time capture on timed_rounds parts —
+          the score for those parts is the round time itself (captured at
+          the part level), so per-movement max-reps / per-round capture
+          would conflict with the part's scoring contract. */}
+      {workoutType !== "timed_rounds" && (
+        <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!mov.isMaxReps}
+            onChange={(e) =>
+              onUpdate(mov.tempId, {
+                isMaxReps: e.target.checked,
+                ...(e.target.checked
+                  ? { prescribedReps: "", captureDurationPerRound: false }
+                  : {}),
+              })
+            }
+            className="size-3 cursor-pointer"
+          />
+          {mov.metricType === "calories"
+            ? "Max calories (score)"
+            : mov.metricType === "distance"
+              ? "Max distance (score)"
+              : mov.metricType === "duration"
+                ? "Max duration (score)"
+                : "Max reps (score)"}
+          {mov.isMaxReps && (
+            <span className="rounded bg-amber-500/15 px-1 py-px text-[10px] font-bold text-amber-300">
+              MAX
+            </span>
+          )}
+        </label>
+      )}
 
       {/* Per-round time capture — for prescriptions like "Run 400m × 3 as
           fast as possible". Athlete logs one time per round; the sum
