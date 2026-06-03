@@ -5,6 +5,7 @@ import {
   timestamp,
   boolean,
   integer,
+  smallint,
   numeric,
   date,
   jsonb,
@@ -1806,6 +1807,11 @@ export const hyroxRaceTemplates = pgTable(
     name: text("name").notNull(),
     divisionKey: text("division_key"),
     simulateRoxzone: boolean("simulate_roxzone").notNull().default(false),
+    // Pre-race countdown the template was saved with. NULL = use the
+    // device's standing preference at race start. Allowed non-null
+    // values: 0, 3, 5, 10 (enforced by a CHECK constraint in the
+    // migration and by the picker UI).
+    countdownSeconds: smallint("countdown_seconds"),
     segments: jsonb("segments").$type<RaceTemplateSegment[]>().notNull(),
     // When non-null, this template is shared with the given gym; every
     // active member of that community can see and clone it.

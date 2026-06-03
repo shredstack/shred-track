@@ -323,15 +323,27 @@ function parseRepsPerSet(repScheme: string): number | undefined {
 function MovementRow({
   mov,
   partWorkoutType,
+  partRepScheme,
 }: {
   mov: WorkoutMovementDisplay;
   partWorkoutType: WorkoutPartDisplay["workoutType"];
+  /** Part-level shared rep scheme. For for_time / amrap, falls back here
+   *  when the movement has no per-movement prescribedReps — keeps "applies
+   *  to all movements" intent visible even if the per-movement prefill
+   *  didn't run at authoring time. */
+  partRepScheme?: string | null;
 }) {
   const metricText = formatMovementMetric(mov, partWorkoutType);
   const prefix =
     mov.equipmentCount && mov.equipmentCount > 1
       ? `${mov.equipmentCount} × `
       : "";
+  const effectiveReps =
+    mov.prescribedReps?.trim() ||
+    ((partWorkoutType === "for_time" || partWorkoutType === "amrap") &&
+    partRepScheme?.trim()
+      ? partRepScheme.trim()
+      : "");
 
   // Rest rows promote the duration to the bold lead slot so the prescribed
   // length is the first thing the athlete reads — "0:30 Rest" instead of
@@ -376,9 +388,9 @@ function MovementRow({
                   : "MAX REPS"}
           </span>
         ) : (
-          mov.prescribedReps && (
+          effectiveReps && (
             <span className="font-mono font-bold text-foreground">
-              {mov.prescribedReps}{" "}
+              {effectiveReps}{" "}
             </span>
           )
         )}
@@ -508,7 +520,21 @@ export function PartSection({
     }
 
     if (part.workoutType === "amrap" && part.amrapDurationSeconds) {
-      return formatTime(part.amrapDurationSeconds);
+      const duration = formatTime(part.amrapDurationSeconds);
+      // When the admin authored a shared rep scheme on the AMRAP (e.g. a
+      // 1-2-3-... ladder), stack it under the duration so the ladder is
+      // visible at a glance, not just inline next to each movement.
+      if (part.repScheme?.trim()) {
+        return (
+          <span className="flex flex-col gap-0.5">
+            <span>{duration}</span>
+            <span className="text-sm font-normal text-muted-foreground">
+              {part.repScheme}
+            </span>
+          </span>
+        );
+      }
+      return duration;
     }
 
     if (part.repScheme) return part.repScheme;
@@ -596,6 +622,7 @@ export function PartSection({
                       key={mov.id}
                       mov={mov}
                       partWorkoutType={part.workoutType}
+                      partRepScheme={part.repScheme}
                     />
                   ))}
                 </div>
@@ -621,6 +648,7 @@ export function PartSection({
                           key={mov.id}
                           mov={mov}
                           partWorkoutType={part.workoutType}
+                          partRepScheme={part.repScheme}
                         />
                       ))}
                     </div>

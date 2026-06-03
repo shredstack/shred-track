@@ -11,7 +11,10 @@
 
 import { ClipboardPaste, Trophy, Wrench } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SmartBuilder } from "@/components/crossfit/smart-builder";
+import {
+  SmartBuilder,
+  type SmartBuilderContext,
+} from "@/components/crossfit/smart-builder";
 import { WorkoutParser } from "@/components/crossfit/workout-parser";
 import { BenchmarkPicker } from "@/components/crossfit/benchmark-picker";
 import type {
@@ -44,6 +47,11 @@ export interface AddWorkoutTabsProps {
   builderSaveLabel?: string;
   // Label for the Parser's primary save action.
   parserSaveLabel?: string;
+  // When set, pre-populates the Smart Builder with an existing prescription
+  // so opening the dialog on a section that already has content lands in
+  // edit mode instead of a blank form (which silently overwrote the
+  // existing content on save).
+  builderInitialForm?: WorkoutBuilderForm;
 
   // ---- Contextual controls shared across tabs ----
   // Hide the date input across all tabs (the parent owns the date — e.g.
@@ -55,6 +63,9 @@ export interface AddWorkoutTabsProps {
   // Hide vest requirements in the Smart Builder (programming sections
   // leave vest gear to the athlete).
   hideVest?: boolean;
+  // Authoring context forwarded to the Smart Builder's title suggestion.
+  // See SmartBuilderContext for the shape.
+  builderContext?: SmartBuilderContext;
 
   // For the legacy CrossFit-tab benchmark behavior where the picker
   // creates the workout itself via /api/workouts. Forwarded to the picker
@@ -73,9 +84,11 @@ export function AddWorkoutTabs({
   isBenchmarkSubmitting,
   builderSaveLabel,
   parserSaveLabel,
+  builderInitialForm,
   lockedDate,
   hidePartner,
   hideVest,
+  builderContext,
 }: AddWorkoutTabsProps) {
   return (
     <Tabs defaultValue="build">
@@ -111,9 +124,11 @@ export function AddWorkoutTabs({
           onSave={onSaveFromBuilder}
           onCancel={onCancel}
           saveLabel={builderSaveLabel}
+          initialForm={builderInitialForm}
           hideDateInput={lockedDate}
           hidePartner={hidePartner}
           hideVest={hideVest}
+          context={builderContext}
         />
       </TabsContent>
 

@@ -60,13 +60,16 @@ import {
 import { AddWorkoutTabs } from "@/components/crossfit/add-workout-tabs";
 import { builderPartToPayload } from "@/lib/crossfit/builder-payload";
 import { resolveParsedToCreatePart } from "@/lib/crossfit/resolve-parsed-movements";
+import { workoutToBuilderForm } from "@/lib/crossfit/workout-to-builder-form";
 import { useMovements, useCreateMovement } from "@/hooks/useMovements";
+import { useQuery } from "@tanstack/react-query";
 import {
   WORKOUT_TYPE_LABELS,
   type BenchmarkWorkout,
   type MovementMetricType,
   type ParsedWorkout,
   type WorkoutBuilderForm,
+  type WorkoutDisplay,
   type WorkoutType,
 } from "@/types/crossfit";
 import type { CreatePartInput } from "@/hooks/useWorkouts";
@@ -655,6 +658,46 @@ function SectionRow({
   const { data: movementLibrary = [] } = useMovements();
   const createMovement = useCreateMovement();
 
+  // When the section already has built content, fetch the parent workout so
+  // we can hand a pre-populated WorkoutBuilderForm to the Smart Builder.
+  // Without this, opening Build on a section with content always landed in
+  // a blank form and Save silently overwrote everything. The wire shape
+  // returned by /api/gym/[id]/programming strips fields the builder needs
+  // (movementId, category, weightSource, etc.), so we re-fetch the full
+  // WorkoutDisplay from /api/workouts/[sessionId] — `section.id` is a
+  // workout_sessions.id, and that endpoint resolves the parent workout for
+  // a given session id.
+  const hasParts = section.parts.length > 0;
+  const sectionWorkoutQuery = useQuery<WorkoutDisplay>({
+    queryKey: ["workouts", "by-id", section.id],
+    enabled: builderOpen && hasParts,
+    queryFn: async () => {
+      const res = await fetch(`/api/workouts/${section.id}`);
+      if (!res.ok) throw new Error("Failed to load workout");
+      return res.json();
+    },
+  });
+
+  const builderInitialForm = useMemo<WorkoutBuilderForm | undefined>(() => {
+    const display = sectionWorkoutQuery.data;
+    if (!display) return undefined;
+    const sectionDisplay = display.sections?.find((s) => s.id === section.id);
+    if (!sectionDisplay) return undefined;
+    const partIds = new Set(sectionDisplay.partIds);
+    const parts = display.parts.filter((p) => partIds.has(p.id));
+    if (parts.length === 0) return undefined;
+    // Section-scoped synthetic WorkoutDisplay: section title/notes win over
+    // the parent workout's title/description (the section saver maps form
+    // .title → section.title and form.description → section.notes).
+    return workoutToBuilderForm({
+      ...display,
+      title: sectionDisplay.title ?? "",
+      description: sectionDisplay.notes ?? "",
+      parts,
+      sections: undefined,
+    });
+  }, [sectionWorkoutQuery.data, section.id]);
+
   // Single write path used by all three tabs. Section title gets
   // overwritten only when the caller passes one (e.g. Smart Builder
   // title, parsed workout title, benchmark name) — passing `null`
@@ -965,7 +1008,8 @@ function SectionRow({
         <DialogContent className="max-h-[90vh] w-[min(96vw,42rem)] max-w-none overflow-x-hidden overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              Build {WORKOUT_SECTION_KIND_LABELS[section.kind]} content
+              {hasParts ? "Edit" : "Build"}{" "}
+              {WORKOUT_SECTION_KIND_LABELS[section.kind]} content
             </DialogTitle>
           </DialogHeader>
           {builderError ? (
@@ -979,18 +1023,42 @@ function SectionRow({
               Saving…
             </div>
           ) : null}
-          <AddWorkoutTabs
-            onSaveFromBuilder={handleBuilderSave}
-            onSaveFromParser={handleParserSave}
-            onSaveFromBenchmark={handleBenchmarkSave}
-            onCancel={() => setBuilderOpen(false)}
-            builderSaveLabel="Save content"
-            parserSaveLabel="Save content"
-            benchmarkSubmitLabel="Add to section"
-            isBenchmarkSubmitting={builderSaving}
-            lockedDate
-            hideVest
-          />
+          {hasParts && sectionWorkoutQuery.isLoading ? (
+            <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              Loading workout…
+            </div>
+          ) : hasParts && sectionWorkoutQuery.isError ? (
+            <div className="space-y-2 py-4 text-sm">
+              <p className="text-destructive">
+                {sectionWorkoutQuery.error instanceof Error
+                  ? sectionWorkoutQuery.error.message
+                  : "Failed to load workout"}
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => sectionWorkoutQuery.refetch()}
+              >
+                Retry
+              </Button>
+            </div>
+          ) : (
+            <AddWorkoutTabs
+              onSaveFromBuilder={handleBuilderSave}
+              onSaveFromParser={handleParserSave}
+              onSaveFromBenchmark={handleBenchmarkSave}
+              onCancel={() => setBuilderOpen(false)}
+              builderSaveLabel={hasParts ? "Save changes" : "Save content"}
+              parserSaveLabel="Save content"
+              benchmarkSubmitLabel="Add to section"
+              isBenchmarkSubmitting={builderSaving}
+              builderInitialForm={builderInitialForm}
+              lockedDate
+              hideVest
+              builderContext={{ sectionKind: section.kind }}
+            />
+          )}
         </DialogContent>
       </Dialog>
 

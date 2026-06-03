@@ -47,6 +47,10 @@ interface WatchSnapshotTemplate {
   name: string;
   divisionKey: string | null;
   simulateRoxzone: boolean;
+  /** Pre-race countdown the template author chose, in seconds. NULL means
+   *  the template doesn't specify one — the watch should fall back to
+   *  its own default. Allowed non-null values: 0, 3, 5, 10. */
+  countdownSeconds: number | null;
   segments: WatchSnapshotSegment[];
 }
 
@@ -63,6 +67,7 @@ function toWatchShape(templates: RaceTemplate[]): WatchSnapshot {
       name: t.name,
       divisionKey: t.divisionKey,
       simulateRoxzone: t.simulateRoxzone,
+      countdownSeconds: t.countdownSeconds,
       segments: t.segments.map((s, idx) => ({
         id: `${t.id}-${idx}`,
         segmentType: s.segmentType,

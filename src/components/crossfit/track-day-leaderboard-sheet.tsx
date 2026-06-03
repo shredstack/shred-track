@@ -46,6 +46,8 @@ export function TrackDayLeaderboardSheet({
       createdAt: e.createdAt,
       isComplete: e.isComplete,
       notes: e.notes,
+      consecutiveDaysLogged: e.consecutiveDaysLogged,
+      adherence: e.adherence,
     }));
   }, [data]);
 

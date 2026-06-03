@@ -90,7 +90,12 @@ function saveRoxzonePref(value: boolean): void {
 // ---------------------------------------------------------------------------
 
 interface TimerSetupProps {
-  onStart: (segments: RaceSegment[], divisionKey: DivisionKey, template: RaceTemplate) => void;
+  onStart: (
+    segments: RaceSegment[],
+    divisionKey: DivisionKey,
+    template: RaceTemplate,
+    countdownSeconds: CountdownSeconds,
+  ) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -122,6 +127,19 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
   const { seconds: countdownSeconds, setSeconds: setCountdownSeconds, options: countdownOptions } =
     useCountdownPreference();
 
+  // When the user loads a template that has its own countdownSeconds
+  // baked in, override the global preference for *this race only*. The
+  // override is cleared when the user explicitly taps the countdown
+  // picker (their tap = "use this from now on", which also updates the
+  // global pref). Holds the source template's name so we can hint at
+  // it under the picker.
+  const [countdownOverride, setCountdownOverride] = useState<{
+    seconds: CountdownSeconds;
+    sourceName: string;
+  } | null>(null);
+  const effectiveCountdown: CountdownSeconds =
+    countdownOverride?.seconds ?? countdownSeconds;
+
   // Saved-template UI state.
   const templatesQuery = useRaceTemplates();
   const createTemplate = useCreateRaceTemplate();
@@ -133,6 +151,10 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
   const [shareWithGym, setShareWithGym] = useState(false);
   const [shareCommunityId, setShareCommunityId] = useState<string | null>(null);
   const [templatesTab, setTemplatesTab] = useState<"mine" | "gym">("mine");
+  // Per-template countdown chosen in the save dialog. Defaults to the
+  // current effective value when the dialog opens.
+  const [dialogCountdown, setDialogCountdown] =
+    useState<CountdownSeconds>(10);
 
   // Hydrate persisted Roxzone preference on mount and rebuild segments
   // for the current preset. The deps are intentionally empty — we only
@@ -173,6 +195,9 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
   const handleTemplateChange = useCallback(
     (t: RaceTemplate) => {
       applyTemplate(t, divisionKey);
+      // Switching presets clears any per-template countdown override —
+      // we're no longer on the saved template that set it.
+      setCountdownOverride(null);
     },
     [divisionKey, applyTemplate],
   );
@@ -184,6 +209,9 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
       if (template !== "custom") {
         setTemplate("custom");
       }
+      // Editing segments breaks the link with the loaded template, so
+      // its countdown shouldn't keep applying either.
+      setCountdownOverride(null);
     },
     [template],
   );
@@ -204,6 +232,7 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
     setSegments((prev) => [...prev, createRunSegment()]);
     setShowAddMenu(false);
     if (template !== "custom") setTemplate("custom");
+    setCountdownOverride(null);
   }, [template]);
 
   const addStation = useCallback(
@@ -223,12 +252,14 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
       ]);
       setShowAddMenu(false);
       if (template !== "custom") setTemplate("custom");
+      setCountdownOverride(null);
     },
     [divisionKey, template],
   );
 
   const resetToDefault = useCallback(() => {
     applyTemplate("full", divisionKey);
+    setCountdownOverride(null);
   }, [divisionKey, applyTemplate]);
 
   const handleLoadTemplate = useCallback(
@@ -243,9 +274,24 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
       );
       setTemplate("custom");
       setShowAddMenu(false);
+      // Apply the template's countdown for this race only. Clear any
+      // prior override when the template has no value of its own so we
+      // fall back to the global preference.
+      if (
+        saved.countdownSeconds !== null &&
+        saved.countdownSeconds !== undefined &&
+        (countdownOptions as readonly number[]).includes(saved.countdownSeconds)
+      ) {
+        setCountdownOverride({
+          seconds: saved.countdownSeconds as CountdownSeconds,
+          sourceName: saved.name,
+        });
+      } else {
+        setCountdownOverride(null);
+      }
       toast.success(opts?.toastMessage ?? `Loaded "${saved.name}"`);
     },
-    [],
+    [countdownOptions],
   );
 
   // Eligible gyms for sharing/picking — active memberships only.
@@ -263,8 +309,9 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
     setTemplateName("");
     setShareWithGym(false);
     setShareCommunityId(shareableGyms[0]?.communityId ?? null);
+    setDialogCountdown(effectiveCountdown);
     setSaveDialogOpen(true);
-  }, [shareableGyms]);
+  }, [shareableGyms, effectiveCountdown]);
 
   const handleCloneGymTemplate = useCallback(
     async (gymTpl: GymRaceTemplate) => {
@@ -311,6 +358,7 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
         name,
         divisionKey,
         simulateRoxzone,
+        countdownSeconds: dialogCountdown,
         segments: stored,
         communityId,
       });
@@ -327,6 +375,7 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
     segments,
     divisionKey,
     simulateRoxzone,
+    dialogCountdown,
     createTemplate,
     shareWithGym,
     shareCommunityId,
@@ -583,7 +632,9 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
               <div className="min-w-0">
                 <p className="text-xs font-medium">Pre-race countdown</p>
                 <p className="text-[10px] text-muted-foreground mt-0.5">
-                  Time to stash your phone and get on the line
+                  {countdownOverride
+                    ? `Using "${countdownOverride.sourceName}" template's setting — tap to change`
+                    : "Time to stash your phone and get on the line"}
                 </p>
               </div>
             </div>
@@ -591,13 +642,19 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
               {countdownOptions.map((opt) => (
                 <button
                   key={opt}
-                  onClick={() => setCountdownSeconds(opt as CountdownSeconds)}
+                  onClick={() => {
+                    // Tapping the picker = "use this for this race AND
+                    // make it my new default". Clearing the override
+                    // makes the global preference visible again.
+                    setCountdownOverride(null);
+                    setCountdownSeconds(opt as CountdownSeconds);
+                  }}
                   className={`min-w-[34px] rounded px-2 py-1 text-[11px] font-medium transition-all duration-150 ${
-                    countdownSeconds === opt
+                    effectiveCountdown === opt
                       ? "bg-primary/15 text-primary"
                       : "text-muted-foreground hover:bg-white/[0.06]"
                   }`}
-                  aria-pressed={countdownSeconds === opt}
+                  aria-pressed={effectiveCountdown === opt}
                   aria-label={opt === 0 ? "No countdown" : `${opt} second countdown`}
                 >
                   {opt === 0 ? "Off" : `${opt}s`}
@@ -696,7 +753,7 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
 
       {/* Start button */}
       <button
-        onClick={() => onStart(segments, divisionKey, template)}
+        onClick={() => onStart(segments, divisionKey, template, effectiveCountdown)}
         disabled={segments.length === 0}
         className="w-full rounded-2xl bg-primary py-5 text-lg font-bold text-primary-foreground shadow-lg shadow-primary/25 hover:bg-primary/90 active:scale-[0.98] transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
       >
@@ -732,6 +789,42 @@ export function TimerSetup({ onStart }: TimerSetupProps) {
                   }
                 }}
               />
+            </div>
+
+            <div className="flex flex-col gap-2 rounded-lg bg-white/[0.03] border border-white/[0.06] px-3 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <Hourglass className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-xs font-medium">
+                      Pre-race countdown
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Used on phone and watch when starting from this template.
+                  </p>
+                </div>
+                <div className="flex rounded-md bg-white/[0.03] p-0.5 gap-0.5">
+                  {countdownOptions.map((opt) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => setDialogCountdown(opt as CountdownSeconds)}
+                      className={`min-w-[34px] rounded px-2 py-1 text-[11px] font-medium transition-all duration-150 ${
+                        dialogCountdown === opt
+                          ? "bg-primary/15 text-primary"
+                          : "text-muted-foreground hover:bg-white/[0.06]"
+                      }`}
+                      aria-pressed={dialogCountdown === opt}
+                      aria-label={
+                        opt === 0 ? "No countdown" : `${opt} second countdown`
+                      }
+                    >
+                      {opt === 0 ? "Off" : `${opt}s`}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
 
             {hasShareableGym && (

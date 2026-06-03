@@ -13,7 +13,10 @@ import type { RaceSegment, RaceTemplate, PracticeRaceResult } from "./types";
 import type { DivisionKey } from "@/lib/hyrox-data";
 import { practiceRaceKeys } from "@/hooks/usePracticeRaces";
 import { formatLongTime } from "@/lib/hyrox-data";
-import { getCountdownPreference } from "@/hooks/useCountdownPreference";
+import {
+  getCountdownPreference,
+  type CountdownSeconds,
+} from "@/hooks/useCountdownPreference";
 import {
   sendRaceStartToWatch,
   sendSplitToWatch,
@@ -234,14 +237,19 @@ export function RaceTimerFlow() {
   }, []);
 
   const handleStart = useCallback(
-    (segments: RaceSegment[], dk: DivisionKey, t: RaceTemplate) => {
+    (
+      segments: RaceSegment[],
+      dk: DivisionKey,
+      t: RaceTemplate,
+      countdownOverride?: CountdownSeconds,
+    ) => {
       setDivisionKey(dk);
       setTemplate(t);
       setSaved(false);
       setPersonalBests([]);
       setSavedRaceId(null);
       timer.reset(segments);
-      const countdownSeconds = getCountdownPreference();
+      const countdownSeconds = countdownOverride ?? getCountdownPreference();
       const raceId =
         typeof crypto !== "undefined" && "randomUUID" in crypto
           ? crypto.randomUUID()

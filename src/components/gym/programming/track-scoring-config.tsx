@@ -23,6 +23,8 @@ const AGG_HELP: Record<TrackScoringAggregation, string> = {
   last: "Latest entry wins. Best for ongoing measures (\"current weight: 195 lb\").",
   per_day_independent:
     "Each day stands alone. Default for monthly challenges.",
+  streak:
+    "Rank by days completed. Best for habit challenges (\"log every day\").",
 };
 
 interface Props {

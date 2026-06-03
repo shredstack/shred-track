@@ -9,6 +9,8 @@ import {
 import { eq, inArray, and, isNull } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { WORKOUT_TYPE_LABELS, type WorkoutType } from "@/types/crossfit";
+import type { WorkoutSectionKind } from "@/db/schema";
+import type { TrackKind } from "@/types/programming-tracks";
 
 const TITLE_MODEL = "claude-haiku-4-5";
 const HAIKU_TIMEOUT_MS = 2_000;
@@ -36,6 +38,13 @@ interface SuggestBody {
   requiresVest?: boolean;
   vestWeightMaleLb?: number | null;
   vestWeightFemaleLb?: number | null;
+  // Optional authoring context. When provided, biases naming style and
+  // gates benchmark matching: pre-/post-skill build-ups and monthly
+  // challenges should never get "Grace (modified)" tagged on them.
+  context?: {
+    sectionKind?: WorkoutSectionKind | null;
+    trackKind?: TrackKind | null;
+  };
 }
 
 // ============================================
@@ -68,9 +77,12 @@ function normalizeRepScheme(raw: string | null | undefined): string {
 //   • identical movement multiset (by movement_id)
 //   • matching rep_scheme (exact after normalization)
 //
-// Near-match (benchmark_modified): same type, movement multiset differs by
-// at most one movement (one added or one removed). Only ever suggested for
-// single-part submissions.
+// Near-match (benchmark_modified): identical movement multiset and same
+// workout_type, but rep scheme / vest scaling differs. We deliberately do
+// NOT match on "one movement added or removed" — that produced too many
+// false positives ("Fran (modified)" for any thruster workout). Real
+// variants like Running Grace live as their own benchmark rows and are
+// reached via the exact-match path.
 
 async function findBenchmarkMatch(
   part: SuggestPartInput,
@@ -164,22 +176,16 @@ async function findBenchmarkMatch(
       }
     }
 
-    if (!near) {
-      const diff = multisetSymmetricDiff(bwMovements, wantMultiset);
-      if (diff <= 1) near = { id: bw.id, name: bw.name };
+    // Near-match: identical multiset + same workout_type, but rep scheme
+    // or vest scaling differs. We do NOT widen this to allow ±1 movement
+    // — that produced false positives like "Fran (modified)" for any
+    // thruster-based workout.
+    if (!near && sameMultiset) {
+      near = { id: bw.id, name: bw.name };
     }
   }
 
   return { exact, near };
-}
-
-function multisetSymmetricDiff(a: string[], b: string[]): number {
-  const counts = new Map<string, number>();
-  for (const id of a) counts.set(id, (counts.get(id) ?? 0) + 1);
-  for (const id of b) counts.set(id, (counts.get(id) ?? 0) - 1);
-  let diff = 0;
-  for (const v of counts.values()) diff += Math.abs(v);
-  return diff;
 }
 
 // ============================================
@@ -200,13 +206,65 @@ function formatDuration(totalSeconds: number): string {
 }
 
 /**
+ * Human label for the section/track context so Haiku can pick the right
+ * naming mode. Keep these phrasings stable — they match the labels used
+ * in the prompt's CONTEXT-AWARENESS section.
+ */
+function contextLabel(
+  ctx: SuggestBody["context"] | undefined
+): string | null {
+  if (!ctx) return null;
+  // Section kind wins over track kind when both are present (the section
+  // is the more specific signal — a monthly challenge surfaced as a
+  // post_skill section is still "post_skill" for naming purposes).
+  if (ctx.sectionKind) {
+    switch (ctx.sectionKind) {
+      case "wod":
+        return "WOD";
+      case "pre_skill":
+        return "Pre-skill";
+      case "post_skill":
+        return "Post-skill";
+      case "warm_up":
+        return "Warm-up";
+      case "stretching":
+        return "Stretching";
+      case "monthly_challenge":
+        return "Monthly challenge";
+      case "at_home":
+        return "At-home workout";
+      case "custom":
+        return null; // Fall through to track kind if set.
+      default:
+        return null;
+    }
+  }
+  if (ctx.trackKind) {
+    switch (ctx.trackKind) {
+      case "monthly_challenge":
+        return "Monthly challenge";
+      case "cap":
+        return "CAP track";
+      case "event_prep":
+        return "Event prep track";
+      case "custom":
+        return "Custom track";
+      default:
+        return null;
+    }
+  }
+  return null;
+}
+
+/**
  * Render the workout spec as a short, human-readable description.
  * Haiku names workouts far more reliably from prose than from a raw JSON
  * blob — it shouldn't have to guess what `timeCapSeconds` means.
  */
 function describeWorkoutForHaiku(
   parts: SuggestPartInput[],
-  movementNameById: Map<string, string>
+  movementNameById: Map<string, string>,
+  context: SuggestBody["context"] | undefined
 ): string {
   const describePart = (p: SuggestPartInput): string => {
     const typeLabel = WORKOUT_TYPE_LABELS[p.workoutType] ?? "Workout";
@@ -233,42 +291,112 @@ function describeWorkoutForHaiku(
       : structure;
   };
 
+  const ctxLine = contextLabel(context);
+  const prefix = ctxLine ? `Context: ${ctxLine}\n` : "";
+
   if (parts.length === 1) {
-    return `Workout: ${describePart(parts[0])}`;
+    return `${prefix}Workout: ${describePart(parts[0])}`;
   }
   const lines = parts.map((p, i) => `Part ${i + 1}: ${describePart(p)}`);
-  return `Workout with ${parts.length} parts.\n${lines.join("\n")}`;
+  return `${prefix}Workout with ${parts.length} parts.\n${lines.join("\n")}`;
+}
+
+/**
+ * Benchmark matching only makes sense for sections / tracks where the
+ * athlete might actually be doing a benchmark or a close variant. A
+ * pre-skill back-squat ramp should never get "Grace (modified)" stamped
+ * on it, even if its movement multiset happens to match one.
+ *
+ * Returns true when the context is missing, "wod", "custom", or a
+ * non-monthly_challenge track — i.e. anywhere a benchmark is plausible.
+ */
+function contextAllowsBenchmarkMatch(
+  ctx: SuggestBody["context"] | undefined
+): boolean {
+  if (!ctx) return true;
+  if (ctx.sectionKind) {
+    switch (ctx.sectionKind) {
+      case "wod":
+      case "custom":
+        // "custom" sections might be a coach naming an unusual WOD —
+        // still allow benchmark matching here.
+        break;
+      case "pre_skill":
+      case "post_skill":
+      case "warm_up":
+      case "stretching":
+      case "monthly_challenge":
+      case "at_home":
+        return false;
+    }
+  }
+  if (ctx.trackKind === "monthly_challenge") return false;
+  return true;
 }
 
 // ============================================
 // Haiku fallback
 // ============================================
 
-const HAIKU_SYSTEM_PROMPT = `You name CrossFit workouts (WODs). Given a workout's structure and movements, return one short, memorable title.
+const HAIKU_SYSTEM_PROMPT = `You name CrossFit prescriptions. Given a workout's structure, movements, and authoring context, return one short, memorable title that fits the *purpose* of the piece, not just its movements.
+
+CONTEXT-AWARENESS (most important)
+The prompt may include a "Context:" line describing where this prescription lives. Tailor the name to that purpose:
+
+- Context: WOD (or no Context line) — punchy CrossFit-style WOD names. Movement-evocative or structure-evocative is good ("Thruster Hell", "Down the Ladder", "Grip & Rip"). Treat this like naming a benchmark.
+
+- Context: Pre-skill — this is a build-up, warm-up to weight, ramp, or movement primer that comes BEFORE the WOD. Lean into that purpose. Good names: "Squat Build-Up", "Snatch Ramp", "Heavy Single Build", "Clean Pull Wave", "Pre-Skill Primer", "Find a Heavy 3". Avoid making it sound like a WOD (no "Hell", "Carnage", "Suffer").
+
+- Context: Post-skill — this is a finisher, burnout, accessory, or short conditioning piece AFTER the WOD. Lean into the finisher vibe. Good names: "Post-Skill Burnout", "Bell Ringer", "Lung Tax", "Core Crusher", "Grip Finisher", "Last Call", "Snatch Burnout".
+
+- Context: Warm-up — light, mobilization-flavored. Good names: "Dynamic Open", "Movement Primer", "Warm the Engine".
+
+- Context: Monthly challenge — this is one day in a long-running challenge (e.g., daily burpees for 30 days). Lean into streak / daily / ladder vibes. Good names: "Daily Burpee Climb", "Sit-Up Streak", "Burpee Ladder Day", "30-Day Tax".
+
+- Context: Custom track / CAP track / Event prep track — treat like a WOD, but slightly more programmed-feeling. WOD-style names are fine.
 
 STYLE
 - 1–5 words, Title Case.
-- Fun and a little punchy, but grounded: the name should hint at what the athlete is in for — a signature movement, the structure (AMRAP, ladder, EMOM), or the rep scheme.
-- Lean into CrossFit naming culture. Nod to iconic rep schemes (21-15-9 or any descending ladder → "Down the Ladder", "Triple Down"). The short, snappy, evocative style of benchmark "Girl" WODs is fair game.
-- Movement-evocative ("Thruster Hell", "Deadlift Ladder") or vibe names ("Grip & Rip", "Light 'Till It's Not") both work.
+- The name should hint at what the athlete is in for — the purpose (build-up, finisher), a signature movement, the structure (AMRAP, ladder, EMOM), or the rep scheme.
+- Nod to iconic rep schemes when present (21-15-9 → "Down the Ladder", "Triple Down").
 
 RULES
 - No punctuation except apostrophes and ampersands. No quotes, no emojis.
-- No numbers unless they come straight from the workout (a rep scheme like 21-15-9 is fine).
+- No numbers unless they come straight from the workout (a rep scheme like 21-15-9 is fine; "30-Day" is fine for monthly challenges).
 - Never invent weights, rep counts, or movements the user didn't provide.
-- Never reuse the name of a real benchmark WOD (Fran, Murph, Cindy, Grace, Diane, Helen, etc.) — those are reserved.
+- Never reuse the name of a real benchmark WOD (Fran, Murph, Cindy, Grace, Diane, Helen, Karen, Annie, Jackie, etc.) — those are reserved, even with a suffix.
 - Avoid the literal word "WOD" or "Workout", and generic filler ("My Workout", "Today's Session", "Daily Grind").
 
 EXAMPLES
+Context: WOD
 Workout: For Time, rep scheme 21-15-9 — Movements: Deadlift, Box Jump Over
 Title: Down the Ladder
 
+Context: WOD
 Workout: AMRAP 20 min — Movements: Wall Ball, Toes-to-Bar, Burpee
 Title: Wall Ball Wasteland
 
-Workout: EMOM — Movements: Power Clean, Burpee
-Title: Clean & Suffer
+Context: Pre-skill
+Workout: For Load — Movements: Back Squat
+Title: Back Squat Build-Up
 
+Context: Pre-skill
+Workout: For Load, rep scheme 5-3-1 — Movements: Power Snatch
+Title: Snatch Ramp to Heavy
+
+Context: Post-skill
+Workout: AMRAP 6 min — Movements: Dumbbell Snatch, Burpee
+Title: Snatch & Burpee Burnout
+
+Context: Post-skill
+Workout: For Time (5:00 cap) — Movements: Toes-to-Bar, Push-Up
+Title: Core Bell Ringer
+
+Context: Monthly challenge
+Workout: For Reps — Movements: Burpee
+Title: Daily Burpee Climb
+
+Context: WOD
 Workout with 2 parts.
 Part 1: For Load — Movements: Back Squat
 Part 2: For Time (10:00 cap) — Movements: Pull-Up, Push-Up, Air Squat
@@ -357,8 +485,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "At least one part is required" }, { status: 400 });
   }
 
-  // 1. Exact benchmark match (only meaningful for single-part workouts).
-  if (parts.length === 1) {
+  // 1. Exact benchmark match (only meaningful for single-part workouts,
+  //    and only for contexts where calling something a benchmark variant
+  //    actually helps the coach — see contextAllowsBenchmarkMatch).
+  if (parts.length === 1 && contextAllowsBenchmarkMatch(body.context)) {
     const { exact, near } = await findBenchmarkMatch(parts[0], {
       requiresVest: body.requiresVest,
       vestWeightMaleLb: body.vestWeightMaleLb,
@@ -397,7 +527,7 @@ export async function POST(req: NextRequest) {
   }
 
   const haikuTitle = await callHaiku(
-    describeWorkoutForHaiku(parts, movementNameById)
+    describeWorkoutForHaiku(parts, movementNameById, body.context)
   );
   if (haikuTitle) {
     const result: SuggestionResult = { title: haikuTitle, source: "ai" };

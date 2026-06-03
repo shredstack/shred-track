@@ -7,10 +7,12 @@ import { useCallback, useMemo, useState } from "react";
 import { TrackDayCell } from "@/components/gym/programming/track-day-cell";
 import { TrackDayEditorSheet } from "@/components/gym/programming/track-day-editor-sheet";
 import type { TrackDayRow } from "@/hooks/useTracks";
+import type { TrackKind } from "@/types/programming-tracks";
 
 interface Props {
   communityId: string;
   trackId: string;
+  trackKind: TrackKind;
   startsOn: string;
   endsOn: string;
   days: TrackDayRow[];
@@ -40,6 +42,7 @@ const DOW_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 export function TrackCalendar({
   communityId,
   trackId,
+  trackKind,
   startsOn,
   endsOn,
   days,
@@ -112,6 +115,7 @@ export function TrackCalendar({
           }}
           communityId={communityId}
           trackId={trackId}
+          trackKind={trackKind}
           date={selectedDate}
           existingDay={existingDay}
         />

@@ -31,6 +31,19 @@ import type {
   WorkoutBuilderMovement,
 } from "@/types/crossfit";
 import { WORKOUT_TYPE_LABELS, WORKOUT_TYPE_COLORS } from "@/types/crossfit";
+import type { WorkoutSectionKind } from "@/db/schema";
+import type { TrackKind } from "@/types/programming-tracks";
+
+/**
+ * Authoring context for the title suggestion. Tells the LLM whether this
+ * prescription is a WOD, pre-skill build-up, post-skill finisher, monthly
+ * challenge day, etc. — and gates benchmark matching server-side so
+ * pre-skill ramps don't get tagged "Grace (modified)".
+ */
+export interface SmartBuilderContext {
+  sectionKind?: WorkoutSectionKind | null;
+  trackKind?: TrackKind | null;
+}
 
 interface SmartBuilderProps {
   onSave: (form: WorkoutBuilderForm) => void;
@@ -53,6 +66,11 @@ interface SmartBuilderProps {
   // Hide the vest requirements block — same rationale as hidePartner for
   // gym programming.
   hideVest?: boolean;
+  // Authoring context. Forwarded to /api/workouts/suggest-title so the
+  // LLM knows whether it's naming a WOD, pre-/post-skill section,
+  // monthly challenge day, etc. Also gates server-side benchmark
+  // matching (no "Grace (modified)" for a pre-skill build-up).
+  context?: SmartBuilderContext;
 }
 
 type Step = "build" | "review";
@@ -256,6 +274,7 @@ export function SmartBuilder({
   hideDateInput,
   hidePartner,
   hideVest,
+  context,
 }: SmartBuilderProps) {
   const [step, setStep] = useState<Step>("build");
   const [form, setForm] = useState<WorkoutBuilderForm>(
@@ -322,9 +341,18 @@ export function SmartBuilder({
       vest: !!form.requiresVest,
       vm: form.vestWeightMaleLb || null,
       vf: form.vestWeightFemaleLb || null,
+      ctxS: context?.sectionKind ?? null,
+      ctxT: context?.trackKind ?? null,
     };
     return JSON.stringify(payload);
-  }, [form.parts, form.requiresVest, form.vestWeightMaleLb, form.vestWeightFemaleLb]);
+  }, [
+    form.parts,
+    form.requiresVest,
+    form.vestWeightMaleLb,
+    form.vestWeightFemaleLb,
+    context?.sectionKind,
+    context?.trackKind,
+  ]);
 
   const requestSuggestion = useCallback(async () => {
     // Bail if there's nothing to suggest for.
@@ -353,6 +381,12 @@ export function SmartBuilder({
         vestWeightFemaleLb: form.vestWeightFemaleLb
           ? Number(form.vestWeightFemaleLb)
           : null,
+        context: context
+          ? {
+              sectionKind: context.sectionKind ?? null,
+              trackKind: context.trackKind ?? null,
+            }
+          : undefined,
       };
       const res = await fetch("/api/workouts/suggest-title", {
         method: "POST",
@@ -382,7 +416,13 @@ export function SmartBuilder({
     } finally {
       setSuggestLoading(false);
     }
-  }, [form.parts]);
+  }, [
+    form.parts,
+    form.requiresVest,
+    form.vestWeightMaleLb,
+    form.vestWeightFemaleLb,
+    context,
+  ]);
 
   // Fetch suggestion once we enter review, debounced per-spec-hash.
   useEffect(() => {

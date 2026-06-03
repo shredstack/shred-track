@@ -120,6 +120,10 @@ export interface TrackDayLeaderboardRowEntry extends BaseLeaderboardRowEntry {
   isComplete: boolean;
   /** Optional notes from the athlete on this day's entry. */
   notes?: string | null;
+  /** Longest consecutive-day streak across the track (spec §3.4). */
+  consecutiveDaysLogged?: number;
+  /** Adherence ratio (0..1) — daysLogged / daysAvailable. */
+  adherence?: number;
 }
 
 export type LeaderboardRowEntry =
@@ -204,8 +208,31 @@ export function LeaderboardRow({
               )}
             </>
           )}
-          {entry.kind === "track_day" && entry.isComplete && (
-            <CheckCircle2 className="size-3.5 text-emerald-400" />
+          {entry.kind === "track_day" && (
+            <>
+              {entry.consecutiveDaysLogged != null &&
+                entry.consecutiveDaysLogged > 0 && (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] bg-amber-500/10 text-amber-300 border-amber-500/30"
+                    title="Longest streak"
+                  >
+                    🔥 {entry.consecutiveDaysLogged}
+                  </Badge>
+                )}
+              {entry.adherence != null && (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] bg-sky-500/10 text-sky-300 border-sky-500/30"
+                  title="Days logged / available"
+                >
+                  {Math.round(entry.adherence * 100)}%
+                </Badge>
+              )}
+              {entry.isComplete && (
+                <CheckCircle2 className="size-3.5 text-emerald-400" />
+              )}
+            </>
           )}
         </div>
 

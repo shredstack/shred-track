@@ -288,6 +288,13 @@ export async function GET(
   const programmedBucketByKey = new Map<string, Bucket>();
   const buckets: Bucket[] = [];
   for (const s of sessionRows) {
+    // Sessions sourced from a programming track are authored + managed in
+    // the Tracks UI and surface on the athlete CrossFit tab via the
+    // inline injector. They have no place in the programming admin week
+    // view — bucketing them here would dump them under the amber
+    // "manual workouts" banner with a misleading "Move into programming"
+    // CTA (spec §7).
+    if (s.sourceTrackId) continue;
     if (s.programmingReleaseId) {
       const key = `${s.workoutDate}:${s.programmingReleaseId}`;
       let b = programmedBucketByKey.get(key);

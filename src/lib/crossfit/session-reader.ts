@@ -39,6 +39,8 @@ import {
   crossfitWorkoutParts,
   crossfitWorkouts,
   movements,
+  programmingTrackDays,
+  programmingTracks,
   scoreMovementDetails,
   scores,
   users,
@@ -331,6 +333,54 @@ export async function readSessionWorkouts(
     : [];
   const communityById = new Map(communityRows.map((r) => [r.id, r]));
 
+  // Step 5b: track-day hydration for sessions sourced from a programming
+  // track. Without this, monthly_challenge / custom-track free-text days
+  // render their body but the athlete-facing TrackDayScoreInput is gated
+  // off (it requires both sourceTrackId AND trackDayId to be populated —
+  // see workout-section-block.tsx). The inline injector writes back the
+  // workoutSessionId on the track day, so a lookup by sessionId resolves
+  // to the (day, scoringConfig, prescribedValue) triple the input needs.
+  const trackIdsFromSessions = Array.from(
+    new Set(
+      sessionRows
+        .map((s) => s.sourceTrackId)
+        .filter((id): id is string => !!id)
+    )
+  );
+  const trackRows = trackIdsFromSessions.length
+    ? await db
+        .select({
+          id: programmingTracks.id,
+          scoringConfig: programmingTracks.scoringConfig,
+        })
+        .from(programmingTracks)
+        .where(inArray(programmingTracks.id, trackIdsFromSessions))
+    : [];
+  const trackById = new Map(trackRows.map((t) => [t.id, t]));
+
+  const trackDayRows = sessionIds.length
+    ? await db
+        .select({
+          id: programmingTrackDays.id,
+          workoutSessionId: programmingTrackDays.workoutSessionId,
+          prescribedValue: programmingTrackDays.prescribedValue,
+        })
+        .from(programmingTrackDays)
+        .where(inArray(programmingTrackDays.workoutSessionId, sessionIds))
+    : [];
+  const trackDayBySession = new Map<
+    string,
+    { id: string; prescribedValue: string | null }
+  >();
+  for (const td of trackDayRows) {
+    if (td.workoutSessionId) {
+      trackDayBySession.set(td.workoutSessionId, {
+        id: td.id,
+        prescribedValue: td.prescribedValue,
+      });
+    }
+  }
+
   // Step 6: group sessions by (scope key, workoutDate) and build the
   // synthetic workout shape.
   type Group = {
@@ -581,11 +631,16 @@ export async function readSessionWorkouts(
         scoreType: s.scoreType,
         partIds,
         sourceTrackId: s.sourceTrackId ?? null,
-        // Track-day fields are handled by the caller when needed (the
-        // gym programming card reads them); leave them null here.
-        trackDayId: null,
-        trackScoringConfig: null,
-        trackPrescribedValue: null,
+        trackDayId: trackDayBySession.get(s.id)?.id ?? null,
+        trackScoringConfig: s.sourceTrackId
+          ? trackById.get(s.sourceTrackId)?.scoringConfig ?? null
+          : null,
+        trackPrescribedValue: (() => {
+          const raw = trackDayBySession.get(s.id)?.prescribedValue;
+          if (raw == null) return null;
+          const n = Number(raw);
+          return Number.isFinite(n) ? n : null;
+        })(),
         // Benchmark id: the template id itself, only when the template
         // is_benchmark (so the UI's owner-section selection logic still
         // picks the right card for description / partner / vest chips).

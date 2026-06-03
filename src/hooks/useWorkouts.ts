@@ -627,6 +627,30 @@ export function useLogScore() {
   });
 }
 
+// Parse a YYYY-MM-DD `workoutDate` (no TZ) as the user's local noon. Noon
+// avoids midnight edge cases where a small TZ shift would slide the
+// workout into the previous/next day in Apple Health.
+function parseWorkoutDateLocalNoon(workoutDate?: string | null): number | null {
+  if (!workoutDate) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(workoutDate);
+  if (!match) return null;
+  const [, y, m, d] = match;
+  return new Date(Number(y), Number(m) - 1, Number(d), 12, 0, 0, 0).getTime();
+}
+
+// Treat a WOD as "too old to push" once today's local date is more than
+// one calendar day past the WOD's local date. Same-day and yesterday →
+// push; older → skip. Calendar days (not 24-hour windows) so the cutoff
+// doesn't slide with the time of day the user happens to log.
+function isOlderThanOneCalendarDay(wodMs: number): boolean {
+  const startOfDay = (ms: number) => {
+    const d = new Date(ms);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  };
+  const daysDiff = (startOfDay(Date.now()) - startOfDay(wodMs)) / 86_400_000;
+  return daysDiff > 1;
+}
+
 // Best-effort Apple Health push. Lives outside the mutation chain so a
 // HealthKit failure never bubbles into the UI as a score-save error.
 async function maybePushToAppleHealth(
@@ -638,6 +662,7 @@ async function maybePushToAppleHealth(
     estimatedKcalActiveWithEpoc?: number | null;
     appleHealthWorkoutUuid?: string | null;
     appleHealthMetadata?: Record<string, string | number> | null;
+    workoutDate?: string | null;
   },
   queryClient: QueryClient,
 ): Promise<void> {
@@ -659,12 +684,26 @@ async function maybePushToAppleHealth(
   const pushPref = cached.pushToAppleHealth !== false;
   if (!pushPref) return;
 
+  // Decide the time window for the HK workout record.
+  //
+  // Live timer trumps everything: if the athlete bracketed the workout
+  // with start/stop, those wall-clock timestamps are authoritative.
+  //
+  // Otherwise (back-log or quick-log), key off the WOD's programmed date.
+  // Back-logs more than a calendar day old are skipped — we don't want to
+  // pollute today's Move ring with old workouts, and Apple Health credit
+  // for a 3-month-old workout isn't meaningful anyway.
   const start = saved.startedAt ? new Date(saved.startedAt).getTime() : null;
   const end = saved.endedAt ? new Date(saved.endedAt).getTime() : null;
-  let fromMs = start ?? null;
-  let toMs = end ?? null;
-  // If no live bracket, back-fill the window from durationSeconds.
-  if (toMs == null) toMs = Date.now();
+  let fromMs: number | null = start;
+  let toMs: number | null = end;
+
+  if (toMs == null) {
+    const wodMs = parseWorkoutDateLocalNoon(saved.workoutDate);
+    if (wodMs == null) return; // no WOD date and no bracket — nothing safe to stamp
+    if (isOlderThanOneCalendarDay(wodMs)) return; // back-log too old; skip the push
+    toMs = wodMs;
+  }
   if (fromMs == null) {
     const dur = (saved.durationSeconds ?? 0) * 1000;
     fromMs = dur > 0 ? toMs - dur : toMs - 30 * 60 * 1000; // last-ditch 30 min

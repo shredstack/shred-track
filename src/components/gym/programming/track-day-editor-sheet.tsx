@@ -9,8 +9,10 @@
 //     paste dialog uses and writes the result as a free-form body
 //     (single-day variant — re-use rather than re-implement).
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Sheet,
   SheetContent,
@@ -24,19 +26,26 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { SmartBuilder } from "@/components/crossfit/smart-builder";
 import { builderPartToPayload } from "@/lib/crossfit/builder-payload";
-import type { WorkoutBuilderForm } from "@/types/crossfit";
+import { workoutToBuilderForm } from "@/lib/crossfit/workout-to-builder-form";
+import { useUpdateWorkout } from "@/hooks/useWorkouts";
+import type { WorkoutBuilderForm, WorkoutDisplay } from "@/types/crossfit";
 import {
   useTrackDayCreateWorkout,
   useTrackDayUpsert,
   useTrackDayDelete,
   type TrackDayRow,
 } from "@/hooks/useTracks";
+import type { TrackKind } from "@/types/programming-tracks";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   communityId: string;
   trackId: string;
+  // Kind of the parent track. Forwarded to the Smart Builder so the title
+  // suggestion knows it's authoring a monthly-challenge day vs a custom
+  // track WOD vs a CAP day, etc.
+  trackKind: TrackKind;
   date: string;
   existingDay: TrackDayRow | null;
 }
@@ -46,6 +55,7 @@ export function TrackDayEditorSheet({
   onOpenChange,
   communityId,
   trackId,
+  trackKind,
   date,
   existingDay,
 }: Props) {
@@ -64,6 +74,28 @@ export function TrackDayEditorSheet({
   const upsert = useTrackDayUpsert(communityId, trackId);
   const deleteDay = useTrackDayDelete(communityId, trackId);
   const createWorkout = useTrackDayCreateWorkout(communityId, trackId);
+  const updateWorkout = useUpdateWorkout();
+  const queryClient = useQueryClient();
+
+  // Linked workout — fetched only when the day has one so the Smart Builder
+  // tab can pre-populate from the existing prescription. Without this, the
+  // builder always opens empty and Save creates a new session, silently
+  // replacing the one already there.
+  const linkedWorkoutId = existingDay?.workoutSessionId ?? null;
+  const linkedWorkoutQuery = useQuery<WorkoutDisplay>({
+    queryKey: ["workouts", "by-id", linkedWorkoutId],
+    enabled: open && !!linkedWorkoutId,
+    queryFn: async () => {
+      const res = await fetch(`/api/workouts/${linkedWorkoutId}`);
+      if (!res.ok) throw new Error("Failed to load workout");
+      return res.json();
+    },
+  });
+
+  const builderInitialForm = useMemo<WorkoutBuilderForm | null>(() => {
+    if (!linkedWorkoutQuery.data) return null;
+    return workoutToBuilderForm(linkedWorkoutQuery.data);
+  }, [linkedWorkoutQuery.data]);
 
   async function saveBody() {
     try {
@@ -115,12 +147,44 @@ export function TrackDayEditorSheet({
       return;
     }
     try {
-      await createWorkout.mutateAsync({
-        date,
-        title: form.title || undefined,
-        parts,
-      });
-      toast.success("Workout saved");
+      if (linkedWorkoutId) {
+        await updateWorkout.mutateAsync({
+          id: linkedWorkoutId,
+          input: {
+            title: form.title || undefined,
+            description: form.description || undefined,
+            workoutDate: form.workoutDate || date,
+            requiresVest: !!form.requiresVest,
+            vestWeightMaleLb: form.vestWeightMaleLb
+              ? parseFloat(form.vestWeightMaleLb)
+              : undefined,
+            vestWeightFemaleLb: form.vestWeightFemaleLb
+              ? parseFloat(form.vestWeightFemaleLb)
+              : undefined,
+            isPartner: !!form.isPartner,
+            partnerCount: form.partnerCount
+              ? parseInt(form.partnerCount, 10)
+              : undefined,
+            parts,
+          },
+        });
+        // useUpdateWorkout only invalidates ["workouts"]; the tracks query
+        // caches the day row separately, so nudge it too.
+        queryClient.invalidateQueries({
+          queryKey: ["gym", communityId, "tracks", trackId],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ["workouts", "by-id", linkedWorkoutId],
+        });
+        toast.success("Workout updated");
+      } else {
+        await createWorkout.mutateAsync({
+          date,
+          title: form.title || undefined,
+          parts,
+        });
+        toast.success("Workout saved");
+      }
       onOpenChange(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
@@ -208,12 +272,43 @@ export function TrackDayEditorSheet({
           </TabsContent>
 
           <TabsContent value="builder" className="pt-3">
-            <SmartBuilder
-              onSave={saveBuilder}
-              onCancel={() => onOpenChange(false)}
-              defaultWorkoutDate={date}
-              saveLabel={createWorkout.isPending ? "Saving…" : "Save workout"}
-            />
+            {linkedWorkoutId && linkedWorkoutQuery.isLoading ? (
+              <div className="flex items-center justify-center py-10 text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+              </div>
+            ) : linkedWorkoutId && linkedWorkoutQuery.isError ? (
+              <div className="space-y-2 py-6 text-sm">
+                <p className="text-destructive">
+                  {linkedWorkoutQuery.error instanceof Error
+                    ? linkedWorkoutQuery.error.message
+                    : "Failed to load workout"}
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => linkedWorkoutQuery.refetch()}
+                >
+                  Retry
+                </Button>
+              </div>
+            ) : (
+              <SmartBuilder
+                onSave={saveBuilder}
+                onCancel={() => onOpenChange(false)}
+                defaultWorkoutDate={date}
+                initialForm={builderInitialForm ?? undefined}
+                context={{ trackKind }}
+                saveLabel={
+                  linkedWorkoutId
+                    ? updateWorkout.isPending
+                      ? "Saving…"
+                      : "Save changes"
+                    : createWorkout.isPending
+                      ? "Saving…"
+                      : "Save workout"
+                }
+              />
+            )}
           </TabsContent>
 
           <TabsContent value="paste" className="space-y-3 pt-3">

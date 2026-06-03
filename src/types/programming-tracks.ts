@@ -21,10 +21,43 @@ export const TRACK_SCORING_AGGREGATIONS = [
   "sum",
   "last",
   "per_day_independent",
+  "streak",
 ] as const;
 
 export type TrackScoringAggregation =
   (typeof TRACK_SCORING_AGGREGATIONS)[number];
+
+/**
+ * Builder-emitted pattern metadata. Stored so "Re-run Builder" knows what
+ * to re-render. Authoring-side only — athlete-facing code never reads it.
+ */
+export type TrackBuilderPattern =
+  | { kind: "flat"; dailyAmount: number }
+  | {
+      kind: "ladder";
+      startAmount: number;
+      incrementPerDay: number;
+      weeklyBonus: number;
+    }
+  | { kind: "per_day" };
+
+export const TRACK_BUILDER_REST_CADENCES = [
+  "none",
+  "every_7th",
+  "weekends",
+] as const;
+
+export type TrackBuilderRestCadence =
+  (typeof TRACK_BUILDER_REST_CADENCES)[number];
+
+export const TRACK_BUILDER_MARK_DONE_STYLES = [
+  "prefilled",
+  "free_entry",
+  "checkbox",
+] as const;
+
+export type TrackBuilderMarkDoneStyle =
+  (typeof TRACK_BUILDER_MARK_DONE_STYLES)[number];
 
 export interface TrackScoringConfig {
   unit: TrackScoringUnit;
@@ -37,6 +70,16 @@ export interface TrackScoringConfig {
   allowJustDone?: boolean;
   /** Shown next to the input. */
   description?: string;
+  /** Builder-emitted pattern metadata. See `TrackBuilderPattern`. */
+  builderPattern?: TrackBuilderPattern;
+  /** Builder-set rest-day cadence so Re-run Builder reproduces the same
+   *  skip days. Not used at athlete-render time. */
+  restCadence?: TrackBuilderRestCadence;
+  /** Body to write for rest days. Defaults to "Rest day". */
+  restDayLabel?: string;
+  /** When true, the per-day input suppresses the numeric field entirely —
+   *  the athlete only sees a "Mark done" button. Implies `allowJustDone`. */
+  checkboxOnly?: boolean;
 }
 
 export const INLINE_POSITIONS = [
