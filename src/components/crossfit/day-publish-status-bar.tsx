@@ -25,6 +25,11 @@ import type { ProgrammingWeekRelease } from "@/hooks/useGymProgrammingWeek";
 
 interface Props {
   communityId: string;
+  // Monday-of-week the bar is mounted for. Used for targeted invalidation
+  // of the shared `gymProgrammingWeekKey` and the surrounding-week nav
+  // strip so publish/unpublish doesn't blow away every cached query under
+  // `["gym", communityId]`.
+  weekStart: string;
   release: ProgrammingWeekRelease | null;
   // Workouts-by-date key to invalidate on the CrossFit-tab mount so the
   // admin's own gym-mode view picks up the now-published sessions without
@@ -44,6 +49,7 @@ function formatPublishedAt(iso: string): string {
 
 export function DayPublishStatusBar({
   communityId,
+  weekStart,
   release,
   onAfterMutate,
 }: Props) {
@@ -51,21 +57,13 @@ export function DayPublishStatusBar({
   const [publishing, setPublishing] = useState(false);
   const [unpublishing, setUnpublishing] = useState(false);
 
-  // Look up the week start from the release row. When the release doesn't
-  // exist yet (empty week) we have nothing to invalidate beyond the
-  // current-week key — which the parent already holds via its own data
-  // fetch, so a coarse `gym/{communityId}` invalidation is fine.
-  function invalidate(weekStart: string | undefined) {
-    if (weekStart) {
-      qc.invalidateQueries({
-        queryKey: gymProgrammingWeekKey(communityId, weekStart),
-      });
-      qc.invalidateQueries({
-        queryKey: ["gym", communityId, "programming-nav", weekStart],
-      });
-    } else {
-      qc.invalidateQueries({ queryKey: ["gym", communityId] });
-    }
+  function invalidate() {
+    qc.invalidateQueries({
+      queryKey: gymProgrammingWeekKey(communityId, weekStart),
+    });
+    qc.invalidateQueries({
+      queryKey: ["gym", communityId, "programming-nav", weekStart],
+    });
     onAfterMutate?.();
   }
 
@@ -82,7 +80,7 @@ export function DayPublishStatusBar({
         throw new Error(body?.error ?? "Failed to publish");
       }
       toast.success("Published. Members can see this week.");
-      invalidate(undefined);
+      invalidate();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
     } finally {
@@ -110,7 +108,7 @@ export function DayPublishStatusBar({
         throw new Error(body?.error ?? "Failed to unpublish");
       }
       toast.success("Unpublished. Members no longer see this week.");
-      invalidate(undefined);
+      invalidate();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
     } finally {

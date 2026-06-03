@@ -1063,7 +1063,7 @@ function SectionRow({
               before making structural changes. */}
           {hasParts && (section.scoreCount ?? 0) > 0 ? (
             <p className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-300">
-              {section.scoreCount}{" "}
+              {section.scoreCount ?? 0}{" "}
               {section.scoreCount === 1 ? "athlete has" : "athletes have"}{" "}
               already logged scores on this section. Your edits won&apos;t
               invalidate those scores.

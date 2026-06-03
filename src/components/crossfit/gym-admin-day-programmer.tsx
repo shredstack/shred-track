@@ -23,6 +23,7 @@ import { QueryError } from "@/components/shared/query-error";
 import { ProgrammingDayCard } from "@/components/gym/programming/programming-day-card";
 import { DayPublishStatusBar } from "@/components/crossfit/day-publish-status-bar";
 import { useGymProgrammingWeek } from "@/hooks/useGymProgrammingWeek";
+import { workoutsByDateKey } from "@/hooks/useWorkouts";
 
 interface Props {
   communityId: string;
@@ -64,7 +65,7 @@ export function GymAdminDayProgrammer({
   // cache to refresh.
   const onAfterMutate = useCallback(() => {
     qc.invalidateQueries({
-      queryKey: ["workouts", "by-date", date, `gym:${communityId}`],
+      queryKey: workoutsByDateKey(date, { mode: "gym", communityId }),
     });
   }, [qc, date, communityId]);
 
@@ -124,6 +125,7 @@ export function GymAdminDayProgrammer({
     <div className="space-y-3">
       <DayPublishStatusBar
         communityId={communityId}
+        weekStart={weekStart}
         release={data?.release ?? null}
         onAfterMutate={onAfterMutate}
       />

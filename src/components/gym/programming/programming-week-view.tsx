@@ -144,6 +144,7 @@ export function ProgrammingWeekView({
 
       <DayPublishStatusBar
         communityId={communityId}
+        weekStart={weekStart}
         release={data?.release ?? null}
       />
 
