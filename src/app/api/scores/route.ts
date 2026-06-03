@@ -12,7 +12,7 @@ import {
 import { and, eq, desc, asc } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
-import { aggregateRoundDurations } from "@/lib/crossfit/round-aggregation";
+import { validateAndAggregateRoundDurations } from "@/lib/crossfit/round-aggregation";
 import { invalidateCrossfitInsightsCache } from "@/lib/crossfit/insights/cache";
 import type { SetEntry } from "@/types/crossfit";
 import { computeScoreEstimate } from "@/lib/calories/orchestrator";
@@ -289,48 +289,12 @@ export async function POST(req: NextRequest) {
       .from(crossfitWorkoutParts)
       .where(eq(crossfitWorkoutParts.id, crossfitWorkoutPartId))
       .limit(1);
-
-    if (partRow?.workoutType === "timed_rounds") {
-      // Per-round times must be strictly positive: a 0 means the round
-      // didn't happen, not a real result. Mirrors the client's filter so
-      // the displayed live aggregate matches what the server stores.
-      const supplied = Array.isArray(body.roundDurationsSeconds)
-        ? body.roundDurationsSeconds.filter(
-            (n): n is number =>
-              typeof n === "number" && Number.isFinite(n) && n > 0
-          )
-        : null;
-      if (supplied && supplied.length > 0) {
-        if (partRow.rounds == null) {
-          return NextResponse.json(
-            {
-              error:
-                "This part has no round count configured; contact the workout author.",
-            },
-            { status: 400 }
-          );
-        }
-        const expectedRounds = partRow.rounds;
-        if (supplied.length !== expectedRounds) {
-          return NextResponse.json(
-            {
-              error: `roundDurationsSeconds.length (${supplied.length}) must equal part.rounds (${expectedRounds}); each round must be a positive number of seconds`,
-            },
-            { status: 400 }
-          );
-        }
-        timedRoundDurations = supplied.map((n) => Math.round(n));
-        timedRoundsAggregate = aggregateRoundDurations(
-          timedRoundDurations,
-          partRow.roundScoreAggregation as
-            | "slowest"
-            | "fastest"
-            | "sum"
-            | "average"
-            | null
-        );
-      }
+    const result = validateAndAggregateRoundDurations(partRow, body);
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
     }
+    timedRoundsAggregate = result.aggregate;
+    timedRoundDurations = result.durations;
   }
 
   const details = body.movementDetails ?? body.movementScalings ?? [];

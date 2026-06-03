@@ -9,7 +9,7 @@ import {
 import { eq, and } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
-import { aggregateRoundDurations } from "@/lib/crossfit/round-aggregation";
+import { validateAndAggregateRoundDurations } from "@/lib/crossfit/round-aggregation";
 import { invalidateCrossfitInsightsCache } from "@/lib/crossfit/insights/cache";
 import type { SetEntry } from "@/types/crossfit";
 import { computeScoreEstimate } from "@/lib/calories/orchestrator";
@@ -117,6 +117,7 @@ export async function PUT(
     null;
   let timedRoundsAggregate: number | null = null;
   let timedRoundDurations: number[] | null = null;
+  let isTimedRoundsPart = false;
   if (existing.crossfitWorkoutPartId) {
     const [partRow] = await db
       .select({
@@ -143,62 +144,33 @@ export async function PUT(
         console.error("[calories] estimator failed for score PUT", err);
       }
     }
-    if (partRow?.workoutType === "timed_rounds") {
-      // Per-round times must be strictly positive: a 0 means the round
-      // didn't happen, not a real result. Mirrors the client's filter so
-      // the displayed live aggregate matches what the server stores.
-      const supplied = Array.isArray(body.roundDurationsSeconds)
-        ? body.roundDurationsSeconds.filter(
-            (n: unknown): n is number =>
-              typeof n === "number" && Number.isFinite(n) && n > 0
-          )
-        : null;
-      if (supplied && supplied.length > 0) {
-        if (partRow.rounds == null) {
-          return NextResponse.json(
-            {
-              error:
-                "This part has no round count configured; contact the workout author.",
-            },
-            { status: 400 }
-          );
-        }
-        const expectedRounds = partRow.rounds;
-        if (supplied.length !== expectedRounds) {
-          return NextResponse.json(
-            {
-              error: `roundDurationsSeconds.length (${supplied.length}) must equal part.rounds (${expectedRounds}); each round must be a positive number of seconds`,
-            },
-            { status: 400 }
-          );
-        }
-        const rounded = supplied.map((n: number) => Math.round(n));
-        timedRoundDurations = rounded;
-        timedRoundsAggregate = aggregateRoundDurations(
-          rounded,
-          partRow.roundScoreAggregation as
-            | "slowest"
-            | "fastest"
-            | "sum"
-            | "average"
-            | null
-        );
-      }
+    isTimedRoundsPart = partRow?.workoutType === "timed_rounds";
+    const result = validateAndAggregateRoundDurations(partRow, body);
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
     }
+    timedRoundsAggregate = result.aggregate;
+    timedRoundDurations = result.durations;
   }
+
+  // Timed Rounds: scores.timeSeconds is server-computed from the per-round
+  // array. On a notes-only edit (no roundDurationsSeconds in the body) we
+  // must ignore any body.timeSeconds the client happens to send — otherwise
+  // a client-provided value would silently overwrite the stored aggregate.
+  const preserveAggregateTime =
+    isTimedRoundsPart && existing.roundDurationsSeconds != null;
+  const resolvedTimeSeconds =
+    timedRoundsAggregate ??
+    (preserveAggregateTime
+      ? existing.timeSeconds
+      : body.timeSeconds ?? existing.timeSeconds);
 
   const updated = await db.transaction(async (tx) => {
     const [row] = await tx
       .update(scores)
       .set({
         division: body.division ?? existing.division,
-        // Timed Rounds: the aggregate wins over any body.timeSeconds the
-        // client may have sent — they're computed from the same per-round
-        // array but we want the server to be canonical.
-        timeSeconds:
-          timedRoundsAggregate ??
-          body.timeSeconds ??
-          existing.timeSeconds,
+        timeSeconds: resolvedTimeSeconds,
         rounds: body.rounds ?? existing.rounds,
         remainderReps: body.remainderReps ?? existing.remainderReps,
         weightLbs: weightLbs != null ? weightLbs.toString() : existing.weightLbs,
@@ -223,8 +195,8 @@ export async function PUT(
               1000;
             if (diff > 0) return Math.round(diff);
           }
-          if (mergedScore.timeSeconds && mergedScore.timeSeconds > 0) {
-            return mergedScore.timeSeconds;
+          if (resolvedTimeSeconds && resolvedTimeSeconds > 0) {
+            return resolvedTimeSeconds;
           }
           return existing.durationSeconds;
         })(),
