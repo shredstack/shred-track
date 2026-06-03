@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { WorkoutTypeSelector } from "@/components/crossfit/workout-type-selector";
@@ -9,7 +10,12 @@ import {
 } from "@/components/crossfit/movement-list-builder";
 import { IntervalsConfig } from "@/components/crossfit/intervals-config";
 import { DurationInput } from "@/components/crossfit/duration-input";
+import {
+  parseRepScheme,
+  canPromoteSequenceToLadder,
+} from "@/lib/crossfit/rep-scheme-parser";
 import type {
+  RoundScoreAggregation,
   WorkoutBuilderBlock,
   WorkoutBuilderMovement,
   WorkoutBuilderPart,
@@ -78,7 +84,20 @@ export function WorkoutPartConfig({
           onSelect={(type) =>
             // `structure` is workout-type-specific (tabata→for_reps,
             // complex→for_load), so a type change always clears it.
-            onChange({ workoutType: type, structure: undefined })
+            // For timed_rounds, seed a default rounds count (5) and
+            // aggregation (slowest) when those fields aren't already
+            // populated — saves the user a click for the canonical case.
+            onChange({
+              workoutType: type,
+              structure: undefined,
+              ...(type === "timed_rounds"
+                ? {
+                    rounds: part.rounds || "5",
+                    roundScoreAggregation:
+                      part.roundScoreAggregation ?? "slowest",
+                  }
+                : {}),
+            })
           }
         />
       </div>
@@ -223,6 +242,17 @@ export function WorkoutPartConfig({
         </div>
       )}
 
+      {part.workoutType === "timed_rounds" && (
+        <TimedRoundsConfig
+          rounds={part.rounds}
+          roundWindowInput={part.roundWindowInput ?? ""}
+          roundScoreAggregation={part.roundScoreAggregation ?? "slowest"}
+          onChange={onChange}
+          labelClass={labelClass}
+          inputHeight={inputHeight}
+        />
+      )}
+
       {part.workoutType === "for_time" && (
         <div className="space-y-1.5">
           <Label className={labelClass}>Rounds (optional)</Label>
@@ -280,33 +310,13 @@ export function WorkoutPartConfig({
       {(showRepScheme ||
         part.workoutType === "for_time" ||
         part.workoutType === "amrap") && (
-        <div className="space-y-1.5">
-          <Label className={labelClass}>
-            Rep scheme (applies to all movements)
-          </Label>
-          <Input
-            value={part.repScheme}
-            onChange={(e) => {
-              const next = e.target.value;
-              onChange({ repScheme: next });
-              // Prefill any movement whose own scheme is empty. Users
-              // can still override per-movement (the wall-balls vs.
-              // cals-on-bike case from the spec).
-              if (next.trim()) {
-                const updated = part.movements.map((m) =>
-                  m.prescribedReps && m.prescribedReps.trim()
-                    ? m
-                    : { ...m, prescribedReps: next }
-                );
-                if (updated.some((m, i) => m !== part.movements[i])) {
-                  onMovementsChange(updated);
-                }
-              }
-            }}
-            placeholder="e.g. 21-15-9 or 75-50-25"
-            className={inputHeight}
-          />
-        </div>
+        <PartRepSchemeField
+          part={part}
+          onChange={onChange}
+          onMovementsChange={onMovementsChange}
+          labelClass={labelClass}
+          inputHeight={inputHeight}
+        />
       )}
 
       {/* Side-cadence — pairs the part with a recurring on-the-minute
@@ -332,6 +342,7 @@ export function WorkoutPartConfig({
         onBlocksChange={onBlocksChange}
         earlierLoadParts={earlierLoadParts}
         partRepScheme={part.repScheme}
+        partPromoteSequenceToLadder={part.promoteSequenceToLadder}
         showSideCadence={
           (part.workoutType === "for_time" ||
             part.workoutType === "amrap" ||
@@ -340,6 +351,218 @@ export function WorkoutPartConfig({
             part.sideCadenceIntervalInput.trim() !== "")
         }
       />
+    </div>
+  );
+}
+
+// Part-level "Rep scheme (applies to all movements)" input. Wraps the
+// text field with a "Continue as ladder?" toggle that mirrors the per-
+// movement one — saves the user from having to type the scheme into
+// every movement just to enable the ladder behavior for an AMRAP.
+//
+// When the user toggles the part-level promote flag, we propagate it onto
+// every movement currently inheriting the part's scheme (i.e. whose
+// prescribedReps either matches the part's repScheme or is empty). A
+// movement that has its own overridden scheme keeps its own flag.
+function PartRepSchemeField({
+  part,
+  onChange,
+  onMovementsChange,
+  labelClass,
+  inputHeight,
+}: {
+  part: WorkoutBuilderPart;
+  onChange: (updates: Partial<WorkoutBuilderPart>) => void;
+  onMovementsChange: (movements: WorkoutBuilderMovement[]) => void;
+  labelClass: string;
+  inputHeight: string;
+}) {
+  const parsed = parseRepScheme(part.repScheme);
+  const promotable = !!(parsed && canPromoteSequenceToLadder(parsed));
+  const promote = !!part.promoteSequenceToLadder;
+
+  const isInheriting = (m: WorkoutBuilderMovement, scheme: string) =>
+    !m.prescribedReps?.trim() || m.prescribedReps === scheme;
+
+  // Mirror RepSchemeField: if the input becomes un-promotable (e.g. user
+  // edits "3-6-9-12-15" to "3-6-7"), clear the saved intent so the form
+  // doesn't carry a stale flag. Also clear it on inheriting movements,
+  // since their own RepSchemeField is hidden (the override link path),
+  // meaning its own auto-clear effect can't run for them. Done in an
+  // effect because side effects during render are forbidden.
+  useEffect(() => {
+    if (promotable || !promote) return;
+    onChange({ promoteSequenceToLadder: false });
+    const updated = part.movements.map((m) =>
+      isInheriting(m, part.repScheme) && m.promoteSequenceToLadder
+        ? { ...m, promoteSequenceToLadder: false }
+        : m
+    );
+    if (updated.some((m, i) => m !== part.movements[i])) {
+      onMovementsChange(updated);
+    }
+    // We only want this to fire on the promotable→un-promotable transition;
+    // including `part` would re-fire on every other part edit. The closure
+    // reads the latest `part` because PartRepSchemeField re-renders on
+    // each part change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [promotable, promote]);
+
+  return (
+    <div className="space-y-1.5">
+      <Label className={labelClass}>
+        Rep scheme (applies to all movements)
+      </Label>
+      <Input
+        value={part.repScheme}
+        onChange={(e) => {
+          const next = e.target.value;
+          // Update both the scheme and propagate it onto inheriting
+          // movements in a single pass — saves an extra render and keeps
+          // the inheriting set stable across keystrokes.
+          const prev = part.repScheme;
+          onChange({ repScheme: next });
+          if (next.trim()) {
+            const updated = part.movements.map((m) =>
+              isInheriting(m, prev) ? { ...m, prescribedReps: next } : m
+            );
+            if (updated.some((m, i) => m !== part.movements[i])) {
+              onMovementsChange(updated);
+            }
+          }
+        }}
+        placeholder="e.g. 21-15-9 or 75-50-25"
+        className={inputHeight}
+      />
+      {promotable && (
+        <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
+          <input
+            type="checkbox"
+            checked={promote}
+            onChange={(e) => {
+              const next = e.target.checked;
+              onChange({ promoteSequenceToLadder: next });
+              // Checking the box is a force-apply: the user is telling us
+              // the ladder applies to every movement. Overwrite each
+              // movement's scheme + flag so they all snap to the compact
+              // chip view (no half-inherited, half-text-box state).
+              // Per-movement overrides can still happen after via the
+              // "Override reps" link.
+              //
+              // Unchecking the box just clears the per-movement flag on
+              // currently-inheriting movements; we don't blow away the
+              // schemes they were inheriting.
+              const updated = part.movements.map((m) => {
+                if (next) {
+                  return {
+                    ...m,
+                    prescribedReps: part.repScheme,
+                    promoteSequenceToLadder: true,
+                  };
+                }
+                return isInheriting(m, part.repScheme)
+                  ? { ...m, promoteSequenceToLadder: false }
+                  : m;
+              });
+              if (updated.some((m, i) => m !== part.movements[i])) {
+                onMovementsChange(updated);
+              }
+            }}
+            className="size-3 cursor-pointer"
+          />
+          Continue as ladder?
+        </label>
+      )}
+    </div>
+  );
+}
+
+// Inline Timed Rounds config block — rounds, optional per-round window,
+// and the score-by aggregation strategy. All four aggregations rank with
+// "lowest aggregate wins" (consistent with for_time), so the explainer
+// makes that explicit to avoid the "what's a good score?" question.
+function TimedRoundsConfig({
+  rounds,
+  roundWindowInput,
+  roundScoreAggregation,
+  onChange,
+  labelClass,
+  inputHeight,
+}: {
+  rounds: string;
+  roundWindowInput: string;
+  roundScoreAggregation: RoundScoreAggregation;
+  onChange: (updates: Partial<WorkoutBuilderPart>) => void;
+  labelClass: string;
+  inputHeight: string;
+}) {
+  const aggregations: { key: RoundScoreAggregation; label: string }[] = [
+    { key: "slowest", label: "Slowest round" },
+    { key: "fastest", label: "Fastest round" },
+    { key: "sum", label: "Sum" },
+    { key: "average", label: "Average" },
+  ];
+  const explainer: Record<RoundScoreAggregation, string> = {
+    slowest:
+      "Lowest aggregate wins. Slowest single round is your score.",
+    fastest:
+      "Lowest aggregate wins. Fastest single round is your score.",
+    sum: "Lowest aggregate wins. Total time across all rounds.",
+    average: "Lowest aggregate wins. Average round time.",
+  };
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <Label className={labelClass}>Rounds</Label>
+        <Input
+          type="number"
+          min={1}
+          max={20}
+          value={rounds}
+          onChange={(e) => onChange({ rounds: e.target.value })}
+          placeholder="e.g. 5"
+          className={inputHeight}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label className={labelClass}>Round window (optional, mm:ss)</Label>
+        <DurationInput
+          value={roundWindowInput}
+          onChange={(v) => onChange({ roundWindowInput: v })}
+          placeholder="e.g. 5:00 (Every 5:00)"
+          className={inputHeight}
+          ariaLabel="Round window"
+        />
+        <p className="text-[11px] text-muted-foreground pt-0.5">
+          When set, the score-entry warns if a round time exceeds the window.
+          Leave blank for sprint-repeat style (no enforced cadence).
+        </p>
+      </div>
+      <div className="space-y-1.5">
+        <Label className={labelClass}>Score by</Label>
+        <div className="flex flex-wrap gap-1">
+          {aggregations.map((opt) => {
+            const selected = roundScoreAggregation === opt.key;
+            return (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => onChange({ roundScoreAggregation: opt.key })}
+                className={`rounded-md px-2 py-0.5 text-xs font-medium ${
+                  selected
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted/50 text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[11px] text-muted-foreground pt-0.5">
+          {explainer[roundScoreAggregation]}
+        </p>
+      </div>
     </div>
   );
 }

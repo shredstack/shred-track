@@ -318,6 +318,26 @@ export function SmartBuilder({
   const localFallbackTitle = useMemo(() => {
     const firstPart = form.parts[0];
     if (!firstPart) return "";
+    // Timed Rounds gets its own template — "Every 5:00 × 5 — Slowest Round"
+    // (with window) or "5 Timed Rounds — Slowest Round" (without). Same
+    // contract as the spec acceptance criteria.
+    if (firstPart.workoutType === "timed_rounds") {
+      const aggregation = firstPart.roundScoreAggregation ?? "slowest";
+      const aggregationLabel =
+        aggregation === "fastest"
+          ? "Fastest Round"
+          : aggregation === "sum"
+            ? "Sum"
+            : aggregation === "average"
+              ? "Avg Round"
+              : "Slowest Round";
+      const rounds = firstPart.rounds || "5";
+      const window = firstPart.roundWindowInput?.trim();
+      const headline = window
+        ? `Every ${window} × ${rounds}`
+        : `${rounds} Timed Rounds`;
+      return `${headline} — ${aggregationLabel}`;
+    }
     const typeLabel = WORKOUT_TYPE_LABELS[firstPart.workoutType];
     const names = firstPart.movements
       .slice(0, 2)
@@ -554,6 +574,11 @@ export function SmartBuilder({
                     {part.repScheme ? ` · ${part.repScheme}` : ""}
                     {part.workoutType === "amrap" && part.amrapDurationInput
                       ? ` · ${part.amrapDurationInput}`
+                      : ""}
+                    {part.workoutType === "timed_rounds" && part.rounds
+                      ? part.roundWindowInput?.trim()
+                        ? ` · Every ${part.roundWindowInput} × ${part.rounds}`
+                        : ` · ${part.rounds} timed rounds`
                       : ""}
                     {(part.workoutType === "for_time" ||
                       part.workoutType === "emom" ||

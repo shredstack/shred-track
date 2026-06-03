@@ -3,6 +3,7 @@ import type {
   ParsedWorkout,
   ParsedMovement,
   MovementMetricType,
+  RoundScoreAggregation,
 } from "@/types/crossfit";
 
 // ============================================
@@ -186,6 +187,13 @@ function detectWorkoutType(text: string): {
     return { type: "amrap", confidence: 0.9 };
   }
 
+  // Timed Rounds detection — "Every X:XX for N rounds" or "Every X:XX × N
+  // rounds". Matched before generic EMOM detection so the more specific
+  // "for N rounds" pattern wins.
+  if (extractTimedRoundsHeader(text)) {
+    return { type: "timed_rounds", confidence: 0.95 };
+  }
+
   // EMOM detection
   if (/\bemom\b/i.test(lower)) {
     return { type: "emom", confidence: 0.95 };
@@ -265,6 +273,63 @@ function extractTimeCap(text: string): number | undefined {
   }
 
   return undefined;
+}
+
+// ============================================
+// Timed Rounds Extraction
+// ============================================
+//
+// Pattern: "Every M:SS for N rounds" or "Every M:SS × N rounds". Returns
+// { windowSeconds, rounds } when matched, null otherwise. Used both to
+// detect the workout type and to seed the prescription's rounds + window.
+function extractTimedRoundsHeader(
+  text: string
+): { windowSeconds: number; rounds: number } | null {
+  // Match within any line — the header is usually first but we don't
+  // require it to lead the text. `(?:for|x)` accepts both "for N rounds"
+  // and "× N rounds".
+  const re = /every\s+(\d+):(\d{2})\s+(?:for|x|×)\s+(\d+)\s+rounds?\b/i;
+  for (const line of text.split(/\n/)) {
+    const m = line.trim().match(re);
+    if (m) {
+      const minutes = parseInt(m[1], 10);
+      const seconds = parseInt(m[2], 10);
+      const rounds = parseInt(m[3], 10);
+      if (
+        Number.isFinite(minutes) &&
+        Number.isFinite(seconds) &&
+        Number.isFinite(rounds) &&
+        rounds > 0
+      ) {
+        return { windowSeconds: minutes * 60 + seconds, rounds };
+      }
+    }
+  }
+  return null;
+}
+
+// Look for "score is the slowest / fastest / sum / total / average / avg"
+// lines anywhere in the text. Returns null when no scoring directive is
+// found — caller defaults to 'slowest'.
+function extractRoundScoreAggregation(
+  text: string
+): { aggregation: RoundScoreAggregation; matchedLine: string } | null {
+  for (const rawLine of text.split(/\n/)) {
+    const line = rawLine.trim();
+    if (/score\s+is\s+the\s+slowest/i.test(line)) {
+      return { aggregation: "slowest", matchedLine: rawLine };
+    }
+    if (/score\s+is\s+the\s+fastest/i.test(line)) {
+      return { aggregation: "fastest", matchedLine: rawLine };
+    }
+    if (/score\s+is\s+the\s+(sum|total)/i.test(line)) {
+      return { aggregation: "sum", matchedLine: rawLine };
+    }
+    if (/score\s+is\s+the\s+(average|avg)/i.test(line)) {
+      return { aggregation: "average", matchedLine: rawLine };
+    }
+  }
+  return null;
 }
 
 // ============================================
@@ -569,6 +634,18 @@ export function parseWorkoutText(
   const amrapDurationSeconds =
     workoutType === "amrap" ? extractAmrapDuration(rawText) : undefined;
 
+  // Timed Rounds: extract the header (rounds + window) and the scoring
+  // line aggregation. Both are workout-type-gated so they don't leak into
+  // unrelated parses.
+  const timedRoundsHeader =
+    workoutType === "timed_rounds"
+      ? extractTimedRoundsHeader(rawText)
+      : null;
+  const aggregationMatch =
+    workoutType === "timed_rounds"
+      ? extractRoundScoreAggregation(rawText)
+      : null;
+
   // Extract rep scheme
   const repScheme = extractRepScheme(rawText);
 
@@ -579,19 +656,27 @@ export function parseWorkoutText(
     firstLine &&
     firstLine.length < 40 &&
     !/^\d/.test(firstLine) &&
-    !/for\s+time|amrap|emom|tabata/i.test(firstLine) &&
+    !/for\s+time|amrap|emom|tabata|every\s+\d/i.test(firstLine) &&
     !parseWeight(firstLine)
   ) {
     // Looks like a title (short, doesn't start with a number, not a workout type)
     title = firstLine;
   }
 
-  // Parse each line as a potential movement
+  // Parse each line as a potential movement. For timed_rounds, drop the
+  // header line and the scoring directive — they're metadata, not movements.
+  const headerRe = /every\s+\d+:\d{2}\s+(?:for|x|×)\s+\d+\s+rounds?:?$/i;
   const movements: ParsedMovement[] = [];
   for (const line of lines) {
-    // Skip the title line if we extracted one
     if (line === title) continue;
-
+    if (workoutType === "timed_rounds" && headerRe.test(line)) continue;
+    if (
+      workoutType === "timed_rounds" &&
+      aggregationMatch &&
+      line === aggregationMatch.matchedLine.trim()
+    ) {
+      continue;
+    }
     const parsed = parseMovementLine(line, library);
     if (parsed) {
       movements.push(parsed);
@@ -605,6 +690,12 @@ export function parseWorkoutText(
     timeCapSeconds,
     amrapDurationSeconds,
     repScheme,
+    rounds: timedRoundsHeader?.rounds,
+    roundWindowSeconds: timedRoundsHeader?.windowSeconds,
+    roundScoreAggregation:
+      workoutType === "timed_rounds"
+        ? aggregationMatch?.aggregation ?? "slowest"
+        : undefined,
     movements,
     rawText,
   };

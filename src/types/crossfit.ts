@@ -42,6 +42,7 @@ export const WORKOUT_TYPES = [
   "for_reps",
   "for_calories",
   "emom",
+  "timed_rounds",
   "tabata",
   "intervals",
   "max_effort",
@@ -57,6 +58,7 @@ export const WORKOUT_TYPE_LABELS: Record<WorkoutType, string> = {
   for_reps: "For Reps",
   for_calories: "For Calories",
   emom: "EMOM",
+  timed_rounds: "Timed Rounds",
   tabata: "Tabata",
   intervals: "Intervals",
   max_effort: "Max Effort",
@@ -70,10 +72,34 @@ export const WORKOUT_TYPE_COLORS: Record<WorkoutType, string> = {
   for_reps: "bg-green-500/20 text-green-400 border-green-500/30",
   for_calories: "bg-orange-500/20 text-orange-400 border-orange-500/30",
   emom: "bg-purple-500/20 text-purple-400 border-purple-500/30",
+  timed_rounds: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
   tabata: "bg-pink-500/20 text-pink-400 border-pink-500/30",
   intervals: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30",
   max_effort: "bg-rose-500/20 text-rose-400 border-rose-500/30",
   other: "bg-zinc-500/20 text-zinc-400 border-zinc-500/30",
+};
+
+// ============================================
+// Round Score Aggregation (timed_rounds)
+// ============================================
+
+export const ROUND_SCORE_AGGREGATIONS = [
+  "slowest",
+  "fastest",
+  "sum",
+  "average",
+] as const;
+
+export type RoundScoreAggregation = (typeof ROUND_SCORE_AGGREGATIONS)[number];
+
+export const ROUND_SCORE_AGGREGATION_LABELS: Record<
+  RoundScoreAggregation,
+  string
+> = {
+  slowest: "Slowest Round",
+  fastest: "Fastest Round",
+  sum: "Sum",
+  average: "Avg Round",
 };
 
 // ============================================
@@ -159,6 +185,13 @@ export interface ParsedWorkout {
   timeCapSeconds?: number;
   amrapDurationSeconds?: number;
   repScheme?: string;
+  // Timed Rounds: rounds count (from "for N rounds"), per-round window
+  // (from "every M:SS"), and aggregation (defaulted to 'slowest' when the
+  // text matched the header but not a scoring line). Optional so other
+  // workout types' parsed payloads are unaffected.
+  rounds?: number;
+  roundWindowSeconds?: number;
+  roundScoreAggregation?: RoundScoreAggregation;
   movements: ParsedMovement[];
   rawText: string;
   description?: string;
@@ -350,6 +383,9 @@ export interface BenchmarkWorkoutPart {
   sideCadenceIntervalSeconds: number | null;
   sideCadenceOpenEnded: boolean;
   scoreType?: PartScoreType | null;
+  // Timed Rounds: aggregation strategy + optional per-round window.
+  roundScoreAggregation?: RoundScoreAggregation | null;
+  roundWindowSeconds?: number | null;
   notes: string | null;
   movements: BenchmarkMovement[];
   // Optional named groupings under this part. Empty array = no grouping
@@ -488,6 +524,9 @@ export interface WorkoutPartDisplay {
   sideCadenceIntervalSeconds?: number;
   sideCadenceOpenEnded?: boolean;
   scoreType?: PartScoreType | null;
+  // Timed Rounds — aggregation strategy + optional per-round window.
+  roundScoreAggregation?: RoundScoreAggregation;
+  roundWindowSeconds?: number;
   notes?: string;
   movements: WorkoutMovementDisplay[];
   // Optional named groupings under this part. Empty = no grouping.
@@ -609,6 +648,11 @@ export interface ScoreDisplay {
   userName?: string;
   scalingDetails?: MovementScalingDisplay[];
   movementDetails?: ScoreMovementDetailDisplay[];
+  // Per-round durations (seconds) for a timed_rounds part. Length should
+  // equal the part's `rounds`. The aggregated value (slowest / fastest /
+  // sum / average) is stored in `timeSeconds` so leaderboard sort works
+  // without any special-case math.
+  roundDurationsSeconds?: number[];
   /** Personalized calorie estimate (athlete bodyweight, EPOC applied per
    *  user preference). Surfaced in post-score summary and the score row. */
   estimatedKcal?: number | null;
@@ -683,6 +727,10 @@ export interface ScoreInput {
   rpe?: number;
   woreVest?: boolean;
   vestWeightLb?: number;
+  // Per-round durations for timed_rounds. The server computes the aggregate
+  // (slowest / fastest / sum / average) from this array and writes it to
+  // scores.time_seconds.
+  roundDurationsSeconds?: number[];
   movementScalings: MovementScaling[];
 }
 
@@ -829,6 +877,12 @@ export interface WorkoutBuilderPart {
   // expresses its scheme per-movement via `prescribedReps`, and round-based
   // workouts use `rounds` below.
   repScheme: string;
+  // Builder-only mirror of the per-movement `promoteSequenceToLadder` flag.
+  // Holds the part-level "Continue as ladder?" toggle while the user is
+  // editing the shared rep scheme; gets propagated onto each movement that
+  // inherits the part's scheme. Not persisted — the wire only carries the
+  // per-movement flag.
+  promoteSequenceToLadder?: boolean;
   rounds: string;
   structure?: WorkoutPartStructure;
   // Admin override for parts where the workout type is ambiguous
@@ -838,6 +892,11 @@ export interface WorkoutBuilderPart {
   // 'load' ranks by heaviest weight used. Undefined elsewhere — reader
   // treats undefined as "derive from workout_type" (legacy behavior).
   scoreType?: PartScoreType;
+  // Timed Rounds — aggregation strategy + optional per-round window.
+  // `roundWindowInput` is the free-text mm:ss-style string the builder
+  // carries until submit; the server parses it via parseDurationToSeconds.
+  roundScoreAggregation?: RoundScoreAggregation;
+  roundWindowInput?: string;
   movements: WorkoutBuilderMovement[];
   // Named groupings under this part. Empty = ungrouped flat rendering.
   // Each movement either references a block via `blockTempRef`/`blockId`

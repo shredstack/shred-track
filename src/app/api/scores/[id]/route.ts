@@ -9,6 +9,7 @@ import {
 import { eq, and } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
+import { validateAndAggregateRoundDurations } from "@/lib/crossfit/round-aggregation";
 import { invalidateCrossfitInsightsCache } from "@/lib/crossfit/insights/cache";
 import type { SetEntry } from "@/types/crossfit";
 import { computeScoreEstimate } from "@/lib/calories/orchestrator";
@@ -110,12 +111,22 @@ export async function PUT(
   // is the canonical link, so the estimator works without trusting either
   // the legacy `scores.workoutId` (always null post-cutover) or the score's
   // session (which on multi-section days points at the synthetic group's
-  // first session, not the part's session).
+  // first session, not the part's session). Also pull the timed_rounds
+  // config so an edit recomputes the aggregate cleanly.
   let calorieEstimate: Awaited<ReturnType<typeof computeScoreEstimate>> | null =
     null;
+  let timedRoundsAggregate: number | null = null;
+  let timedRoundDurations: number[] | null = null;
+  let isTimedRoundsPart = false;
   if (existing.crossfitWorkoutPartId) {
     const [partRow] = await db
-      .select({ templateId: crossfitWorkoutParts.crossfitWorkoutId })
+      .select({
+        templateId: crossfitWorkoutParts.crossfitWorkoutId,
+        workoutType: crossfitWorkoutParts.workoutType,
+        rounds: crossfitWorkoutParts.rounds,
+        roundScoreAggregation:
+          crossfitWorkoutParts.roundScoreAggregation,
+      })
       .from(crossfitWorkoutParts)
       .where(eq(crossfitWorkoutParts.id, existing.crossfitWorkoutPartId))
       .limit(1);
@@ -133,14 +144,35 @@ export async function PUT(
         console.error("[calories] estimator failed for score PUT", err);
       }
     }
+    isTimedRoundsPart = partRow?.workoutType === "timed_rounds";
+    const result = validateAndAggregateRoundDurations(partRow, body);
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
+    }
+    timedRoundsAggregate = result.aggregate;
+    timedRoundDurations = result.durations;
   }
+
+  // Timed Rounds: scores.timeSeconds is server-computed from the per-round
+  // array. On a notes-only edit (no roundDurationsSeconds in the body) we
+  // must ignore any body.timeSeconds the client happens to send — otherwise
+  // a client-provided value would silently overwrite the stored aggregate.
+  // Guard on existing.timeSeconds (not roundDurationsSeconds) so legacy
+  // scores written before the per-round array was stored are still protected.
+  const preserveAggregateTime =
+    isTimedRoundsPart && existing.timeSeconds != null;
+  const resolvedTimeSeconds =
+    timedRoundsAggregate ??
+    (preserveAggregateTime
+      ? existing.timeSeconds
+      : body.timeSeconds ?? existing.timeSeconds);
 
   const updated = await db.transaction(async (tx) => {
     const [row] = await tx
       .update(scores)
       .set({
         division: body.division ?? existing.division,
-        timeSeconds: body.timeSeconds ?? existing.timeSeconds,
+        timeSeconds: resolvedTimeSeconds,
         rounds: body.rounds ?? existing.rounds,
         remainderReps: body.remainderReps ?? existing.remainderReps,
         weightLbs: weightLbs != null ? weightLbs.toString() : existing.weightLbs,
@@ -149,6 +181,8 @@ export async function PUT(
         hitTimeCap: body.hitTimeCap ?? existing.hitTimeCap,
         notes: body.notes ?? existing.notes,
         rpe: body.rpe ?? existing.rpe,
+        roundDurationsSeconds:
+          timedRoundDurations ?? existing.roundDurationsSeconds,
         woreVest: body.woreVest !== undefined ? body.woreVest : existing.woreVest,
         vestWeightLb:
           body.vestWeightLb != null
@@ -163,8 +197,8 @@ export async function PUT(
               1000;
             if (diff > 0) return Math.round(diff);
           }
-          if (mergedScore.timeSeconds && mergedScore.timeSeconds > 0) {
-            return mergedScore.timeSeconds;
+          if (resolvedTimeSeconds && resolvedTimeSeconds > 0) {
+            return resolvedTimeSeconds;
           }
           return existing.durationSeconds;
         })(),

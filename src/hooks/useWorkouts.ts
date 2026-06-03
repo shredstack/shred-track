@@ -98,6 +98,7 @@ interface WireScore {
   rpe?: number;
   woreVest?: boolean | null;
   vestWeightLb?: number;
+  roundDurationsSeconds?: number[];
   estimatedKcal?: number | null;
   estimatedKcalActive?: number | null;
   estimatedKcalWithEpoc?: number | null;
@@ -123,6 +124,14 @@ interface WirePart {
   rounds: number | null;
   structure: string | null;
   scoreType?: "reps" | "load" | null;
+  // Timed Rounds — aggregation strategy + optional per-round window.
+  roundScoreAggregation?:
+    | "slowest"
+    | "fastest"
+    | "sum"
+    | "average"
+    | null;
+  roundWindowSeconds?: number | null;
   notes: string | null;
   movements: WireMovement[];
   blocks: WireBlock[];
@@ -242,6 +251,11 @@ function wireScoreToDisplay(s: WireScore): ScoreDisplay {
     rpe: s.rpe,
     woreVest: s.woreVest ?? null,
     vestWeightLb: s.vestWeightLb,
+    roundDurationsSeconds:
+      Array.isArray(s.roundDurationsSeconds) &&
+      s.roundDurationsSeconds.length > 0
+        ? s.roundDurationsSeconds
+        : undefined,
     estimatedKcal: s.estimatedKcal ?? null,
     estimatedKcalActive: s.estimatedKcalActive ?? null,
     estimatedKcalWithEpoc: s.estimatedKcalWithEpoc ?? null,
@@ -269,6 +283,8 @@ function wirePartToDisplay(p: WirePart): WorkoutPartDisplay {
     rounds: p.rounds ?? undefined,
     structure: (p.structure as WorkoutPartStructure | null) ?? undefined,
     scoreType: p.scoreType ?? undefined,
+    roundScoreAggregation: p.roundScoreAggregation ?? undefined,
+    roundWindowSeconds: p.roundWindowSeconds ?? undefined,
     notes: p.notes ?? undefined,
     movements: p.movements.map(wireMovementToDisplay),
     blocks: (p.blocks ?? []).map(wireBlockToDisplay),
@@ -452,6 +468,10 @@ export interface CreatePartInput {
   rounds?: number;
   structure?: WorkoutPartStructure;
   scoreType?: "reps" | "load" | null;
+  // Timed Rounds — aggregation strategy + optional per-round window in
+  // seconds. Server normalizes / validates per workout type.
+  roundScoreAggregation?: "slowest" | "fastest" | "sum" | "average";
+  roundWindowSeconds?: number | string;
   notes?: string;
   movements: CreatePartMovementInput[];
   blocks?: CreatePartBlockInput[];

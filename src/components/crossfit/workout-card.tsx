@@ -121,11 +121,24 @@ function ScoreRow({
         }, 0)
       : 0;
 
+  // Timed Rounds: display the aggregated time with the right suffix so the
+  // user can tell "4:32" is the slowest / fastest / sum / avg of N rounds.
+  const timedRoundsSuffix =
+    part.workoutType === "timed_rounds"
+      ? part.roundScoreAggregation === "fastest"
+        ? " (fastest)"
+        : part.roundScoreAggregation === "sum"
+          ? " (total)"
+          : part.roundScoreAggregation === "average"
+            ? " (avg)"
+            : " (slowest)"
+      : "";
+
   let scoreDisplay = "";
   if (loadScoredHeaviest > 0) {
     scoreDisplay = `${loadScoredHeaviest} lb`;
   } else if (s.timeSeconds) {
-    scoreDisplay = formatTime(s.timeSeconds);
+    scoreDisplay = formatTime(s.timeSeconds) + timedRoundsSuffix;
     if (s.hitTimeCap) scoreDisplay += " (cap)";
   } else if (s.rounds !== undefined) {
     scoreDisplay = `${s.rounds} rds`;
@@ -193,6 +206,18 @@ function ScoreRow({
       {part.workoutType === "amrap" && (
         <AmrapScoreBreakdown part={part} score={s} />
       )}
+
+      {/* Timed Rounds: per-round splits with the aggregation-determining
+          round highlighted. Lets the athlete see pacing at a glance. */}
+      {part.workoutType === "timed_rounds" &&
+        s.roundDurationsSeconds &&
+        s.roundDurationsSeconds.length > 0 && (
+          <TimedRoundsBreakdown
+            durations={s.roundDurationsSeconds}
+            aggregation={part.roundScoreAggregation ?? "slowest"}
+            windowSeconds={part.roundWindowSeconds ?? null}
+          />
+        )}
 
       {/* Per-round time breakdown for movements that captured time per
           round (e.g. "Run 400m × 3 as fast as possible"). The summed total
@@ -279,11 +304,51 @@ function ScoreRow({
   );
 }
 
-// Returns the "details" portion of a prescription (everything after the
-// movement name). All formatting flows through the single source of
-// truth in `lib/crossfit/prescription.ts`. The reps prefix is filtered
-// out because the workout-card renders it next to the movement name.
-//
+// Per-round splits for a timed_rounds score. Highlights the round that
+// determined the aggregate (slowest → max; fastest → min). Sum and average
+// have no single "winning" round so no highlight is rendered.
+function TimedRoundsBreakdown({
+  durations,
+  aggregation,
+  windowSeconds,
+}: {
+  durations: number[];
+  aggregation: "slowest" | "fastest" | "sum" | "average";
+  windowSeconds: number | null;
+}) {
+  const max = Math.max(...durations);
+  const min = Math.min(...durations);
+  const highlightIdx =
+    aggregation === "slowest"
+      ? durations.findIndex((d) => d === max)
+      : aggregation === "fastest"
+        ? durations.findIndex((d) => d === min)
+        : -1;
+  return (
+    <div className="space-y-0.5 pl-2 text-xs">
+      <div className="flex flex-wrap gap-1.5 font-mono text-[11px]">
+        {durations.map((sec, i) => {
+          const exceeded =
+            windowSeconds != null && sec > windowSeconds;
+          const isHighlight = i === highlightIdx;
+          return (
+            <span
+              key={i}
+              className={`rounded px-1.5 py-0.5 ${
+                isHighlight
+                  ? "bg-amber-500/20 text-amber-300 font-semibold"
+                  : "bg-emerald-500/10 text-emerald-300"
+              } ${exceeded ? "ring-1 ring-amber-500/40" : ""}`}
+            >
+              R{i + 1} {sec > 0 ? formatTime(sec) : "—"}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // for_load parts: weight is the score, not a prescription. Older saved
 // workouts may still carry phantom common-Rx defaults from the builder
 // (the input was hidden but the state field was populated). Nulling the
@@ -517,6 +582,34 @@ export function PartSection({
         return <span className="text-base sm:text-lg">{text}</span>;
       }
       return null;
+    }
+
+    if (part.workoutType === "timed_rounds") {
+      const rounds = part.rounds;
+      const window = part.roundWindowSeconds;
+      const aggregation = part.roundScoreAggregation ?? "slowest";
+      const aggregationLabel =
+        aggregation === "fastest"
+          ? "Fastest Round"
+          : aggregation === "sum"
+            ? "Sum"
+            : aggregation === "average"
+              ? "Avg Round"
+              : "Slowest Round";
+      const headline =
+        window != null && rounds
+          ? `Every ${formatSecondsAsClock(window)} × ${rounds}`
+          : rounds
+            ? `${rounds} Timed Rounds`
+            : "Timed Rounds";
+      return (
+        <span className="flex flex-col gap-0.5">
+          <span>{headline}</span>
+          <span className="text-sm font-normal text-muted-foreground">
+            Score: {aggregationLabel}
+          </span>
+        </span>
+      );
     }
 
     if (part.workoutType === "amrap" && part.amrapDurationSeconds) {

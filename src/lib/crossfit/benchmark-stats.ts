@@ -1,4 +1,4 @@
-import type { WorkoutType } from "@/types/crossfit";
+import type { RoundScoreAggregation, WorkoutType } from "@/types/crossfit";
 
 export interface ScoreRow {
   scoreId: string;
@@ -48,6 +48,15 @@ export function pickBestScore(
       if (pool.length === 0) return rows[0];
       return [...pool].sort((a, b) => (a.timeSeconds ?? Infinity) - (b.timeSeconds ?? Infinity))[0];
     }
+    case "timed_rounds": {
+      // scores.timeSeconds is the pre-computed aggregate (slowest /
+      // fastest / sum / average). Lower wins, same as for_time.
+      const pool = rows.filter((r) => r.timeSeconds != null);
+      if (pool.length === 0) return rows[0];
+      return [...pool].sort(
+        (a, b) => (a.timeSeconds ?? Infinity) - (b.timeSeconds ?? Infinity)
+      )[0];
+    }
     case "amrap":
       return [...rows].sort(cmpAmrap)[0];
     case "for_load":
@@ -85,7 +94,11 @@ export function formatBestScore(
   workoutType: WorkoutType,
   score: ScoreRow,
   scoreType?: "reps" | "load" | null,
-  heaviestAthleteWeightLb?: number | null
+  heaviestAthleteWeightLb?: number | null,
+  // Timed Rounds — included in the display suffix so an athlete glancing at
+  // the leaderboard can tell whether "4:32" is the slowest, fastest, sum or
+  // average round. Defaults to 'slowest' (the most common case).
+  roundScoreAggregation?: RoundScoreAggregation | null
 ): string {
   if (score.scoreText) return score.scoreText;
   if (scoreType === "load") {
@@ -101,6 +114,21 @@ export function formatBestScore(
       const s = score.timeSeconds % 60;
       const base = `${m}:${s.toString().padStart(2, "0")}`;
       return score.hitTimeCap ? `${base} (capped)` : base;
+    }
+    case "timed_rounds": {
+      if (score.timeSeconds == null) return "—";
+      const m = Math.floor(score.timeSeconds / 60);
+      const s = score.timeSeconds % 60;
+      const base = `${m}:${s.toString().padStart(2, "0")}`;
+      const suffix =
+        roundScoreAggregation === "fastest"
+          ? "fastest"
+          : roundScoreAggregation === "sum"
+            ? "total"
+            : roundScoreAggregation === "average"
+              ? "avg"
+              : "slowest";
+      return `${base} ${suffix}`;
     }
     case "amrap": {
       if (score.totalReps != null) return `${score.totalReps} reps`;

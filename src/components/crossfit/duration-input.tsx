@@ -14,6 +14,7 @@ interface DurationInputProps {
   placeholder?: string;
   className?: string;
   ariaLabel?: string;
+  id?: string;
 }
 
 // Free-text duration input. Accepts ":30", "1:30", "30s", "1m30s",
@@ -29,6 +30,7 @@ export function DurationInput({
   placeholder = "e.g. :30 or 1:30",
   className,
   ariaLabel,
+  id,
 }: DurationInputProps) {
   const preview = useMemo(() => {
     if (!value.trim()) return null;
@@ -39,6 +41,7 @@ export function DurationInput({
   return (
     <div className="space-y-0.5">
       <Input
+        id={id}
         type="text"
         inputMode="text"
         value={value}

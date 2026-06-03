@@ -76,6 +76,10 @@ export type FingerprintPart = {
   sideCadenceIntervalSeconds?: number | null;
   sideCadenceOpenEnded?: boolean | null;
   scoreType?: string | null;
+  // Timed Rounds — included in the fingerprint only when non-null, so other
+  // workout types don't have their legacy hashes mutated.
+  roundScoreAggregation?: string | null;
+  roundWindowSeconds?: number | null;
   movements: FingerprintMovement[];
 };
 
@@ -161,6 +165,14 @@ function pickPartLevel(p: FingerprintPart): Record<string, unknown> {
     sideCadenceOpenEnded: p.sideCadenceOpenEnded ?? false,
   };
   if (p.scoreType) out.scoreType = p.scoreType;
+  // Conditional emit, same as scoreType — keeps the hash stable for every
+  // workout type that isn't timed_rounds.
+  if (p.roundScoreAggregation) {
+    out.roundScoreAggregation = p.roundScoreAggregation;
+  }
+  if (p.roundWindowSeconds != null) {
+    out.roundWindowSeconds = p.roundWindowSeconds;
+  }
   return out;
 }
 

@@ -454,6 +454,8 @@ export async function readSessionWorkouts(
           sideCadenceIntervalSeconds: p.sideCadenceIntervalSeconds,
           sideCadenceOpenEnded: p.sideCadenceOpenEnded,
           scoreType: p.scoreType,
+          roundScoreAggregation: p.roundScoreAggregation,
+          roundWindowSeconds: p.roundWindowSeconds,
           repScheme: p.repScheme,
           rounds: p.rounds,
           structure: p.structure,
@@ -535,6 +537,11 @@ export async function readSessionWorkouts(
                 vestWeightLb:
                   score.vestWeightLb != null
                     ? Number(score.vestWeightLb)
+                    : undefined,
+                roundDurationsSeconds:
+                  Array.isArray(score.roundDurationsSeconds) &&
+                  score.roundDurationsSeconds.length > 0
+                    ? score.roundDurationsSeconds
                     : undefined,
                 estimatedKcal: score.estimatedKcal ?? null,
                 estimatedKcalActive: score.estimatedKcalActive ?? null,
@@ -735,6 +742,7 @@ export interface SyntheticWorkoutScore {
   rpe?: number;
   woreVest?: boolean | null;
   vestWeightLb?: number;
+  roundDurationsSeconds?: number[];
   estimatedKcal: number | null;
   estimatedKcalActive: number | null;
   estimatedKcalWithEpoc: number | null;
@@ -761,6 +769,8 @@ export interface SyntheticWorkoutPart {
   rounds: number | null;
   structure: string | null;
   scoreType: string | null;
+  roundScoreAggregation: string | null;
+  roundWindowSeconds: number | null;
   notes: string | null;
   blocks: { id: string; orderIndex: number; title: string }[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

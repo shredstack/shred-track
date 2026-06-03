@@ -10,10 +10,14 @@ import {
   BarChart3,
   Zap,
   Repeat,
+  Hourglass,
   MoreHorizontal,
 } from "lucide-react";
 import type { WorkoutType } from "@/types/crossfit";
 
+// Order matters — `timed_rounds` is placed next to EMOM since they share
+// the "fixed cadence over N rounds" mental model. The yellow chip keeps it
+// visually distinct from EMOM (purple) and Intervals (cyan).
 const WORKOUT_TYPE_OPTIONS: {
   value: WorkoutType;
   label: string;
@@ -23,6 +27,7 @@ const WORKOUT_TYPE_OPTIONS: {
   { value: "for_time", label: "For Time", icon: Clock, color: "bg-blue-500/20 text-blue-400 border-blue-500/30" },
   { value: "amrap", label: "AMRAP", icon: Infinity, color: "bg-amber-500/20 text-amber-400 border-amber-500/30" },
   { value: "emom", label: "EMOM", icon: Timer, color: "bg-purple-500/20 text-purple-400 border-purple-500/30" },
+  { value: "timed_rounds", label: "Timed Rounds", icon: Hourglass, color: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30" },
   { value: "for_load", label: "For Load", icon: Dumbbell, color: "bg-red-500/20 text-red-400 border-red-500/30" },
   { value: "for_reps", label: "For Reps", icon: Hash, color: "bg-green-500/20 text-green-400 border-green-500/30" },
   { value: "for_calories", label: "For Calories", icon: Flame, color: "bg-orange-500/20 text-orange-400 border-orange-500/30" },

@@ -29,7 +29,11 @@ import {
 import { getSessionUser } from "@/lib/session";
 import { getSessionAccess } from "@/lib/authz/workout";
 import { formatBestScore } from "@/lib/crossfit/benchmark-stats";
-import type { LeaderboardEntry, WorkoutType } from "@/types/crossfit";
+import type {
+  LeaderboardEntry,
+  RoundScoreAggregation,
+  WorkoutType,
+} from "@/types/crossfit";
 
 const substitutionMovements = aliasedTable(movements, "subs");
 
@@ -61,6 +65,10 @@ function computeSortValue(
   }
   switch (workoutType) {
     case "for_time":
+      return row.timeSeconds ?? Number.POSITIVE_INFINITY;
+    case "timed_rounds":
+      // scores.timeSeconds is the pre-computed aggregate (slowest /
+      // fastest / sum / average). Lower wins, same as for_time.
       return row.timeSeconds ?? Number.POSITIVE_INFINITY;
     case "amrap": {
       if (row.totalReps != null) return row.totalReps;
@@ -121,6 +129,7 @@ export async function GET(
       id: crossfitWorkoutParts.id,
       workoutType: crossfitWorkoutParts.workoutType,
       scoreType: crossfitWorkoutParts.scoreType,
+      roundScoreAggregation: crossfitWorkoutParts.roundScoreAggregation,
     })
     .from(crossfitWorkoutParts)
     .where(eq(crossfitWorkoutParts.crossfitWorkoutId, s.crossfitWorkoutId))
@@ -133,6 +142,15 @@ export async function GET(
   );
   const partScoreTypeById = new Map<string, "reps" | "load" | null>(
     parts.map((p) => [p.id, (p.scoreType as "reps" | "load" | null) ?? null])
+  );
+  const partRoundAggregationById = new Map<
+    string,
+    RoundScoreAggregation | null
+  >(
+    parts.map((p) => [
+      p.id,
+      (p.roundScoreAggregation as RoundScoreAggregation | null) ?? null,
+    ])
   );
   const partIds = parts.map((p) => p.id);
 
@@ -358,7 +376,8 @@ export async function GET(
         createdAt: row.createdAt.toISOString(),
       },
       partScoreType,
-      heaviestAthleteWeightLb
+      heaviestAthleteWeightLb,
+      partRoundAggregationById.get(partId) ?? null
     );
 
     const sortValue = computeSortValue(workoutType, {

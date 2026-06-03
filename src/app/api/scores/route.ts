@@ -12,6 +12,7 @@ import {
 import { and, eq, desc, asc } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
+import { validateAndAggregateRoundDurations } from "@/lib/crossfit/round-aggregation";
 import { invalidateCrossfitInsightsCache } from "@/lib/crossfit/insights/cache";
 import type { SetEntry } from "@/types/crossfit";
 import { computeScoreEstimate } from "@/lib/calories/orchestrator";
@@ -64,6 +65,11 @@ interface ScorePostBody {
   rpe?: number;
   woreVest?: boolean;
   vestWeightLb?: number;
+  // Per-round durations for a timed_rounds part. Length must equal the
+  // part's `rounds` value. The server computes the aggregate per the part's
+  // roundScoreAggregation and writes it to scores.timeSeconds so the
+  // leaderboard's ascending-time sort works without special-case math.
+  roundDurationsSeconds?: number[];
   // Live-logger bracket. When omitted, the calorie estimator falls back to
   // the score's own time fields and (last resort) the part's time cap.
   startedAt?: string;
@@ -268,6 +274,29 @@ export async function POST(req: NextRequest) {
     effectiveUserId = body.forUserId;
   }
 
+  // Timed Rounds handling — load the target part so we know how to
+  // aggregate the per-round array into scores.timeSeconds. Done as a single
+  // tiny lookup before the transaction so the txn body stays write-only.
+  let timedRoundsAggregate: number | null = null;
+  let timedRoundDurations: number[] | null = null;
+  if (crossfitWorkoutPartId) {
+    const [partRow] = await db
+      .select({
+        workoutType: crossfitWorkoutParts.workoutType,
+        rounds: crossfitWorkoutParts.rounds,
+        roundScoreAggregation: crossfitWorkoutParts.roundScoreAggregation,
+      })
+      .from(crossfitWorkoutParts)
+      .where(eq(crossfitWorkoutParts.id, crossfitWorkoutPartId))
+      .limit(1);
+    const result = validateAndAggregateRoundDurations(partRow, body);
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
+    }
+    timedRoundsAggregate = result.aggregate;
+    timedRoundDurations = result.durations;
+  }
+
   const details = body.movementDetails ?? body.movementScalings ?? [];
 
   // Normalize setEntries on every detail up front so downstream code can
@@ -368,7 +397,11 @@ export async function POST(req: NextRequest) {
           crossfitWorkoutPartId,
           userId: effectiveUserId,
           division,
-          timeSeconds: body.timeSeconds ?? null,
+          // For timed_rounds parts, time_seconds is the aggregate (slowest /
+          // fastest / sum / average) computed from the per-round array, so
+          // the leaderboard's existing ascending-time sort just works.
+          timeSeconds:
+            timedRoundsAggregate ?? body.timeSeconds ?? null,
           rounds: body.rounds ?? null,
           remainderReps: body.remainderReps ?? null,
           weightLbs: weightLbs != null ? weightLbs.toString() : null,
@@ -377,6 +410,7 @@ export async function POST(req: NextRequest) {
           hitTimeCap: body.hitTimeCap ?? false,
           notes: body.notes ?? null,
           rpe: body.rpe ?? null,
+          roundDurationsSeconds: timedRoundDurations ?? null,
           woreVest: body.woreVest ?? null,
           vestWeightLb:
             body.vestWeightLb != null ? body.vestWeightLb.toString() : null,

@@ -483,6 +483,12 @@ export const workoutParts = pgTable(
     // express "150 DB hang power cleans for time, EMOM 5 burpees".
     sideCadenceIntervalSeconds: integer("side_cadence_interval_seconds"),
     sideCadenceOpenEnded: boolean("side_cadence_open_ended").default(false).notNull(),
+    // Timed Rounds — aggregation strategy ('slowest' | 'fastest' | 'sum' |
+    // 'average') and optional per-round window in seconds. Required at the
+    // Zod layer when workout_type = 'timed_rounds'; nullable here so other
+    // workout types don't need backfill.
+    roundScoreAggregation: text("round_score_aggregation"),
+    roundWindowSeconds: integer("round_window_seconds"),
     notes: text("notes"),
     // Group this part under a typed section (spec §1.6). Null = no section
     // (personal workouts and any pre-PR1 gym workout). FK declared in the
@@ -647,6 +653,11 @@ export const scores = pgTable(
     // is not user-editable — only this flag is.
     estimatedKcalSource: text("estimated_kcal_source").default("model").notNull(),
     appleHealthWorkoutUuid: uuid("apple_health_workout_uuid"),
+    // Per-round durations for a timed_rounds part. Length should equal the
+    // part's `rounds`. The aggregated value (slowest / fastest / sum /
+    // average) is stored in `timeSeconds` so the existing ascending-time
+    // sort works without any special-case math.
+    roundDurationsSeconds: integer("round_durations_seconds").array(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -845,6 +856,9 @@ export const benchmarkWorkoutParts = pgTable(
     sideCadenceIntervalSeconds: integer("side_cadence_interval_seconds"),
     sideCadenceOpenEnded: boolean("side_cadence_open_ended").default(false).notNull(),
     scoreType: text("score_type"),
+    // Timed Rounds — see workoutParts for documentation.
+    roundScoreAggregation: text("round_score_aggregation"),
+    roundWindowSeconds: integer("round_window_seconds"),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -1026,6 +1040,9 @@ export const crossfitWorkoutParts = pgTable(
     sideCadenceOpenEnded: boolean("side_cadence_open_ended")
       .default(false)
       .notNull(),
+    // Timed Rounds — see workoutParts for documentation.
+    roundScoreAggregation: text("round_score_aggregation"),
+    roundWindowSeconds: integer("round_window_seconds"),
     notes: text("notes"),
     estimatedKcalLow: integer("estimated_kcal_low"),
     estimatedKcalHigh: integer("estimated_kcal_high"),

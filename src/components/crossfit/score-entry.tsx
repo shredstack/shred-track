@@ -213,6 +213,12 @@ interface PartState {
   // movements (weightSource === "athlete"). Held as strings so the user
   // can type freely; parsed to numbers on save. One slot per round.
   weightPerRoundDrafts: Record<string, string[]>;
+  // Timed Rounds — one mm:ss-style draft per round (1-indexed slot in the
+  // array). Length matches the part's `rounds`. On save, each draft is
+  // parsed to seconds and the array is submitted as
+  // `roundDurationsSeconds`; the server computes the aggregate per the
+  // part's `roundScoreAggregation`.
+  roundDurationDrafts: string[];
 }
 
 export interface SetEntryDraft {
@@ -332,6 +338,19 @@ function emptyPartState(
     sumFromPerRoundDurationsOnLoad > 0 &&
     existing?.timeSeconds === sumFromPerRoundDurationsOnLoad;
 
+  // Timed Rounds — seed one slot per round, prefilled from the existing
+  // score's per-round array when editing.
+  const isTimedRounds = part?.workoutType === "timed_rounds";
+  const roundCount = isTimedRounds
+    ? Math.max(1, Math.min(20, part?.rounds ?? 0))
+    : 0;
+  const roundDurationDrafts: string[] = isTimedRounds
+    ? Array.from({ length: roundCount }, (_, i) => {
+        const secs = existing?.roundDurationsSeconds?.[i];
+        return secs != null && secs > 0 ? formatSecondsAsClock(secs) : "";
+      })
+    : [];
+
   return {
     division: existing?.division ?? null,
     timeSeconds: timeSecondsWasAutoSummed ? undefined : existing?.timeSeconds,
@@ -352,6 +371,7 @@ function emptyPartState(
     maxRepsDrafts,
     durationPerRoundDrafts,
     weightPerRoundDrafts,
+    roundDurationDrafts,
   };
 }
 
@@ -1007,6 +1027,19 @@ export function ScoreEntry({
             score.timeSeconds = sumFromPerRoundDurations;
           }
           break;
+        case "timed_rounds": {
+          // Each draft parses to a positive integer of seconds. The server
+          // re-computes the aggregate from this array — we don't try to
+          // pre-fill `timeSeconds` here so the source of truth stays on
+          // the server (aggregation rule + array length both live there).
+          const parsed = st.roundDurationDrafts
+            .map((draft) => parseDurationToSeconds(draft))
+            .filter((s): s is number => s != null && s > 0);
+          if (parsed.length === st.roundDurationDrafts.length) {
+            score.roundDurationsSeconds = parsed;
+          }
+          break;
+        }
         case "emom":
         case "tabata":
           score.scoreText = st.scoreText || undefined;
@@ -1048,6 +1081,13 @@ export function ScoreEntry({
               entries.some((e) => parseFloat(e.weight) > 0)
             )
           );
+        case "timed_rounds":
+          // The score is "started" as soon as any round has a positive
+          // parseable time. Submit-time validation enforces "all or none".
+          return st.roundDurationDrafts.some((r) => {
+            const sec = parseDurationToSeconds(r);
+            return sec != null && sec > 0;
+          });
         case "for_reps":
         case "for_calories":
         case "intervals":
@@ -1101,6 +1141,27 @@ export function ScoreEntry({
     if (missing) {
       setActivePartId(missing.id);
       setDivisionError("Please select a division before saving.");
+      return;
+    }
+
+    // Timed Rounds: all N round inputs must be parseable to seconds, or
+    // all blank. A partially-filled set would submit an empty score row;
+    // require completeness up front so the user can fix it.
+    const incompleteTimed = parts.find((part) => {
+      if (part.workoutType !== "timed_rounds") return false;
+      const st = partStates[part.id];
+      if (!st) return false;
+      if (!partHasData(part, st)) return false;
+      return st.roundDurationDrafts.some((draft) => {
+        const sec = parseDurationToSeconds(draft);
+        return sec == null || sec <= 0;
+      });
+    });
+    if (incompleteTimed) {
+      setActivePartId(incompleteTimed.id);
+      setSubmitError(
+        "Fill in every round time before saving (or clear them all)."
+      );
       return;
     }
 
@@ -1541,6 +1602,95 @@ export function ScoreEntry({
             />
           </div>
         );
+
+      case "timed_rounds": {
+        const aggregation = activePart.roundScoreAggregation ?? "slowest";
+        const window = activePart.roundWindowSeconds ?? null;
+        const drafts = state.roundDurationDrafts;
+        // Parse drafts into seconds so we can compute the live aggregate and
+        // flag any rounds that breach the window. parsed[i] === null means
+        // "not yet entered" — those rows display the input but don't count
+        // toward the aggregate.
+        const parsed = drafts.map((d) => parseDurationToSeconds(d));
+        const validValues = parsed.filter(
+          (s): s is number => s != null && s > 0
+        );
+        const allFilled =
+          validValues.length === drafts.length && drafts.length > 0;
+        const aggregate = !allFilled
+          ? null
+          : aggregation === "fastest"
+            ? Math.min(...validValues)
+            : aggregation === "sum"
+              ? validValues.reduce((a, b) => a + b, 0)
+              : aggregation === "average"
+                ? Math.round(
+                    validValues.reduce((a, b) => a + b, 0) / validValues.length
+                  )
+                : Math.max(...validValues);
+        const aggregateLabel =
+          aggregation === "fastest"
+            ? "fastest round"
+            : aggregation === "sum"
+              ? "total"
+              : aggregation === "average"
+                ? "avg round"
+                : "slowest round";
+        return (
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              {drafts.map((draft, i) => {
+                const sec = parsed[i];
+                const exceeded =
+                  window != null && sec != null && sec > window;
+                return (
+                  <div
+                    key={`round-${i}`}
+                    className="flex items-center gap-2"
+                  >
+                    <Label
+                      htmlFor={`se-round-${i}`}
+                      className="w-20 shrink-0 text-xs text-muted-foreground"
+                    >
+                      Round {i + 1}
+                    </Label>
+                    <DurationInput
+                      id={`se-round-${i}`}
+                      value={draft}
+                      onChange={(v) =>
+                        updateState(activePart.id, {
+                          roundDurationDrafts: drafts.map((d, j) =>
+                            j === i ? v : d
+                          ),
+                        })
+                      }
+                      placeholder="mm:ss"
+                      className="flex-1 font-mono"
+                      ariaLabel={`Round ${i + 1} time`}
+                    />
+                    {exceeded && (
+                      <span
+                        title={`Exceeded ${formatSecondsAsClock(window!)}`}
+                        className="flex items-center gap-1 text-[11px] text-amber-400"
+                      >
+                        <AlertTriangle className="size-3.5" />
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {aggregate != null && (
+              <div className="text-center font-mono text-lg font-semibold text-foreground">
+                Score: {formatSecondsAsClock(aggregate)}
+                <span className="ml-1 text-xs font-normal text-muted-foreground">
+                  ({aggregateLabel})
+                </span>
+              </div>
+            )}
+          </div>
+        );
+      }
 
       case "tabata":
         return (

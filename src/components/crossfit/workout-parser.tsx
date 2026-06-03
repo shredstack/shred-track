@@ -349,6 +349,48 @@ Time Cap: 10 min`}
           </div>
         )}
 
+        {parsed.workoutType === "timed_rounds" && (
+          <>
+            <div className="space-y-2">
+              <Label htmlFor="wp-tr-rounds">Rounds</Label>
+              <Input
+                id="wp-tr-rounds"
+                type="number"
+                min={1}
+                max={20}
+                value={parsed.rounds ?? ""}
+                onChange={(e) =>
+                  updateParsedField(
+                    "rounds",
+                    e.target.value ? parseInt(e.target.value) : undefined
+                  )
+                }
+                placeholder="e.g. 5"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="wp-tr-window">Round Window (seconds)</Label>
+              <Input
+                id="wp-tr-window"
+                type="number"
+                value={parsed.roundWindowSeconds ?? ""}
+                onChange={(e) =>
+                  updateParsedField(
+                    "roundWindowSeconds",
+                    e.target.value ? parseInt(e.target.value) : undefined
+                  )
+                }
+                placeholder="e.g. 300 (Every 5:00)"
+              />
+              {parsed.roundWindowSeconds && (
+                <p className="text-xs text-muted-foreground">
+                  = {formatTime(parsed.roundWindowSeconds)}
+                </p>
+              )}
+            </div>
+          </>
+        )}
+
         {parsed.repScheme && (
           <div className="space-y-2">
             <Label htmlFor="wp-reps">Rep Scheme</Label>

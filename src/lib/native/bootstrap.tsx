@@ -19,6 +19,7 @@ import { installNativeAuthFetch } from "./auth-fetch";
 import { installWatchTokenRelay } from "./watch-token-relay";
 import { installWatchRaceRelay } from "./watch-race-relay";
 import { installWatchRaceSyncListener } from "./watch-race-sync";
+import { installWatchRaceTemplatesSync } from "./watch-race-templates-sync";
 import { installWatchOpenItemListener } from "./watch-open-item";
 import { installNativeGoogleAuth } from "./google-auth";
 import { installRescheduleOnForeground } from "./notifications/install-reschedule-on-foreground";
@@ -31,6 +32,7 @@ export function NativeBootstrap() {
     installWatchTokenRelay();
     installWatchRaceRelay();
     installWatchRaceSyncListener();
+    installWatchRaceTemplatesSync();
     installWatchOpenItemListener();
     installRescheduleOnForeground();
     void installNativeGoogleAuth();
