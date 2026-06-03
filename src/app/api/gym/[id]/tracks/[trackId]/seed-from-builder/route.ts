@@ -16,7 +16,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq, notInArray } from "drizzle-orm";
 import { db } from "@/db";
-import { programmingTrackDays, programmingTracks } from "@/db/schema";
+import {
+  programmingTrackDays,
+  programmingTracks,
+  workoutSessions,
+} from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canManageGym } from "@/lib/authz/community";
 import {
@@ -170,11 +174,7 @@ export async function POST(
   const scoringConfig: TrackScoringConfig = {
     unit: parsed.unit,
     aggregation: parsed.aggregation,
-    ...(parsed.unit === "custom" && parsed.unitLabel
-      ? { unitLabel: parsed.unitLabel }
-      : parsed.unit !== "custom" && parsed.unitLabel
-        ? { unitLabel: parsed.unitLabel }
-        : {}),
+    ...(parsed.unitLabel ? { unitLabel: parsed.unitLabel } : {}),
     ...(parsed.dailyTarget != null ? { dailyTarget: parsed.dailyTarget } : {}),
     ...(allowJustDone ? { allowJustDone: true } : {}),
     ...(parsed.markDoneStyle === "checkbox" ? { checkboxOnly: true } : {}),
@@ -232,9 +232,12 @@ export async function POST(
 
     // Soft cleanup: drop any track-day rows that fell outside the new
     // generated set (e.g. the admin shortened the window or shifted the
-    // rest cadence). Sessions sourced from this track are handled by the
-    // track PUT route's publish-state flip; deleting a day with no linked
-    // session is harmless.
+    // rest cadence) AND any workout_sessions sourced from this track on
+    // those same dates. Without the session delete, Re-run Builder on an
+    // active track would leave orphaned sessions visible on the CrossFit
+    // tab for dates that no longer have a backing track day — the
+    // publish-state flip on track PUT only fires when status changes,
+    // which doesn't happen here.
     const keepDates = outputs.map((o) => o.date);
     if (keepDates.length > 0) {
       await tx
@@ -243,6 +246,14 @@ export async function POST(
           and(
             eq(programmingTrackDays.trackId, trackId),
             notInArray(programmingTrackDays.date, keepDates)
+          )
+        );
+      await tx
+        .delete(workoutSessions)
+        .where(
+          and(
+            eq(workoutSessions.sourceTrackId, trackId),
+            notInArray(workoutSessions.workoutDate, keepDates)
           )
         );
     }

@@ -179,6 +179,12 @@ export async function PUT(
   // (or aren't an object) are accepted as-is — `textValue` is also a
   // general-purpose free-text column.
   if (typeof body.textValue === "string" && body.textValue.trim()) {
+    if (body.textValue.length > 8192) {
+      return NextResponse.json(
+        { error: "textValue exceeds 8KB limit" },
+        { status: 400 }
+      );
+    }
     try {
       const parsed = JSON.parse(body.textValue);
       if (
