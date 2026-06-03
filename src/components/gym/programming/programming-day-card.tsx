@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { gymProgrammingWeekKey } from "@/hooks/useGymProgrammingWeek";
 import {
   Check,
   ChevronDown,
@@ -62,7 +63,7 @@ import { builderPartToPayload } from "@/lib/crossfit/builder-payload";
 import { resolveParsedToCreatePart } from "@/lib/crossfit/resolve-parsed-movements";
 import { workoutToBuilderForm } from "@/lib/crossfit/workout-to-builder-form";
 import { useMovements, useCreateMovement } from "@/hooks/useMovements";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   WORKOUT_TYPE_LABELS,
   type BenchmarkWorkout,
@@ -140,6 +141,10 @@ interface SectionWire {
   isScored: boolean;
   scoreType: string | null;
   reviewedAt: string | null;
+  // Count of athlete scores currently logged against this section. The
+  // optional marker is defensive — a stale persisted React Query cache may
+  // briefly restore a pre-field shape on first paint. Treat missing as 0.
+  scoreCount?: number;
   parts: PartWire[];
 }
 
@@ -153,6 +158,11 @@ interface WorkoutWire {
 
 interface Props {
   communityId: string;
+  // Monday-of-week ISO date for the release this day belongs to. Used to
+  // invalidate the shared `gymProgrammingWeekKey` from inside the card so
+  // both the week editor and the CrossFit-tab admin view refetch off the
+  // same key without the parent having to thread a refetch callback.
+  weekStart: string;
   date: string;
   workout: WorkoutWire | null;
   // Workouts on the same date that weren't programmed (added manually
@@ -160,7 +170,18 @@ interface Props {
   // as a banner so the coach knows they exist without conflating them
   // with the programmed sections.
   manualWorkouts?: WorkoutWire[];
-  onMutated: () => void;
+  // Optional slot above the day's section stack. The CrossFit-tab mount
+  // passes a slim gym-name + calorie chip strip here so the editable card
+  // matches the athlete-view chrome users see when they're not an admin.
+  // The week-editor mount passes nothing — its own week header already
+  // identifies the gym.
+  headerChrome?: ReactNode;
+  // Side-effect callback fired after every successful section mutation
+  // (create, update, reorder, delete) and after the day-level delete.
+  // The CrossFit-tab mount uses this to invalidate the workouts-by-date
+  // query so the admin's own gym-mode view picks up the change. The week-
+  // editor mount has no athlete-side cache to refresh and can omit it.
+  onAfterMutate?: () => void;
 }
 
 // Sections that get scaffolded as placeholders on every day. Coaches
@@ -242,11 +263,14 @@ function formatHeader(iso: string): string {
 
 export function ProgrammingDayCard({
   communityId,
+  weekStart,
   date,
   workout,
   manualWorkouts = [],
-  onMutated,
+  headerChrome,
+  onAfterMutate,
 }: Props) {
+  const qc = useQueryClient();
   const [expanded, setExpanded] = useState(true);
   const [adding, setAdding] = useState(false);
   const [newKind, setNewKind] = useState<WorkoutSectionKind>("custom");
@@ -255,6 +279,21 @@ export function ProgrammingDayCard({
   const [hiddenPlaceholders, setHiddenPlaceholders] = useState<Set<string>>(
     () => new Set()
   );
+
+  // Single mutation-aftermath helper. Invalidates the shared week query
+  // (so both the week editor and the CrossFit-tab admin view re-render
+  // off the same cache) plus the nav strip, then fires the optional
+  // parent side-effect so the CrossFit-tab mount can also invalidate
+  // the workouts-by-date query.
+  const onMutated = useCallback(() => {
+    qc.invalidateQueries({
+      queryKey: gymProgrammingWeekKey(communityId, weekStart),
+    });
+    qc.invalidateQueries({
+      queryKey: ["gym", communityId, "programming-nav", weekStart],
+    });
+    onAfterMutate?.();
+  }, [qc, communityId, weekStart, onAfterMutate]);
 
   // Load persisted "hidden placeholder" state on mount. Lives in
   // localStorage so dismissing e.g. "Stretching" on a single day
@@ -471,6 +510,9 @@ export function ProgrammingDayCard({
       />
       {expanded ? (
         <CardContent className="space-y-2">
+          {headerChrome ? (
+            <div className="pb-1">{headerChrome}</div>
+          ) : null}
           {manualWorkouts.length > 0 ? (
             <ManualWorkoutBanner
               communityId={communityId}
@@ -901,12 +943,15 @@ function SectionRow({
   }
 
   async function remove() {
-    if (
-      !confirm(
-        "Delete this section? Its content and any athlete scores logged against it will be removed. This cannot be undone."
-      )
-    )
-      return;
+    // Heads-up the coach when they're about to delete a section their
+    // members have already scored against. The endpoint cascades to
+    // remove those scores, so they should know what's leaving with it.
+    const sc = section.scoreCount ?? 0;
+    const message =
+      sc > 0
+        ? `${sc} ${sc === 1 ? "athlete has" : "athletes have"} already logged scores on this section. Deleting will remove those scores too. This cannot be undone. Continue?`
+        : "Delete this section? Its content will be removed. This cannot be undone.";
+    if (!confirm(message)) return;
     try {
       const res = await fetch(
         `/api/gym/${communityId}/programming/sections?id=${section.id}`,
@@ -1012,6 +1057,18 @@ function SectionRow({
               {WORKOUT_SECTION_KIND_LABELS[section.kind]} content
             </DialogTitle>
           </DialogHeader>
+          {/* Heads-up that members already scored. The endpoint forks the
+              template so existing scores are preserved — but it's worth
+              calling out so the coach knows what they're stepping into
+              before making structural changes. */}
+          {hasParts && (section.scoreCount ?? 0) > 0 ? (
+            <p className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-300">
+              {section.scoreCount}{" "}
+              {section.scoreCount === 1 ? "athlete has" : "athletes have"}{" "}
+              already logged scores on this section. Your edits won&apos;t
+              invalidate those scores.
+            </p>
+          ) : null}
           {builderError ? (
             <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
               {builderError}
@@ -1263,7 +1320,12 @@ function FreeformSectionRow({
   }
 
   async function remove() {
-    if (!confirm("Delete this section?")) return;
+    const sc = section.scoreCount ?? 0;
+    const message =
+      sc > 0
+        ? `${sc} ${sc === 1 ? "athlete has" : "athletes have"} already logged scores on this section. Deleting will remove those scores too. Continue?`
+        : "Delete this section?";
+    if (!confirm(message)) return;
     try {
       const res = await fetch(
         `/api/gym/${communityId}/programming/sections?id=${section.id}`,

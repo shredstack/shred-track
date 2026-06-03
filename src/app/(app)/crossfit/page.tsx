@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { WorkoutCard } from "@/components/crossfit/workout-card";
 import { ProgrammedWorkoutDay } from "@/components/crossfit/programmed-workout-day";
+import { GymAdminDayProgrammer } from "@/components/crossfit/gym-admin-day-programmer";
 import { SmartBuilder } from "@/components/crossfit/smart-builder";
 import { AddWorkoutTabs } from "@/components/crossfit/add-workout-tabs";
 import { ScoreEntry } from "@/components/crossfit/score-entry";
@@ -173,6 +174,11 @@ function CrossfitPageBody() {
   const setCrossfitView = useSetCrossfitView();
 
   const inGymMode = view === "gym" && !!activeMembership;
+  // Admin/coach (or super-admin) on the gym whose programming we're
+  // viewing. Drives the inline editable surface below — mirrors the
+  // `canManageGym` predicate the API uses.
+  const canProgramHere =
+    inGymMode && (isCoach || isSuperAdmin);
 
   const scope: WorkoutScopeFilter = useMemo(() => {
     if (activeMembership && view === "gym") {
@@ -607,15 +613,14 @@ function CrossfitPageBody() {
 
       {inGymMode && (isCoach || isSuperAdmin) && (
         <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px] text-muted-foreground">
-          Viewing programming from {activeMembership!.communityName}. Edit it
-          on the{" "}
+          Programming {activeMembership!.communityName} inline. Open the{" "}
           <Link
             href={`/gym/programming/${mondayOfWeek(selectedDate)}`}
             className="underline underline-offset-2 hover:text-foreground"
           >
-            programming admin
-          </Link>
-          , or switch to{" "}
+            week editor
+          </Link>{" "}
+          to lay out a full week, or switch to{" "}
           <button
             type="button"
             className="underline underline-offset-2 hover:text-foreground"
@@ -633,6 +638,22 @@ function CrossfitPageBody() {
         </div>
       )}
 
+      {/* Gym admins/coaches get an inline editable day card right under the
+          info banner — same data model and same endpoints the week editor
+          uses, scoped to the selected date. We render this *instead of*
+          the read-only `ProgrammedWorkoutDay` for the same date (see spec
+          §1 — duplicating the read-only and editable surfaces invites
+          out-of-sync UX). */}
+      {canProgramHere && (
+        <GymAdminDayProgrammer
+          communityId={activeMembership!.communityId}
+          communityName={activeMembership!.communityName}
+          communityLogoUrl={activeMembership!.logoUrl}
+          weekStart={mondayOfWeek(selectedDate)}
+          date={dateStr}
+        />
+      )}
+
       {gymContextPending || isLoading ? (
         <div className="flex items-center justify-center py-10">
           <Loader2 className="size-5 animate-spin text-muted-foreground" />
@@ -647,7 +668,11 @@ function CrossfitPageBody() {
         />
       ) : (
         <>
-          {workouts.map((workout) => {
+          {/* Hide the read-only programmed workout cards when the inline
+              editor is mounted — they describe the same data the day card
+              above already shows. Track day cards and the empty state
+              still render below. */}
+          {!canProgramHere && workouts.map((workout) => {
             const editable = canEditWorkout({
               createdBy: workout.createdBy,
               communityId: workout.communityId ?? null,
@@ -796,33 +821,39 @@ function CrossfitPageBody() {
                 </Card>
               ))}
 
-          {workouts.length === 0 && myTrackDays.length === 0 && (
-            <Card className="border-dashed border-white/[0.06]">
-              <CardContent className="flex flex-col items-center gap-4 py-10">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
-                  <Zap className="h-6 w-6 text-primary/60" />
-                </div>
-                <div className="text-center">
-                  <p className="font-semibold">No workouts for this date</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {inGymMode && !canAddInCurrentView
-                      ? "Your coach hasn't programmed anything yet."
-                      : "Add a workout or paste one from your gym"}
-                  </p>
-                </div>
-                {canAddInCurrentView && (
-                  <Button
-                    variant="outline"
-                    className="mt-1 border-white/[0.08]"
-                    onClick={() => setShowAddWorkout(true)}
-                  >
-                    <Plus className="h-4 w-4" />
-                    Add Workout
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
-          )}
+          {/* Suppress the "No workouts" card when the inline programmer is
+              up — the day card has its own placeholder rows
+              (warm-up → stretching), and showing both at once would
+              double up on emptiness. */}
+          {!canProgramHere &&
+            workouts.length === 0 &&
+            myTrackDays.length === 0 && (
+              <Card className="border-dashed border-white/[0.06]">
+                <CardContent className="flex flex-col items-center gap-4 py-10">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+                    <Zap className="h-6 w-6 text-primary/60" />
+                  </div>
+                  <div className="text-center">
+                    <p className="font-semibold">No workouts for this date</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {inGymMode && !canAddInCurrentView
+                        ? "Your coach hasn't programmed anything yet."
+                        : "Add a workout or paste one from your gym"}
+                    </p>
+                  </div>
+                  {canAddInCurrentView && (
+                    <Button
+                      variant="outline"
+                      className="mt-1 border-white/[0.08]"
+                      onClick={() => setShowAddWorkout(true)}
+                    >
+                      <Plus className="h-4 w-4" />
+                      Add Workout
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            )}
         </>
       )}
 
