@@ -877,6 +877,12 @@ export interface WorkoutBuilderPart {
   // expresses its scheme per-movement via `prescribedReps`, and round-based
   // workouts use `rounds` below.
   repScheme: string;
+  // Builder-only mirror of the per-movement `promoteSequenceToLadder` flag.
+  // Holds the part-level "Continue as ladder?" toggle while the user is
+  // editing the shared rep scheme; gets propagated onto each movement that
+  // inherits the part's scheme. Not persisted — the wire only carries the
+  // per-movement flag.
+  promoteSequenceToLadder?: boolean;
   rounds: string;
   structure?: WorkoutPartStructure;
   // Admin override for parts where the workout type is ambiguous

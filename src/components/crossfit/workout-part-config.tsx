@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { WorkoutTypeSelector } from "@/components/crossfit/workout-type-selector";
@@ -9,6 +10,10 @@ import {
 } from "@/components/crossfit/movement-list-builder";
 import { IntervalsConfig } from "@/components/crossfit/intervals-config";
 import { DurationInput } from "@/components/crossfit/duration-input";
+import {
+  parseRepScheme,
+  canPromoteSequenceToLadder,
+} from "@/lib/crossfit/rep-scheme-parser";
 import type {
   RoundScoreAggregation,
   WorkoutBuilderBlock,
@@ -305,33 +310,13 @@ export function WorkoutPartConfig({
       {(showRepScheme ||
         part.workoutType === "for_time" ||
         part.workoutType === "amrap") && (
-        <div className="space-y-1.5">
-          <Label className={labelClass}>
-            Rep scheme (applies to all movements)
-          </Label>
-          <Input
-            value={part.repScheme}
-            onChange={(e) => {
-              const next = e.target.value;
-              onChange({ repScheme: next });
-              // Prefill any movement whose own scheme is empty. Users
-              // can still override per-movement (the wall-balls vs.
-              // cals-on-bike case from the spec).
-              if (next.trim()) {
-                const updated = part.movements.map((m) =>
-                  m.prescribedReps && m.prescribedReps.trim()
-                    ? m
-                    : { ...m, prescribedReps: next }
-                );
-                if (updated.some((m, i) => m !== part.movements[i])) {
-                  onMovementsChange(updated);
-                }
-              }
-            }}
-            placeholder="e.g. 21-15-9 or 75-50-25"
-            className={inputHeight}
-          />
-        </div>
+        <PartRepSchemeField
+          part={part}
+          onChange={onChange}
+          onMovementsChange={onMovementsChange}
+          labelClass={labelClass}
+          inputHeight={inputHeight}
+        />
       )}
 
       {/* Side-cadence — pairs the part with a recurring on-the-minute
@@ -357,6 +342,7 @@ export function WorkoutPartConfig({
         onBlocksChange={onBlocksChange}
         earlierLoadParts={earlierLoadParts}
         partRepScheme={part.repScheme}
+        partPromoteSequenceToLadder={part.promoteSequenceToLadder}
         showSideCadence={
           (part.workoutType === "for_time" ||
             part.workoutType === "amrap" ||
@@ -365,6 +351,128 @@ export function WorkoutPartConfig({
             part.sideCadenceIntervalInput.trim() !== "")
         }
       />
+    </div>
+  );
+}
+
+// Part-level "Rep scheme (applies to all movements)" input. Wraps the
+// text field with a "Continue as ladder?" toggle that mirrors the per-
+// movement one — saves the user from having to type the scheme into
+// every movement just to enable the ladder behavior for an AMRAP.
+//
+// When the user toggles the part-level promote flag, we propagate it onto
+// every movement currently inheriting the part's scheme (i.e. whose
+// prescribedReps either matches the part's repScheme or is empty). A
+// movement that has its own overridden scheme keeps its own flag.
+function PartRepSchemeField({
+  part,
+  onChange,
+  onMovementsChange,
+  labelClass,
+  inputHeight,
+}: {
+  part: WorkoutBuilderPart;
+  onChange: (updates: Partial<WorkoutBuilderPart>) => void;
+  onMovementsChange: (movements: WorkoutBuilderMovement[]) => void;
+  labelClass: string;
+  inputHeight: string;
+}) {
+  const parsed = parseRepScheme(part.repScheme);
+  const promotable = !!(parsed && canPromoteSequenceToLadder(parsed));
+  const promote = !!part.promoteSequenceToLadder;
+
+  const isInheriting = (m: WorkoutBuilderMovement, scheme: string) =>
+    !m.prescribedReps?.trim() || m.prescribedReps === scheme;
+
+  // Mirror RepSchemeField: if the input becomes un-promotable (e.g. user
+  // edits "3-6-9-12-15" to "3-6-7"), clear the saved intent so the form
+  // doesn't carry a stale flag. Also clear it on inheriting movements,
+  // since their own RepSchemeField is hidden (the override link path),
+  // meaning its own auto-clear effect can't run for them. Done in an
+  // effect because side effects during render are forbidden.
+  useEffect(() => {
+    if (promotable || !promote) return;
+    onChange({ promoteSequenceToLadder: false });
+    const updated = part.movements.map((m) =>
+      isInheriting(m, part.repScheme) && m.promoteSequenceToLadder
+        ? { ...m, promoteSequenceToLadder: false }
+        : m
+    );
+    if (updated.some((m, i) => m !== part.movements[i])) {
+      onMovementsChange(updated);
+    }
+    // We only want this to fire on the promotable→un-promotable transition;
+    // including `part` would re-fire on every other part edit. The closure
+    // reads the latest `part` because PartRepSchemeField re-renders on
+    // each part change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [promotable, promote]);
+
+  return (
+    <div className="space-y-1.5">
+      <Label className={labelClass}>
+        Rep scheme (applies to all movements)
+      </Label>
+      <Input
+        value={part.repScheme}
+        onChange={(e) => {
+          const next = e.target.value;
+          // Update both the scheme and propagate it onto inheriting
+          // movements in a single pass — saves an extra render and keeps
+          // the inheriting set stable across keystrokes.
+          const prev = part.repScheme;
+          onChange({ repScheme: next });
+          if (next.trim()) {
+            const updated = part.movements.map((m) =>
+              isInheriting(m, prev) ? { ...m, prescribedReps: next } : m
+            );
+            if (updated.some((m, i) => m !== part.movements[i])) {
+              onMovementsChange(updated);
+            }
+          }
+        }}
+        placeholder="e.g. 21-15-9 or 75-50-25"
+        className={inputHeight}
+      />
+      {promotable && (
+        <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
+          <input
+            type="checkbox"
+            checked={promote}
+            onChange={(e) => {
+              const next = e.target.checked;
+              onChange({ promoteSequenceToLadder: next });
+              // Checking the box is a force-apply: the user is telling us
+              // the ladder applies to every movement. Overwrite each
+              // movement's scheme + flag so they all snap to the compact
+              // chip view (no half-inherited, half-text-box state).
+              // Per-movement overrides can still happen after via the
+              // "Override reps" link.
+              //
+              // Unchecking the box just clears the per-movement flag on
+              // currently-inheriting movements; we don't blow away the
+              // schemes they were inheriting.
+              const updated = part.movements.map((m) => {
+                if (next) {
+                  return {
+                    ...m,
+                    prescribedReps: part.repScheme,
+                    promoteSequenceToLadder: true,
+                  };
+                }
+                return isInheriting(m, part.repScheme)
+                  ? { ...m, promoteSequenceToLadder: false }
+                  : m;
+              });
+              if (updated.some((m, i) => m !== part.movements[i])) {
+                onMovementsChange(updated);
+              }
+            }}
+            className="size-3 cursor-pointer"
+          />
+          Continue as ladder?
+        </label>
+      )}
     </div>
   );
 }

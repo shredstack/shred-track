@@ -106,6 +106,11 @@ interface MovementListBuilderProps {
   // admin doesn't lose the shared scheme by adding a movement after typing
   // it. Per-movement edits still win — this only prefills the empty case.
   partRepScheme?: string;
+  // Part-level "Continue as ladder?" flag mirrored onto inheriting
+  // movements. When a movement is inheriting the part's rep scheme, its
+  // per-movement rep input is hidden behind an "Override reps" disclosure
+  // and the ladder flag is governed by the part-level checkbox.
+  partPromoteSequenceToLadder?: boolean;
 }
 
 // ============================================
@@ -243,9 +248,19 @@ export function MovementListBuilder({
   showSideCadence = false,
   earlierLoadParts = [],
   partRepScheme,
+  partPromoteSequenceToLadder,
 }: MovementListBuilderProps) {
   const showRxWeights = workoutType !== "for_load";
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  // Movements whose user has clicked "Override reps". When a movement is
+  // inheriting the part's rep scheme, we hide its per-movement reps field
+  // by default to reduce confusion; clicking the override link reveals it
+  // for this session. Not persisted — once the user edits the field, the
+  // movement's prescribedReps diverges from partRepScheme and the override
+  // is implicit from then on.
+  const [overrideOpenIds, setOverrideOpenIds] = useState<Set<string>>(
+    new Set()
+  );
   const [creatingName, setCreatingName] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   // The Advanced creation form is opt-in — typing a name and hitting enter
@@ -255,6 +270,26 @@ export function MovementListBuilder({
   const [advancedFormOpen, setAdvancedFormOpen] = useState(false);
   const createMovement = useCreateMovement();
   const { data: movementLibrary = [] } = useMovements();
+
+  const openOverride = useCallback((tempId: string) => {
+    setOverrideOpenIds((prev) => {
+      if (prev.has(tempId)) return prev;
+      const next = new Set(prev);
+      next.add(tempId);
+      return next;
+    });
+  }, []);
+
+  // When the part-level ladder is turned on, snap every movement back to
+  // the compact chip view. The part-level checkbox force-propagates the
+  // scheme to all movements, but any open override fields would otherwise
+  // keep showing the now-redundant per-movement RepSchemeField. Reset the
+  // override set so the UI matches what the part-level toggle says.
+  useEffect(() => {
+    if (partPromoteSequenceToLadder) {
+      setOverrideOpenIds((prev) => (prev.size === 0 ? prev : new Set()));
+    }
+  }, [partPromoteSequenceToLadder]);
 
   const toggleExpanded = useCallback((tempId: string) => {
     setExpandedIds((prev) => {
@@ -268,15 +303,21 @@ export function MovementListBuilder({
   // Inherit the part's shared rep scheme into the new movement if the
   // movement doesn't already carry one. Mirrors the prefill in the part
   // editor's rep-scheme input, but covers the timing gap when movements
-  // are added AFTER the rep scheme is typed.
+  // are added AFTER the rep scheme is typed. Also inherits the part's
+  // "Continue as ladder?" flag so a fresh movement added after the
+  // toggle was set still gets the ladder behavior.
   const applyPartRepScheme = useCallback(
     (mov: WorkoutBuilderMovement): WorkoutBuilderMovement => {
       const shared = partRepScheme?.trim();
       if (!shared) return mov;
       if (mov.prescribedReps && mov.prescribedReps.trim()) return mov;
-      return { ...mov, prescribedReps: shared };
+      return {
+        ...mov,
+        prescribedReps: shared,
+        promoteSequenceToLadder: !!partPromoteSequenceToLadder,
+      };
     },
-    [partRepScheme]
+    [partRepScheme, partPromoteSequenceToLadder]
   );
 
   // Adding a movement is section-aware: the new movement gets the right
@@ -567,6 +608,9 @@ export function MovementListBuilder({
               }
               creatingName={creatingName}
               createError={createError}
+              partRepScheme={partRepScheme}
+              overrideOpenIds={overrideOpenIds}
+              onOpenOverride={openOverride}
             />
           )}
 
@@ -598,6 +642,9 @@ export function MovementListBuilder({
               }
               creatingName={creatingName}
               createError={createError}
+              partRepScheme={partRepScheme}
+              overrideOpenIds={overrideOpenIds}
+              onOpenOverride={openOverride}
             />
           ))}
         </div>
@@ -661,6 +708,13 @@ interface SectionBodyProps {
   onAddCustomMovement: (name: string) => void;
   creatingName: string | null;
   createError: string | null;
+  // Part-level shared rep scheme — used to detect movements that inherit
+  // it so the per-movement reps field can be hidden behind an override.
+  partRepScheme?: string;
+  // Set of movement tempIds whose user has explicitly opened the
+  // overridable reps field (via the "Override reps" link).
+  overrideOpenIds: Set<string>;
+  onOpenOverride: (tempId: string) => void;
 }
 
 function Section({
@@ -780,6 +834,9 @@ function SectionBody({
   onAddCustomMovement,
   creatingName,
   createError,
+  partRepScheme,
+  overrideOpenIds,
+  onOpenOverride,
 }: SectionBodyProps & { sectionId: string }) {
   const { setNodeRef, isOver } = useDroppable({ id: sectionId });
   const itemIds = useMemo(() => movements.map((m) => m.tempId), [movements]);
@@ -813,6 +870,9 @@ function SectionBody({
               showSideCadence={showSideCadence}
               earlierLoadParts={earlierLoadParts}
               movementLibrary={movementLibrary}
+              partRepScheme={partRepScheme}
+              isOverrideOpen={overrideOpenIds.has(mov.tempId)}
+              onOpenOverride={onOpenOverride}
             />
           ))
         )}
@@ -854,6 +914,11 @@ interface MovementCardProps {
   showSideCadence: boolean;
   earlierLoadParts: EarlierLoadPart[];
   movementLibrary: MovementOption[];
+  // Part-level rep scheme — used to detect inheritance.
+  partRepScheme?: string;
+  // True when the user has clicked "Override reps" on this movement.
+  isOverrideOpen: boolean;
+  onOpenOverride: (tempId: string) => void;
 }
 
 function SortableMovementCard(props: MovementCardProps) {
@@ -894,6 +959,9 @@ function MovementCard({
   showSideCadence,
   earlierLoadParts,
   movementLibrary,
+  partRepScheme,
+  isOverrideOpen,
+  onOpenOverride,
   dragListeners,
 }: MovementCardProps & { dragListeners?: Record<string, unknown> }) {
   const rxFields = resolveRxFields(mov, movementLibrary);
@@ -965,27 +1033,77 @@ function MovementCard({
           (Rest, Plank, etc.). For_load uses the per-movement rep scheme
           (e.g. "10-10-7-7-3-3-3" for a deadlift wave). Suppressed entirely
           when isMaxReps is on (the count comes from score-entry, per
-          round). */}
-      {mov.metricType !== "duration" && !mov.isMaxReps && (
-        <RepSchemeField
-          value={mov.prescribedReps}
-          onChange={(reps) =>
-            onUpdate(mov.tempId, { prescribedReps: reps })
-          }
-          promoteSequenceToLadder={!!mov.promoteSequenceToLadder}
-          onPromoteChange={(promote) =>
-            onUpdate(mov.tempId, { promoteSequenceToLadder: promote })
-          }
-          workoutType={workoutType}
-          hasTimeCap={
-            !!mov.prescribedDurationSecondsMale ||
-            !!mov.prescribedDurationSecondsFemale
-          }
-          onAddTimeCap={() =>
-            onUpdate(mov.tempId, { prescribedDurationSecondsMale: " " })
-          }
-        />
-      )}
+          round).
+
+          When the movement is inheriting the part's shared rep scheme,
+          hide the per-movement field by default to eliminate the
+          confusion of two reps boxes. The user can reveal it via the
+          "Override reps" link if a single movement needs a different
+          scheme (e.g. wall-balls 21-15-9 vs. max-cal bike). The Add
+          time cap link still shows so users don't have to override
+          reps just to add a per-movement cap. */}
+      {mov.metricType !== "duration" && !mov.isMaxReps && (() => {
+        const sharedScheme = partRepScheme?.trim() ?? "";
+        const isInheriting =
+          !!sharedScheme && mov.prescribedReps.trim() === sharedScheme;
+        const hasTimeCap =
+          !!mov.prescribedDurationSecondsMale ||
+          !!mov.prescribedDurationSecondsFemale;
+        if (isInheriting && !isOverrideOpen) {
+          return (
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Reps</Label>
+              <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                <Check className="size-3 text-emerald-400" />
+                Inherits part scheme:{" "}
+                <span className="font-medium text-foreground/80">
+                  {sharedScheme}
+                </span>
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => onOpenOverride(mov.tempId)}
+                  className="inline-flex items-center gap-1 text-[11px] text-primary/80 hover:text-primary"
+                >
+                  Override reps
+                </button>
+                {!hasTimeCap && workoutType !== "for_load" && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onUpdate(mov.tempId, {
+                        prescribedDurationSecondsMale: " ",
+                      })
+                    }
+                    className="inline-flex items-center gap-1 text-[11px] text-primary/80 hover:text-primary"
+                  >
+                    <Plus className="size-3" />
+                    Add time cap
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        }
+        return (
+          <RepSchemeField
+            value={mov.prescribedReps}
+            onChange={(reps) =>
+              onUpdate(mov.tempId, { prescribedReps: reps })
+            }
+            promoteSequenceToLadder={!!mov.promoteSequenceToLadder}
+            onPromoteChange={(promote) =>
+              onUpdate(mov.tempId, { promoteSequenceToLadder: promote })
+            }
+            workoutType={workoutType}
+            hasTimeCap={hasTimeCap}
+            onAddTimeCap={() =>
+              onUpdate(mov.tempId, { prescribedDurationSecondsMale: " " })
+            }
+          />
+        );
+      })()}
 
       {showSideCadence && (
         <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">

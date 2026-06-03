@@ -5,6 +5,10 @@
 // silently overwriting it.
 
 import { formatSecondsAsClock } from "@/lib/crossfit/duration-parser";
+import {
+  parseRepScheme,
+  canPromoteSequenceToLadder,
+} from "@/lib/crossfit/rep-scheme-parser";
 import type {
   WorkoutBuilderForm,
   WorkoutBuilderMovement,
@@ -46,6 +50,19 @@ export function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
       const blockTempRefByDbId = new Map(
         blocks.map((b) => [b.id ?? "", b.tempId])
       );
+      // Derive the part-level "Continue as ladder?" toggle from the
+      // inheriting movements: if any movement that's using the part's
+      // shared scheme had its ladder flag set, the part's checkbox
+      // should restore as checked when editing.
+      const sharedScheme = (p.repScheme ?? "").trim();
+      const partPromote =
+        sharedScheme.length > 0 &&
+        p.movements.some((m) => {
+          if (m.repSchemeParsed?.kind !== "ladder") return false;
+          if ((m.prescribedReps ?? "").trim() !== sharedScheme) return false;
+          const textShape = parseRepScheme(m.prescribedReps);
+          return !!textShape && canPromoteSequenceToLadder(textShape);
+        });
       return {
         tempId: partTempIds[partIdx],
         id: p.id,
@@ -82,6 +99,7 @@ export function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
             : "",
         sideCadenceOpenEnded: !!p.sideCadenceOpenEnded,
         repScheme: p.repScheme ?? "",
+        promoteSequenceToLadder: partPromote,
         rounds: p.rounds ? String(p.rounds) : "",
         structure: p.structure,
         scoreType: p.scoreType ?? undefined,
@@ -99,6 +117,15 @@ export function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
             category: m.category,
             isWeighted: m.isWeighted,
             metricType: m.metricType,
+            // Re-derive the "Continue as ladder?" toggle: the wire shape
+            // doesn't carry the flag, but the saved `repSchemeParsed` is a
+            // ladder while the raw `prescribedReps` text parses to a
+            // promotable sequence iff the user had checked the toggle.
+            promoteSequenceToLadder: (() => {
+              if (m.repSchemeParsed?.kind !== "ladder") return false;
+              const textShape = parseRepScheme(m.prescribedReps);
+              return !!textShape && canPromoteSequenceToLadder(textShape);
+            })(),
             prescribedReps: m.prescribedReps ?? "",
             prescribedWeightMale: m.prescribedWeightMale ?? "",
             prescribedWeightFemale: m.prescribedWeightFemale ?? "",
