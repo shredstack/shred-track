@@ -14,11 +14,13 @@
 // visible to the athlete-facing reader.
 
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, notInArray } from "drizzle-orm";
+import { and, eq, notInArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   programmingTrackDays,
   programmingTracks,
+  scores,
+  trackDayScores,
   workoutSessions,
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
@@ -231,21 +233,62 @@ export async function POST(
     }
 
     // Soft cleanup: drop any track-day rows that fell outside the new
-    // generated set (e.g. the admin shortened the window or shifted the
-    // rest cadence) AND any workout_sessions sourced from this track on
-    // those same dates. Without the session delete, Re-run Builder on an
-    // active track would leave orphaned sessions visible on the CrossFit
-    // tab for dates that no longer have a backing track day — the
-    // publish-state flip on track PUT only fires when status changes,
-    // which doesn't happen here.
+    // generated set (e.g. the admin shifted the rest cadence) AND any
+    // workout_sessions sourced from this track on those same dates.
+    // Without the session delete, Re-run Builder on an active track
+    // would leave orphaned sessions visible on the CrossFit tab for
+    // dates that no longer have a backing track day — the publish-state
+    // flip on track PUT only fires when status changes, which doesn't
+    // happen here.
+    //
+    // Honor the "Already-logged scores are kept" promise in the
+    // Re-run Builder UI: a date that already has a logged score
+    // (per-day track_day_scores OR WOD-side scores via the linked
+    // session) is preserved so the athlete's history survives. The day
+    // body becomes a stale leftover but the score row is intact.
     const keepDates = outputs.map((o) => o.date);
     if (keepDates.length > 0) {
+      const outsideDays = await tx
+        .select({
+          id: programmingTrackDays.id,
+          date: programmingTrackDays.date,
+          workoutSessionId: programmingTrackDays.workoutSessionId,
+        })
+        .from(programmingTrackDays)
+        .where(
+          and(
+            eq(programmingTrackDays.trackId, trackId),
+            notInArray(programmingTrackDays.date, keepDates)
+          )
+        );
+
+      const protectedDates = new Set<string>();
+      for (const d of outsideDays) {
+        const [tds] = await tx
+          .select({ c: sql<number>`count(*)::int` })
+          .from(trackDayScores)
+          .where(eq(trackDayScores.trackDayId, d.id));
+        if ((tds?.c ?? 0) > 0) {
+          protectedDates.add(d.date);
+          continue;
+        }
+        if (d.workoutSessionId) {
+          const [s] = await tx
+            .select({ c: sql<number>`count(*)::int` })
+            .from(scores)
+            .where(eq(scores.workoutSessionId, d.workoutSessionId));
+          if ((s?.c ?? 0) > 0) protectedDates.add(d.date);
+        }
+      }
+
+      const datesToKeep = Array.from(new Set([...keepDates, ...protectedDates]));
+
       await tx
         .delete(programmingTrackDays)
         .where(
           and(
             eq(programmingTrackDays.trackId, trackId),
-            notInArray(programmingTrackDays.date, keepDates)
+            notInArray(programmingTrackDays.date, datesToKeep)
           )
         );
       await tx
@@ -253,7 +296,7 @@ export async function POST(
         .where(
           and(
             eq(workoutSessions.sourceTrackId, trackId),
-            notInArray(workoutSessions.workoutDate, keepDates)
+            notInArray(workoutSessions.workoutDate, datesToKeep)
           )
         );
     }
