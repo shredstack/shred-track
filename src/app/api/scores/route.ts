@@ -301,7 +301,16 @@ export async function POST(req: NextRequest) {
           )
         : null;
       if (supplied && supplied.length > 0) {
-        const expectedRounds = partRow.rounds ?? supplied.length;
+        if (partRow.rounds == null) {
+          return NextResponse.json(
+            {
+              error:
+                "This part has no round count configured; contact the workout author.",
+            },
+            { status: 400 }
+          );
+        }
+        const expectedRounds = partRow.rounds;
         if (supplied.length !== expectedRounds) {
           return NextResponse.json(
             {

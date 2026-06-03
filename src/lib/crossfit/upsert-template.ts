@@ -499,11 +499,6 @@ export async function insertTemplateParts(
           "Timed Rounds workouts need a number of rounds. Set the rounds field (e.g. 5)."
         );
       }
-      if (p.roundScoreAggregation === null) {
-        throw new Error(
-          "Timed Rounds workouts need a score aggregation (slowest / fastest / sum / average)."
-        );
-      }
     }
 
     const [part] = await tx
