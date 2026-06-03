@@ -101,6 +101,11 @@ interface MovementListBuilderProps {
   // Earlier for_load parts a movement's weight can be prescribed as a
   // percentage of. Empty/undefined hides the "% of earlier part" toggle.
   earlierLoadParts?: EarlierLoadPart[];
+  // Part-level shared rep scheme. When set (e.g. "1-2-3-..." on an AMRAP),
+  // freshly-added movements inherit it as their `prescribedReps` so the
+  // admin doesn't lose the shared scheme by adding a movement after typing
+  // it. Per-movement edits still win — this only prefills the empty case.
+  partRepScheme?: string;
 }
 
 // ============================================
@@ -237,6 +242,7 @@ export function MovementListBuilder({
   workoutType,
   showSideCadence = false,
   earlierLoadParts = [],
+  partRepScheme,
 }: MovementListBuilderProps) {
   const showRxWeights = workoutType !== "for_load";
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -259,16 +265,30 @@ export function MovementListBuilder({
     });
   }, []);
 
+  // Inherit the part's shared rep scheme into the new movement if the
+  // movement doesn't already carry one. Mirrors the prefill in the part
+  // editor's rep-scheme input, but covers the timing gap when movements
+  // are added AFTER the rep scheme is typed.
+  const applyPartRepScheme = useCallback(
+    (mov: WorkoutBuilderMovement): WorkoutBuilderMovement => {
+      const shared = partRepScheme?.trim();
+      if (!shared) return mov;
+      if (mov.prescribedReps && mov.prescribedReps.trim()) return mov;
+      return { ...mov, prescribedReps: shared };
+    },
+    [partRepScheme]
+  );
+
   // Adding a movement is section-aware: the new movement gets the right
   // `blockTempRef` baked in so it lands in the section the user clicked
   // "Add" under.
   const addMovementToSection = useCallback(
     (option: MovementOption, sectionRef: string | null) => {
-      const newMov = makeBuilderMovement(option);
+      const newMov = applyPartRepScheme(makeBuilderMovement(option));
       if (sectionRef) newMov.blockTempRef = sectionRef;
       onChange([...movements, newMov]);
     },
-    [movements, onChange]
+    [applyPartRepScheme, movements, onChange]
   );
 
   const addCustomMovementToSection = useCallback(
@@ -279,7 +299,7 @@ export function MovementListBuilder({
         const created = await createMovement.mutateAsync({
           canonicalName: name,
         });
-        const newMov = makeBuilderMovement(created);
+        const newMov = applyPartRepScheme(makeBuilderMovement(created));
         if (sectionRef) newMov.blockTempRef = sectionRef;
         onChange([...movements, newMov]);
       } catch (err) {
@@ -290,7 +310,7 @@ export function MovementListBuilder({
         setCreatingName(null);
       }
     },
-    [createMovement, movements, onChange]
+    [applyPartRepScheme, createMovement, movements, onChange]
   );
 
   const addAdvancedMovement = useCallback(
@@ -299,7 +319,10 @@ export function MovementListBuilder({
       setCreatingName(input.canonicalName);
       try {
         const created = await createMovement.mutateAsync(input);
-        onChange([...movements, makeBuilderMovement(created)]);
+        onChange([
+          ...movements,
+          applyPartRepScheme(makeBuilderMovement(created)),
+        ]);
         setAdvancedFormOpen(false);
       } catch (err) {
         setCreateError(
@@ -309,7 +332,7 @@ export function MovementListBuilder({
         setCreatingName(null);
       }
     },
-    [createMovement, movements, onChange]
+    [applyPartRepScheme, createMovement, movements, onChange]
   );
 
   const updateMovement = useCallback(

@@ -331,6 +331,7 @@ export function WorkoutPartConfig({
         blocks={part.blocks}
         onBlocksChange={onBlocksChange}
         earlierLoadParts={earlierLoadParts}
+        partRepScheme={part.repScheme}
         showSideCadence={
           (part.workoutType === "for_time" ||
             part.workoutType === "amrap" ||

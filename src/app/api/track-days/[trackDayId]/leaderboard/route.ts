@@ -51,6 +51,12 @@ export interface TrackDayLeaderboardEntry {
   sortValue: number;
   /** For cumulative leaderboards, how many days the athlete has logged. */
   daysLogged?: number;
+  /** Longest run of consecutive in-window days the athlete has logged.
+   *  Only set on cumulative leaderboards. */
+  consecutiveDaysLogged?: number;
+  /** daysLogged / daysAvailable as a 0..1 ratio, rounded to 2 decimals.
+   *  Only set on cumulative leaderboards. */
+  adherence?: number;
 }
 
 export interface TrackDayLeaderboardResponse {
@@ -60,6 +66,11 @@ export interface TrackDayLeaderboardResponse {
   unitLabel: string | null;
   /** True when entries are summed across every day of the track. */
   isCumulative: boolean;
+  /** Total scored days in the parent track — denominator for adherence. */
+  daysAvailable?: number;
+  /** When the aggregation is "streak", the rank key is `daysLogged`
+   *  instead of `sum(numericValue)`. UI uses this to label the column. */
+  rankKey: "sum" | "streak";
   entries: TrackDayLeaderboardEntry[];
 }
 
@@ -131,9 +142,13 @@ export async function GET(
   const config = (track.scoringConfig ?? null) as TrackScoringConfig | null;
   const unitLabel = config ? trackScoringUnitLabel(config) : null;
   // Monthly challenges are cumulative by definition; other kinds opt in
-  // via aggregation === "sum".
+  // via aggregation === "sum" or "streak".
+  const isStreakAggregation = config?.aggregation === "streak";
   const isCumulative =
-    track.kind === "monthly_challenge" || config?.aggregation === "sum";
+    track.kind === "monthly_challenge" ||
+    config?.aggregation === "sum" ||
+    isStreakAggregation;
+  const rankKey: "sum" | "streak" = isStreakAggregation ? "streak" : "sum";
 
   // Active gym members — used to filter out deactivated users from the
   // leaderboard regardless of whether we're showing a single day or the
@@ -150,6 +165,27 @@ export async function GET(
   const activeIds = new Set(activeMembers.map((m) => m.userId));
 
   let entries: TrackDayLeaderboardEntry[];
+
+  // Computed once for cumulative mode — denominator for adherence and
+  // the universe of dates we use to compute consecutive-day streaks.
+  const allScoredDays = isCumulative
+    ? await db
+        .select({
+          date: programmingTrackDays.date,
+        })
+        .from(programmingTrackDays)
+        .where(
+          and(
+            eq(programmingTrackDays.trackId, track.id),
+            eq(programmingTrackDays.isScored, true)
+          )
+        )
+    : [];
+  const daysAvailable = allScoredDays.length;
+  const scoredDateOrder = allScoredDays
+    .map((d) => d.date)
+    .sort()
+    .filter((_, i, arr) => i === 0 || arr[i - 1] !== arr[i]);
 
   if (isCumulative) {
     // Sum each athlete's scores across every day of the parent track.
@@ -193,11 +229,65 @@ export async function GET(
         users.image
       );
 
+    // Per-day timeline per user — needed to compute the longest run of
+    // consecutive scored-day completions. One query, grouped client-side
+    // so we avoid an N+1 against trackDayScores.
+    const timelineRows = await db
+      .select({
+        userId: trackDayScores.userId,
+        date: programmingTrackDays.date,
+        isComplete: trackDayScores.isComplete,
+      })
+      .from(trackDayScores)
+      .innerJoin(
+        programmingTrackDays,
+        eq(trackDayScores.trackDayId, programmingTrackDays.id)
+      )
+      .where(eq(programmingTrackDays.trackId, track.id));
+    const completedDatesByUser = new Map<string, Set<string>>();
+    for (const row of timelineRows) {
+      if (!row.isComplete) continue;
+      let set = completedDatesByUser.get(row.userId);
+      if (!set) {
+        set = new Set<string>();
+        completedDatesByUser.set(row.userId, set);
+      }
+      set.add(row.date);
+    }
+    const streakByUser = new Map<string, number>();
+    for (const [userId, completed] of completedDatesByUser.entries()) {
+      let best = 0;
+      let current = 0;
+      for (const d of scoredDateOrder) {
+        if (completed.has(d)) {
+          current += 1;
+          if (current > best) best = current;
+        } else {
+          current = 0;
+        }
+      }
+      streakByUser.set(userId, best);
+    }
+
     entries = aggRows
       .filter((r) => activeIds.has(r.userId))
       .map((r) => {
         const numeric = r.sumValue != null ? Number(r.sumValue) : null;
         const displayUnit = r.unit ?? unitLabel;
+        const streak = streakByUser.get(r.userId) ?? 0;
+        const adherence =
+          daysAvailable > 0
+            ? Math.round((r.daysLogged / daysAvailable) * 100) / 100
+            : 0;
+        // Streak-mode aggregation: rank by daysLogged so consistency
+        // beats volume. Display the user's count of days logged as the
+        // primary score; sum stays available in numericValue.
+        const sortValue = isStreakAggregation
+          ? r.daysLogged
+          : numeric ?? (r.anyComplete ? 0 : -Infinity);
+        const displayScore = isStreakAggregation
+          ? `${r.daysLogged} day${r.daysLogged === 1 ? "" : "s"}`
+          : formatTrackDayScore(numeric, r.anyComplete ?? false, displayUnit);
         return {
           // No single scoreId for an aggregated row; userId is stable.
           scoreId: r.userId,
@@ -210,13 +300,11 @@ export async function GET(
           isComplete: r.anyComplete ?? false,
           notes: null,
           createdAt: new Date(r.lastUpdated).toISOString(),
-          displayScore: formatTrackDayScore(
-            numeric,
-            r.anyComplete ?? false,
-            displayUnit
-          ),
-          sortValue: numeric ?? (r.anyComplete ? 0 : -Infinity),
+          displayScore,
+          sortValue,
           daysLogged: r.daysLogged,
+          consecutiveDaysLogged: streak,
+          adherence,
         };
       })
       .sort((a, b) => b.sortValue - a.sortValue);
@@ -278,6 +366,8 @@ export async function GET(
     dayDate: day.date,
     unitLabel,
     isCumulative,
+    rankKey,
+    ...(isCumulative ? { daysAvailable } : {}),
     entries,
   };
   return NextResponse.json(response);

@@ -258,6 +258,64 @@ export function useGenerateProgression(
 }
 
 // ============================================
+// Monthly Challenge Builder (spec §5.1)
+// ============================================
+
+export interface BuilderSeedPayload {
+  pattern:
+    | { kind: "flat"; dailyAmount: number }
+    | {
+        kind: "ladder";
+        startAmount: number;
+        incrementPerDay: number;
+        weeklyBonus?: number;
+      }
+    | {
+        kind: "per_day";
+        daysSets: Array<{ date: string; sets: number[]; restHint?: string }>;
+      };
+  unit: string;
+  unitLabel?: string;
+  label: string;
+  restCadence: "none" | "every_7th" | "weekends";
+  restDayLabel?: string;
+  markDoneStyle: "prefilled" | "free_entry" | "checkbox";
+  aggregation: "sum" | "streak" | "last" | "per_day_independent";
+  description?: string;
+  dailyTarget?: number;
+}
+
+export function useSeedFromBuilder(communityId: string, trackId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: BuilderSeedPayload) => {
+      const res = await fetch(
+        `/api/gym/${communityId}/tracks/${trackId}/seed-from-builder`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error ?? "Failed to seed challenge");
+      }
+      return res.json() as Promise<{
+        written: number;
+        scoringConfig: TrackScoringConfig;
+      }>;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({
+        queryKey: ["gym", communityId, "tracks", trackId],
+      });
+      qc.invalidateQueries({ queryKey: ["gym", communityId, "tracks"] });
+    },
+  });
+}
+
+// ============================================
 // Athlete: available tracks + participations
 // ============================================
 
@@ -429,7 +487,7 @@ export interface TrackDayRollup {
   sum: number;
   daysLogged: number;
   daysAvailable: number;
-  aggregation: "sum" | "last" | "per_day_independent";
+  aggregation: "sum" | "last" | "per_day_independent" | "streak";
   /** True when scores roll up across the whole track (monthly_challenge
    *  or aggregation === "sum"). Use this — not `aggregation` — to decide
    *  whether to surface cumulative totals in the UI. */
@@ -470,6 +528,10 @@ export interface TrackDayLeaderboardEntry {
   sortValue: number;
   /** For cumulative leaderboards, number of days the athlete has logged. */
   daysLogged?: number;
+  /** Longest run of consecutive scored days the athlete has completed. */
+  consecutiveDaysLogged?: number;
+  /** daysLogged / daysAvailable ratio (0..1, rounded to 2 decimals). */
+  adherence?: number;
 }
 
 export interface TrackDayLeaderboardResponse {
@@ -479,6 +541,10 @@ export interface TrackDayLeaderboardResponse {
   unitLabel: string | null;
   /** True when the response sums each athlete's scores across the whole track. */
   isCumulative: boolean;
+  /** Total scored days in the parent track. */
+  daysAvailable?: number;
+  /** When "streak", rank is by daysLogged rather than sum(numericValue). */
+  rankKey: "sum" | "streak";
   entries: TrackDayLeaderboardEntry[];
 }
 

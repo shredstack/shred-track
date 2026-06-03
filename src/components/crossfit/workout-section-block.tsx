@@ -7,7 +7,7 @@ import type {
   WorkoutSectionKindDisplay,
 } from "@/types/crossfit";
 import { Button } from "@/components/ui/button";
-import { TrackDayScoreInput } from "@/components/crossfit/track-day-score-input";
+import { TrackDayChallengeInput } from "@/components/crossfit/track-day-challenge-input";
 import type { TrackScoringConfig } from "@/types/programming-tracks";
 
 /**
@@ -173,12 +173,13 @@ export function WorkoutSectionBlock({
       ) : null}
       {isFreeFormTrackDay && section.isScored && (
         <>
-          <TrackDayScoreInput
+          <TrackDayChallengeInput
             trackDayId={section.trackDayId!}
             scoringConfig={
               (section.trackScoringConfig as TrackScoringConfig | null) ?? null
             }
             prescribedValue={section.trackPrescribedValue ?? null}
+            body={body}
           />
           {onViewTrackDayLeaderboard && (
             <div className="pt-0.5">

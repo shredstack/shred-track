@@ -22,10 +22,22 @@ import {
   useTrack,
   useUpdateTrack,
   useDeleteTrack,
+  useSeedFromBuilder,
 } from "@/hooks/useTracks";
 import { TrackCalendar } from "@/components/gym/programming/track-calendar";
 import { ProgressionGeneratorDialog } from "@/components/gym/programming/progression-generator-dialog";
 import { TrackScoringConfigEditor } from "@/components/gym/programming/track-scoring-config";
+import {
+  MonthlyChallengeBuilder,
+  type BuilderSubmitPayload,
+} from "@/components/gym/programming/monthly-challenge-builder";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { useIsFeatureOn } from "@/hooks/useFeatureFlag";
 import type { TrackScoringConfig } from "@/types/programming-tracks";
 
@@ -42,8 +54,10 @@ export default function TrackDetailPage({
   const { data, isLoading } = useTrack(communityId, trackId);
   const update = useUpdateTrack(communityId ?? "", trackId);
   const deleteMutation = useDeleteTrack(communityId ?? "", trackId);
+  const seedFromBuilder = useSeedFromBuilder(communityId ?? "", trackId);
 
   const [showProgression, setShowProgression] = useState(false);
+  const [showBuilderSheet, setShowBuilderSheet] = useState(false);
   const [editingHeader, setEditingHeader] = useState(false);
   const [headerName, setHeaderName] = useState("");
   const [headerStart, setHeaderStart] = useState("");
@@ -158,6 +172,34 @@ export default function TrackDetailPage({
   }
 
   const inlinePositionLocked = track.kind === "monthly_challenge";
+  const isMonthlyChallenge = track.kind === "monthly_challenge";
+  const isFreshlyCreated =
+    isMonthlyChallenge && (days?.length ?? 0) === 0;
+
+  async function runBuilderSeed(payload: BuilderSubmitPayload) {
+    try {
+      const res = await seedFromBuilder.mutateAsync(payload);
+      toast.success(
+        `Builder wrote ${res.written} day${res.written === 1 ? "" : "s"}`
+      );
+      setShowBuilderSheet(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    }
+  }
+
+  async function openRerunBuilder() {
+    const loggedCount = days.filter((d) => d.body?.trim()).length;
+    if (loggedCount > 0) {
+      const confirmed = confirm(
+        `Re-run Builder will overwrite ${loggedCount} day prescription${
+          loggedCount === 1 ? "" : "s"
+        } with the new pattern. Already-logged scores are kept (they're keyed by day, not body), but the body text will change. Proceed?`
+      );
+      if (!confirmed) return;
+    }
+    setShowBuilderSheet(true);
+  }
 
   return (
     <div className="space-y-4">
@@ -303,19 +345,40 @@ export default function TrackDetailPage({
         </CardContent>
       </Card>
 
+      {isMonthlyChallenge && isFreshlyCreated && (
+        <MonthlyChallengeBuilder
+          startsOn={track.startsOn}
+          endsOn={track.endsOn}
+          initial={
+            (track.scoringConfig ?? null) as TrackScoringConfig | null
+          }
+          defaultLabel={track.name.replace(/challenge/i, "").trim() || "Reps"}
+          onSubmit={runBuilderSeed}
+          submitting={seedFromBuilder.isPending}
+          submitLabel="Seed challenge days"
+        />
+      )}
+
       <TrackScoringConfigEditor
         initial={(track.scoringConfig ?? null) as TrackScoringConfig | null}
         onSave={saveScoringConfig}
         saving={update.isPending}
       />
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h3 className="text-sm font-semibold">
           <CalendarIcon className="mr-1 inline size-3.5" /> Calendar
         </h3>
-        <Button size="sm" onClick={() => setShowProgression(true)}>
-          Generate from progression
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {isMonthlyChallenge && (
+            <Button size="sm" variant="outline" onClick={openRerunBuilder}>
+              <Sparkles className="size-3.5" /> Re-run Builder
+            </Button>
+          )}
+          <Button size="sm" onClick={() => setShowProgression(true)}>
+            Generate from progression
+          </Button>
+        </div>
       </div>
 
       <TrackCalendar
@@ -334,6 +397,35 @@ export default function TrackDetailPage({
         startsOn={track.startsOn}
         endsOn={track.endsOn}
       />
+
+      {isMonthlyChallenge && (
+        <Sheet open={showBuilderSheet} onOpenChange={setShowBuilderSheet}>
+          <SheetContent side="right" className="w-full p-4 sm:max-w-lg overflow-y-auto">
+            <SheetHeader>
+              <SheetTitle>Re-run Builder</SheetTitle>
+              <SheetDescription>
+                Overwrites every day in the window. Already-logged scores
+                are kept; day bodies are rewritten from the new pattern.
+              </SheetDescription>
+            </SheetHeader>
+            <div className="pt-4">
+              <MonthlyChallengeBuilder
+                startsOn={track.startsOn}
+                endsOn={track.endsOn}
+                initial={
+                  (track.scoringConfig ?? null) as TrackScoringConfig | null
+                }
+                defaultLabel={
+                  track.name.replace(/challenge/i, "").trim() || "Reps"
+                }
+                onSubmit={runBuilderSeed}
+                submitting={seedFromBuilder.isPending}
+                submitLabel="Re-run Builder"
+              />
+            </div>
+          </SheetContent>
+        </Sheet>
+      )}
     </div>
   );
 }

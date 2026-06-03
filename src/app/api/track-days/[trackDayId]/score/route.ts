@@ -172,6 +172,36 @@ export async function PUT(
     numericValue = String(n);
   }
 
+  // textValue carries the tile-state JSON for per-day sets challenges
+  // (spec §5.2): `{"sets":[6,4,3,3]}`. We validate non-negative integers
+  // when the JSON parses; extra fields are ignored so older clients can
+  // round-trip a value they don't understand. Bodies that aren't JSON
+  // (or aren't an object) are accepted as-is — `textValue` is also a
+  // general-purpose free-text column.
+  if (typeof body.textValue === "string" && body.textValue.trim()) {
+    try {
+      const parsed = JSON.parse(body.textValue);
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        Array.isArray((parsed as { sets?: unknown }).sets)
+      ) {
+        const sets = (parsed as { sets: unknown[] }).sets;
+        const ok = sets.every(
+          (s) => typeof s === "number" && Number.isInteger(s) && s >= 0
+        );
+        if (!ok) {
+          return NextResponse.json(
+            { error: "textValue.sets must be non-negative integers" },
+            { status: 400 }
+          );
+        }
+      }
+    } catch {
+      // Not JSON — leave as-is.
+    }
+  }
+
   // If the scoring config doesn't allow "just done" and the athlete sent
   // no numeric value, require one — otherwise this is just a no-op tap.
   const allowJustDone = config?.allowJustDone === true;
