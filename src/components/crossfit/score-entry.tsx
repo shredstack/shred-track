@@ -1655,6 +1655,7 @@ export function ScoreEntry({
                       Round {i + 1}
                     </Label>
                     <DurationInput
+                      id={`se-round-${i}`}
                       value={draft}
                       onChange={(v) =>
                         updateState(activePart.id, {

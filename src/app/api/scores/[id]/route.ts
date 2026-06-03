@@ -157,8 +157,10 @@ export async function PUT(
   // array. On a notes-only edit (no roundDurationsSeconds in the body) we
   // must ignore any body.timeSeconds the client happens to send — otherwise
   // a client-provided value would silently overwrite the stored aggregate.
+  // Guard on existing.timeSeconds (not roundDurationsSeconds) so legacy
+  // scores written before the per-round array was stored are still protected.
   const preserveAggregateTime =
-    isTimedRoundsPart && existing.roundDurationsSeconds != null;
+    isTimedRoundsPart && existing.timeSeconds != null;
   const resolvedTimeSeconds =
     timedRoundsAggregate ??
     (preserveAggregateTime

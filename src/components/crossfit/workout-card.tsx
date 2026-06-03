@@ -349,8 +349,6 @@ function TimedRoundsBreakdown({
   );
 }
 
-// out because the workout-card renders it next to the movement name.
-//
 // for_load parts: weight is the score, not a prescription. Older saved
 // workouts may still carry phantom common-Rx defaults from the builder
 // (the input was hidden but the state field was populated). Nulling the
