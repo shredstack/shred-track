@@ -31,6 +31,7 @@ import {
   type NotifKind,
   type CopyContext,
 } from "@/lib/notifications/copy";
+import { DEFAULT_OFF_KINDS } from "@/lib/notifications/preferences";
 
 const KNOWN_KINDS: ReadonlySet<NotifKind> = new Set<NotifKind>([
   "score_reaction",
@@ -45,13 +46,6 @@ const KNOWN_KINDS: ReadonlySet<NotifKind> = new Set<NotifKind>([
   "committed_club_earned",
   "committed_club_streak",
   "class_cancelled",
-  "class_reservation_reminder",
-]);
-
-// Kinds that default OFF when no preference row exists for the user.
-// Class reservation reminders are explicit opt-in per spec §3.4 to
-// avoid notification fatigue.
-const DEFAULT_OFF_KINDS: ReadonlySet<NotifKind> = new Set<NotifKind>([
   "class_reservation_reminder",
 ]);
 

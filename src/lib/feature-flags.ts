@@ -12,7 +12,7 @@
 // ---------------------------------------------------------------------------
 
 import { cache } from "react";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
   featureFlags,
@@ -92,6 +92,62 @@ export async function isFlagOn(
 /** Returns the full resolved flag map. Used by /api/me/feature-flags. */
 export async function getAllFlags(ctx: FlagContext): Promise<FlagMap> {
   return loadAllFlags(ctx.userId ?? null, ctx.communityId ?? null);
+}
+
+/**
+ * Batched per-recipient flag resolution. Returns the subset of `userIds`
+ * for whom `key` resolves to a truthy value under the (communityId,
+ * recipient) context. Resolution order matches the single-context path:
+ * user override → community override → default.
+ *
+ * Uses 3 queries regardless of recipient count, so a 500-member gym fan-out
+ * still hits the DB three times instead of 500. Intended for notification
+ * fan-outs that need to honour individual opt-in/opt-out overrides.
+ */
+export async function filterRecipientsByFlag(
+  key: string,
+  communityId: string | null,
+  userIds: string[]
+): Promise<string[]> {
+  if (userIds.length === 0) return [];
+
+  const [defaultRow] = await db
+    .select({ value: featureFlags.defaultValue })
+    .from(featureFlags)
+    .where(eq(featureFlags.key, key))
+    .limit(1);
+  let baseValue: FlagValue = defaultRow?.value ?? false;
+
+  if (communityId) {
+    const [communityRow] = await db
+      .select({ value: communityFeatureOverrides.value })
+      .from(communityFeatureOverrides)
+      .where(
+        and(
+          eq(communityFeatureOverrides.flagKey, key),
+          eq(communityFeatureOverrides.communityId, communityId)
+        )
+      )
+      .limit(1);
+    if (communityRow) baseValue = communityRow.value;
+  }
+
+  const userRows = await db
+    .select({
+      userId: userFeatureOverrides.userId,
+      value: userFeatureOverrides.value,
+    })
+    .from(userFeatureOverrides)
+    .where(
+      and(
+        eq(userFeatureOverrides.flagKey, key),
+        inArray(userFeatureOverrides.userId, userIds)
+      )
+    );
+  const userMap = new Map(userRows.map((r) => [r.userId, r.value]));
+
+  const isOn = (v: FlagValue) => v === true || v === "true" || v === 1;
+  return userIds.filter((id) => isOn(userMap.get(id) ?? baseValue));
 }
 
 /**

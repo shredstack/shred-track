@@ -1,9 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import Link from "next/link";
 import {
-  ArrowLeft,
   Search,
   X,
   CalendarDays,
@@ -16,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { WorkoutCard } from "@/components/crossfit/workout-card";
 import { MovementSearch } from "@/components/crossfit/movement-search";
 import { ScoreEntry } from "@/components/crossfit/score-entry";
+import { BackButton } from "@/components/shared/back-button";
 import {
   useWorkoutSearch,
   useLogScore,
@@ -119,14 +118,8 @@ export default function CrossfitSearchPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-2">
-        <Link href="/crossfit" aria-label="Back to workouts">
-          <Button variant="ghost" size="icon-xs">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
-        <h1 className="text-base font-bold">Search Workouts</h1>
-      </div>
+      <BackButton fallbackHref="/crossfit" label="Workouts" />
+      <h1 className="text-base font-bold">Search Workouts</h1>
 
       <div className="flex flex-col gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
         <div className="relative">

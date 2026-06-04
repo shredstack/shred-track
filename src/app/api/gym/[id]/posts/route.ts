@@ -22,6 +22,8 @@ import { canManageGym, canViewGym } from "@/lib/authz/community";
 import { inngest } from "@/inngest/client";
 import { sql } from "drizzle-orm";
 import { parseMentionsFromBody } from "@/lib/social/mentions";
+import { filterRecipientsByFlag } from "@/lib/feature-flags";
+import { filterRecipientsByInAppPref } from "@/lib/notifications/preferences";
 
 const VALID_KINDS = new Set([
   "announcement",
@@ -224,6 +226,12 @@ export async function POST(
     return row;
   });
 
+  // Notification fan-out (social_post_published + social_post_mention) is
+  // double-gated: gym-level `gym_notifications` flag (default on, gym
+  // kill switch) → per-user `inAppEnabled` for the kind (default OFF, user
+  // opt-in via /settings/notifications). The post itself still lands in
+  // the feed regardless; we just don't blast inboxes.
+
   // Fan out social_post_published to active gym members (minus author).
   const members = await db
     .select({ userId: communityMemberships.userId })
@@ -234,50 +242,66 @@ export async function POST(
         eq(communityMemberships.isActive, true)
       )
     );
-  if (members.length) {
-    const recipients = members
-      .filter((m) => m.userId !== user.id)
-      .map((m) => ({
-        recipientId: m.userId,
-        actorId: user.id,
-        kind: "social_post_published" as const,
-        communityId,
-        gymPostId: post.id,
-      }));
-    if (recipients.length) {
-      const inserted = await db
-        .insert(notifications)
-        .values(recipients)
-        .returning({ id: notifications.id });
-      for (const n of inserted) {
-        try {
-          await inngest.send({
-            id: `dispatch:${n.id}`,
-            name: "notifications/created",
-            data: { notificationId: n.id },
-          });
-        } catch (err) {
-          console.error("[gym-posts] dispatch failed", err);
-        }
+  const publishCandidates = members
+    .map((m) => m.userId)
+    .filter((id) => id !== user.id);
+  const publishFlagPassed = await filterRecipientsByFlag(
+    "gym_notifications",
+    communityId,
+    publishCandidates
+  );
+  const publishRecipientIds = await filterRecipientsByInAppPref(
+    "social_post_published",
+    publishFlagPassed
+  );
+  if (publishRecipientIds.length) {
+    const rows = publishRecipientIds.map((rid) => ({
+      recipientId: rid,
+      actorId: user.id,
+      kind: "social_post_published" as const,
+      communityId,
+      gymPostId: post.id,
+    }));
+    const inserted = await db
+      .insert(notifications)
+      .values(rows)
+      .returning({ id: notifications.id });
+    for (const n of inserted) {
+      try {
+        await inngest.send({
+          id: `dispatch:${n.id}`,
+          name: "notifications/created",
+          data: { notificationId: n.id },
+        });
+      } catch (err) {
+        console.error("[gym-posts] dispatch failed", err);
       }
     }
   }
 
   // Mention notifications.
   if (mentions.length) {
-    const mentionRecipients = mentions
-      .filter((id) => id !== user.id)
-      .map((id) => ({
+    const mentionCandidates = mentions.filter((id) => id !== user.id);
+    const mentionFlagPassed = await filterRecipientsByFlag(
+      "gym_notifications",
+      communityId,
+      mentionCandidates
+    );
+    const mentionRecipientIds = await filterRecipientsByInAppPref(
+      "social_post_mention",
+      mentionFlagPassed
+    );
+    if (mentionRecipientIds.length) {
+      const rows = mentionRecipientIds.map((id) => ({
         recipientId: id,
         actorId: user.id,
         kind: "social_post_mention" as const,
         communityId,
         gymPostId: post.id,
       }));
-    if (mentionRecipients.length) {
       const inserted = await db
         .insert(notifications)
-        .values(mentionRecipients)
+        .values(rows)
         .returning({ id: notifications.id });
       for (const n of inserted) {
         try {

@@ -2,7 +2,7 @@
 
 import { use } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2, Pencil, Users } from "lucide-react";
+import { Loader2, Pencil, Users } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { useGymContext } from "@/hooks/useGymContext";
 import { formatPrescription } from "@/types/recovery";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { BackButton } from "@/components/shared/back-button";
 
 const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 function formatDays(days: number[]): string {
@@ -73,13 +74,7 @@ export default function ScheduleDetailPage({
 
   return (
     <div className="flex flex-col gap-4">
-      <Link
-        href="/recovery/schedules"
-        className="inline-flex items-center text-xs text-muted-foreground"
-      >
-        <ArrowLeft className="h-3.5 w-3.5 mr-1" />
-        Back
-      </Link>
+      <BackButton fallbackHref="/recovery/schedules" label="Schedules" />
       <div className="flex items-start justify-between gap-2">
         <div>
           <h1 className="text-xl font-bold">{data.name}</h1>

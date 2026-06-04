@@ -19,6 +19,7 @@ import type {
 } from "@/types/recovery";
 import { MovementPicker } from "./movement-picker";
 import { PrescriptionRow } from "./prescription-row";
+import { BackButton } from "@/components/shared/back-button";
 
 interface DraftSlot {
   key: string;
@@ -294,6 +295,14 @@ export function ScheduleBuilderForm({
 
   return (
     <div className="flex flex-col gap-4">
+      <BackButton
+        fallbackHref={
+          editing && initial?.id
+            ? `/recovery/schedules/${initial.id}`
+            : "/recovery/schedules"
+        }
+        label={editing ? "Schedule" : "Schedules"}
+      />
       <h1 className="text-lg font-semibold">
         {editing ? "Edit schedule" : "New schedule"}
       </h1>

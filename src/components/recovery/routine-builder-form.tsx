@@ -16,6 +16,7 @@ import { useActiveMembership, useGymContext } from "@/hooks/useGymContext";
 import type { RecoveryPrescription } from "@/types/recovery";
 import { MovementPicker } from "./movement-picker";
 import { PrescriptionRow } from "./prescription-row";
+import { BackButton } from "@/components/shared/back-button";
 
 interface DraftMovement {
   key: string;
@@ -114,6 +115,14 @@ export function RoutineBuilderForm({
 
   return (
     <div className="flex flex-col gap-4">
+      <BackButton
+        fallbackHref={
+          editing && initial?.id
+            ? `/recovery/routines/${initial.id}`
+            : "/recovery/routines"
+        }
+        label={editing ? "Routine" : "Routines"}
+      />
       <h1 className="text-lg font-semibold">
         {editing ? "Edit routine" : "New routine"}
       </h1>

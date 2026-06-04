@@ -4,7 +4,6 @@ import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
-  ArrowLeft,
   Loader2,
   Plus,
   Play,
@@ -41,6 +40,7 @@ import {
   externalThumbnailUrl,
 } from "@/lib/recovery/storage";
 import { GymOverrideEditor } from "@/components/recovery/gym-override-editor";
+import { BackButton } from "@/components/shared/back-button";
 
 export default function RecoveryMovementDetailPage({
   params,
@@ -102,13 +102,7 @@ export default function RecoveryMovementDetailPage({
 
   return (
     <div className="flex flex-col gap-4">
-      <Link
-        href="/recovery/movements"
-        className="inline-flex items-center text-xs text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="h-3.5 w-3.5 mr-1" />
-        Library
-      </Link>
+      <BackButton fallbackHref="/recovery/movements" label="Library" />
 
       <div>
         <h1 className="text-xl font-bold">{data.canonicalName}</h1>

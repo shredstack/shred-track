@@ -7,6 +7,7 @@ import {
   integer,
   smallint,
   numeric,
+  doublePrecision,
   date,
   jsonb,
   uniqueIndex,
@@ -619,7 +620,7 @@ export const scores = pgTable(
     scoreText: text("score_text"),
     hitTimeCap: boolean("hit_time_cap").default(false).notNull(),
     notes: text("notes"),
-    rpe: integer("rpe"), // 1-10
+    rpe: doublePrecision("rpe"), // 1-10, 0.5 increments (auto-averaged from per-set RPE when filled)
     // Vest the athlete actually wore (only meaningful when the workout
     // requires a vest). Lets a Murph-without-vest score show a badge
     // without flipping the division to scaled.

@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Bug, Loader2, MessageSquare } from "lucide-react";
+import { BackButton } from "@/components/shared/back-button";
 
 type Variant = "gym-owner" | "bug-report";
 
@@ -49,6 +50,7 @@ export default function SupportPage() {
 
   return (
     <div className="space-y-4">
+      <BackButton fallbackHref="/profile" label="Profile" />
       <div>
         <h1 className="text-2xl font-bold">Help &amp; Support</h1>
         <p className="text-sm text-muted-foreground">

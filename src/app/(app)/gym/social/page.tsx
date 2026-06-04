@@ -19,6 +19,7 @@ import { PostCard } from "@/components/gym/post-card";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { BackButton } from "@/components/shared/back-button";
 
 export default function GymSocialPage() {
   const { data: ctx } = useGymContext();
@@ -96,6 +97,7 @@ export default function GymSocialPage() {
 
   return (
     <div className="space-y-4">
+      <BackButton fallbackHref="/home" />
       <div className="flex items-start gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted/40">
           <Megaphone className="size-4" />
