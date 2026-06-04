@@ -120,3 +120,24 @@ alter table score_movement_details
         'unavailable'
       )
     );
+
+-- ----------------------------------------------------------------------------
+-- 5. RLS — defense-in-depth. All app writes go through the postgres service
+--    role (bypasses RLS); these policies guard any access via the Supabase
+--    JS client. Mirrors the pattern used by user_movement_paces +
+--    community_calorie_preferences.
+-- ----------------------------------------------------------------------------
+
+-- stimulus_profiles is admin-curated global reference data. The admin
+-- endpoint (super-admin gated in the route handler) is the only writer, and
+-- it runs server-side via the service role. No policies = no Supabase-JS
+-- access; the catalog is only readable through the API.
+alter table stimulus_profiles enable row level security;
+
+-- athlete_movement_strength is per-user. Reads through the Supabase JS
+-- client are scoped to the calling user. Writes only happen server-side via
+-- the strength updater (service role).
+alter table athlete_movement_strength enable row level security;
+
+create policy "athlete_movement_strength_select_own"
+  on athlete_movement_strength for select using (auth.uid() = user_id);

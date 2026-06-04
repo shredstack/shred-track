@@ -158,9 +158,21 @@ export async function GET(
   }
 
   // Group rows by part for PR computation, then map back.
+  // Invariant: every score returned here is unified-schema (joined through
+  // workout_sessions), and the score POST path always populates
+  // crossfit_workout_part_id when workout_session_id is set (auto-resolves
+  // to the template's first part if the client omits it). A null partId
+  // would skip PR computation and silently flag isPr=false for every row,
+  // so log loudly if it ever happens — that means a writer skipped the
+  // invariant, not a real data state.
   const rowsByPart = new Map<string, typeof scoreRows>();
   for (const r of scoreRows) {
-    if (!r.partId) continue;
+    if (!r.partId) {
+      console.error(
+        `[template-history] score ${r.scoreId} has null crossfit_workout_part_id — isPr will be false`
+      );
+      continue;
+    }
     const list = rowsByPart.get(r.partId) ?? [];
     list.push(r);
     rowsByPart.set(r.partId, list);
