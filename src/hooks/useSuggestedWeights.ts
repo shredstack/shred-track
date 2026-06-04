@@ -3,6 +3,14 @@
 import { createContext, useContext } from "react";
 import { useQuery } from "@tanstack/react-query";
 
+export interface SuggestionPriorContext {
+  workoutDate: string; // YYYY-MM-DD
+  priorPrescribedLb: number | null;
+  priorActualLb: number;
+  rpe: number | null;
+  workoutTemplateTitle: string | null;
+}
+
 export interface SuggestionDTO {
   method: string;
   confidence: "high" | "medium" | "low";
@@ -11,6 +19,8 @@ export interface SuggestionDTO {
   anchor1rmLb: number | null;
   anchorSource: string | null;
   stimulusClass: string | null;
+  // Populated by the movement_history tier; null otherwise.
+  priorContext?: SuggestionPriorContext | null;
 }
 
 interface SuggestedWeightsResponse {

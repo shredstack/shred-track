@@ -66,6 +66,8 @@ export async function GET(
       rxStimulusClass: movements.rxStimulusClass,
       commonRxWeightMale: movements.commonRxWeightMale,
       commonRxWeightFemale: movements.commonRxWeightFemale,
+      prescribedWeightMale: crossfitWorkoutMovements.prescribedWeightMale,
+      prescribedWeightFemale: crossfitWorkoutMovements.prescribedWeightFemale,
     })
     .from(crossfitWorkoutMovements)
     .innerJoin(movements, eq(movements.id, crossfitWorkoutMovements.movementId))
@@ -119,6 +121,14 @@ export async function GET(
           m.commonRxWeightFemale != null
             ? Number(m.commonRxWeightFemale)
             : null,
+        prescribedWeightMale:
+          m.prescribedWeightMale != null
+            ? Number(m.prescribedWeightMale)
+            : null,
+        prescribedWeightFemale:
+          m.prescribedWeightFemale != null
+            ? Number(m.prescribedWeightFemale)
+            : null,
       })),
     };
 
@@ -141,6 +151,13 @@ function shapeSuggestion(s: {
   anchor1rmLb?: number | null;
   anchorSource?: string | null;
   stimulusClass: string | null;
+  priorContext?: {
+    workoutDate: string;
+    priorPrescribedLb: number | null;
+    priorActualLb: number;
+    rpe: number | null;
+    workoutTemplateTitle: string | null;
+  } | null;
 }) {
   return {
     method: s.method,
@@ -150,5 +167,6 @@ function shapeSuggestion(s: {
     anchor1rmLb: s.anchor1rmLb ?? null,
     anchorSource: s.anchorSource ?? null,
     stimulusClass: s.stimulusClass,
+    priorContext: s.priorContext ?? null,
   };
 }

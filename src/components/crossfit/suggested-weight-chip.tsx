@@ -31,6 +31,7 @@ const METHOD_LABEL: Record<SuggestionDTO["method"] | string, string> = {
   logged_1rm: "Based on your logged 1RM.",
   estimated_1rm: "Estimated from your heaviest logged set.",
   similar_template_history: "Averaged from your prior similar-stimulus sets.",
+  movement_history: "Based on the last time you did this movement.",
   rx_fallback: "Starting point — using the gym Rx baseline.",
   unavailable: "",
 };
@@ -152,13 +153,21 @@ function WhySheet({
             </Section>
           )}
 
-          {!suggestion.anchor1rmLb && suggestion.anchorSource && (
-            <Section title="Source">
-              <p className="text-xs text-muted-foreground">
-                {suggestion.anchorSource}
-              </p>
+          {suggestion.priorContext && (
+            <Section title="Last time you did this">
+              <PriorContextLine context={suggestion.priorContext} />
             </Section>
           )}
+
+          {!suggestion.anchor1rmLb &&
+            !suggestion.priorContext &&
+            suggestion.anchorSource && (
+              <Section title="Source">
+                <p className="text-xs text-muted-foreground">
+                  {suggestion.anchorSource}
+                </p>
+              </Section>
+            )}
 
           <Section title="Confidence">
             <Badge
@@ -207,4 +216,58 @@ function Section({
       {children}
     </div>
   );
+}
+
+// Renders the same side-by-side prescribed/actual line used in the
+// workout-detail prep card so the chip "Why?" sheet shows the prior log
+// alongside the suggestion.
+export function PriorContextLine({
+  context,
+}: {
+  context: NonNullable<SuggestionDTO["priorContext"]>;
+}) {
+  const dateLabel = shortDate(context.workoutDate);
+  const usedLb = formatLb(context.priorActualLb);
+  const rxLabel =
+    context.priorPrescribedLb != null &&
+    context.priorActualLb >= context.priorPrescribedLb
+      ? " Rx"
+      : "";
+  return (
+    <div className="rounded-lg border border-border/40 bg-muted/20 p-3 text-sm">
+      <p className="text-foreground/85">
+        <span className="font-medium">{dateLabel}</span>
+        {context.priorPrescribedLb != null ? (
+          <>
+            : prescribed{" "}
+            <span className="font-mono">{formatLb(context.priorPrescribedLb)} lb</span>
+            , you used <span className="font-mono">{usedLb} lb</span>
+            {rxLabel}
+          </>
+        ) : (
+          <>
+            : you used <span className="font-mono">{usedLb} lb</span>
+          </>
+        )}
+        {context.rpe != null && (
+          <span className="text-muted-foreground"> (RPE {context.rpe})</span>
+        )}
+        .
+      </p>
+      {context.workoutTemplateTitle && (
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          From {context.workoutTemplateTitle}.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function shortDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
 }
