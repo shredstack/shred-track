@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  coercePerformanceSignals,
   formatNotesForPrompt,
   parseExtraction,
   rollupRows,
@@ -17,7 +18,7 @@ import type {
 describe("parseExtraction", () => {
   it("parses a clean JSON response", () => {
     const raw = JSON.stringify({
-      complaints: [{ topic: "Shoulder", phrase: "shoulder felt off", confidence: 0.8 }],
+      complaints: [{ topic: "Shoulder", movement: null, phrase: "shoulder felt off", confidence: 0.8 }],
       scalingRationale: [
         { movement: "C2B", reason: "Grip", phrase: "grip went" },
       ],
@@ -44,13 +45,77 @@ describe("parseExtraction", () => {
       complaints: [],
       scalingRationale: [],
       milestones: [],
+      performanceSignals: [],
     });
+  });
+
+  it("populates complaint.movement when the LLM attributes it", () => {
+    const raw = JSON.stringify({
+      complaints: [
+        {
+          topic: "grip",
+          movement: "Toes-to-Bar",
+          phrase: "grip gave",
+          confidence: 0.9,
+        },
+        // movement omitted — coerces to null
+        { topic: "shoulder", phrase: "felt off", confidence: 0.6 },
+        // movement is an empty string — also null
+        {
+          topic: "endurance",
+          movement: "   ",
+          phrase: "got winded",
+          confidence: 0.5,
+        },
+      ],
+      scalingRationale: [],
+      milestones: [],
+    });
+    const out = parseExtraction(raw);
+    expect(out.complaints).toHaveLength(3);
+    expect(out.complaints[0].movement).toBe("Toes-to-Bar");
+    expect(out.complaints[1].movement).toBeNull();
+    expect(out.complaints[2].movement).toBeNull();
+  });
+
+  it("parses performanceSignals when present", () => {
+    const raw = JSON.stringify({
+      complaints: [],
+      scalingRationale: [],
+      milestones: [],
+      performanceSignals: [
+        {
+          movement: "Double Unders",
+          metric: "reps_in_window",
+          value: 30,
+          unit: "reps",
+          window: "1.5 min",
+          qualitative: "better",
+          phrase: "30 unbroken in 1.5 min",
+        },
+      ],
+    });
+    const out = parseExtraction(raw);
+    expect(out.performanceSignals).toHaveLength(1);
+    expect(out.performanceSignals[0].movement).toBe("Double Unders");
+    expect(out.performanceSignals[0].metric).toBe("reps_in_window");
+    expect(out.performanceSignals[0].value).toBe(30);
+  });
+
+  it("defaults performanceSignals to [] when omitted", () => {
+    const raw = JSON.stringify({
+      complaints: [],
+      scalingRationale: [],
+      milestones: [],
+    });
+    const out = parseExtraction(raw);
+    expect(out.performanceSignals).toEqual([]);
   });
 
   it("clamps confidence to [0, 1]", () => {
     const raw = JSON.stringify({
       complaints: [
-        { topic: "x", phrase: "p", confidence: 1.5 },
+        { topic: "x", movement: null, phrase: "p", confidence: 1.5 },
         { topic: "y", phrase: "q", confidence: -0.2 },
       ],
       scalingRationale: [],
@@ -81,6 +146,147 @@ describe("parseExtraction", () => {
     expect(out.complaints).toEqual([]);
     expect(out.scalingRationale).toEqual([]);
     expect(out.milestones).toEqual([]);
+  });
+});
+
+// ============================================
+// coercePerformanceSignals
+// ============================================
+
+describe("coercePerformanceSignals", () => {
+  it("accepts a well-formed signal", () => {
+    const out = coercePerformanceSignals([
+      {
+        movement: "Double Unders",
+        metric: "reps_in_window",
+        value: 30,
+        unit: "reps",
+        window: "1.5 min",
+        qualitative: "better",
+        phrase: "30 unbroken in 1.5 min",
+      },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toEqual({
+      movement: "Double Unders",
+      metric: "reps_in_window",
+      value: 30,
+      unit: "reps",
+      window: "1.5 min",
+      qualitative: "better",
+      phrase: "30 unbroken in 1.5 min",
+    });
+  });
+
+  it("returns [] for non-array input", () => {
+    expect(coercePerformanceSignals(undefined)).toEqual([]);
+    expect(coercePerformanceSignals(null)).toEqual([]);
+    expect(coercePerformanceSignals("nope")).toEqual([]);
+    expect(coercePerformanceSignals({})).toEqual([]);
+  });
+
+  it("drops entries missing a movement", () => {
+    const out = coercePerformanceSignals([
+      {
+        // movement missing
+        metric: "unbroken_reps",
+        value: 25,
+        unit: "reps",
+        window: null,
+        qualitative: null,
+        phrase: "25 unbroken",
+      },
+      {
+        movement: "   ",
+        metric: "unbroken_reps",
+        value: 25,
+        unit: "reps",
+        window: null,
+        qualitative: null,
+        phrase: "25 unbroken",
+      },
+    ]);
+    expect(out).toEqual([]);
+  });
+
+  it("drops entries with an invalid metric enum", () => {
+    const out = coercePerformanceSignals([
+      {
+        movement: "Pull-up",
+        metric: "made_up_metric",
+        value: 5,
+        unit: "reps",
+        window: null,
+        qualitative: null,
+        phrase: "5 unbroken",
+      },
+    ]);
+    expect(out).toEqual([]);
+  });
+
+  it("drops entries where value isn't a finite number", () => {
+    const out = coercePerformanceSignals([
+      {
+        movement: "Row",
+        metric: "pace",
+        value: "fast",
+        unit: "sec",
+        window: "500m",
+        qualitative: null,
+        phrase: "1:55",
+      },
+      {
+        movement: "Row",
+        metric: "pace",
+        value: Number.POSITIVE_INFINITY,
+        unit: "sec",
+        window: "500m",
+        qualitative: null,
+        phrase: "1:55",
+      },
+    ]);
+    expect(out).toEqual([]);
+  });
+
+  it("drops entries with empty unit or phrase", () => {
+    const out = coercePerformanceSignals([
+      {
+        movement: "Pull-up",
+        metric: "unbroken_reps",
+        value: 5,
+        unit: "",
+        window: null,
+        qualitative: null,
+        phrase: "5 unbroken",
+      },
+      {
+        movement: "Pull-up",
+        metric: "unbroken_reps",
+        value: 5,
+        unit: "reps",
+        window: null,
+        qualitative: null,
+        phrase: "   ",
+      },
+    ]);
+    expect(out).toEqual([]);
+  });
+
+  it("normalizes optional fields (window, qualitative)", () => {
+    const out = coercePerformanceSignals([
+      {
+        movement: "DU",
+        metric: "unbroken_reps",
+        value: 25,
+        unit: "reps",
+        window: "",
+        qualitative: "magical",
+        phrase: "25 unbroken",
+      },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].window).toBeNull();
+    expect(out[0].qualitative).toBeNull();
   });
 });
 
@@ -254,7 +460,7 @@ describe("rollupRows", () => {
       row({
         scoreId: "s1",
         complaints: [
-          { topic: "shoulder", phrase: "felt off", confidence: 0.8 },
+          { topic: "shoulder", movement: null, phrase: "felt off", confidence: 0.8 },
         ],
       }),
     ];
@@ -268,15 +474,15 @@ describe("rollupRows", () => {
     const rows = [
       row({
         scoreId: "s1",
-        complaints: [{ topic: "shoulder", phrase: "twingy", confidence: 0.7 }],
+        complaints: [{ topic: "shoulder", movement: null, phrase: "twingy", confidence: 0.7 }],
       }),
       row({
         scoreId: "s2",
-        complaints: [{ topic: "shoulder", phrase: "still off", confidence: 0.9 }],
+        complaints: [{ topic: "shoulder", movement: null, phrase: "still off", confidence: 0.9 }],
       }),
       row({
         scoreId: "s3",
-        complaints: [{ topic: "hip", phrase: "tight", confidence: 0.8 }],
+        complaints: [{ topic: "hip", movement: null, phrase: "tight", confidence: 0.8 }],
       }),
     ];
     const out = rollupRows(rows);
@@ -291,17 +497,17 @@ describe("rollupRows", () => {
       row({
         scoreId: "s1",
         workoutDate: "2026-04-10",
-        complaints: [{ topic: "shoulder", phrase: "twingy", confidence: 0.7 }],
+        complaints: [{ topic: "shoulder", movement: null, phrase: "twingy", confidence: 0.7 }],
       }),
       row({
         scoreId: "s2",
         workoutDate: "2026-04-20",
-        complaints: [{ topic: "shoulder", phrase: "still off", confidence: 0.9 }],
+        complaints: [{ topic: "shoulder", movement: null, phrase: "still off", confidence: 0.9 }],
       }),
       row({
         scoreId: "s3",
         workoutDate: "2026-04-25",
-        complaints: [{ topic: "shoulder", phrase: "nagging", confidence: 0.5 }],
+        complaints: [{ topic: "shoulder", movement: null, phrase: "nagging", confidence: 0.5 }],
       }),
     ];
     const out = rollupRows(rows);
@@ -317,11 +523,11 @@ describe("rollupRows", () => {
     const rows = [
       row({
         scoreId: "s1",
-        complaints: [{ topic: "hip", phrase: "...", confidence: 0.2 }],
+        complaints: [{ topic: "hip", movement: null, phrase: "...", confidence: 0.2 }],
       }),
       row({
         scoreId: "s2",
-        complaints: [{ topic: "hip", phrase: "...", confidence: 0.3 }],
+        complaints: [{ topic: "hip", movement: null, phrase: "...", confidence: 0.3 }],
       }),
     ];
     const out = rollupRows(rows);

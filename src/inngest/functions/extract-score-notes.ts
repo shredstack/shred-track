@@ -110,7 +110,8 @@ export const extractScoreNotes = inngest.createFunction(
               note.scoreId,
               extraction,
               NOTES_MODEL_VERSION,
-              contentHash
+              contentHash,
+              { userId: user.id, workoutDate: note.workoutDate }
             );
             extracted += 1;
           } catch (err) {
