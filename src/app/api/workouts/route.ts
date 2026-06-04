@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { crossfitWorkouts } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { crossfitWorkouts, workoutSessions, type WorkoutSession } from "@/db/schema";
+import { and, eq, isNull } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { canCreateWorkoutInGym } from "@/lib/authz/workout";
 import { canViewGym } from "@/lib/authz/community";
@@ -208,6 +208,13 @@ export async function POST(req: NextRequest) {
       Array.isArray(body.parts) && (body.parts as unknown[]).length > 0;
     if (!(tmpl.weightliftingMovementId && hasParts)) {
       const session = await db.transaction(async (tx) => {
+        const existing = await findExistingSession(tx, {
+          userId: targetCommunityId ? null : user.id,
+          communityId: targetCommunityId,
+          workoutDate,
+          crossfitWorkoutId: tmpl.id,
+        });
+        if (existing) return existing;
         return createSession(tx, {
           crossfitWorkoutId: tmpl.id,
           userId: targetCommunityId ? null : user.id,
@@ -302,19 +309,27 @@ export async function POST(req: NextRequest) {
         isNewTemplate = upsertResult.isNew;
       }
 
-      const session = await createSession(tx, {
-        crossfitWorkoutId: templateId,
+      const existing = await findExistingSession(tx, {
         userId: targetCommunityId ? null : user.id,
         communityId: targetCommunityId,
         workoutDate,
-        // See benchmark fast-path above for the kind default rationale.
-        kind: targetCommunityId ? "wod" : "custom",
-        position: 0,
-        isScored: true,
-        source:
-          source || (autoLinkedTemplateId ? "benchmark_inferred" : "manual"),
-        published: published ?? targetCommunityId !== null,
+        crossfitWorkoutId: templateId,
       });
+      const session =
+        existing ??
+        (await createSession(tx, {
+          crossfitWorkoutId: templateId,
+          userId: targetCommunityId ? null : user.id,
+          communityId: targetCommunityId,
+          workoutDate,
+          // See benchmark fast-path above for the kind default rationale.
+          kind: targetCommunityId ? "wod" : "custom",
+          position: 0,
+          isScored: true,
+          source:
+            source || (autoLinkedTemplateId ? "benchmark_inferred" : "manual"),
+          published: published ?? targetCommunityId !== null,
+        }));
 
       return { session, templateId, isNewTemplate };
     });
@@ -338,6 +353,44 @@ export async function POST(req: NextRequest) {
     },
     { status: 201 }
   );
+}
+
+// Look for an existing session that already covers the same (owner, date,
+// template) tuple this request would create. Guards against the
+// double-submit case where a slow network or a double-tap on Save lands
+// two POSTs and produces two sessions sharing one template — which the
+// synthetic-workout reader then renders as duplicate cards on the same
+// day. We match on the same FK shape `createSession` would write so the
+// returned row is indistinguishable from a fresh insert. Not a hard
+// uniqueness guarantee — two concurrent requests can still race — but it
+// handles the realistic UI cases. A unique index would be the durable
+// fix.
+async function findExistingSession(
+  tx: Parameters<typeof createSession>[0],
+  opts: {
+    userId: string | null;
+    communityId: string | null;
+    workoutDate: string;
+    crossfitWorkoutId: string;
+  }
+): Promise<WorkoutSession | null> {
+  const [row] = await tx
+    .select()
+    .from(workoutSessions)
+    .where(
+      and(
+        opts.userId
+          ? eq(workoutSessions.userId, opts.userId)
+          : isNull(workoutSessions.userId),
+        opts.communityId
+          ? eq(workoutSessions.communityId, opts.communityId)
+          : isNull(workoutSessions.communityId),
+        eq(workoutSessions.workoutDate, opts.workoutDate),
+        eq(workoutSessions.crossfitWorkoutId, opts.crossfitWorkoutId)
+      )
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 // Pick a non-empty title for the template. Templates require a NOT NULL
