@@ -50,6 +50,14 @@ import { DeleteWorkoutDialog } from "@/components/crossfit/delete-workout-dialog
 import { WorkoutSectionBlock } from "@/components/crossfit/workout-section-block";
 import { CalorieBadge } from "@/components/crossfit/calorie-badge";
 import { useEffectiveEpocEnabled } from "@/hooks/useEpocPreference";
+import { TemplateHistoryLink } from "@/components/crossfit/template-history-sheet";
+import { SuggestionChip } from "@/components/crossfit/suggested-weight-chip";
+import {
+  SuggestionContext,
+  flattenSuggestions,
+  useSuggestedWeights,
+  useSuggestionForMovement,
+} from "@/hooks/useSuggestedWeights";
 
 // Programmed Rest is identified by name + duration metric, mirroring the
 // builder's `isLegacyRestMovement` check. For a Rest the duration is the
@@ -389,6 +397,7 @@ function MovementRow({
   mov,
   partWorkoutType,
   partRepScheme,
+  suggestionsHidden,
 }: {
   mov: WorkoutMovementDisplay;
   partWorkoutType: WorkoutPartDisplay["workoutType"];
@@ -397,7 +406,11 @@ function MovementRow({
    *  to all movements" intent visible even if the per-movement prefill
    *  didn't run at authoring time. */
   partRepScheme?: string | null;
+  /** When true, suppress the suggestion chip (used after a score is logged
+   *  for the part — we don't second-guess the athlete on the same card). */
+  suggestionsHidden?: boolean;
 }) {
+  const suggestion = useSuggestionForMovement(mov.id);
   const metricText = formatMovementMetric(mov, partWorkoutType);
   const prefix =
     mov.equipmentCount && mov.equipmentCount > 1
@@ -437,39 +450,49 @@ function MovementRow({
   }
 
   return (
-    <div className="flex items-center gap-2.5 text-sm">
-      <div className="flex h-5 w-5 items-center justify-center rounded bg-primary/10">
+    <div className="flex items-start gap-2.5 text-sm">
+      <div className="mt-0.5 flex h-5 w-5 items-center justify-center rounded bg-primary/10">
         <Dumbbell className="size-3 text-primary/70" />
       </div>
       <span className="flex-1">
-        {mov.isMaxReps ? (
-          <span className="mr-1 inline-flex items-center rounded bg-amber-500/15 px-1 py-px text-[10px] font-bold text-amber-300">
-            {mov.metricType === "calories"
-              ? "MAX CAL"
-              : mov.metricType === "distance"
-                ? "MAX DIST"
-                : mov.metricType === "duration"
-                  ? "MAX TIME"
-                  : "MAX REPS"}
-          </span>
-        ) : (
-          effectiveReps && (
-            <span className="font-mono font-bold text-foreground">
-              {effectiveReps}{" "}
+        <span>
+          {mov.isMaxReps ? (
+            <span className="mr-1 inline-flex items-center rounded bg-amber-500/15 px-1 py-px text-[10px] font-bold text-amber-300">
+              {mov.metricType === "calories"
+                ? "MAX CAL"
+                : mov.metricType === "distance"
+                  ? "MAX DIST"
+                  : mov.metricType === "duration"
+                    ? "MAX TIME"
+                    : "MAX REPS"}
             </span>
-          )
-        )}
-        <span className="text-foreground/85">{mov.movementName}</span>
-        {metricText && (
-          <span className="ml-1.5 text-xs text-muted-foreground font-mono">
-            ({prefix}
-            {metricText})
-          </span>
-        )}
-        {!metricText && prefix && (
-          <span className="ml-1.5 text-xs text-muted-foreground font-mono">
-            ({mov.equipmentCount} DBs)
-          </span>
+          ) : (
+            effectiveReps && (
+              <span className="font-mono font-bold text-foreground">
+                {effectiveReps}{" "}
+              </span>
+            )
+          )}
+          <span className="text-foreground/85">{mov.movementName}</span>
+          {metricText && (
+            <span className="ml-1.5 text-xs text-muted-foreground font-mono">
+              ({prefix}
+              {metricText})
+            </span>
+          )}
+          {!metricText && prefix && (
+            <span className="ml-1.5 text-xs text-muted-foreground font-mono">
+              ({mov.equipmentCount} DBs)
+            </span>
+          )}
+        </span>
+        {!suggestionsHidden && mov.isWeighted && suggestion && (
+          <div className="mt-1">
+            <SuggestionChip
+              suggestion={suggestion}
+              movementName={mov.movementName}
+            />
+          </div>
         )}
       </span>
     </div>
@@ -524,6 +547,10 @@ export function PartSection({
   showLabel: boolean;
   communityId: string | null | undefined;
 }) {
+  // Hide the suggestion chip after the athlete has logged a score for this
+  // part (spec §"Per-movement suggestion on the WOD card" — we don't
+  // second-guess the athlete on the same card).
+  const suggestionsHidden = !!part.score;
   const typeColor = WORKOUT_TYPE_COLORS[part.workoutType];
   const typeLabel = WORKOUT_TYPE_LABELS[part.workoutType];
   const defaultLabel = `Part ${String.fromCharCode(65 + index)}`;
@@ -716,6 +743,7 @@ export function PartSection({
                       mov={mov}
                       partWorkoutType={part.workoutType}
                       partRepScheme={part.repScheme}
+                      suggestionsHidden={suggestionsHidden}
                     />
                   ))}
                 </div>
@@ -742,6 +770,7 @@ export function PartSection({
                           mov={mov}
                           partWorkoutType={part.workoutType}
                           partRepScheme={part.repScheme}
+                          suggestionsHidden={suggestionsHidden}
                         />
                       ))}
                     </div>
@@ -774,6 +803,17 @@ export function WorkoutCard({
   const multiPart = parts.length > 1;
   const sections = workout.sections ?? [];
   const hasSections = sections.length > 0;
+
+  // Pre-fetch the per-movement suggestion map for this template so each
+  // MovementRow can render its chip without firing its own request. Skip
+  // the request entirely when every part already has a logged score —
+  // those rows hide the chip anyway.
+  const needsSuggestions =
+    !!workout.crossfitWorkoutId && parts.some((p) => !p.score);
+  const { data: suggestionsData } = useSuggestedWeights(
+    needsSuggestions ? workout.crossfitWorkoutId ?? null : null
+  );
+  const suggestionMap = flattenSuggestions(suggestionsData);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -809,6 +849,7 @@ export function WorkoutCard({
   };
 
   return (
+    <SuggestionContext.Provider value={suggestionMap}>
     <Card className="gradient-border overflow-visible">
       <CardHeader>
         <div className="flex items-start gap-2">
@@ -832,6 +873,11 @@ export function WorkoutCard({
               </div>
             ) : null}
           </div>
+          {workout.crossfitWorkoutId && (
+            <TemplateHistoryLink
+              crossfitWorkoutId={workout.crossfitWorkoutId}
+            />
+          )}
         </div>
       </CardHeader>
 
@@ -1120,5 +1166,6 @@ export function WorkoutCard({
         </Dialog>
       )}
     </Card>
+    </SuggestionContext.Provider>
   );
 }

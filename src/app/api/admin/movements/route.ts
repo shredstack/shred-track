@@ -36,6 +36,7 @@ export async function GET(req: NextRequest) {
       rxDefaults: movements.rxDefaults,
       commonRxWeightMale: movements.commonRxWeightMale,
       commonRxWeightFemale: movements.commonRxWeightFemale,
+      rxStimulusClass: movements.rxStimulusClass,
       videoUrl: movements.videoUrl,
       createdBy: movements.createdBy,
       isValidated: movements.isValidated,

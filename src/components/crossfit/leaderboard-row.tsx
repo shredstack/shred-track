@@ -18,6 +18,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { MovementScalingRow } from "@/components/crossfit/movement-scaling-row";
 import { Button } from "@/components/ui/button";
 
 // --------------------------------------------------------------
@@ -316,36 +317,20 @@ export function LeaderboardRow({
             Scaling Details
           </p>
           {entry.scalingDetails.map((detail, idx) => (
-            <div
+            <MovementScalingRow
               key={idx}
-              className="flex items-center justify-between text-xs"
-            >
-              <span className="text-muted-foreground">
-                {detail.movementName}
-              </span>
-              <div className="flex items-center gap-2">
-                {detail.wasRx ? (
-                  <Badge
-                    variant="outline"
-                    className="text-[9px] bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-                  >
-                    Rx
-                  </Badge>
-                ) : (
-                  <span className="text-yellow-400">
-                    {detail.modification && (
-                      <span>{detail.modification}</span>
-                    )}
-                    {detail.actualWeight && (
-                      <span> @ {detail.actualWeight} lb</span>
-                    )}
-                    {detail.substitutionName && (
-                      <span> &rarr; {detail.substitutionName}</span>
-                    )}
-                  </span>
-                )}
-              </div>
-            </div>
+              variant="compact"
+              detail={{
+                movementName: detail.movementName,
+                wasRx: detail.wasRx,
+                actualWeightLb: detail.actualWeight
+                  ? Number(detail.actualWeight)
+                  : null,
+                actualReps: detail.actualReps ?? null,
+                modification: detail.modification ?? null,
+                substitutionName: detail.substitutionName ?? null,
+              }}
+            />
           ))}
           {entry.rpe && (
             <div className="flex items-center justify-between text-xs pt-1 border-t border-border/30">

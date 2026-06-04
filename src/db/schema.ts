@@ -398,6 +398,11 @@ export const movements = pgTable(
     isPacedRun: boolean("is_paced_run").default(false).notNull(),
     isPacedErg: text("is_paced_erg"), // 'row' | 'ski' | null
     metUpdatedAt: timestamp("met_updated_at", { withTimezone: true }),
+    // Stimulus class the catalog Rx weight is calibrated for. Lets the
+    // suggested-weight engine scale Rx baselines up/down when the actual
+    // workout's stimulus differs. Admin-curated. See
+    // suggested_working_weight_and_template_history_spec.md.
+    rxStimulusClass: text("rx_stimulus_class"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [index("movements_created_by_idx").on(table.createdBy)]
@@ -728,6 +733,103 @@ export type CommunityCaloriePreferences =
 export type NewCommunityCaloriePreferences =
   typeof communityCaloriePreferences.$inferInsert;
 
+// ============================================
+// Suggested working weight — strength cache + stimulus profiles
+// ============================================
+//
+// See claude_code_instructions/crossfit_improvements/
+//     suggested_working_weight_and_template_history_spec.md.
+
+// Stimulus-class → %1RM band, per movement category. Admin-editable. Seeded
+// from the spec values; tunable later as we gather logged data.
+export const stimulusProfiles = pgTable(
+  "stimulus_profiles",
+  {
+    stimulusClass: text("stimulus_class").notNull(),
+    movementCategory: text("movement_category").notNull(),
+    pct1rmLow: numeric("pct_1rm_low").notNull(),
+    pct1rmHigh: numeric("pct_1rm_high").notNull(),
+    notes: text("notes"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.stimulusClass, table.movementCategory] }),
+  ]
+);
+
+// Per-(user, movement) best-known 1RM. Rebuilt on score save + nightly. The
+// estimator prefers logged_1rm over rep-max estimates; among estimates,
+// prefers the highest observed in the last 12 months.
+export const athleteMovementStrength = pgTable(
+  "athlete_movement_strength",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    movementId: uuid("movement_id")
+      .notNull()
+      .references(() => movements.id, { onDelete: "cascade" }),
+    estimated1rmLb: numeric("estimated_1rm_lb").notNull(),
+    source: text("source").notNull(),
+    sourceScoreId: uuid("source_score_id").references(() => scores.id, {
+      onDelete: "set null",
+    }),
+    sourceSetWeightLb: numeric("source_set_weight_lb"),
+    sourceSetReps: integer("source_set_reps"),
+    sampleSize: integer("sample_size").default(1).notNull(),
+    lastObservedAt: timestamp("last_observed_at", { withTimezone: true })
+      .notNull(),
+    computedAt: timestamp("computed_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.movementId] }),
+    index("idx_ams_user").on(table.userId),
+    index("idx_ams_movement").on(table.movementId),
+  ]
+);
+
+export type StimulusProfile = typeof stimulusProfiles.$inferSelect;
+export type NewStimulusProfile = typeof stimulusProfiles.$inferInsert;
+export type AthleteMovementStrength =
+  typeof athleteMovementStrength.$inferSelect;
+export type NewAthleteMovementStrength =
+  typeof athleteMovementStrength.$inferInsert;
+
+// Stimulus classes — matches the CHECK constraint in the migration and the
+// classifier output.
+export const STIMULUS_CLASSES = [
+  "strength_heavy",
+  "strength_moderate",
+  "short_intense",
+  "moderate_metcon",
+  "long_metcon",
+  "oly_metcon",
+] as const;
+export type StimulusClass = (typeof STIMULUS_CLASSES)[number];
+
+export const ATHLETE_MOVEMENT_STRENGTH_SOURCES = [
+  "logged_1rm",
+  "epley_from_set",
+  "brzycki_from_set",
+  "gym_default",
+] as const;
+export type AthleteMovementStrengthSource =
+  (typeof ATHLETE_MOVEMENT_STRENGTH_SOURCES)[number];
+
+export const SUGGESTED_WEIGHT_METHODS = [
+  "logged_1rm",
+  "estimated_1rm",
+  "similar_template_history",
+  "direct_template_history",
+  "rx_fallback",
+  "unavailable",
+] as const;
+export type SuggestedWeightMethod = (typeof SUGGESTED_WEIGHT_METHODS)[number];
+
 export const scoreMovementDetails = pgTable("score_movement_details", {
   id: uuid("id").defaultRandom().primaryKey(),
   scoreId: uuid("score_id").notNull().references(() => scores.id, { onDelete: "cascade" }),
@@ -764,6 +866,13 @@ export const scoreMovementDetails = pgTable("score_movement_details", {
   // kg->lb conversions.
   actualWeightLbsPerRound: numeric("actual_weight_lbs_per_round").array(),
   notes: text("notes"),
+  // Suggested-weight snapshot (display + analytics only — never overrides
+  // the athlete's actual logged weight). Captured at score-save time so we
+  // can later study how often the suggestion matched what they used.
+  suggestedWeightLbLow: numeric("suggested_weight_lb_low"),
+  suggestedWeightLbHigh: numeric("suggested_weight_lb_high"),
+  suggestedWeightConfidence: text("suggested_weight_confidence"),
+  suggestedWeightMethod: text("suggested_weight_method"),
 }, (table) => [
   foreignKey({
     name: "smd_workout_movement_id_fk",

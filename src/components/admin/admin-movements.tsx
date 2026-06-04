@@ -53,6 +53,9 @@ interface Movement {
   rxDefaults?: Record<string, unknown> | null;
   commonRxWeightMale: string | null;
   commonRxWeightFemale: string | null;
+  // Stimulus class the Rx weight is calibrated for. Drives baseline scaling
+  // in the suggested-weight engine. See stimulus_profiles.
+  rxStimulusClass?: string | null;
   videoUrl: string | null;
   createdBy: string | null;
   isValidated: boolean;
@@ -99,6 +102,7 @@ interface MovementFormData {
   is1rmApplicable: boolean;
   commonRxWeightMale: string;
   commonRxWeightFemale: string;
+  rxStimulusClass: string; // "" = unset (no inference)
   videoUrl: string;
   metricType: MovementMetricType;
   supportedMetricTypes: MovementMetricType[];
@@ -113,12 +117,23 @@ const emptyForm: MovementFormData = {
   is1rmApplicable: false,
   commonRxWeightMale: "",
   commonRxWeightFemale: "",
+  rxStimulusClass: "",
   videoUrl: "",
   metricType: "reps",
   supportedMetricTypes: ["reps"],
   rxFields: [],
   rxDefaults: {},
 };
+
+const RX_STIMULUS_CLASS_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "— (unset)" },
+  { value: "short_intense", label: "Short / intense" },
+  { value: "moderate_metcon", label: "Moderate metcon" },
+  { value: "long_metcon", label: "Long metcon" },
+  { value: "strength_heavy", label: "Strength — heavy" },
+  { value: "strength_moderate", label: "Strength — moderate" },
+  { value: "oly_metcon", label: "Olympic-flavored metcon" },
+];
 
 function parseMetricType(v: unknown): MovementMetricType {
   return typeof v === "string" &&
@@ -255,6 +270,7 @@ export function AdminMovements() {
       is1rmApplicable: m.is1rmApplicable,
       commonRxWeightMale: m.commonRxWeightMale || "",
       commonRxWeightFemale: m.commonRxWeightFemale || "",
+      rxStimulusClass: m.rxStimulusClass || "",
       videoUrl: m.videoUrl || "",
       metricType,
       supportedMetricTypes: parseSupportedMetricTypes(
@@ -519,36 +535,62 @@ export function AdminMovements() {
             </div>
 
             {form.isWeighted && (
-              <div className="grid gap-3 grid-cols-2">
+              <>
+                <div className="grid gap-3 grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="am-rxm">Rx Weight (M)</Label>
+                    <Input
+                      id="am-rxm"
+                      value={form.commonRxWeightMale}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          commonRxWeightMale: e.target.value,
+                        }))
+                      }
+                      placeholder="e.g. 135"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="am-rxf">Rx Weight (F)</Label>
+                    <Input
+                      id="am-rxf"
+                      value={form.commonRxWeightFemale}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          commonRxWeightFemale: e.target.value,
+                        }))
+                      }
+                      placeholder="e.g. 95"
+                    />
+                  </div>
+                </div>
                 <div className="space-y-2">
-                  <Label htmlFor="am-rxm">Rx Weight (M)</Label>
-                  <Input
-                    id="am-rxm"
-                    value={form.commonRxWeightMale}
+                  <Label htmlFor="am-stim">Rx stimulus class</Label>
+                  <select
+                    id="am-stim"
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={form.rxStimulusClass}
                     onChange={(e) =>
                       setForm((prev) => ({
                         ...prev,
-                        commonRxWeightMale: e.target.value,
+                        rxStimulusClass: e.target.value,
                       }))
                     }
-                    placeholder="e.g. 135"
-                  />
+                  >
+                    {RX_STIMULUS_CLASS_OPTIONS.map((o) => (
+                      <option key={o.value || "unset"} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-muted-foreground">
+                    The stimulus the catalog Rx weight is calibrated for.
+                    Used as the baseline when no athlete signal exists.
+                  </p>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="am-rxf">Rx Weight (F)</Label>
-                  <Input
-                    id="am-rxf"
-                    value={form.commonRxWeightFemale}
-                    onChange={(e) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        commonRxWeightFemale: e.target.value,
-                      }))
-                    }
-                    placeholder="e.g. 95"
-                  />
-                </div>
-              </div>
+              </>
             )}
 
             {/* How is this movement scored? */}

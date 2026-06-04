@@ -14,6 +14,12 @@ import { WorkoutSectionBlock } from "@/components/crossfit/workout-section-block
 import { PartSection } from "@/components/crossfit/workout-card";
 import { CalorieBadge } from "@/components/crossfit/calorie-badge";
 import { BenchmarkPrPill } from "@/components/crossfit/benchmark-pr-pill";
+import { TemplateHistoryLink } from "@/components/crossfit/template-history-sheet";
+import {
+  SuggestionContext,
+  flattenSuggestions,
+  useSuggestedWeights,
+} from "@/hooks/useSuggestedWeights";
 import type { WorkoutDisplay } from "@/types/crossfit";
 
 interface ProgrammedWorkoutDayProps {
@@ -63,6 +69,17 @@ export function ProgrammedWorkoutDay({
     (a, b) => a.position - b.position
   );
   const showKebab = !!(onEditInProgramming || onDelete || onMoveToGym);
+
+  // Pre-fetch the per-movement suggestion map for the owner template so
+  // each MovementRow inside PartSection can render its chip without firing
+  // its own request. Skip when every part already has a logged score
+  // (chips hide post-log anyway).
+  const needsSuggestions =
+    !!workout.crossfitWorkoutId && parts.some((p) => !p.score);
+  const { data: suggestionsData } = useSuggestedWeights(
+    needsSuggestions ? workout.crossfitWorkoutId ?? null : null
+  );
+  const suggestionMap = flattenSuggestions(suggestionsData);
   const weekStart = mondayOfWeek(workout.workoutDate);
   // Programming admin deep-link. The page resolves the gym from the
   // user's active community (no communityId segment in the URL), so we
@@ -95,209 +112,218 @@ export function ProgrammedWorkoutDay({
     (!!workout.description || workout.isPartner || workout.requiresVest);
 
   return (
-    <div className="space-y-3">
-      {/* Day header strip — slim, non-Card. Carries gym branding,
-          calorie chip, and admin kebab. Workout title is intentionally
-          omitted; the WOD section's own title acts as the day's name. */}
-      <div className="flex items-center justify-between gap-2 px-1">
-        <div className="flex min-w-0 items-center gap-2">
-          {workout.communityId && workout.communityName ? (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              {workout.communityLogoUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={workout.communityLogoUrl}
-                  alt=""
-                  className="h-4 w-4 rounded object-contain"
-                />
-              ) : (
-                <Building2 className="h-3.5 w-3.5" />
-              )}
-              <span className="truncate">{workout.communityName}</span>
-            </div>
-          ) : null}
-          {workout.estimatedKcalLow != null &&
-          workout.estimatedKcalHigh != null ? (
-            <>
-              <span className="text-muted-foreground/40">·</span>
-              <CalorieBadge
-                variant="detail"
-                low={workout.estimatedKcalLow}
-                high={workout.estimatedKcalHigh}
-                confidence={workout.estimatedKcalConfidence}
-              />
-            </>
-          ) : null}
-        </div>
-        {showKebab ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 w-8 p-0 text-muted-foreground"
-                  aria-label="Day actions"
-                />
-              }
-            >
-              <MoreVertical className="h-4 w-4" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              {onEditInProgramming && programmingHref ? (
-                <DropdownMenuItem
-                  render={<Link href={programmingHref} />}
-                >
-                  <Pencil className="size-3.5" />
-                  Edit in programming admin
-                </DropdownMenuItem>
-              ) : null}
-              {onMoveToGym ? (
-                <DropdownMenuItem onClick={() => onMoveToGym(workout.id)}>
-                  <Send className="size-3.5" />
-                  Move to {moveToGymName ?? "another gym"}
-                </DropdownMenuItem>
-              ) : null}
-              {onDelete ? (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onClick={() => onDelete(workout.id)}
-                    className="text-destructive focus:text-destructive"
-                  >
-                    <Trash2 className="size-3.5" />
-                    Delete workout
-                  </DropdownMenuItem>
-                </>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
-      </div>
-
-      {/* One standalone card per section. */}
-      {sections.map((section) => {
-        const sectionParts = section.partIds
-          .map((pid) => parts.find((p) => p.id === pid))
-          .filter((p): p is (typeof parts)[number] => !!p);
-        const sectionHasParts = sectionParts.length > 0;
-        const sectionHasScore = sectionParts.some((p) => p.score);
-        // Any section with Smart-Builder parts is scoreable. The
-        // `is_scored` field is currently never set by the programming
-        // admin (the toggle isn't exposed in the UI), so gating on it
-        // would hide the button on every published section.
-        // TrackDayScoreInput only renders for *free-form* track sections
-        // (no parts) — so parts-based track sessions (built via Smart
-        // Builder on a track day) need the regular Log Score CTA too.
-        const showSectionScoring = sectionHasParts && !!onLogScore;
-        const showSectionLeaderboard =
-          showSectionScoring && !!onViewLeaderboard && !!workout.communityId;
-        const isOwnerSection = hasOwnerMetadata && section.id === ownerSectionId;
-        return (
-          <WorkoutSectionBlock
-            key={section.id}
-            section={section}
-            variant="standalone"
-            onViewTrackDayLeaderboard={onViewTrackDayLeaderboard}
-            onLogScore={
-              showSectionScoring
-                ? () => onLogScore?.(workout.id, section.id)
-                : undefined
-            }
-            onViewLeaderboard={
-              showSectionLeaderboard
-                ? () => onViewLeaderboard?.(workout.id, section.id)
-                : undefined
-            }
-            sectionHasScore={sectionHasScore}
-            sectionIsMultiPart={sectionParts.length > 1}
-          >
-            {section.benchmarkWorkoutId && (
-              <div className="-mt-1 flex flex-wrap gap-2">
-                <BenchmarkPrPill
-                  benchmarkWorkoutId={section.benchmarkWorkoutId}
-                  fallbackName={section.title ?? undefined}
-                />
+    <SuggestionContext.Provider value={suggestionMap}>
+      <div className="space-y-3">
+        {/* Day header strip — slim, non-Card. Carries gym branding,
+            calorie chip, and admin kebab. Workout title is intentionally
+            omitted; the WOD section's own title acts as the day's name. */}
+        <div className="flex items-center justify-between gap-2 px-1">
+          <div className="flex min-w-0 items-center gap-2">
+            {workout.communityId && workout.communityName ? (
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                {workout.communityLogoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={workout.communityLogoUrl}
+                    alt=""
+                    className="h-4 w-4 rounded object-contain"
+                  />
+                ) : (
+                  <Building2 className="h-3.5 w-3.5" />
+                )}
+                <span className="truncate">{workout.communityName}</span>
               </div>
+            ) : null}
+            {workout.estimatedKcalLow != null &&
+            workout.estimatedKcalHigh != null ? (
+              <>
+                <span className="text-muted-foreground/40">·</span>
+                <CalorieBadge
+                  variant="detail"
+                  low={workout.estimatedKcalLow}
+                  high={workout.estimatedKcalHigh}
+                  confidence={workout.estimatedKcalConfidence}
+                />
+              </>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-1">
+            {workout.crossfitWorkoutId && (
+              <TemplateHistoryLink
+                crossfitWorkoutId={workout.crossfitWorkoutId}
+              />
             )}
-            {isOwnerSection && workout.description && (
-              <p className="whitespace-pre-wrap text-sm italic leading-relaxed text-muted-foreground">
-                {workout.description}
-              </p>
-            )}
-            {isOwnerSection &&
-              (workout.requiresVest || workout.isPartner) && (
-                <div className="flex flex-wrap items-center gap-3">
-                  {workout.requiresVest && (
-                    <div className="flex items-center gap-1.5 text-[11px] text-amber-300/90">
-                      <Shield className="size-3.5" />
-                      <span>
-                        {workout.vestWeightMaleLb || workout.vestWeightFemaleLb
-                          ? `${workout.vestWeightMaleLb ?? "?"}/${
-                              workout.vestWeightFemaleLb ?? "?"
-                            } lb vest required`
-                          : "Weighted vest required"}
-                      </span>
-                    </div>
-                  )}
-                  {workout.isPartner && (
-                    <div className="flex items-center gap-1.5 text-[11px] text-cyan-300/90">
-                      <Users className="size-3.5" />
-                      <span>
-                        Partner workout
-                        {workout.partnerCount && workout.partnerCount > 2
-                          ? ` (${workout.partnerCount}-person team)`
-                          : ""}
-                      </span>
-                    </div>
-                  )}
+            {showKebab ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 text-muted-foreground"
+                      aria-label="Day actions"
+                    />
+                  }
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  {onEditInProgramming && programmingHref ? (
+                    <DropdownMenuItem
+                      render={<Link href={programmingHref} />}
+                    >
+                      <Pencil className="size-3.5" />
+                      Edit in programming admin
+                    </DropdownMenuItem>
+                  ) : null}
+                  {onMoveToGym ? (
+                    <DropdownMenuItem onClick={() => onMoveToGym(workout.id)}>
+                      <Send className="size-3.5" />
+                      Move to {moveToGymName ?? "another gym"}
+                    </DropdownMenuItem>
+                  ) : null}
+                  {onDelete ? (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={() => onDelete(workout.id)}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        <Trash2 className="size-3.5" />
+                        Delete workout
+                      </DropdownMenuItem>
+                    </>
+                  ) : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+          </div>
+        </div>
+
+        {/* One standalone card per section. */}
+        {sections.map((section) => {
+          const sectionParts = section.partIds
+            .map((pid) => parts.find((p) => p.id === pid))
+            .filter((p): p is (typeof parts)[number] => !!p);
+          const sectionHasParts = sectionParts.length > 0;
+          const sectionHasScore = sectionParts.some((p) => p.score);
+          // Any section with Smart-Builder parts is scoreable. The
+          // `is_scored` field is currently never set by the programming
+          // admin (the toggle isn't exposed in the UI), so gating on it
+          // would hide the button on every published section.
+          // TrackDayScoreInput only renders for *free-form* track sections
+          // (no parts) — so parts-based track sessions (built via Smart
+          // Builder on a track day) need the regular Log Score CTA too.
+          const showSectionScoring = sectionHasParts && !!onLogScore;
+          const showSectionLeaderboard =
+            showSectionScoring && !!onViewLeaderboard && !!workout.communityId;
+          const isOwnerSection = hasOwnerMetadata && section.id === ownerSectionId;
+          return (
+            <WorkoutSectionBlock
+              key={section.id}
+              section={section}
+              variant="standalone"
+              onViewTrackDayLeaderboard={onViewTrackDayLeaderboard}
+              onLogScore={
+                showSectionScoring
+                  ? () => onLogScore?.(workout.id, section.id)
+                  : undefined
+              }
+              onViewLeaderboard={
+                showSectionLeaderboard
+                  ? () => onViewLeaderboard?.(workout.id, section.id)
+                  : undefined
+              }
+              sectionHasScore={sectionHasScore}
+              sectionIsMultiPart={sectionParts.length > 1}
+            >
+              {section.benchmarkWorkoutId && (
+                <div className="-mt-1 flex flex-wrap gap-2">
+                  <BenchmarkPrPill
+                    benchmarkWorkoutId={section.benchmarkWorkoutId}
+                    fallbackName={section.title ?? undefined}
+                  />
                 </div>
               )}
-            {sectionHasParts
-              ? sectionParts.map((part, idx) => (
-                  <div key={part.id} className="space-y-3">
-                    {idx > 0 && (
-                      <div className="border-t border-border/60" />
+              {isOwnerSection && workout.description && (
+                <p className="whitespace-pre-wrap text-sm italic leading-relaxed text-muted-foreground">
+                  {workout.description}
+                </p>
+              )}
+              {isOwnerSection &&
+                (workout.requiresVest || workout.isPartner) && (
+                  <div className="flex flex-wrap items-center gap-3">
+                    {workout.requiresVest && (
+                      <div className="flex items-center gap-1.5 text-[11px] text-amber-300/90">
+                        <Shield className="size-3.5" />
+                        <span>
+                          {workout.vestWeightMaleLb || workout.vestWeightFemaleLb
+                            ? `${workout.vestWeightMaleLb ?? "?"}/${
+                                workout.vestWeightFemaleLb ?? "?"
+                              } lb vest required`
+                            : "Weighted vest required"}
+                        </span>
+                      </div>
                     )}
-                    <PartSection
-                      part={part}
-                      index={idx}
-                      showLabel={sectionParts.length > 1}
-                      communityId={workout.communityId}
-                    />
+                    {workout.isPartner && (
+                      <div className="flex items-center gap-1.5 text-[11px] text-cyan-300/90">
+                        <Users className="size-3.5" />
+                        <span>
+                          Partner workout
+                          {workout.partnerCount && workout.partnerCount > 2
+                            ? ` (${workout.partnerCount}-person team)`
+                            : ""}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                ))
-              : // Sections without Smart Builder parts (warm-up,
-                // stretching, freeform pre-skill, etc.) carry their
-                // prescription in `body`, which WorkoutSectionBlock
-                // already renders. No placeholder needed when body is
-                // present; only show "Empty" when both are missing —
-                // and even then, keep it silent for athletes since the
-                // coach editing view is where that signal belongs.
-                null}
-          </WorkoutSectionBlock>
-        );
-      })}
+                )}
+              {sectionHasParts
+                ? sectionParts.map((part, idx) => (
+                    <div key={part.id} className="space-y-3">
+                      {idx > 0 && (
+                        <div className="border-t border-border/60" />
+                      )}
+                      <PartSection
+                        part={part}
+                        index={idx}
+                        showLabel={sectionParts.length > 1}
+                        communityId={workout.communityId}
+                      />
+                    </div>
+                  ))
+                : // Sections without Smart Builder parts (warm-up,
+                  // stretching, freeform pre-skill, etc.) carry their
+                  // prescription in `body`, which WorkoutSectionBlock
+                  // already renders. No placeholder needed when body is
+                  // present; only show "Empty" when both are missing —
+                  // and even then, keep it silent for athletes since the
+                  // coach editing view is where that signal belongs.
+                  null}
+            </WorkoutSectionBlock>
+          );
+        })}
 
-      {/* Orphans get their own minimal card so they're not lost. */}
-      {orphanParts.length > 0 && (
-        <div className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            Other
-          </h3>
-          {orphanParts.map((part, idx) => (
-            <div key={part.id} className="space-y-3">
-              {idx > 0 && <div className="border-t border-border/60" />}
-              <PartSection
-                part={part}
-                index={idx}
-                showLabel={orphanParts.length > 1}
-                communityId={workout.communityId}
-              />
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+        {/* Orphans get their own minimal card so they're not lost. */}
+        {orphanParts.length > 0 && (
+          <div className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              Other
+            </h3>
+            {orphanParts.map((part, idx) => (
+              <div key={part.id} className="space-y-3">
+                {idx > 0 && <div className="border-t border-border/60" />}
+                <PartSection
+                  part={part}
+                  index={idx}
+                  showLabel={orphanParts.length > 1}
+                  communityId={workout.communityId}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </SuggestionContext.Provider>
   );
 }
