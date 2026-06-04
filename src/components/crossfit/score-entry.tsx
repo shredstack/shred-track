@@ -189,6 +189,14 @@ interface PartState {
   weightLbs: string;
   scoreText: string;
   rpe: number;
+  // Tracks whether the current `rpe` value was last written by the per-set
+  // auto-average. Cleared as soon as the athlete drags the slider.
+  rpeAutoSetActive: boolean;
+  // Latches once the athlete drags the slider *away* from an auto-averaged
+  // value. From that point on the auto-average no longer overwrites the
+  // slider, so a deliberate manual override survives subsequent edits to
+  // the per-set RPE inputs.
+  rpeUserOverride: boolean;
   notes: string;
   // Keyed by **movement_id** (not workout_movement_id) so the same movement
   // appearing multiple times in a part only needs one scaling entry. On save,
@@ -363,6 +371,8 @@ function emptyPartState(
     weightLbs: existing?.weightLbs ?? "",
     scoreText: existing?.scoreText ?? "",
     rpe: existing?.rpe ?? 7,
+    rpeAutoSetActive: false,
+    rpeUserOverride: false,
     notes: existing?.notes ?? "",
     movementScalings: scalings,
     setEntriesMap,
@@ -851,11 +861,12 @@ export function ScoreEntry({
             [movId]: updated,
           },
         };
-        if (part) {
+        if (part && !nextPart.rpeUserOverride) {
           const { values, expected } = collectPerSetRpe(part, nextPart);
           if (expected > 0 && values.length === expected) {
             const avg = values.reduce((a, b) => a + b, 0) / values.length;
             nextPart.rpe = Math.round(avg * 2) / 2;
+            nextPart.rpeAutoSetActive = true;
           }
         }
         return { ...prev, [partId]: nextPart };
@@ -2659,11 +2670,19 @@ export function ScoreEntry({
             </div>
             <Slider
               value={[state.rpe]}
-              onValueChange={(val) =>
+              onValueChange={(val) => {
+                const nextRpe = Array.isArray(val) ? val[0] : val;
+                // If the slider was sitting on an auto-averaged value and the
+                // athlete drags it away, latch the user-override flag so the
+                // next per-set edit doesn't snap the slider back.
+                const latchOverride =
+                  state.rpeAutoSetActive && nextRpe !== state.rpe;
                 updateState(activePart.id, {
-                  rpe: Array.isArray(val) ? val[0] : val,
-                })
-              }
+                  rpe: nextRpe,
+                  rpeAutoSetActive: false,
+                  ...(latchOverride ? { rpeUserOverride: true } : {}),
+                });
+              }}
               min={1}
               max={10}
               step={0.5}
