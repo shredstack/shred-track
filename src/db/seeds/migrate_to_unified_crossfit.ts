@@ -1952,16 +1952,21 @@ async function runVerifyAssertions(
     );
   }
 
-  // Every non-freeform session has a non-null template.
+  // Every non-freeform session has either a template or a non-empty body.
+  // This mirrors the workout_sessions_content_check DB constraint and the
+  // session-writer invariant: gym admins can create a body-only placeholder
+  // (e.g., monthly_challenge, wod) before Smart Builder attaches a template.
   const [orphanSessions] = await tx
     .select({ c: sql<number>`count(*)::int` })
     .from(workoutSessions)
     .where(
-      sql`kind not in ('warm_up', 'stretching') and crossfit_workout_id is null`
+      sql`kind not in ('warm_up', 'stretching')
+        and crossfit_workout_id is null
+        and (body is null or btrim(body) = '')`
     );
   if (Number(orphanSessions.c) > 0) {
     throw new Error(
-      `verify: ${orphanSessions.c} non-freeform sessions lack a template`
+      `verify: ${orphanSessions.c} non-freeform sessions lack both a template and a body`
     );
   }
 

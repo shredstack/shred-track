@@ -40,8 +40,8 @@ import {
 import type {
   BenchmarkWorkout,
   BenchmarkCategoryName,
-  BenchmarkAttempt,
-  WorkoutType,
+  BenchmarkPartAttempt,
+  BenchmarkSession,
   BenchmarkMovement,
   BenchmarkWorkoutBlock,
   RepMaxStat,
@@ -600,14 +600,17 @@ function BenchmarkDetailDialog({
 
               <Separator />
 
-              {/* Legacy flat history */}
+              {/* Session-grouped history. Multi-part benchmarks render
+                  each session as one row with every part's score stacked
+                  inside, so "I did this once" doesn't show up as N
+                  separate attempts. */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold">Your History</h3>
-                  {history && "attempts" in history && history.attempts.length > 0 && (
+                  {history && "sessions" in history && history.sessions.length > 0 && (
                     <span className="text-xs text-muted-foreground">
-                      {history.attempts.length} attempt
-                      {history.attempts.length === 1 ? "" : "s"}
+                      {history.sessions.length} session
+                      {history.sessions.length === 1 ? "" : "s"}
                     </span>
                   )}
                 </div>
@@ -616,13 +619,13 @@ function BenchmarkDetailDialog({
                   <div className="flex items-center justify-center py-4">
                     <Loader2 className="size-4 animate-spin text-muted-foreground" />
                   </div>
-                ) : history && "attempts" in history && history.attempts.length > 0 ? (
+                ) : history && "sessions" in history && history.sessions.length > 0 ? (
                   <div className="flex flex-col gap-1.5">
-                    {history.attempts.map((a) => (
-                      <AttemptRow
-                        key={a.scoreId}
-                        workoutType={benchmark.workoutType}
-                        attempt={a}
+                    {history.sessions.map((s) => (
+                      <SessionRow
+                        key={s.sessionId}
+                        session={s}
+                        isMultiPart={history.parts.length > 1}
                       />
                     ))}
                   </div>
@@ -671,51 +674,80 @@ function BenchmarkDetailDialog({
 }
 
 // ============================================
-// Attempt row inside history list
+// Session row inside history list
 // ============================================
 
-function AttemptRow({
-  attempt,
-  workoutType,
+function SessionRow({
+  session,
+  isMultiPart,
 }: {
-  attempt: BenchmarkAttempt;
-  workoutType: WorkoutType;
+  session: BenchmarkSession;
+  isMultiPart: boolean;
 }) {
-  const display = formatBenchmarkAttempt(workoutType, attempt);
+  const firstNotes = session.partAttempts.find((pa) => pa.notes)?.notes ?? null;
   return (
-    <div className="flex items-center justify-between gap-2 rounded-md border border-border/40 bg-muted/20 px-3 py-2">
-      <div className="flex flex-col">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold">{display}</span>
-          {attempt.isPR && (
-            <Badge className="gap-1 bg-amber-500/15 text-amber-300 border border-amber-500/30 hover:bg-amber-500/15">
-              <Star className="size-3" />
-              PR
-            </Badge>
-          )}
-          {attempt.hitTimeCap && (
-            <Badge variant="outline" className="text-[10px] text-muted-foreground">
-              capped
-            </Badge>
-          )}
+    <div className="flex items-start justify-between gap-2 rounded-md border border-border/40 bg-muted/20 px-3 py-2">
+      <div className="flex min-w-0 flex-col gap-1">
+        <div className="flex flex-col gap-0.5">
+          {session.partAttempts.map((pa) => (
+            <PartScoreLine
+              key={pa.scoreId}
+              partAttempt={pa}
+              showPartLabel={isMultiPart}
+            />
+          ))}
         </div>
-        {attempt.notes && (
-          <span className="text-[11px] text-muted-foreground line-clamp-1">
-            {attempt.notes}
+        {firstNotes && (
+          <span className="line-clamp-1 text-[11px] text-muted-foreground">
+            {firstNotes}
           </span>
         )}
       </div>
-      <div className="flex flex-col items-end gap-0.5">
+      <div className="flex shrink-0 flex-col items-end gap-0.5">
         <span className="text-xs text-muted-foreground">
-          {formatShortDate(attempt.workoutDate)}
+          {formatShortDate(session.workoutDate)}
         </span>
         <Badge
           variant="outline"
           className="text-[10px] uppercase text-muted-foreground"
         >
-          {attempt.division.replace("_", " ")}
+          {session.division.replace("_", " ")}
         </Badge>
       </div>
+    </div>
+  );
+}
+
+function PartScoreLine({
+  partAttempt,
+  showPartLabel,
+}: {
+  partAttempt: BenchmarkPartAttempt;
+  showPartLabel: boolean;
+}) {
+  const display = formatBenchmarkAttempt(
+    partAttempt.partWorkoutType,
+    partAttempt
+  );
+  return (
+    <div className="flex items-center gap-2">
+      {showPartLabel && (
+        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+          {partAttempt.partLabel ?? `Part ${partAttempt.partOrderIndex + 1}`}
+        </span>
+      )}
+      <span className="text-sm font-semibold">{display}</span>
+      {partAttempt.isPR && (
+        <Badge className="gap-1 bg-amber-500/15 text-amber-300 border border-amber-500/30 hover:bg-amber-500/15">
+          <Star className="size-3" />
+          PR
+        </Badge>
+      )}
+      {partAttempt.hitTimeCap && (
+        <Badge variant="outline" className="text-[10px] text-muted-foreground">
+          capped
+        </Badge>
+      )}
     </div>
   );
 }
