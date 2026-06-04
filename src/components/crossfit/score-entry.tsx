@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { DurationInput } from "@/components/crossfit/duration-input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +10,10 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Sparkles } from "lucide-react";
+import { useWorkoutPrepSignals } from "@/hooks/useWorkoutPrepSignals";
+import { useHasMounted } from "@/hooks/useHasMounted";
+import type { NoteNudge } from "@/lib/crossfit/insights/prep-signals";
 import {
   Dialog,
   DialogContent,
@@ -757,6 +761,15 @@ export function ScoreEntry({
     () => new Set()
   );
   const { data: profile } = useUserProfile();
+  // Notes Insights v2 PR 3 §3.1 — one-line nudge above the notes textarea
+  // when the workout includes a movement the athlete has scaled ≥ 3 times
+  // recently. The query is the same one the workout-detail prep card uses,
+  // so React Query serves it from cache when this dialog opens. Disabled
+  // for "log for…" dependents since the localStorage dedupe is keyed on
+  // the signed-in user.
+  const { data: prepSignals } = useWorkoutPrepSignals(workoutId, {
+    enabled: !!profile?.id && !forUserId,
+  });
   // Movement library — used by the per-movement details renderer to look
   // up rx_fields off the canonical movement (Phase 2 movement settings).
   // Falls back to legacy heuristics when the lookup is empty (cold cache,
@@ -2705,6 +2718,10 @@ export function ScoreEntry({
 
           {/* Notes */}
           <div className="space-y-2">
+            <NoteNudgeBanner
+              nudge={prepSignals?.noteNudge ?? null}
+              userId={profile?.id ?? null}
+            />
             <Label htmlFor="se-notes">Notes</Label>
             <Textarea
               id="se-notes"
@@ -2751,5 +2768,98 @@ export function ScoreEntry({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// Notes Insights v2 PR 3 §3.1. Renders nothing on the server (mounted
+// gate) so localStorage state can't leak into SSR markup. The localStorage
+// read happens during render (memoized), and the stamp happens in an
+// effect — no setState inside an effect, which keeps React's
+// cascading-renders lint rule happy.
+const NOTE_PROMPT_STORAGE_KEY = "shredtrack.notePromptHistory";
+const NOTE_PROMPT_WINDOW_DAYS = 7;
+
+// Top-level helper so the `Date.now()` call doesn't trip React 19's
+// `react-hooks/purity` lint rule when consulted from a useMemo inside
+// the component. Returns true when the stamped timestamp is fresh enough
+// to suppress the prompt.
+function isWithinNotePromptWindow(lastIso: string): boolean {
+  const diffDays =
+    (Date.now() - new Date(lastIso).getTime()) / (1000 * 60 * 60 * 24);
+  return Number.isFinite(diffDays) && diffDays < NOTE_PROMPT_WINDOW_DAYS;
+}
+
+function NoteNudgeBanner({
+  nudge,
+  userId,
+}: {
+  nudge: NoteNudge | null;
+  userId: string | null;
+}) {
+  // Hydration gate — useMemo below reads localStorage, which doesn't
+  // exist on the server. Without this we'd get a mismatch on the very
+  // first render after hydration.
+  const mounted = useHasMounted();
+
+  // Compute the prompt decision in render so React's lint rule against
+  // setState-in-effect stays satisfied. The 7-day cap survives reopens of
+  // the dialog because the *next* mount re-reads the stamped timestamp
+  // and returns null here.
+  const allowed = useMemo<NoteNudge | null>(() => {
+    if (!mounted || !nudge || !userId) return null;
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem(NOTE_PROMPT_STORAGE_KEY);
+      const history: Record<string, string> = raw ? JSON.parse(raw) : {};
+      const histKey = `${userId}:${nudge.movement.toLowerCase()}`;
+      const last = history[histKey];
+      if (last && isWithinNotePromptWindow(last)) {
+        return null;
+      }
+      return nudge;
+    } catch {
+      // Corrupt entry — show the nudge and let the stamp below overwrite.
+      return nudge;
+    }
+  }, [mounted, nudge, userId]);
+
+  // Stamp the 7-day window once on first display. Inside an effect so
+  // localStorage is only ever written from the client.
+  useEffect(() => {
+    if (!allowed || !userId) return;
+    if (typeof window === "undefined") return;
+    let history: Record<string, string> = {};
+    try {
+      const raw = window.localStorage.getItem(NOTE_PROMPT_STORAGE_KEY);
+      if (raw) history = JSON.parse(raw) ?? {};
+    } catch {
+      history = {};
+    }
+    const histKey = `${userId}:${allowed.movement.toLowerCase()}`;
+    history[histKey] = new Date().toISOString();
+    try {
+      window.localStorage.setItem(
+        NOTE_PROMPT_STORAGE_KEY,
+        JSON.stringify(history)
+      );
+    } catch {
+      // Quota / private mode — fall back to "shown once per page load"
+      // semantics. The prompt still shows; we just can't dedupe across
+      // sessions.
+    }
+  }, [allowed, userId]);
+
+  if (!allowed) return null;
+
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-fuchsia-500/20 bg-fuchsia-500/[0.04] px-2.5 py-1.5 text-xs">
+      <Sparkles className="mt-0.5 size-3.5 shrink-0 text-fuchsia-400" />
+      <p className="text-foreground/90">
+        You&apos;ve scaled{" "}
+        <span className="font-medium">{allowed.movement}</span>{" "}
+        {allowed.scaleCount}× recently — a quick note on what you did today
+        helps us track your progress.
+      </p>
+    </div>
   );
 }

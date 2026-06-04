@@ -32,6 +32,7 @@ import type {
   NotesPerformanceSignal,
   NotesScalingReason,
 } from "@/types/crossfit";
+import type { WeeklyDigest } from "./digest";
 
 // Bumping this string forces re-extraction of every score on the next cron
 // run. Embed any meaningful prompt or schema change here.
@@ -106,6 +107,9 @@ export type NotesInsights = {
   // Added in PR 2 — scaling-graduation tracker. Optional for the same
   // forward-compat reason.
   graduationTracker?: GraduationTrackerEntry[];
+  // Added in PR 3 §3.2 — weekly digest. Null when the user doesn't have
+  // ≥ 2 bullets worth of signal this week.
+  weeklyDigest?: WeeklyDigest | null;
 };
 
 // ============================================
@@ -1365,13 +1369,32 @@ export type DormantRow = {
   topics: string[];
 };
 
+// Optional window overrides — used by the weekly digest aggregator
+// (Notes Insights v2 PR 3 §3.2) to reuse the dormant logic with a
+// different recent / history horizon. Defaults preserve the original
+// Insights-card behavior so existing callers don't have to change.
+export type DormantWindowOpts = {
+  recentDays?: number;
+  historyDays?: number;
+  historyMinDays?: number;
+  minPriorMentions?: number;
+  maxOutput?: number;
+};
+
 export function aggregateDormantComplaintsFromRows(
   rows: DormantRow[],
-  now: Date = new Date()
+  now: Date = new Date(),
+  opts: DormantWindowOpts = {}
 ): NotesDormantWin[] {
-  const recentCutoff = isoFromDate(addDays(now, -DORMANT_RECENT_DAYS));
-  const historyStart = isoFromDate(addDays(now, -DORMANT_HISTORY_DAYS));
-  const historyEnd = isoFromDate(addDays(now, -DORMANT_HISTORY_MIN_DAYS));
+  const recentDays = opts.recentDays ?? DORMANT_RECENT_DAYS;
+  const historyDays = opts.historyDays ?? DORMANT_HISTORY_DAYS;
+  const historyMinDays = opts.historyMinDays ?? DORMANT_HISTORY_MIN_DAYS;
+  const minPriorMentions =
+    opts.minPriorMentions ?? DORMANT_MIN_PRIOR_MENTIONS;
+  const maxOutput = opts.maxOutput ?? DORMANT_MAX_OUTPUT;
+  const recentCutoff = isoFromDate(addDays(now, -recentDays));
+  const historyStart = isoFromDate(addDays(now, -historyDays));
+  const historyEnd = isoFromDate(addDays(now, -historyMinDays));
 
   // Per topic: mentions in the historical window, mentions in the recent
   // window, and the most recent date the topic appeared.
@@ -1399,7 +1422,7 @@ export function aggregateDormantComplaintsFromRows(
 
   const out: NotesDormantWin[] = [];
   for (const [topic, prior] of priorMentions) {
-    if (prior < DORMANT_MIN_PRIOR_MENTIONS) continue;
+    if (prior < minPriorMentions) continue;
     if ((recentMentions.get(topic) ?? 0) > 0) continue;
     out.push({
       topic,
@@ -1410,7 +1433,7 @@ export function aggregateDormantComplaintsFromRows(
 
   // Most-recent-prior-mention first so the freshest decays surface.
   out.sort((a, b) => b.lastMentionedAt.localeCompare(a.lastMentionedAt));
-  return out.slice(0, DORMANT_MAX_OUTPUT);
+  return out.slice(0, maxOutput);
 }
 
 export async function aggregateDormantComplaints(

@@ -17,6 +17,7 @@ import { db } from "@/db";
 import {
   crossfitWorkoutMovements,
   movements,
+  scoreMovementDetails,
   scoreMovementSignals,
   scoreNotesExtractions,
   scores,
@@ -34,6 +35,13 @@ import type {
 const WINDOW_DAYS = 90;
 const MAX_COMPLAINT_BANNERS = 2;
 const COMPLAINT_MIN_CONFIDENCE = 0.5;
+
+// Score-entry note prompt (Notes Insights v2 PR 3 §3.1). The nudge fires
+// when the athlete has scaled a movement in today's workout at least this
+// many times in the recent window — a signal that a note here would feed
+// the graduation tracker.
+const NUDGE_WINDOW_DAYS = 60;
+const NUDGE_MIN_SCALES = 3;
 
 // reps_in_window / unbroken_reps: cap the proposed value so we don't tell a
 // world-class athlete "stretch goal: 230 DUs."
@@ -71,9 +79,33 @@ export type ComplaintBanner = {
   recommendation: string | null; // static-map lookup; null when unknown topic
 };
 
+// Score-entry note prompt (Notes Insights v2 PR 3 §3.1). One-line nudge
+// surfaced above the notes textarea when the athlete has been quietly
+// scaling a movement that's in today's workout. `scaleCount` is the
+// number of distinct scaled scores in NUDGE_WINDOW_DAYS — drives the copy
+// ("scaled 3× recently"). Client-side localStorage handles the per-movement
+// 7-day cap.
+export type NoteNudge = {
+  movement: string; // canonical movement name from the catalog
+  scaleCount: number;
+  lastScaledAt: string; // YYYY-MM-DD — drives "most recent eligible movement" tie-breaking
+};
+
 export type WorkoutPrepSignals = {
   stretchGoals: StretchGoalSignal[];
   complaintBanners: ComplaintBanner[];
+  // Notes Insights v2 PR 3 §3.1. Null when no movement in the workout
+  // qualifies — the client renders nothing.
+  noteNudge: NoteNudge | null;
+};
+
+// One eligible-scaled-movement candidate the picker walks. Exposed for the
+// pure unit test in prep-signals.test.ts so the cap logic stays
+// DB-independent.
+export type NoteNudgeCandidate = {
+  movement: string;
+  scaleCount: number;
+  lastScaledAt: string; // YYYY-MM-DD
 };
 
 // One row out of `score_movement_signals` shaped for the in-process picker.
@@ -184,6 +216,33 @@ export function proposeStretchGoal(signal: {
     default:
       return null;
   }
+}
+
+// Picks the single nudge candidate to surface. Spec §3.1 caps the prompt
+// to one per session and prefers the *most recent* eligible movement so
+// the athlete sees the freshest pattern. Candidates with fewer than
+// NUDGE_MIN_SCALES are filtered out (the picker doesn't trust the caller
+// to enforce the floor). Pure for unit testability — the client cap (one
+// per 7-day window per movement) lives in localStorage on the score-entry
+// component.
+export function pickNoteNudge(
+  candidates: NoteNudgeCandidate[]
+): NoteNudge | null {
+  const eligible = candidates.filter((c) => c.scaleCount >= NUDGE_MIN_SCALES);
+  if (eligible.length === 0) return null;
+  // Sort by last-scaled date descending; on tie, higher scaleCount wins
+  // (stronger signal).
+  eligible.sort((a, b) => {
+    const dateCmp = b.lastScaledAt.localeCompare(a.lastScaledAt);
+    if (dateCmp !== 0) return dateCmp;
+    return b.scaleCount - a.scaleCount;
+  });
+  const pick = eligible[0];
+  return {
+    movement: pick.movement,
+    scaleCount: pick.scaleCount,
+    lastScaledAt: pick.lastScaledAt,
+  };
 }
 
 // Per spec §2.2: cap banners at 2, prefer the most recent. Pure so the
@@ -359,18 +418,92 @@ async function loadMovementComplaintsForUser(
   return out;
 }
 
+// Walks `score_movement_details` for the user's recent scaled movements
+// and rolls them up per canonical movement name. Returns candidates only
+// for movements that appear in the workout (cuts the in-memory work to
+// the names the picker actually cares about). The picker enforces the
+// scale-count floor.
+async function loadNoteNudgeCandidates(
+  userId: string,
+  workoutMovementNames: string[]
+): Promise<NoteNudgeCandidate[]> {
+  if (workoutMovementNames.length === 0) return [];
+  const since = daysAgoIso(NUDGE_WINDOW_DAYS);
+  const lowered = workoutMovementNames.map((n) => n.toLowerCase());
+
+  const rows = await db
+    .select({
+      movementName: movements.canonicalName,
+      scoreId: scoreMovementDetails.scoreId,
+      workoutDate: workoutSessions.workoutDate,
+    })
+    .from(scoreMovementDetails)
+    .innerJoin(scores, eq(scores.id, scoreMovementDetails.scoreId))
+    .innerJoin(
+      workoutSessions,
+      eq(workoutSessions.id, scores.workoutSessionId)
+    )
+    .innerJoin(
+      crossfitWorkoutMovements,
+      eq(
+        crossfitWorkoutMovements.id,
+        scoreMovementDetails.crossfitWorkoutMovementId
+      )
+    )
+    .innerJoin(movements, eq(movements.id, crossfitWorkoutMovements.movementId))
+    .where(
+      and(
+        eq(scores.userId, userId),
+        eq(scoreMovementDetails.wasRx, false),
+        gte(workoutSessions.workoutDate, since),
+        sql`lower(${movements.canonicalName}) = ANY(${lowered})`
+      )
+    );
+
+  // Roll up to one entry per movement: distinct-score scale count + latest
+  // scaled date.
+  type Bucket = {
+    movement: string;
+    scoreIds: Set<string>;
+    lastScaledAt: string;
+  };
+  const buckets = new Map<string, Bucket>();
+  for (const r of rows) {
+    const key = r.movementName.toLowerCase();
+    let b = buckets.get(key);
+    if (!b) {
+      b = {
+        movement: r.movementName,
+        scoreIds: new Set([r.scoreId]),
+        lastScaledAt: r.workoutDate,
+      };
+      buckets.set(key, b);
+      continue;
+    }
+    b.scoreIds.add(r.scoreId);
+    if (r.workoutDate > b.lastScaledAt) b.lastScaledAt = r.workoutDate;
+  }
+
+  return Array.from(buckets.values()).map((b) => ({
+    movement: b.movement,
+    scaleCount: b.scoreIds.size,
+    lastScaledAt: b.lastScaledAt,
+  }));
+}
+
 export async function getWorkoutPrepSignals(input: {
   userId: string;
   workoutId: string;
 }): Promise<WorkoutPrepSignals> {
   const movementNames = await loadMovementNamesForSession(input.workoutId);
   if (movementNames.length === 0) {
-    return { stretchGoals: [], complaintBanners: [] };
+    return { stretchGoals: [], complaintBanners: [], noteNudge: null };
   }
 
-  const [signalRows, rawBanners] = await Promise.all([
+  const [signalRows, rawBanners, nudgeCandidates] = await Promise.all([
     selectMovementSignalsForPrep(input.userId, movementNames),
     loadMovementComplaintsForUser(input.userId, movementNames),
+    loadNoteNudgeCandidates(input.userId, movementNames),
   ]);
 
   const bests = pickRecentBests(signalRows);
@@ -402,5 +535,6 @@ export async function getWorkoutPrepSignals(input: {
   return {
     stretchGoals,
     complaintBanners: shapeComplaintBanners(rawBanners),
+    noteNudge: pickNoteNudge(nudgeCandidates),
   };
 }
