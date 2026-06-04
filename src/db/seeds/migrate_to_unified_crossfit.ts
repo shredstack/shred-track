@@ -1471,13 +1471,18 @@ async function reFKScores(
     });
   }
 
+  // Only scores still needing migration. New unified-schema writes leave
+  // the legacy workout_id/workout_part_id columns null and populate
+  // workout_session_id directly — iterating those would throw on the
+  // unresolved-session check below.
   const allScores = await tx
     .select({
       id: scores.id,
       workoutId: scores.workoutId,
       workoutPartId: scores.workoutPartId,
     })
-    .from(scores);
+    .from(scores)
+    .where(sql`workout_session_id is null`);
 
   for (const s of allScores) {
     let sessionId: string | null = null;
