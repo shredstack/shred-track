@@ -1,5 +1,4 @@
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { BackButton } from "@/components/shared/back-button";
 
 export const metadata = {
   title: "How calories are calculated · ShredTrack",
@@ -8,13 +7,7 @@ export const metadata = {
 export default function CaloriesHelpPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-6 px-4 py-6 pb-24">
-      <Link
-        href="/crossfit"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back
-      </Link>
+      <BackButton fallbackHref="/crossfit" />
 
       <header className="space-y-2">
         <h1 className="text-2xl font-bold tracking-tight">

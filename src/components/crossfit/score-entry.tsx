@@ -509,15 +509,17 @@ function setsFromRepScheme(repScheme?: string): number {
   return 1;
 }
 
-// For Load set count. An explicit prescribed set count (`rounds` — surfaced
-// in the builder as "Sets", required for complexes where the per-movement
-// rep scheme is a single number) wins over the dash-derived scheme count.
-// Falls back to the rep scheme so legacy for_load workouts that predate the
-// Sets field render exactly as before.
+// For Load set count. A multi-part rep scheme like "5-3-3-2-2-1-1-1" is the
+// most specific signal — the dashes ARE the set count — so it wins over the
+// part's `rounds` field. Single-part schemes ("5") defer to `rounds` so a
+// complex framed as "5 sets of 5" still uses the Sets field as its count.
+// Falls back to 1 set for a bare for_load with no scheme and no `rounds`.
 function setCountForLoad(
   rounds: number | undefined | null,
   repScheme?: string
 ): number {
+  const schemeParts = repSchemeParts(repScheme);
+  if (schemeParts.length > 1) return Math.min(schemeParts.length, MAX_SET_INPUTS);
   if (rounds && rounds > 0) return Math.min(rounds, MAX_SET_INPUTS);
   return setsFromRepScheme(repScheme);
 }
@@ -537,6 +539,52 @@ function prescribedRepsForSet(repScheme: string | undefined, setIdx: number): nu
   if (setIdx < parts.length) return parts[setIdx];
   // Out-of-bounds (extra set added) — fall back to last prescribed value.
   return parts[parts.length - 1];
+}
+
+// Collect every per-set RPE value the UI is rendering inputs for on this
+// part, and the count of those inputs. When `values.length === expected` (and
+// expected > 0) the athlete has rated every working set — that's our cue to
+// auto-set the overall RPE to the average. The traversal mirrors the for_load
+// rendering: a complex part stores set entries only on the lead movement;
+// otherwise every non-duration movement owns its own set grid.
+function collectPerSetRpe(
+  part: WorkoutPartDisplay,
+  state: PartState
+): { values: number[]; expected: number } {
+  if (part.workoutType !== "for_load") return { values: [], expected: 0 };
+  const loadMovements = part.movements.filter(
+    (m) => m.metricType !== "duration"
+  );
+  if (loadMovements.length === 0) return { values: [], expected: 0 };
+  const targets: Array<{ movId: string; sets: number }> =
+    part.structure === "complex"
+      ? [
+          {
+            movId: loadMovements[0].id,
+            sets: setCountForLoad(
+              part.rounds,
+              loadMovements[0].prescribedReps
+            ),
+          },
+        ]
+      : loadMovements.map((mov) => ({
+          movId: mov.id,
+          sets: setCountForLoad(
+            part.rounds,
+            mov.prescribedReps || part.repScheme
+          ),
+        }));
+  const values: number[] = [];
+  let expected = 0;
+  for (const { movId, sets } of targets) {
+    expected += sets;
+    const drafts = state.setEntriesMap[movId] ?? [];
+    for (let i = 0; i < sets; i++) {
+      const r = parseFloat(drafts[i]?.rpe ?? "");
+      if (Number.isFinite(r) && r >= 1 && r <= 10) values.push(r);
+    }
+  }
+  return { values, expected };
 }
 
 // The TimeInput owns its own string drafts so the user can type "06" in
@@ -771,7 +819,10 @@ export function ScoreEntry({
 
   // Update a single field (weight, reps, or rpe) on a single set draft.
   // Auto-grows the array up to setIdx so the user can edit Set 3 even if
-  // Set 1 and 2 are empty.
+  // Set 1 and 2 are empty. Also auto-syncs the overall RPE to the average of
+  // the per-set RPEs whenever every set on the part has been rated — the per-
+  // set inputs take longer to fill, so when the athlete does the work we treat
+  // their average as the source of truth and overwrite the slider.
   const updateSetEntry = useCallback(
     (
       partId: string,
@@ -781,6 +832,7 @@ export function ScoreEntry({
       value: string,
       defaultReps?: number
     ) => {
+      const part = parts.find((p) => p.id === partId);
       setPartStates((prev) => {
         const current = prev[partId].setEntriesMap[movId] ?? [];
         const updated = [...current];
@@ -792,19 +844,24 @@ export function ScoreEntry({
           };
         }
         updated[setIdx] = { ...updated[setIdx], [field]: value };
-        return {
-          ...prev,
-          [partId]: {
-            ...prev[partId],
-            setEntriesMap: {
-              ...prev[partId].setEntriesMap,
-              [movId]: updated,
-            },
+        const nextPart: PartState = {
+          ...prev[partId],
+          setEntriesMap: {
+            ...prev[partId].setEntriesMap,
+            [movId]: updated,
           },
         };
+        if (part) {
+          const { values, expected } = collectPerSetRpe(part, nextPart);
+          if (expected > 0 && values.length === expected) {
+            const avg = values.reduce((a, b) => a + b, 0) / values.length;
+            nextPart.rpe = Math.round(avg * 2) / 2;
+          }
+        }
+        return { ...prev, [partId]: nextPart };
       });
     },
-    []
+    [parts]
   );
 
   // ============================================
@@ -2609,13 +2666,22 @@ export function ScoreEntry({
               }
               min={1}
               max={10}
-              step={1}
+              step={0.5}
             />
             <div className="flex justify-between text-[10px] text-muted-foreground">
               <span>Easy</span>
               <span>Moderate</span>
               <span>Max Effort</span>
             </div>
+            {activePart.workoutType === "for_load" &&
+              activePart.movements.some(
+                (m) => m.metricType !== "duration"
+              ) && (
+                <p className="text-[10px] italic text-muted-foreground">
+                  Tip: Fill RPE for every set above and we&apos;ll set this to
+                  the average.
+                </p>
+              )}
           </div>
 
           {/* Notes */}

@@ -5,10 +5,12 @@
 // with the existing "Native app" link in the profile menu.
 
 import { LocalNotificationSettings } from "@/components/settings/local-notification-settings";
+import { BackButton } from "@/components/shared/back-button";
 
 export default function NativeSettingsPage() {
   return (
     <div className="space-y-6">
+      <BackButton fallbackHref="/profile" label="Profile" />
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold">Notifications</h1>
         <p className="text-sm text-muted-foreground">

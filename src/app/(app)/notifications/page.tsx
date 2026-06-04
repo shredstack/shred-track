@@ -26,6 +26,7 @@ import {
 import { useGymContext, useSetActiveCommunity } from "@/hooks/useGymContext";
 import { renderNotificationCopy } from "@/lib/notifications/copy";
 import type { NotificationDisplay, NotificationKind } from "@/types/social";
+import { BackButton } from "@/components/shared/back-button";
 
 function relativeTime(iso: string): string {
   const diffSec = Math.max(
@@ -243,7 +244,8 @@ export default function NotificationsPage() {
 
   return (
     <div className="mx-auto max-w-lg px-3 py-4">
-      <header className="mb-3 flex items-center justify-between">
+      <BackButton fallbackHref="/home" />
+      <header className="mb-3 mt-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Bell className="size-4 text-muted-foreground" />
           <h1 className="text-base font-semibold">Notifications</h1>

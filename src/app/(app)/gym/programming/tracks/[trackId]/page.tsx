@@ -6,11 +6,11 @@ import { use, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  ArrowLeft,
   Calendar as CalendarIcon,
   Sparkles,
   Trash2,
 } from "lucide-react";
+import { BackButton } from "@/components/shared/back-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -159,13 +159,7 @@ export default function TrackDetailPage({
   if (!track) {
     return (
       <div className="space-y-4">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => router.push("/gym/programming/tracks")}
-        >
-          <ArrowLeft className="size-3.5" /> Back
-        </Button>
+        <BackButton fallbackHref="/gym/programming/tracks" label="Tracks" />
         <p className="text-sm text-muted-foreground">Track not found.</p>
       </div>
     );
@@ -203,17 +197,12 @@ export default function TrackDetailPage({
 
   return (
     <div className="space-y-4">
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => router.push("/gym/programming/tracks")}
-      >
-        <ArrowLeft className="size-3.5" /> Back to tracks
-      </Button>
       <GymToolHeader
         icon={Sparkles}
         label={track.name}
         description={`${track.kind} · ${track.startsOn} → ${track.endsOn}`}
+        backHref="/gym/programming/tracks"
+        backLabel="Tracks"
       />
 
       <Card>

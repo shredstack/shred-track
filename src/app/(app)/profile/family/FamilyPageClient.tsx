@@ -9,6 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Plus, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { BackButton } from "@/components/shared/back-button";
 import {
   familyQueryKey,
   useAddFamilyMember,
@@ -160,6 +161,7 @@ export function FamilyPageClient({
 
   return (
     <div className="mx-auto max-w-md space-y-4 px-4 py-6 pb-24">
+      <BackButton fallbackHref="/profile" label="Profile" />
       <div>
         <h1 className="text-2xl font-bold">Family</h1>
         <p className="mt-1 text-sm text-muted-foreground">

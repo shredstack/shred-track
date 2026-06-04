@@ -40,6 +40,7 @@ import { RaceSplitsTable } from "@/components/hyrox/race-history/race-splits-tab
 import { EditableNotes } from "@/components/hyrox/race-history/editable-notes";
 import { RaceCompareView } from "@/components/hyrox/race-history/race-compare-view";
 import { RaceReportCard } from "@/components/hyrox/race-history/race-report-card";
+import { BackButton } from "@/components/shared/back-button";
 
 export default function RaceDetailPage({
   params,
@@ -144,12 +145,7 @@ export default function RaceDetailPage({
     <div className="flex flex-col gap-4">
       {/* Header / nav */}
       <div className="flex items-center justify-between gap-2">
-        <Link href="/hyrox/race-tools/races">
-          <Button variant="ghost" size="sm" className="gap-1 h-8 -ml-2">
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Races
-          </Button>
-        </Link>
+        <BackButton fallbackHref="/hyrox/race-tools/races" label="Races" />
         <Button
           variant="ghost"
           size="sm"

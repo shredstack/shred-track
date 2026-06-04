@@ -10,6 +10,7 @@ import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { BackButton } from "@/components/shared/back-button";
 
 interface TrackData {
   track: {
@@ -65,6 +66,7 @@ export default function TrackPage() {
 
   return (
     <div className="space-y-4">
+      <BackButton fallbackHref="/home" />
       <div>
         <h1 className="text-2xl font-bold">{data.track.name}</h1>
         <p className="text-sm text-muted-foreground">

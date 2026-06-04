@@ -11,11 +11,12 @@ import {
   gymPosts,
   gymPostReactions,
   notifications,
-  notificationPreferences,
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { canViewGym } from "@/lib/authz/community";
 import { inngest } from "@/inngest/client";
+import { isFlagOn } from "@/lib/feature-flags";
+import { isInAppEnabled } from "@/lib/notifications/preferences";
 
 const ALLOWED = new Set(["fire"]);
 
@@ -60,40 +61,37 @@ export async function POST(
     return { reactionId: row.id, created: row.inserted === true };
   });
 
-  // Skip self-reaction notification.
-  if (result.created && post.authorId !== user.id) {
-    // Check author pref before inserting (saves a notifications row when
-    // pref is off).
-    const [pref] = await db
-      .select({ inAppEnabled: notificationPreferences.inAppEnabled })
-      .from(notificationPreferences)
-      .where(
-        and(
-          eq(notificationPreferences.userId, post.authorId),
-          eq(notificationPreferences.kind, "social_post_reaction")
-        )
-      )
-      .limit(1);
-    if (pref?.inAppEnabled !== false) {
-      const [n] = await db
-        .insert(notifications)
-        .values({
-          recipientId: post.authorId,
-          actorId: user.id,
-          kind: "social_post_reaction",
-          gymPostId: postId,
-          communityId: post.communityId,
-        })
-        .returning({ id: notifications.id });
-      try {
-        await inngest.send({
-          id: `dispatch:${n.id}`,
-          name: "notifications/created",
-          data: { notificationId: n.id },
-        });
-      } catch (err) {
-        console.error("[gym-post-reactions] dispatch failed", err);
-      }
+  // Double-gated like the other gym-context notifications: gym
+  // `gym_notifications` flag (default on, kill switch) → author's per-kind
+  // `inAppEnabled` (default OFF for social_post_reaction). Self-reactions
+  // are skipped regardless.
+  if (
+    result.created &&
+    post.authorId !== user.id &&
+    (await isFlagOn("gym_notifications", {
+      userId: post.authorId,
+      communityId: post.communityId,
+    })) &&
+    (await isInAppEnabled(post.authorId, "social_post_reaction"))
+  ) {
+    const [n] = await db
+      .insert(notifications)
+      .values({
+        recipientId: post.authorId,
+        actorId: user.id,
+        kind: "social_post_reaction",
+        gymPostId: postId,
+        communityId: post.communityId,
+      })
+      .returning({ id: notifications.id });
+    try {
+      await inngest.send({
+        id: `dispatch:${n.id}`,
+        name: "notifications/created",
+        data: { notificationId: n.id },
+      });
+    } catch (err) {
+      console.error("[gym-post-reactions] dispatch failed", err);
     }
   }
 

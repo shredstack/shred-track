@@ -19,6 +19,11 @@ import { canViewGym } from "@/lib/authz/community";
 import { inngest } from "@/inngest/client";
 import { parseMentionsFromBody } from "@/lib/social/mentions";
 import { sql } from "drizzle-orm";
+import { isFlagOn, filterRecipientsByFlag } from "@/lib/feature-flags";
+import {
+  isInAppEnabled,
+  filterRecipientsByInAppPref,
+} from "@/lib/notifications/preferences";
 
 export async function GET(
   _req: NextRequest,
@@ -97,8 +102,22 @@ export async function POST(
     })
     .returning();
 
-  // Comment notification to post author (unless self).
-  if (post.authorId !== user.id) {
+  // Notification fan-out (social_post_comment + social_post_mention) is
+  // gated by `gym_notifications` per recipient. The comment itself still
+  // lands on the post; we just don't notify if the recipient's resolved
+  // flag is off.
+
+  // Comment notification to post author. Skipped if (a) author is the
+  // commenter, (b) gym flag is off for them, or (c) they haven't opted
+  // in to social_post_comment in /settings/notifications (default off).
+  if (
+    post.authorId !== user.id &&
+    (await isFlagOn("gym_notifications", {
+      userId: post.authorId,
+      communityId: post.communityId,
+    })) &&
+    (await isInAppEnabled(post.authorId, "social_post_comment"))
+  ) {
     const [n] = await db
       .insert(notifications)
       .values({
@@ -122,8 +141,17 @@ export async function POST(
   }
   // Mention notifications.
   if (mentions.length) {
-    const recipients = mentions
+    const candidates = mentions
       .filter((id) => id !== user.id && id !== post.authorId);
+    const flagPassed = await filterRecipientsByFlag(
+      "gym_notifications",
+      post.communityId,
+      candidates
+    );
+    const recipients = await filterRecipientsByInAppPref(
+      "social_post_mention",
+      flagPassed
+    );
     if (recipients.length) {
       const inserted = await db
         .insert(notifications)

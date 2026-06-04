@@ -1,7 +1,5 @@
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
-import { buttonVariants } from "@/components/ui/button";
 import type { LucideIcon } from "lucide-react";
+import { BackButton } from "@/components/shared/back-button";
 
 interface GymToolHeaderProps {
   label: string;
@@ -20,13 +18,7 @@ export function GymToolHeader({
 }: GymToolHeaderProps) {
   return (
     <div className="space-y-3">
-      <Link
-        href={backHref}
-        className={buttonVariants({ variant: "ghost", size: "sm" }) + " self-start -ml-2"}
-      >
-        <ArrowLeft className="size-4" />
-        {backLabel}
-      </Link>
+      <BackButton fallbackHref={backHref} label={backLabel} />
       <div className="flex items-start gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted/40">
           <Icon className="size-4" />

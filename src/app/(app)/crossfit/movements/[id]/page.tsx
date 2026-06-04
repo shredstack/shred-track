@@ -20,6 +20,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { BackButton } from "@/components/shared/back-button";
 import {
   MOVEMENT_CATEGORY_COLORS,
   type CrossfitMovementVideo,
@@ -160,13 +161,7 @@ export default function MovementDetailPage({
 
   return (
     <div className="flex flex-col gap-4">
-      <Link
-        href="/crossfit/movements"
-        className={buttonVariants({ variant: "ghost", size: "sm" }) + " self-start -ml-2"}
-      >
-        <ArrowLeft className="size-4" />
-        Movements
-      </Link>
+      <BackButton fallbackHref="/crossfit/movements" label="Movements" />
 
       <Card className="gradient-border overflow-visible">
         <CardContent className="flex flex-col gap-3 py-5 bg-mesh rounded-xl">

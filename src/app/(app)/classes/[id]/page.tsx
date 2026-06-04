@@ -13,6 +13,7 @@ import { ArrowLeft } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { BackButton } from "@/components/shared/back-button";
 import {
   useClassDetail,
   useRegisterForClassDetail,
@@ -71,15 +72,7 @@ export default function ClassDetailPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <Link
-        href="/classes"
-        className={
-          buttonVariants({ variant: "ghost", size: "sm" }) + " self-start -ml-2"
-        }
-      >
-        <ArrowLeft className="size-4" />
-        Classes
-      </Link>
+      <BackButton fallbackHref="/classes" label="Classes" />
 
       {instance.kind === "event" && instance.eventImageUrl ? (
         <img

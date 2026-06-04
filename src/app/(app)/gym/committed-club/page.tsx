@@ -13,6 +13,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Trophy } from "lucide-react";
+import { BackButton } from "@/components/shared/back-button";
 
 interface LeaderboardRow {
   userId: string;
@@ -63,6 +64,7 @@ export default function CommittedClubPage() {
 
   return (
     <div className="space-y-4">
+      <BackButton fallbackHref="/home" />
       <div className="flex items-start gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted/40">
           <Trophy className="size-4" />

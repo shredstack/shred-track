@@ -21,6 +21,8 @@ import { getSessionUser } from "@/lib/session";
 import { canManageGym } from "@/lib/authz/community";
 import { injectInlineTrackSections } from "@/lib/programming/inline-track-injection";
 import { inngest } from "@/inngest/client";
+import { filterRecipientsByFlag } from "@/lib/feature-flags";
+import { filterRecipientsByInAppPref } from "@/lib/notifications/preferences";
 
 export async function POST(
   _req: NextRequest,
@@ -74,6 +76,11 @@ export async function POST(
   // respects pushEnabled per kind. A partial unique index on
   // (recipient_id, programming_release_id) WHERE kind='workout_published'
   // makes republish / retry idempotent via ON CONFLICT DO NOTHING.
+  //
+  // Two-layer gating: the gym-level `gym_notifications` flag (default
+  // ON, gym/user can override) is the gym kill switch; the per-kind
+  // `notification_preferences.inAppEnabled` check (default OFF for
+  // workout_published — see DEFAULT_OFF_KINDS) is the user opt-in.
   const members = await db
     .select({ userId: communityMemberships.userId })
     .from(communityMemberships)
@@ -83,9 +90,18 @@ export async function POST(
         eq(communityMemberships.isActive, true)
       )
     );
-  const recipients = members
+  const candidates = members
     .map((m) => m.userId)
     .filter((id) => id !== user.id);
+  const flagPassed = await filterRecipientsByFlag(
+    "gym_notifications",
+    communityId,
+    candidates
+  );
+  const recipients = await filterRecipientsByInAppPref(
+    "workout_published",
+    flagPassed
+  );
   if (recipients.length) {
     const rows = recipients.map((rid) => ({
       recipientId: rid,

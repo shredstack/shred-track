@@ -24,6 +24,7 @@ import { useMyTrackDays } from "@/hooks/useTracks";
 import { useIsFeatureOn } from "@/hooks/useFeatureFlag";
 import { WORKOUT_SECTION_KIND_LABELS } from "@/db/schema";
 import { useHasMounted } from "@/hooks/useHasMounted";
+import { useStickyTab } from "@/hooks/useStickyTab";
 import {
   useWorkoutsByDate,
   useCreateWorkout,
@@ -123,10 +124,13 @@ function CrossfitPageBody() {
   // members see (with Log Score + Leaderboard wired up) so the coach can
   // sanity-check their programming and log their own score without
   // leaving the tab. Same shared cache, so edits in "edit" mode show up
-  // immediately after toggling to "athlete" mode.
-  const [programmingMode, setProgrammingMode] = useState<"edit" | "athlete">(
-    "edit"
+  // immediately after toggling to "athlete" mode. Persisted in
+  // localStorage so the coach's last choice survives refreshes; defaults
+  // to "athlete" since most visits are to log/check rather than program.
+  const [storedProgrammingMode, setProgrammingMode] = useStickyTab<"edit" | "athlete">(
+    "crossfit-programming-mode"
   );
+  const programmingMode: "edit" | "athlete" = storedProgrammingMode ?? "athlete";
   const [showAddWorkout, setShowAddWorkout] = useState(false);
   const [editingWorkoutId, setEditingWorkoutId] = useState<string | null>(null);
   const [scoringWorkoutId, setScoringWorkoutId] = useState<string | null>(null);

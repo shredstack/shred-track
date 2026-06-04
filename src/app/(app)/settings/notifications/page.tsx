@@ -10,6 +10,7 @@ import { useIsFeatureOn } from "@/hooks/useFeatureFlag";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { LocalNotificationSettings } from "@/components/settings/local-notification-settings";
+import { BackButton } from "@/components/shared/back-button";
 
 interface PrefValue {
   inAppEnabled: boolean;
@@ -45,15 +46,34 @@ const GROUPS: Group[] = [
   {
     title: "Gym Activity",
     flag: "social_feed",
+    // All Gym Activity kinds default OFF — see DEFAULT_OFF_KINDS in
+    // src/lib/notifications/preferences.ts. Members opt in here.
     kinds: [
       {
         kind: "social_post_published",
         label: "New posts from your gym",
+        defaultOff: true,
       },
-      { kind: "social_post_reaction", label: "Reactions on your posts" },
-      { kind: "social_post_comment", label: "Comments on your posts" },
-      { kind: "social_post_mention", label: "@mentions in the feed" },
-      { kind: "workout_published", label: "Today's WOD posted" },
+      {
+        kind: "social_post_reaction",
+        label: "Reactions on your posts",
+        defaultOff: true,
+      },
+      {
+        kind: "social_post_comment",
+        label: "Comments on your posts",
+        defaultOff: true,
+      },
+      {
+        kind: "social_post_mention",
+        label: "@mentions in the feed",
+        defaultOff: true,
+      },
+      {
+        kind: "workout_published",
+        label: "Today's WOD posted",
+        defaultOff: true,
+      },
     ],
   },
   {
@@ -135,6 +155,7 @@ export default function NotificationsPage() {
 
   return (
     <div className="space-y-6">
+      <BackButton fallbackHref="/profile" label="Profile" />
       <h1 className="text-2xl font-bold">Notifications</h1>
 
       <LocalNotificationSettings />

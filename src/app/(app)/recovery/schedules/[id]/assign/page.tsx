@@ -1,8 +1,7 @@
 "use client";
 
 import { use, useMemo, useState } from "react";
-import Link from "next/link";
-import { ArrowLeft, Check, Loader2, Search, Trash2, Users } from "lucide-react";
+import { Check, Loader2, Search, Trash2, Users } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +15,7 @@ import {
 } from "@/hooks/useRecoverySchedules";
 import { useGymMembers, type GymMemberRow } from "@/hooks/useGymMembers";
 import { toast } from "sonner";
+import { BackButton } from "@/components/shared/back-button";
 
 export default function AssignSchedulePage({
   params,
@@ -67,13 +67,7 @@ export default function AssignSchedulePage({
 
   return (
     <div className="flex flex-col gap-4">
-      <Link
-        href={`/recovery/schedules/${id}`}
-        className="inline-flex items-center text-xs text-muted-foreground"
-      >
-        <ArrowLeft className="h-3.5 w-3.5 mr-1" />
-        Back
-      </Link>
+      <BackButton fallbackHref={`/recovery/schedules/${id}`} label="Schedule" />
 
       <h1 className="text-lg font-semibold flex items-center gap-2">
         <Users className="h-4 w-4" />

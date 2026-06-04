@@ -24,6 +24,8 @@ import { getSessionUser } from "@/lib/session";
 import { canManageGym, canViewGym } from "@/lib/authz/community";
 import { inngest } from "@/inngest/client";
 import { and, sql } from "drizzle-orm";
+import { filterRecipientsByFlag } from "@/lib/feature-flags";
+import { filterRecipientsByInAppPref } from "@/lib/notifications/preferences";
 
 export async function GET(
   _req: NextRequest,
@@ -158,6 +160,7 @@ export async function PATCH(
   await db.update(gymPosts).set(updates).where(eq(gymPosts.id, id));
 
   // When approving a pending_review post, fan out social_post_published.
+  // Recipient list is filtered by `gym_notifications` per recipient.
   if (
     wasPendingReview &&
     updates.status === "published" &&
@@ -172,9 +175,18 @@ export async function PATCH(
           eq(communityMemberships.isActive, true)
         )
       );
-    const recipients = members
+    const candidates = members
       .map((m) => m.userId)
       .filter((id) => id !== post.authorId);
+    const flagPassed = await filterRecipientsByFlag(
+      "gym_notifications",
+      post.communityId,
+      candidates
+    );
+    const recipients = await filterRecipientsByInAppPref(
+      "social_post_published",
+      flagPassed
+    );
     if (recipients.length) {
       const inserted = await db
         .insert(notifications)
