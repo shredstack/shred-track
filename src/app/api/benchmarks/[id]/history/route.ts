@@ -20,7 +20,7 @@ import {
   scores,
   workoutSessions,
 } from "@/db/schema";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { pickBestScore, type ScoreRow } from "@/lib/crossfit/benchmark-stats";
 import {
@@ -30,6 +30,9 @@ import {
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
 import type {
   BenchmarkAttempt,
+  BenchmarkPartAttempt,
+  BenchmarkPartInfo,
+  BenchmarkSession,
   RepMaxTarget,
   WorkoutType,
 } from "@/types/crossfit";
@@ -68,8 +71,28 @@ export async function GET(
     );
   }
 
-  // Non-weightlifting branch: join scores → sessions where
-  // session.crossfit_workout_id = $id.
+  // Non-weightlifting branch: pull every part of the benchmark, then
+  // every score logged against any of those parts. Group by session so a
+  // multi-part WOD shows up as one attempt with multiple part scores,
+  // not N separate attempts (one per part) that all look identical.
+  const partRows = await db
+    .select({
+      id: crossfitWorkoutParts.id,
+      label: crossfitWorkoutParts.label,
+      orderIndex: crossfitWorkoutParts.orderIndex,
+      workoutType: crossfitWorkoutParts.workoutType,
+    })
+    .from(crossfitWorkoutParts)
+    .where(eq(crossfitWorkoutParts.crossfitWorkoutId, id))
+    .orderBy(asc(crossfitWorkoutParts.orderIndex));
+
+  const parts: BenchmarkPartInfo[] = partRows.map((p) => ({
+    id: p.id,
+    label: p.label,
+    orderIndex: p.orderIndex,
+    workoutType: p.workoutType as WorkoutType,
+  }));
+
   const rows = await db
     .select({
       scoreId: scores.id,
@@ -85,9 +108,17 @@ export async function GET(
       hitTimeCap: scores.hitTimeCap,
       notes: scores.notes,
       createdAt: scores.createdAt,
+      partId: crossfitWorkoutParts.id,
+      partLabel: crossfitWorkoutParts.label,
+      partOrderIndex: crossfitWorkoutParts.orderIndex,
+      partWorkoutType: crossfitWorkoutParts.workoutType,
     })
     .from(scores)
     .innerJoin(workoutSessions, eq(workoutSessions.id, scores.workoutSessionId))
+    .innerJoin(
+      crossfitWorkoutParts,
+      eq(crossfitWorkoutParts.id, scores.crossfitWorkoutPartId)
+    )
     .where(
       and(
         eq(scores.userId, user.id),
@@ -96,45 +127,93 @@ export async function GET(
     )
     .orderBy(desc(workoutSessions.workoutDate), desc(scores.createdAt));
 
-  const normalized: ScoreRow[] = rows.map((r) => ({
-    scoreId: r.scoreId,
-    sessionId: r.sessionId,
-    workoutDate: r.workoutDate,
-    division: r.division,
-    timeSeconds: r.timeSeconds,
-    rounds: r.rounds,
-    remainderReps: r.remainderReps,
-    weightLbs: r.weightLbs != null ? Number(r.weightLbs) : null,
-    totalReps: r.totalReps,
-    scoreText: r.scoreText,
-    hitTimeCap: r.hitTimeCap,
-    createdAt: r.createdAt.toISOString(),
-  }));
+  // Compute per-part PR. Each part has its own scoring rule
+  // (for_load → heaviest, amrap → most reps, etc.) so PRs only make
+  // sense within a single part's workoutType.
+  const partAttemptIsPR = new Map<string, boolean>(); // scoreId → isPR
+  const rowsByPart = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const list = rowsByPart.get(r.partId) ?? [];
+    list.push(r);
+    rowsByPart.set(r.partId, list);
+  }
+  for (const [, partRowList] of rowsByPart) {
+    const partType = partRowList[0].partWorkoutType as WorkoutType;
+    const normalized: ScoreRow[] = partRowList.map((r) => ({
+      scoreId: r.scoreId,
+      sessionId: r.sessionId,
+      workoutDate: r.workoutDate,
+      division: r.division,
+      timeSeconds: r.timeSeconds,
+      rounds: r.rounds,
+      remainderReps: r.remainderReps,
+      weightLbs: r.weightLbs != null ? Number(r.weightLbs) : null,
+      totalReps: r.totalReps,
+      scoreText: r.scoreText,
+      hitTimeCap: r.hitTimeCap,
+      createdAt: r.createdAt.toISOString(),
+    }));
+    const best = pickBestScore(partType, normalized);
+    for (const n of normalized) {
+      partAttemptIsPR.set(n.scoreId, n === best);
+    }
+  }
 
-  const best = pickBestScore(bw.workoutType as WorkoutType, normalized);
+  // Group score rows by sessionId. Sessions come out sorted desc by
+  // workout date (rows are already sorted that way and we only key on
+  // sessionId, so the first time we see each session is in date order).
+  const sessionMap = new Map<string, BenchmarkSession>();
+  for (const r of rows) {
+    if (!r.sessionId) continue;
+    const partAttempt: BenchmarkPartAttempt = {
+      partId: r.partId,
+      partLabel: r.partLabel,
+      partOrderIndex: r.partOrderIndex,
+      partWorkoutType: r.partWorkoutType as WorkoutType,
+      scoreId: r.scoreId,
+      sessionId: r.sessionId,
+      workoutDate: r.workoutDate,
+      division: r.division,
+      timeSeconds: r.timeSeconds,
+      rounds: r.rounds,
+      remainderReps: r.remainderReps,
+      weightLbs: r.weightLbs != null ? Number(r.weightLbs) : null,
+      totalReps: r.totalReps,
+      scoreText: r.scoreText,
+      hitTimeCap: r.hitTimeCap,
+      notes: r.notes,
+      createdAt: r.createdAt.toISOString(),
+      isPR: partAttemptIsPR.get(r.scoreId) ?? false,
+    };
+    const existing = sessionMap.get(r.sessionId);
+    if (existing) {
+      existing.partAttempts.push(partAttempt);
+      if (partAttempt.isPR) existing.isPR = true;
+    } else {
+      sessionMap.set(r.sessionId, {
+        sessionId: r.sessionId,
+        workoutDate: r.workoutDate,
+        division: r.division,
+        createdAt: r.createdAt.toISOString(),
+        partAttempts: [partAttempt],
+        isPR: partAttempt.isPR,
+      });
+    }
+  }
 
-  const attempts = rows.map((r, i) => ({
-    scoreId: r.scoreId,
-    sessionId: r.sessionId,
-    workoutDate: r.workoutDate,
-    division: r.division,
-    timeSeconds: r.timeSeconds,
-    rounds: r.rounds,
-    remainderReps: r.remainderReps,
-    weightLbs: r.weightLbs != null ? Number(r.weightLbs) : null,
-    totalReps: r.totalReps,
-    scoreText: r.scoreText,
-    hitTimeCap: r.hitTimeCap,
-    notes: r.notes,
-    createdAt: r.createdAt.toISOString(),
-    isPR: normalized[i] === best,
+  const sessions = Array.from(sessionMap.values()).map((s) => ({
+    ...s,
+    partAttempts: [...s.partAttempts].sort(
+      (a, b) => a.partOrderIndex - b.partOrderIndex
+    ),
   }));
 
   return NextResponse.json({
     benchmarkId: bw.id,
     benchmarkName: bw.name,
     workoutType: bw.workoutType,
-    attempts,
+    parts,
+    sessions,
   });
 }
 

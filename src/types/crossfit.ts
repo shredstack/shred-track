@@ -295,11 +295,47 @@ export interface BenchmarkAttempt {
   isPR: boolean;
 }
 
+// A score logged against a single part within a benchmark session. For
+// single-part benchmarks every session has exactly one of these; for
+// multi-part benchmarks (e.g. Part A: For Load + Part B: AMRAP) one
+// session can carry multiple, one per logged part. `isPR` is per-part —
+// the best attempt across all sessions for that specific part.
+export interface BenchmarkPartAttempt extends BenchmarkAttempt {
+  partId: string;
+  partLabel: string | null;
+  partOrderIndex: number;
+  partWorkoutType: WorkoutType;
+}
+
+// One workout session against a benchmark. Multi-part benchmarks group
+// their per-part scores under a single session so the history dialog
+// doesn't double-count "I did this once" as two attempts.
+export interface BenchmarkSession {
+  sessionId: string;
+  workoutDate: string;
+  division: string;
+  createdAt: string;
+  partAttempts: BenchmarkPartAttempt[];
+  // True when any part in this session is the current PR for its part.
+  isPR: boolean;
+}
+
+export interface BenchmarkPartInfo {
+  id: string;
+  label: string | null;
+  orderIndex: number;
+  workoutType: WorkoutType;
+}
+
 export interface BenchmarkHistory {
   benchmarkId: string;
   benchmarkName: string;
+  // Workout type of the parent benchmark. For multi-part this is the
+  // first part's type (the historical convention); consumers should use
+  // each part's own workoutType when rendering per-part scores.
   workoutType: WorkoutType;
-  attempts: BenchmarkAttempt[];
+  parts: BenchmarkPartInfo[];
+  sessions: BenchmarkSession[];
 }
 
 // Weightlifting benchmark history. Same attempts list, but split by the
