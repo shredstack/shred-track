@@ -1,12 +1,15 @@
 import { describe, it, expect } from "vitest";
 import {
   aggregateDormantComplaintsFromRows,
+  aggregateGraduationTrackerFromRows,
   aggregateRpeComplaintCorrelationFromRows,
   aggregateTemporalComplaintsFromRows,
   type DormantRow,
+  type GraduationEntry,
   type RpeCorrelationRow,
   type TemporalRow,
 } from "./notes-extraction";
+import type { NotesPerformanceMetric } from "@/types/crossfit";
 
 // ============================================
 // Helpers — date math
@@ -352,5 +355,188 @@ describe("aggregateDormantComplaintsFromRows", () => {
     // shoulder (last @ 35d) comes before hip (last @ 45d) comes before grip
     expect(out[0].topic).toBe("shoulder");
     expect(out[1].topic).toBe("hip");
+  });
+});
+
+// ============================================
+// aggregateGraduationTrackerFromRows
+// ============================================
+
+describe("aggregateGraduationTrackerFromRows", () => {
+  function makeEntry(
+    movement: string,
+    reason: string,
+    workoutDate: string,
+    signal: { metric: NotesPerformanceMetric; value: number } | null,
+    scoreId = `${movement}-${workoutDate}`
+  ): GraduationEntry {
+    return { scoreId, workoutDate, movement, reason, signal };
+  }
+
+  it("returns [] when no (movement, reason) bucket hits the 3-scale floor", () => {
+    const rows: GraduationEntry[] = [
+      makeEntry("Double Unders", "skill", "2026-04-01", {
+        metric: "reps_in_window",
+        value: 20,
+      }),
+      makeEntry("Double Unders", "skill", "2026-04-15", {
+        metric: "reps_in_window",
+        value: 25,
+      }),
+    ];
+    expect(aggregateGraduationTrackerFromRows(rows)).toEqual([]);
+  });
+
+  it("emits 'trending_up' when the last 3 signals strictly improve", () => {
+    const rows: GraduationEntry[] = [
+      makeEntry("Double Unders", "skill", "2026-04-01", {
+        metric: "reps_in_window",
+        value: 20,
+      }),
+      makeEntry("Double Unders", "skill", "2026-04-15", {
+        metric: "reps_in_window",
+        value: 25,
+      }),
+      makeEntry("Double Unders", "skill", "2026-05-01", {
+        metric: "reps_in_window",
+        value: 30,
+      }),
+    ];
+    const out = aggregateGraduationTrackerFromRows(rows);
+    expect(out).toHaveLength(1);
+    expect(out[0].status).toBe("trending_up");
+    expect(out[0].movement).toBe("Double Unders");
+    expect(out[0].reason).toBe("skill");
+    expect(out[0].scaleCount).toBe(3);
+    expect(out[0].weeksSpan).toBeGreaterThanOrEqual(4);
+    expect(out[0].lastScaledAt).toBe("2026-05-01");
+  });
+
+  it("emits 'flat' when the last 4 same-metric signals are within tolerance", () => {
+    const rows: GraduationEntry[] = [
+      makeEntry("Pull-ups", "strength", "2026-03-01", {
+        metric: "unbroken_reps",
+        value: 8,
+      }),
+      makeEntry("Pull-ups", "strength", "2026-03-15", {
+        metric: "unbroken_reps",
+        value: 8,
+      }),
+      makeEntry("Pull-ups", "strength", "2026-04-01", {
+        metric: "unbroken_reps",
+        value: 8,
+      }),
+      makeEntry("Pull-ups", "strength", "2026-04-15", {
+        metric: "unbroken_reps",
+        value: 8,
+      }),
+      makeEntry("Pull-ups", "strength", "2026-05-01", {
+        metric: "unbroken_reps",
+        value: 8,
+      }),
+    ];
+    const out = aggregateGraduationTrackerFromRows(rows);
+    expect(out).toHaveLength(1);
+    expect(out[0].status).toBe("flat");
+    expect(out[0].scaleCount).toBe(5);
+  });
+
+  it("emits 'trending_down' when the last 3 signals strictly worsen", () => {
+    const rows: GraduationEntry[] = [
+      makeEntry("Pull-ups", "skill", "2026-04-01", {
+        metric: "unbroken_reps",
+        value: 12,
+      }),
+      makeEntry("Pull-ups", "skill", "2026-04-15", {
+        metric: "unbroken_reps",
+        value: 9,
+      }),
+      makeEntry("Pull-ups", "skill", "2026-05-01", {
+        metric: "unbroken_reps",
+        value: 6,
+      }),
+    ];
+    const out = aggregateGraduationTrackerFromRows(rows);
+    expect(out).toHaveLength(1);
+    expect(out[0].status).toBe("trending_down");
+  });
+
+  it("treats pace as lower-is-better (faster pace = trending up)", () => {
+    const rows: GraduationEntry[] = [
+      makeEntry("Row", "endurance", "2026-04-01", {
+        metric: "pace",
+        value: 130,
+      }),
+      makeEntry("Row", "endurance", "2026-04-15", {
+        metric: "pace",
+        value: 120,
+      }),
+      makeEntry("Row", "endurance", "2026-05-01", {
+        metric: "pace",
+        value: 110,
+      }),
+    ];
+    const out = aggregateGraduationTrackerFromRows(rows);
+    expect(out).toHaveLength(1);
+    expect(out[0].status).toBe("trending_up");
+  });
+
+  it("skips a bucket whose last 3 signals span different metrics", () => {
+    // Mixed metrics — can't say "trending up" across them.
+    const rows: GraduationEntry[] = [
+      makeEntry("Double Unders", "skill", "2026-04-01", {
+        metric: "reps_in_window",
+        value: 20,
+      }),
+      makeEntry("Double Unders", "skill", "2026-04-15", {
+        metric: "unbroken_reps",
+        value: 25,
+      }),
+      makeEntry("Double Unders", "skill", "2026-05-01", {
+        metric: "reps_in_window",
+        value: 30,
+      }),
+    ];
+    expect(aggregateGraduationTrackerFromRows(rows)).toEqual([]);
+  });
+
+  it("ignores signal-less scales (need real numbers to judge a trend)", () => {
+    const rows: GraduationEntry[] = [
+      makeEntry("Pull-ups", "skill", "2026-04-01", null),
+      makeEntry("Pull-ups", "skill", "2026-04-15", null),
+      makeEntry("Pull-ups", "skill", "2026-05-01", null),
+    ];
+    expect(aggregateGraduationTrackerFromRows(rows)).toEqual([]);
+  });
+
+  it("caps output at 4 entries, most recent last-scaled session first", () => {
+    function trio(
+      movement: string,
+      base: number
+    ): GraduationEntry[] {
+      return [
+        makeEntry(movement, "skill", "2026-03-01", {
+          metric: "reps_in_window",
+          value: base,
+        }),
+        makeEntry(movement, "skill", "2026-04-01", {
+          metric: "reps_in_window",
+          value: base + 5,
+        }),
+        makeEntry(movement, "skill", `2026-05-${"01"}`, {
+          metric: "reps_in_window",
+          value: base + 10,
+        }),
+      ];
+    }
+    const rows: GraduationEntry[] = [
+      ...trio("A", 10),
+      ...trio("B", 12),
+      ...trio("C", 14),
+      ...trio("D", 16),
+      ...trio("E", 18),
+    ];
+    const out = aggregateGraduationTrackerFromRows(rows);
+    expect(out).toHaveLength(4);
   });
 });

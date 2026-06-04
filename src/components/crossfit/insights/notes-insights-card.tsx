@@ -9,6 +9,7 @@ import {
   CalendarClock,
   Flame,
   Leaf,
+  TrendingUp,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +17,7 @@ import { useNotesInsights } from "@/hooks/useCrossfitInsights";
 import { useIsNative } from "@/hooks/useIsNative";
 import { useUserProfile } from "@/hooks/useProfile";
 import type {
+  GraduationTrackerEntry,
   NotesAggregateComplaint,
   NotesAggregateMilestone,
   NotesAggregateScalingReason,
@@ -114,6 +116,12 @@ function Body({ data }: { data: NotesInsights }) {
   const temporalCallouts = data.temporalCallouts ?? [];
   const rpeCallouts = data.rpeCallouts ?? [];
   const dormantWins = data.dormantWins ?? [];
+  // Surface only the actionable subset (trending up + flat). "Trending
+  // down" is computed by the aggregator but not shown — we don't want
+  // the dashboard nagging when the athlete's already losing ground.
+  const graduationCandidates = (data.graduationTracker ?? []).filter(
+    (g) => g.status === "trending_up" || g.status === "flat"
+  );
 
   const hasContent =
     data.complaints.length +
@@ -121,7 +129,8 @@ function Body({ data }: { data: NotesInsights }) {
       data.milestones.length +
       temporalCallouts.length +
       rpeCallouts.length +
-      dormantWins.length >
+      dormantWins.length +
+      graduationCandidates.length >
     0;
 
   return (
@@ -186,6 +195,17 @@ function Body({ data }: { data: NotesInsights }) {
             >
               {data.scalingRationale.map((r, i) => (
                 <ScalingReasonRow key={i} item={r} />
+              ))}
+            </Section>
+          )}
+
+          {graduationCandidates.length > 0 && (
+            <Section
+              title="Ready to graduate?"
+              icon={<TrendingUp className="h-3.5 w-3.5 text-emerald-400" />}
+            >
+              {graduationCandidates.map((g, i) => (
+                <GraduationRow key={`${g.movement}-${g.reason}-${i}`} item={g} />
               ))}
             </Section>
           )}
@@ -325,6 +345,33 @@ function RpeCalloutRow({ item }: { item: NotesRpeCallout }) {
       </p>
       <p className="text-[10px] text-muted-foreground">
         {item.highRpeMentions} of {item.highRpeScores} hard sessions.
+      </p>
+    </div>
+  );
+}
+
+function GraduationRow({ item }: { item: GraduationTrackerEntry }) {
+  // Copy mirrors the spec §2.3 examples — "Try RX next time." when the
+  // last 3 signals all improved, "Worth a dedicated practice block." when
+  // four sessions in a row landed in the same range.
+  const recommendation =
+    item.status === "trending_up"
+      ? "Try RX next time."
+      : "Worth a dedicated practice block.";
+  return (
+    <div className="text-xs">
+      <p className="text-foreground">
+        <span className="font-medium capitalize">{item.movement}</span>
+        <span className="text-muted-foreground">
+          {" "}— scaled {item.scaleCount}× over {item.weeksSpan} week
+          {item.weeksSpan === 1 ? "" : "s"},{" "}
+        </span>
+        {item.status === "trending_up" ? (
+          <span className="text-emerald-300">trending up</span>
+        ) : (
+          <span className="text-amber-300">no movement</span>
+        )}
+        <span className="text-muted-foreground">. {recommendation}</span>
       </p>
     </div>
   );

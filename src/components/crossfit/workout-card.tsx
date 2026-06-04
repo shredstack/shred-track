@@ -52,6 +52,7 @@ import { CalorieBadge } from "@/components/crossfit/calorie-badge";
 import { useEffectiveEpocEnabled } from "@/hooks/useEpocPreference";
 import { TemplateHistoryLink } from "@/components/crossfit/template-history-sheet";
 import { SuggestionChip } from "@/components/crossfit/suggested-weight-chip";
+import { WorkoutPrepCard } from "@/components/crossfit/workout-prep-card";
 import {
   SuggestionContext,
   flattenSuggestions,
@@ -1022,6 +1023,14 @@ export function WorkoutCard({
               />
             </div>
           ))
+        )}
+
+        {/* "Last time you did this" prep card — stretch goals + anticipatory
+            complaint banners drawn from the athlete's recent notes. Renders
+            only when there are no scores logged yet on this WOD (the card
+            self-hides when the payload is empty). */}
+        {!hasAnyScore && (
+          <WorkoutPrepCard workoutId={workout.id} enabled={!hasAnyScore} />
         )}
       </CardContent>
 
