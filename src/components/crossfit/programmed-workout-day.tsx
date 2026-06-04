@@ -17,6 +17,7 @@ import { BenchmarkPrPill } from "@/components/crossfit/benchmark-pr-pill";
 import { TemplateHistoryLink } from "@/components/crossfit/template-history-sheet";
 import {
   SuggestionContext,
+  flattenSuggestions,
   useSuggestedWeights,
 } from "@/hooks/useSuggestedWeights";
 import type { WorkoutDisplay } from "@/types/crossfit";
@@ -78,19 +79,7 @@ export function ProgrammedWorkoutDay({
   const { data: suggestionsData } = useSuggestedWeights(
     needsSuggestions ? workout.crossfitWorkoutId ?? null : null
   );
-  const suggestionMap = (() => {
-    if (!suggestionsData) return null;
-    const m = new Map<
-      string,
-      (typeof suggestionsData.parts)[number]["suggestions"][string]
-    >();
-    for (const part of suggestionsData.parts) {
-      for (const [cwmId, s] of Object.entries(part.suggestions)) {
-        m.set(cwmId, s);
-      }
-    }
-    return m;
-  })();
+  const suggestionMap = flattenSuggestions(suggestionsData);
   const weekStart = mondayOfWeek(workout.workoutDate);
   // Programming admin deep-link. The page resolves the gym from the
   // user's active community (no communityId segment in the URL), so we

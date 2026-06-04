@@ -531,8 +531,17 @@ export async function POST(req: NextRequest) {
           .selectDistinct({ movementId: crossfitWorkoutMovements.movementId })
           .from(crossfitWorkoutMovements)
           .where(inArray(crossfitWorkoutMovements.id, cwmIds));
-        for (const m of movementRows) {
-          await refreshStrengthForMovement(effectiveUserId, m.movementId);
+        // Parallelize so a WOD with 4–5 weighted movements doesn't stack
+        // 4–5 sequential DB round-trips onto the score response latency.
+        const results = await Promise.allSettled(
+          movementRows.map((m) =>
+            refreshStrengthForMovement(effectiveUserId, m.movementId)
+          )
+        );
+        for (const r of results) {
+          if (r.status === "rejected") {
+            console.error("[strength] refresh failed for score POST", r.reason);
+          }
         }
       }
     } catch (err) {

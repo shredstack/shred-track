@@ -177,7 +177,7 @@ function WhySheet({
               <p className="mt-2 text-[11px] text-muted-foreground">
                 {suggestion.confidence === "medium"
                   ? "Based on limited data — log a few more weighted sets to tighten this."
-                  : "We&apos;re inferring from the gym Rx baseline. Pick what feels right; the next score you log will personalize the suggestion."}
+                  : "We're inferring from the gym Rx baseline. Pick what feels right; the next score you log will personalize the suggestion."}
               </p>
             )}
           </Section>

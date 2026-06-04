@@ -54,6 +54,7 @@ import { TemplateHistoryLink } from "@/components/crossfit/template-history-shee
 import { SuggestionChip } from "@/components/crossfit/suggested-weight-chip";
 import {
   SuggestionContext,
+  flattenSuggestions,
   useSuggestedWeights,
   useSuggestionForMovement,
 } from "@/hooks/useSuggestedWeights";
@@ -812,16 +813,7 @@ export function WorkoutCard({
   const { data: suggestionsData } = useSuggestedWeights(
     needsSuggestions ? workout.crossfitWorkoutId ?? null : null
   );
-  const suggestionMap = (() => {
-    if (!suggestionsData) return null;
-    const m = new Map<string, (typeof suggestionsData.parts)[number]["suggestions"][string]>();
-    for (const part of suggestionsData.parts) {
-      for (const [cwmId, s] of Object.entries(part.suggestions)) {
-        m.set(cwmId, s);
-      }
-    }
-    return m;
-  })();
+  const suggestionMap = flattenSuggestions(suggestionsData);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);

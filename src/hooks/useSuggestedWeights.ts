@@ -22,6 +22,24 @@ interface SuggestedWeightsResponse {
 }
 
 /**
+ * Flatten the per-part suggestion buckets into a single
+ * `crossfitWorkoutMovementId -> SuggestionDTO` map for the Context provider.
+ * Returns `null` when there is no data yet so the provider can short-circuit.
+ */
+export function flattenSuggestions(
+  data: SuggestedWeightsResponse | undefined
+): Map<string, SuggestionDTO> | null {
+  if (!data) return null;
+  const m = new Map<string, SuggestionDTO>();
+  for (const part of data.parts) {
+    for (const [cwmId, s] of Object.entries(part.suggestions)) {
+      m.set(cwmId, s);
+    }
+  }
+  return m;
+}
+
+/**
  * Fetch the per-(part, movement) suggestion map for a template. The
  * workout card calls this once at the top and drills suggestions into
  * each `MovementRow`.
