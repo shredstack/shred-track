@@ -352,6 +352,34 @@ async function backfillBenchmarkTemplates(
     });
     const fingerprint = computeWorkoutFingerprint(fingerprintInput);
 
+    // Idempotency: a prior partial run may already have inserted this
+    // benchmark template. Look it up by (scope, fingerprint, is_benchmark=true)
+    // before inserting — the unique constraints on (created_by, fp, benchmark)
+    // and (community_id, fp, benchmark) would otherwise throw 23505.
+    const existingId = await findBenchmarkTemplate(tx, bw, fingerprint);
+    if (existingId) {
+      benchmarkTemplateMap.set(bw.id, existingId);
+      const existingParts = await tx
+        .select({
+          id: crossfitWorkoutParts.id,
+          orderIndex: crossfitWorkoutParts.orderIndex,
+        })
+        .from(crossfitWorkoutParts)
+        .where(eq(crossfitWorkoutParts.crossfitWorkoutId, existingId))
+        .orderBy(crossfitWorkoutParts.orderIndex);
+      const byOrder = new Map<number, string>(
+        existingParts.map((p: { orderIndex: number; id: string }) => [
+          p.orderIndex,
+          p.id,
+        ])
+      );
+      for (let i = 0; i < partIdToOriginal.length; i++) {
+        const target = byOrder.get(i);
+        if (target) benchmarkPartMap.set(partIdToOriginal[i], target);
+      }
+      continue;
+    }
+
     const [inserted] = await tx
       .insert(crossfitWorkouts)
       .values({
@@ -393,6 +421,56 @@ async function backfillBenchmarkTemplates(
   }
 
   return { benchmarkTemplateMap, benchmarkPartMap };
+}
+
+async function findBenchmarkTemplate(
+  tx: Tx,
+  bw: { isSystem: boolean; createdBy: string | null; communityId: string | null },
+  fingerprint: string
+): Promise<string | null> {
+  if (bw.isSystem) {
+    const [row] = await tx
+      .select({ id: crossfitWorkouts.id })
+      .from(crossfitWorkouts)
+      .where(
+        and(
+          eq(crossfitWorkouts.isSystem, true),
+          eq(crossfitWorkouts.contentFingerprint, fingerprint),
+          eq(crossfitWorkouts.isBenchmark, true)
+        )
+      )
+      .limit(1);
+    return row?.id ?? null;
+  }
+  if (bw.communityId) {
+    const [row] = await tx
+      .select({ id: crossfitWorkouts.id })
+      .from(crossfitWorkouts)
+      .where(
+        and(
+          eq(crossfitWorkouts.communityId, bw.communityId),
+          eq(crossfitWorkouts.contentFingerprint, fingerprint),
+          eq(crossfitWorkouts.isBenchmark, true)
+        )
+      )
+      .limit(1);
+    return row?.id ?? null;
+  }
+  if (bw.createdBy) {
+    const [row] = await tx
+      .select({ id: crossfitWorkouts.id })
+      .from(crossfitWorkouts)
+      .where(
+        and(
+          eq(crossfitWorkouts.createdBy, bw.createdBy),
+          eq(crossfitWorkouts.contentFingerprint, fingerprint),
+          eq(crossfitWorkouts.isBenchmark, true)
+        )
+      )
+      .limit(1);
+    return row?.id ?? null;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

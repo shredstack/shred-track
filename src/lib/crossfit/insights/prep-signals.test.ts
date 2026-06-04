@@ -5,6 +5,8 @@ import {
   proposeStretchGoal,
   recommendationForTopic,
   shapeComplaintBanners,
+  shapeMovementHistoryEntries,
+  type MovementHistoryCandidate,
   type MovementSignalRow,
   type NoteNudgeCandidate,
 } from "./prep-signals";
@@ -292,5 +294,72 @@ describe("pickNoteNudge", () => {
       c("Double Unders", 4, "2026-04-15"),
     ]);
     expect(out!.movement).toBe("Double Unders");
+  });
+});
+
+// ============================================
+// shapeMovementHistoryEntries — notes_insights_v2_spec.md §4.2
+// ============================================
+
+describe("shapeMovementHistoryEntries", () => {
+  function candidate(
+    movementName: string,
+    todayPrescribedLb: number | null,
+    priorPrescribedLb: number | null,
+    priorActualLb: number,
+    workoutDate: string
+  ): MovementHistoryCandidate {
+    return {
+      movementId: movementName.toLowerCase().replace(/\s+/g, "-"),
+      movementName,
+      todayPrescribedLb,
+      priorContext: {
+        workoutDate,
+        priorPrescribedLb,
+        priorActualLb,
+        rpe: null,
+        workoutTemplateTitle: `${movementName} template`,
+      },
+    };
+  }
+
+  it("returns an empty list when there are no candidates", () => {
+    expect(shapeMovementHistoryEntries([])).toEqual([]);
+  });
+
+  it("caps the list at 3 entries", () => {
+    const cs = [
+      candidate("A", 100, 100, 100, "2026-05-01"),
+      candidate("B", 100, 100, 100, "2026-05-02"),
+      candidate("C", 100, 100, 100, "2026-05-03"),
+      candidate("D", 100, 100, 100, "2026-05-04"),
+    ];
+    expect(shapeMovementHistoryEntries(cs)).toHaveLength(3);
+  });
+
+  it("orders by 'prescription differs' DESC, then workoutDate DESC", () => {
+    // Two candidates whose prior prescribed weight DIFFERS from today's,
+    // and one that matches. The two-differs entries should come first
+    // (most recent first), then the same-prescription entry.
+    const out = shapeMovementHistoryEntries([
+      candidate("Same Today", 100, 100, 80, "2026-05-30"),
+      candidate("Differs Old", 100, 80, 75, "2026-04-01"),
+      candidate("Differs New", 100, 80, 75, "2026-05-15"),
+    ]);
+    expect(out.map((e) => e.movementName)).toEqual([
+      "Differs New",
+      "Differs Old",
+      "Same Today",
+    ]);
+  });
+
+  it("treats missing prior prescribed as 'does not differ' for ordering", () => {
+    // No way to know if it differs when one side is null — fall through
+    // to the more-decision-relevant differing case.
+    const out = shapeMovementHistoryEntries([
+      candidate("Null Prior", 100, null, 70, "2026-05-30"),
+      candidate("Differs", 100, 75, 75, "2026-04-01"),
+    ]);
+    expect(out[0].movementName).toBe("Differs");
   });
 });

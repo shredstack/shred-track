@@ -826,6 +826,7 @@ export const SUGGESTED_WEIGHT_METHODS = [
   "estimated_1rm",
   "similar_template_history",
   "direct_template_history",
+  "movement_history",
   "rx_fallback",
   "unavailable",
 ] as const;

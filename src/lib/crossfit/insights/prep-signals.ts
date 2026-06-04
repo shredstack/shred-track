@@ -12,21 +12,24 @@
 // DB-bound entry (`getWorkoutPrepSignals`) so the math is unit-testable
 // without standing up a database.
 
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   crossfitWorkoutMovements,
+  crossfitWorkouts,
   movements,
   scoreMovementDetails,
   scoreMovementSignals,
   scoreNotesExtractions,
   scores,
+  users,
   workoutSessions,
 } from "@/db/schema";
 import type {
   NotesComplaint,
   NotesPerformanceMetric,
 } from "@/types/crossfit";
+import type { PriorMovementContext } from "@/lib/crossfit/suggested-weight";
 
 // ============================================
 // Tunables
@@ -35,6 +38,11 @@ import type {
 const WINDOW_DAYS = 90;
 const MAX_COMPLAINT_BANNERS = 2;
 const COMPLAINT_MIN_CONFIDENCE = 0.5;
+
+// Movement-history section (notes_insights_v2_spec.md §4.2): at most 3
+// entries per workout. Same 90-day window as the rest of the prep card.
+const MAX_MOVEMENT_HISTORY = 3;
+const MOVEMENT_HISTORY_WINDOW_DAYS = 90;
 
 // Score-entry note prompt (Notes Insights v2 PR 3 §3.1). The nudge fires
 // when the athlete has scaled a movement in today's workout at least this
@@ -91,12 +99,27 @@ export type NoteNudge = {
   lastScaledAt: string; // YYYY-MM-DD — drives "most recent eligible movement" tie-breaking
 };
 
+// Movement-history prep card entry (notes_insights_v2_spec.md §4.2).
+// One row per movement in today's workout that has a prior log on a
+// different template. The side-by-side prescribed/actual context is
+// non-negotiable copy — the athlete needs to read the comparison at a
+// glance.
+export type MovementHistoryEntry = {
+  movementId: string;
+  movementName: string; // canonical name from the catalog
+  todayPrescribedLb: number | null;
+  priorContext: PriorMovementContext;
+};
+
 export type WorkoutPrepSignals = {
   stretchGoals: StretchGoalSignal[];
   complaintBanners: ComplaintBanner[];
   // Notes Insights v2 PR 3 §3.1. Null when no movement in the workout
   // qualifies — the client renders nothing.
   noteNudge: NoteNudge | null;
+  // Notes Insights v2 PR 4 §4.2. Empty when no eligible prior log — the
+  // section self-hides.
+  movementHistory: MovementHistoryEntry[];
 };
 
 // One eligible-scaled-movement candidate the picker walks. Exposed for the
@@ -335,29 +358,231 @@ export async function selectMovementSignalsForPrep(
   }));
 }
 
-// Loads the canonical movement names for a workout session by resolving
-// it to its template (`crossfit_workout_id`) and reading
-// `crossfit_workout_movements`. Returns [] for freeform sessions (no
-// linked template) or unknown ids — the prep card hides itself in both
-// cases.
-async function loadMovementNamesForSession(
+// Shape the workout-card needs to drive the movement-history section:
+// per-movement template id + today's prescribed weights so the read-side
+// joins know what to scale against.
+type SessionTemplateMovement = {
+  crossfitWorkoutId: string;
+  movementId: string;
+  movementName: string;
+  prescribedWeightMale: number | null;
+  prescribedWeightFemale: number | null;
+};
+
+async function loadSessionTemplateMovements(
   workoutSessionId: string
-): Promise<string[]> {
+): Promise<{
+  crossfitWorkoutId: string | null;
+  movements: SessionTemplateMovement[];
+}> {
   const [session] = await db
     .select({ crossfitWorkoutId: workoutSessions.crossfitWorkoutId })
     .from(workoutSessions)
     .where(eq(workoutSessions.id, workoutSessionId))
     .limit(1);
-  if (!session?.crossfitWorkoutId) return [];
+  if (!session?.crossfitWorkoutId) {
+    return { crossfitWorkoutId: null, movements: [] };
+  }
 
   const rows = await db
-    .selectDistinct({ name: movements.canonicalName })
+    .select({
+      crossfitWorkoutId: crossfitWorkoutMovements.crossfitWorkoutId,
+      movementId: crossfitWorkoutMovements.movementId,
+      movementName: movements.canonicalName,
+      prescribedWeightMale: crossfitWorkoutMovements.prescribedWeightMale,
+      prescribedWeightFemale: crossfitWorkoutMovements.prescribedWeightFemale,
+    })
     .from(crossfitWorkoutMovements)
     .innerJoin(movements, eq(movements.id, crossfitWorkoutMovements.movementId))
     .where(
       eq(crossfitWorkoutMovements.crossfitWorkoutId, session.crossfitWorkoutId)
     );
-  return rows.map((r) => r.name);
+
+  // Multiple rows for the same movement collapse to one — we surface a
+  // single line per movement and take the heaviest prescribed weight if
+  // there's ambiguity (prevents a lightweight EMOM entry from masking a
+  // heavy strength entry on the same template).
+  const byMovement = new Map<string, SessionTemplateMovement>();
+  for (const r of rows) {
+    const cur = byMovement.get(r.movementId);
+    const male = r.prescribedWeightMale != null ? Number(r.prescribedWeightMale) : null;
+    const female =
+      r.prescribedWeightFemale != null ? Number(r.prescribedWeightFemale) : null;
+    if (!cur) {
+      byMovement.set(r.movementId, {
+        crossfitWorkoutId: r.crossfitWorkoutId,
+        movementId: r.movementId,
+        movementName: r.movementName,
+        prescribedWeightMale: male,
+        prescribedWeightFemale: female,
+      });
+      continue;
+    }
+    if (male != null && (cur.prescribedWeightMale == null || male > cur.prescribedWeightMale)) {
+      cur.prescribedWeightMale = male;
+    }
+    if (
+      female != null &&
+      (cur.prescribedWeightFemale == null || female > cur.prescribedWeightFemale)
+    ) {
+      cur.prescribedWeightFemale = female;
+    }
+  }
+  return {
+    crossfitWorkoutId: session.crossfitWorkoutId,
+    movements: Array.from(byMovement.values()),
+  };
+}
+
+// Heaviest representative weight from a setEntries blob, mirroring the
+// suggested-weight engine's logic so the prep card surfaces the same
+// "worked up to" number as the chip's anchor.
+function representativeFromSetEntries(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setEntries: any[] | null | undefined,
+  actualWeight: number | null
+): number | null {
+  if (Array.isArray(setEntries) && setEntries.length > 0) {
+    let max = 0;
+    for (const e of setEntries) {
+      const w = Number(e?.weight);
+      if (Number.isFinite(w) && w > max) max = w;
+    }
+    if (max > 0) return max;
+  }
+  if (actualWeight != null && actualWeight > 0) return actualWeight;
+  return null;
+}
+
+// Pure orchestration used by both the DB-bound entry and the unit tests.
+// Takes raw "prior log + today's prescription" pairs and returns the
+// ordered, capped MovementHistoryEntry list. Spec §4.2 ordering:
+// `(today's prescribed weight differs from prior prescribed weight) DESC,
+//  workoutDate DESC` so the most decision-affecting context comes first.
+export type MovementHistoryCandidate = {
+  movementId: string;
+  movementName: string;
+  todayPrescribedLb: number | null;
+  priorContext: PriorMovementContext;
+};
+
+export function shapeMovementHistoryEntries(
+  candidates: MovementHistoryCandidate[],
+  cap = MAX_MOVEMENT_HISTORY
+): MovementHistoryEntry[] {
+  const decorated = candidates.map((c) => {
+    const differs =
+      c.todayPrescribedLb != null &&
+      c.priorContext.priorPrescribedLb != null &&
+      c.todayPrescribedLb !== c.priorContext.priorPrescribedLb;
+    return { c, differs };
+  });
+  decorated.sort((a, b) => {
+    if (a.differs !== b.differs) return a.differs ? -1 : 1;
+    return b.c.priorContext.workoutDate.localeCompare(a.c.priorContext.workoutDate);
+  });
+  return decorated.slice(0, cap).map(({ c }) => ({
+    movementId: c.movementId,
+    movementName: c.movementName,
+    todayPrescribedLb: c.todayPrescribedLb,
+    priorContext: c.priorContext,
+  }));
+}
+
+// Pulls the most-recent prior log per movement on any *other* template
+// within the freshness window. Excludes the current template
+// (`excludeWorkoutId`) — the chip's tier 1 already shows same-template
+// context. Returns one candidate per qualifying movement.
+async function loadMovementHistoryCandidates(input: {
+  userId: string;
+  gender: string | null;
+  sessionMovements: SessionTemplateMovement[];
+  excludeWorkoutId: string;
+}): Promise<MovementHistoryCandidate[]> {
+  const { userId, gender, sessionMovements, excludeWorkoutId } = input;
+  if (sessionMovements.length === 0) return [];
+
+  const movementIds = sessionMovements.map((m) => m.movementId);
+  const cutoff = daysAgoIso(MOVEMENT_HISTORY_WINDOW_DAYS);
+
+  const rows = await db
+    .select({
+      movementId: crossfitWorkoutMovements.movementId,
+      workoutDate: workoutSessions.workoutDate,
+      actualWeight: scoreMovementDetails.actualWeight,
+      setEntries: scoreMovementDetails.setEntries,
+      rpe: scores.rpe,
+      priorPrescribedMale: crossfitWorkoutMovements.prescribedWeightMale,
+      priorPrescribedFemale: crossfitWorkoutMovements.prescribedWeightFemale,
+      workoutTemplateTitle: crossfitWorkouts.title,
+    })
+    .from(scoreMovementDetails)
+    .innerJoin(scores, eq(scores.id, scoreMovementDetails.scoreId))
+    .innerJoin(
+      crossfitWorkoutMovements,
+      eq(
+        crossfitWorkoutMovements.id,
+        scoreMovementDetails.crossfitWorkoutMovementId
+      )
+    )
+    .innerJoin(
+      crossfitWorkouts,
+      eq(crossfitWorkouts.id, crossfitWorkoutMovements.crossfitWorkoutId)
+    )
+    .innerJoin(
+      workoutSessions,
+      eq(workoutSessions.id, scores.workoutSessionId)
+    )
+    .where(
+      and(
+        eq(scores.userId, userId),
+        inArray(crossfitWorkoutMovements.movementId, movementIds),
+        ne(crossfitWorkoutMovements.crossfitWorkoutId, excludeWorkoutId),
+        gte(workoutSessions.workoutDate, cutoff)
+      )
+    )
+    .orderBy(desc(workoutSessions.workoutDate));
+
+  const seen = new Set<string>();
+  const candidates: MovementHistoryCandidate[] = [];
+  for (const r of rows) {
+    if (seen.has(r.movementId)) continue;
+    const priorActual = representativeFromSetEntries(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      r.setEntries as any[] | null,
+      r.actualWeight != null ? Number(r.actualWeight) : null
+    );
+    if (priorActual == null) continue;
+
+    const session = sessionMovements.find((m) => m.movementId === r.movementId);
+    if (!session) continue;
+
+    const priorPrescribedRaw =
+      gender === "female"
+        ? r.priorPrescribedFemale ?? r.priorPrescribedMale
+        : r.priorPrescribedMale ?? r.priorPrescribedFemale;
+    const priorPrescribedLb =
+      priorPrescribedRaw != null ? Number(priorPrescribedRaw) : null;
+    const todayPrescribedLb =
+      gender === "female"
+        ? session.prescribedWeightFemale ?? session.prescribedWeightMale
+        : session.prescribedWeightMale ?? session.prescribedWeightFemale;
+
+    seen.add(r.movementId);
+    candidates.push({
+      movementId: r.movementId,
+      movementName: session.movementName,
+      todayPrescribedLb: todayPrescribedLb ?? null,
+      priorContext: {
+        workoutDate: r.workoutDate,
+        priorPrescribedLb,
+        priorActualLb: priorActual,
+        rpe: r.rpe != null ? Number(r.rpe) : null,
+        workoutTemplateTitle: r.workoutTemplateTitle,
+      },
+    });
+  }
+  return candidates;
 }
 
 // Pulls movement-attributed complaints in the last 90 days for the given
@@ -495,16 +720,38 @@ export async function getWorkoutPrepSignals(input: {
   userId: string;
   workoutId: string;
 }): Promise<WorkoutPrepSignals> {
-  const movementNames = await loadMovementNamesForSession(input.workoutId);
+  const sessionTemplate = await loadSessionTemplateMovements(input.workoutId);
+  const movementNames = sessionTemplate.movements.map((m) => m.movementName);
   if (movementNames.length === 0) {
-    return { stretchGoals: [], complaintBanners: [], noteNudge: null };
+    return {
+      stretchGoals: [],
+      complaintBanners: [],
+      noteNudge: null,
+      movementHistory: [],
+    };
   }
 
-  const [signalRows, rawBanners, nudgeCandidates] = await Promise.all([
-    selectMovementSignalsForPrep(input.userId, movementNames),
-    loadMovementComplaintsForUser(input.userId, movementNames),
-    loadNoteNudgeCandidates(input.userId, movementNames),
-  ]);
+  const [userRow] = await db
+    .select({ gender: users.gender })
+    .from(users)
+    .where(eq(users.id, input.userId))
+    .limit(1);
+  const gender = userRow?.gender ?? null;
+
+  const [signalRows, rawBanners, nudgeCandidates, historyCandidates] =
+    await Promise.all([
+      selectMovementSignalsForPrep(input.userId, movementNames),
+      loadMovementComplaintsForUser(input.userId, movementNames),
+      loadNoteNudgeCandidates(input.userId, movementNames),
+      sessionTemplate.crossfitWorkoutId
+        ? loadMovementHistoryCandidates({
+            userId: input.userId,
+            gender,
+            sessionMovements: sessionTemplate.movements,
+            excludeWorkoutId: sessionTemplate.crossfitWorkoutId,
+          })
+        : Promise.resolve([] as MovementHistoryCandidate[]),
+    ]);
 
   const bests = pickRecentBests(signalRows);
   const stretchGoals: StretchGoalSignal[] = [];
@@ -536,5 +783,6 @@ export async function getWorkoutPrepSignals(input: {
     stretchGoals,
     complaintBanners: shapeComplaintBanners(rawBanners),
     noteNudge: pickNoteNudge(nudgeCandidates),
+    movementHistory: shapeMovementHistoryEntries(historyCandidates),
   };
 }

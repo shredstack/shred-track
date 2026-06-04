@@ -7,6 +7,11 @@
 //      exact template).
 //   2. Logged 1RM × stimulus-band.
 //   3. Estimated 1RM × stimulus-band.
+//   3.5. Movement history across templates (athlete's prior log of the same
+//        movement on a different template, scaled to today's prescribed
+//        weight by the prior scaling ratio). Catches dumbbell / kettlebell /
+//        sandbag movements that don't have a 1RM and would otherwise fall
+//        through to the Rx fallback. See notes_insights_v2_spec.md §4.
 //   4. Similar-stimulus history (averaged actual weights from other
 //      templates of the same stimulus class).
 //   5. Rx fallback (gender-appropriate prescribed weight × 0.85–1.0).
@@ -18,12 +23,13 @@
 //     per-movement suggestion cascade".
 // ---------------------------------------------------------------------------
 
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   athleteMovementStrength,
   crossfitWorkoutMovements,
   crossfitWorkoutParts,
+  crossfitWorkouts,
   movements,
   scoreMovementDetails,
   scores,
@@ -39,6 +45,20 @@ import {
 
 export type SuggestedWeightConfidence = "high" | "medium" | "low";
 
+/**
+ * Carried on `movement_history` suggestions so the chip's "Why?" sheet and
+ * the workout-detail prep card can render the prior log alongside today's
+ * prescribed weight. The athlete needs to see "Apr 22: prescribed 50 lb,
+ * you used 35 lb" to read the suggestion as anything more than a number.
+ */
+export interface PriorMovementContext {
+  workoutDate: string; // YYYY-MM-DD
+  priorPrescribedLb: number | null;
+  priorActualLb: number;
+  rpe: number | null;
+  workoutTemplateTitle: string | null;
+}
+
 export interface SuggestedWeight {
   method: SuggestedWeightMethod;
   confidence: SuggestedWeightConfidence;
@@ -50,6 +70,9 @@ export interface SuggestedWeight {
   /** Short human-readable source label for the "Why?" sheet. */
   anchorSource?: string | null;
   stimulusClass: StimulusClass | null;
+  /** Populated by the `movement_history` tier so the UI can render the
+   *  prior log side-by-side with today's prescribed weight. */
+  priorContext?: PriorMovementContext | null;
 }
 
 export interface MovementSuggestionInput {
@@ -64,6 +87,10 @@ export interface MovementSuggestionInput {
   crossfitWorkoutMovementId: string;
   /** template id (crossfit_workouts.id) the movement belongs to. */
   crossfitWorkoutId: string;
+  /** Today's prescribed loads (used by the movement_history tier to scale
+   *  the prior log's effort to today's prescription). */
+  prescribedWeightMale: number | null;
+  prescribedWeightFemale: number | null;
 }
 
 export interface PartSuggestionInput extends PartForClassification {
@@ -78,6 +105,10 @@ interface CtxUser {
 const DIRECT_HISTORY_LOOKBACK_DAYS = 6 * 30;
 const DIRECT_HISTORY_FRESH_DAYS = 90;
 const SIMILAR_HISTORY_LOOKBACK_DAYS = 12 * 30;
+// Movement-history tier (notes_insights_v2_spec.md §4): same 6-month
+// window as direct-history; freshness cliff at 90 days.
+const MOVEMENT_HISTORY_LOOKBACK_DAYS = 6 * 30;
+const MOVEMENT_HISTORY_FRESH_DAYS = 90;
 
 /**
  * Look up the %1RM band for (stimulusClass, movementCategory). Falls back
@@ -274,6 +305,237 @@ function suggestFromOneRm(
     anchor1rmLb: Math.round(estimated1rmLb * 10) / 10,
     anchorSource: describe,
     stimulusClass,
+  };
+}
+
+// ============================================
+// Movement-history tier (notes_insights_v2_spec.md §4)
+// ============================================
+//
+// Finds the athlete's most recent log of this movement on any *other*
+// template in the last 6 months. Tier 1 already covers same-template
+// history, so we exclude the current template id. Sorted newest-first;
+// the caller takes the most-recent row only.
+
+export interface MovementHistoryRow {
+  scoreId: string;
+  workoutDate: string;
+  actualWeight: number | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setEntries: any[] | null;
+  rpe: number | null;
+  priorPrescribedMale: number | null;
+  priorPrescribedFemale: number | null;
+  workoutTemplateTitle: string | null;
+  crossfitWorkoutId: string;
+}
+
+async function findMovementHistoryAnyTemplate(
+  userId: string,
+  movementId: string,
+  excludeWorkoutId: string
+): Promise<MovementHistoryRow[]> {
+  const cutoff = daysAgo(MOVEMENT_HISTORY_LOOKBACK_DAYS);
+  const rows = await db
+    .select({
+      scoreId: scores.id,
+      workoutDate: workoutSessions.workoutDate,
+      actualWeight: scoreMovementDetails.actualWeight,
+      setEntries: scoreMovementDetails.setEntries,
+      rpe: scores.rpe,
+      priorPrescribedMale: crossfitWorkoutMovements.prescribedWeightMale,
+      priorPrescribedFemale: crossfitWorkoutMovements.prescribedWeightFemale,
+      workoutTemplateTitle: crossfitWorkouts.title,
+      crossfitWorkoutId: crossfitWorkoutMovements.crossfitWorkoutId,
+    })
+    .from(scoreMovementDetails)
+    .innerJoin(scores, eq(scores.id, scoreMovementDetails.scoreId))
+    .innerJoin(
+      crossfitWorkoutMovements,
+      eq(
+        crossfitWorkoutMovements.id,
+        scoreMovementDetails.crossfitWorkoutMovementId
+      )
+    )
+    .innerJoin(
+      crossfitWorkouts,
+      eq(crossfitWorkouts.id, crossfitWorkoutMovements.crossfitWorkoutId)
+    )
+    .innerJoin(
+      workoutSessions,
+      eq(workoutSessions.id, scores.workoutSessionId)
+    )
+    .where(
+      and(
+        eq(scores.userId, userId),
+        eq(crossfitWorkoutMovements.movementId, movementId),
+        // Exclude the current template — tier 1's responsibility.
+        ne(crossfitWorkoutMovements.crossfitWorkoutId, excludeWorkoutId),
+        sql`${workoutSessions.workoutDate} >= ${cutoff.toISOString().slice(0, 10)}`
+      )
+    )
+    .orderBy(desc(workoutSessions.workoutDate))
+    .limit(10);
+  return rows.map((r) => ({
+    scoreId: r.scoreId,
+    workoutDate: r.workoutDate,
+    actualWeight: r.actualWeight != null ? Number(r.actualWeight) : null,
+    setEntries: r.setEntries,
+    rpe: r.rpe != null ? Number(r.rpe) : null,
+    priorPrescribedMale:
+      r.priorPrescribedMale != null ? Number(r.priorPrescribedMale) : null,
+    priorPrescribedFemale:
+      r.priorPrescribedFemale != null ? Number(r.priorPrescribedFemale) : null,
+    workoutTemplateTitle: r.workoutTemplateTitle,
+    crossfitWorkoutId: r.crossfitWorkoutId,
+  }));
+}
+
+/**
+ * Pick the prior prescribed weight for the gender we suggest against.
+ * Mirrors `pickRxWeight` semantics — female-first when gender == 'female',
+ * with the opposite-gender column as a fallback so older templates that
+ * only seeded one side still resolve.
+ */
+function pickPriorPrescribed(
+  row: { priorPrescribedMale: number | null; priorPrescribedFemale: number | null },
+  gender: string | null
+): number | null {
+  if (gender === "female") {
+    return row.priorPrescribedFemale ?? row.priorPrescribedMale ?? null;
+  }
+  return row.priorPrescribedMale ?? row.priorPrescribedFemale ?? null;
+}
+
+function pickTodaysPrescribed(
+  m: MovementSuggestionInput,
+  gender: string | null
+): number | null {
+  if (gender === "female") {
+    return m.prescribedWeightFemale ?? m.prescribedWeightMale ?? null;
+  }
+  return m.prescribedWeightMale ?? m.prescribedWeightFemale ?? null;
+}
+
+/**
+ * Pure math for the movement-history suggestion. Exported for unit tests so
+ * the scaling-ratio + RPE-nudge + clamp logic stays DB-independent.
+ *
+ * Cascade contract:
+ *  - When `priorPrescribedLb` is present, the centerline scales today's
+ *    prescribed weight by the prior actual/prescribed ratio. This preserves
+ *    relative effort — Rx → Rx, 75/105 → ≈71% of today's prescription.
+ *  - When `priorPrescribedLb` is null, fall back to the raw prior actual
+ *    weight (athlete's most recent observed capacity) and signal `low`
+ *    confidence so the chip stays advisory.
+ *  - Upper bound clamps to today's prescribed weight; the 1RM tiers own the
+ *    heavier-than-Rx case.
+ */
+export function computeMovementHistorySuggestion(input: {
+  priorActualLb: number;
+  priorPrescribedLb: number | null;
+  todayPrescribedLb: number | null;
+  rpe: number | null;
+  ageDays: number;
+}): {
+  centerline: number;
+  lowLb: number;
+  highLb: number;
+  confidence: SuggestedWeightConfidence;
+} | null {
+  const { priorActualLb, priorPrescribedLb, todayPrescribedLb, rpe, ageDays } =
+    input;
+  if (!Number.isFinite(priorActualLb) || priorActualLb <= 0) return null;
+
+  let confidence: SuggestedWeightConfidence = "medium";
+  // Stale prior → drop to low. Same threshold as DIRECT_HISTORY_FRESH_DAYS.
+  if (ageDays > MOVEMENT_HISTORY_FRESH_DAYS) confidence = "low";
+
+  // Default to raw prior actual when we can't compute a scaling ratio.
+  let centerline = priorActualLb;
+  if (
+    priorPrescribedLb != null &&
+    priorPrescribedLb > 0 &&
+    todayPrescribedLb != null &&
+    todayPrescribedLb > 0
+  ) {
+    const scalingRatio = priorActualLb / priorPrescribedLb;
+    centerline = todayPrescribedLb * scalingRatio;
+  } else {
+    // Missing prescribed weight on the prior log — confidence must drop.
+    confidence = "low";
+  }
+
+  // RPE nudge: heavy last time → drop 5%; easy last time → bump 5%.
+  if (rpe != null) {
+    if (rpe >= 9) centerline = centerline * 0.95;
+    else if (rpe <= 6) centerline = centerline * 1.05;
+  }
+
+  let lowLb = centerline * 0.95;
+  let highLb = centerline * 1.05;
+
+  // Clamp the upper bound at today's prescribed weight — the heavier-than-Rx
+  // case is the 1RM tiers' job. When today's prescribed weight is missing,
+  // we don't clamp (raw-prior-actual mode).
+  if (todayPrescribedLb != null && todayPrescribedLb > 0) {
+    if (highLb > todayPrescribedLb) highLb = todayPrescribedLb;
+    // After clamping high, low might exceed high — pull both to today's
+    // prescribed weight in that degenerate case.
+    if (lowLb > highLb) lowLb = highLb;
+  }
+
+  const roundedLow = roundToPlate(lowLb);
+  const roundedHigh = roundToPlate(highLb);
+  if (roundedLow <= 0 && roundedHigh <= 0) return null;
+  return {
+    centerline,
+    lowLb: roundedLow,
+    highLb: roundedHigh,
+    confidence,
+  };
+}
+
+function suggestFromMovementHistory(
+  row: MovementHistoryRow,
+  todayPrescribedLb: number | null,
+  priorPrescribedLb: number | null,
+  stimulusClass: StimulusClass | null
+): SuggestedWeight | null {
+  const priorActual = representativeWeightFromHistory({
+    scoreId: row.scoreId,
+    workoutDate: row.workoutDate,
+    actualWeight: row.actualWeight,
+    setEntries: row.setEntries,
+    rpe: row.rpe,
+  });
+  if (priorActual == null) return null;
+
+  const ageDays = daysBetween(row.workoutDate, new Date());
+  const computed = computeMovementHistorySuggestion({
+    priorActualLb: priorActual,
+    priorPrescribedLb,
+    todayPrescribedLb,
+    rpe: row.rpe,
+    ageDays,
+  });
+  if (!computed) return null;
+
+  return {
+    method: "movement_history",
+    confidence: computed.confidence,
+    lowLb: computed.lowLb,
+    highLb: computed.highLb,
+    anchor1rmLb: null,
+    anchorSource: `Last time on ${row.workoutTemplateTitle ?? "another template"} — ${row.workoutDate}${row.rpe != null ? ` @ RPE ${row.rpe}` : ""}`,
+    stimulusClass,
+    priorContext: {
+      workoutDate: row.workoutDate,
+      priorPrescribedLb,
+      priorActualLb: priorActual,
+      rpe: row.rpe,
+      workoutTemplateTitle: row.workoutTemplateTitle,
+    },
   };
 }
 
@@ -513,6 +775,32 @@ export async function suggestWeightsForPart(
       }
     }
 
+    // 3.5. Movement history across templates — catches non-1RM movements
+    // (dumbbell, kettlebell, sandbag) that have prior logs on other
+    // templates. Same-template logs are excluded (tier 1's job).
+    const movementHistory = await findMovementHistoryAnyTemplate(
+      user.id,
+      m.movementId,
+      m.crossfitWorkoutId
+    );
+    if (movementHistory.length > 0) {
+      const todayPrescribed = pickTodaysPrescribed(m, user.gender);
+      // Take the most-recent row (already sorted desc) — we trust recency
+      // over averaging here since stimulus class can vary between templates.
+      const priorRow = movementHistory[0];
+      const priorPrescribed = pickPriorPrescribed(priorRow, user.gender);
+      const fromHistory = suggestFromMovementHistory(
+        priorRow,
+        todayPrescribed,
+        priorPrescribed,
+        stimulusClass
+      );
+      if (fromHistory) {
+        out.set(m.crossfitWorkoutMovementId, fromHistory);
+        continue;
+      }
+    }
+
     // 4. Similar-stimulus history
     const similarWeights = await findSimilarStimulusHistory(
       user.id,
@@ -564,6 +852,8 @@ export async function loadMovementSuggestionInputs(
       rxStimulusClass: movements.rxStimulusClass,
       commonRxWeightMale: movements.commonRxWeightMale,
       commonRxWeightFemale: movements.commonRxWeightFemale,
+      prescribedWeightMale: crossfitWorkoutMovements.prescribedWeightMale,
+      prescribedWeightFemale: crossfitWorkoutMovements.prescribedWeightFemale,
     })
     .from(crossfitWorkoutMovements)
     .innerJoin(movements, eq(movements.id, crossfitWorkoutMovements.movementId))
@@ -581,6 +871,10 @@ export async function loadMovementSuggestionInputs(
       r.commonRxWeightMale != null ? Number(r.commonRxWeightMale) : null,
     commonRxWeightFemale:
       r.commonRxWeightFemale != null ? Number(r.commonRxWeightFemale) : null,
+    prescribedWeightMale:
+      r.prescribedWeightMale != null ? Number(r.prescribedWeightMale) : null,
+    prescribedWeightFemale:
+      r.prescribedWeightFemale != null ? Number(r.prescribedWeightFemale) : null,
   }));
 }
 
