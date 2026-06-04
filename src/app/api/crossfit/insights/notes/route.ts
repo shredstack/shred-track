@@ -10,6 +10,7 @@ import {
   aggregateRpeComplaintCorrelation,
   aggregateTemporalComplaints,
 } from "@/lib/crossfit/insights/notes-extraction";
+import { aggregateWeeklyDigest } from "@/lib/crossfit/insights/digest";
 
 export async function GET() {
   const session = await getSessionUser();
@@ -37,12 +38,14 @@ export async function GET() {
     rpeCallouts,
     dormantWins,
     graduationTracker,
+    weeklyDigest,
   ] = await Promise.all([
     aggregateNotesForUser(session.id),
     aggregateTemporalComplaints(session.id),
     aggregateRpeComplaintCorrelation(session.id),
     aggregateDormantComplaints(session.id),
     aggregateGraduationTracker(session.id),
+    aggregateWeeklyDigest(session.id),
   ]);
   return NextResponse.json({
     ...insights,
@@ -50,5 +53,6 @@ export async function GET() {
     rpeCallouts,
     dormantWins,
     graduationTracker,
+    weeklyDigest,
   });
 }

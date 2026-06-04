@@ -10,6 +10,7 @@ import {
   Flame,
   Leaf,
   TrendingUp,
+  CalendarDays,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +27,7 @@ import type {
   NotesRpeCallout,
   NotesTemporalCallout,
 } from "@/lib/crossfit/insights/notes-extraction";
+import type { WeeklyDigestBullet } from "@/lib/crossfit/insights/digest";
 
 export function NotesInsightsCard() {
   const { data: user, isLoading: userLoading } = useUserProfile();
@@ -122,6 +124,7 @@ function Body({ data }: { data: NotesInsights }) {
   const graduationCandidates = (data.graduationTracker ?? []).filter(
     (g) => g.status === "trending_up" || g.status === "flat"
   );
+  const weeklyDigest = data.weeklyDigest ?? null;
 
   const hasContent =
     data.complaints.length +
@@ -131,7 +134,7 @@ function Body({ data }: { data: NotesInsights }) {
       rpeCallouts.length +
       dormantWins.length +
       graduationCandidates.length >
-    0;
+      0 || !!weeklyDigest;
 
   return (
     <div className="space-y-3">
@@ -151,6 +154,19 @@ function Body({ data }: { data: NotesInsights }) {
         </div>
       ) : (
         <>
+          {weeklyDigest && (
+            <Section
+              title="This week in your notes"
+              icon={
+                <CalendarDays className="h-3.5 w-3.5 text-fuchsia-400" />
+              }
+            >
+              {weeklyDigest.bullets.map((b, i) => (
+                <DigestBulletRow key={`${b.kind}-${i}`} item={b} />
+              ))}
+            </Section>
+          )}
+
           {data.complaints.length > 0 && (
             <Section
               title="Recurring complaints"
@@ -402,6 +418,82 @@ function DormantWinRow({ item }: { item: NotesDormantWin }) {
       </span>
     </div>
   );
+}
+
+function DigestBulletRow({ item }: { item: WeeklyDigestBullet }) {
+  // Each bullet renders a single line, copy-matched to the spec §3.2
+  // examples. No "see more" — the card is meant to be the whole story.
+  if (item.kind === "new_complaint") {
+    return (
+      <div className="text-xs">
+        <p className="text-foreground/90">
+          <span className="text-muted-foreground">New this week: </span>
+          <span className="font-medium capitalize">
+            &ldquo;{item.topic}&rdquo;
+          </span>{" "}
+          <span className="text-muted-foreground">
+            ({item.mentions} mention{item.mentions === 1 ? "" : "s"})
+          </span>
+        </p>
+        {item.examplePhrase && (
+          <p className="text-[11px] italic text-muted-foreground line-clamp-1">
+            “{item.examplePhrase}”
+          </p>
+        )}
+      </div>
+    );
+  }
+  if (item.kind === "newly_scaled") {
+    return (
+      <p className="text-xs text-foreground/90">
+        <span className="text-muted-foreground">
+          Scaled this week that wasn&apos;t last week:{" "}
+        </span>
+        <span className="font-medium capitalize">{item.movement}</span>
+      </p>
+    );
+  }
+  if (item.kind === "best_of_week") {
+    const value = formatBestValue(item.value, item.unit);
+    const windowSuffix = item.window ? ` in ${item.window}` : "";
+    return (
+      <div className="text-xs">
+        <p className="text-foreground/90">
+          <span className="text-muted-foreground">Best of the week: </span>
+          <span className="font-mono">{value}</span>
+          <span className="text-muted-foreground">{windowSuffix} · </span>
+          <span className="font-medium capitalize">{item.movement}</span>
+        </p>
+        {item.qualitative === "better" && item.phrase && (
+          <p className="text-[11px] italic text-muted-foreground line-clamp-1">
+            “{item.phrase}”
+          </p>
+        )}
+      </div>
+    );
+  }
+  // dormant
+  return (
+    <p className="text-xs text-foreground/90">
+      <span className="text-muted-foreground">
+        Quiet for {item.weeksSilent} week{item.weeksSilent === 1 ? "" : "s"}:
+        no mention of{" "}
+      </span>
+      <span className="font-medium capitalize">
+        &ldquo;{item.topic}&rdquo;
+      </span>
+    </p>
+  );
+}
+
+function formatBestValue(value: number, unit: string): string {
+  if (unit === "sec" && value >= 60) {
+    const minutes = Math.floor(value / 60);
+    const seconds = Math.floor(value % 60);
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+  }
+  const formatted = Number.isInteger(value) ? value.toString() : value.toFixed(1);
+  return `${formatted} ${unit}`;
 }
 
 function shortDate(iso: string): string {

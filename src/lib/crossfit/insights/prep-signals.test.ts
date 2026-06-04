@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
+  pickNoteNudge,
   pickRecentBests,
   proposeStretchGoal,
   recommendationForTopic,
   shapeComplaintBanners,
   type MovementSignalRow,
+  type NoteNudgeCandidate,
 } from "./prep-signals";
 import type { NotesPerformanceMetric } from "@/types/crossfit";
 
@@ -237,5 +239,58 @@ describe("recommendationForTopic", () => {
 
   it("normalizes whitespace + case before lookup", () => {
     expect(recommendationForTopic("  Grip  ")).not.toBeNull();
+  });
+});
+
+// ============================================
+// pickNoteNudge — score-entry note prompt (PR 3 §3.1)
+// ============================================
+
+describe("pickNoteNudge", () => {
+  function c(
+    movement: string,
+    scaleCount: number,
+    lastScaledAt = "2026-05-01"
+  ): NoteNudgeCandidate {
+    return { movement, scaleCount, lastScaledAt };
+  }
+
+  it("returns null when no candidates meet the 3-scale floor", () => {
+    expect(pickNoteNudge([])).toBeNull();
+    expect(pickNoteNudge([c("Toes to Bar", 2, "2026-05-15")])).toBeNull();
+  });
+
+  it("picks the eligible movement (≥ 3 scales)", () => {
+    const out = pickNoteNudge([c("Toes to Bar", 3, "2026-05-15")]);
+    expect(out).not.toBeNull();
+    expect(out!.movement).toBe("Toes to Bar");
+    expect(out!.scaleCount).toBe(3);
+  });
+
+  it("prefers the most-recent eligible movement when multiple qualify", () => {
+    const out = pickNoteNudge([
+      c("Pull-ups", 5, "2026-04-01"),
+      c("Toes to Bar", 3, "2026-05-15"),
+      c("Double Unders", 4, "2026-05-01"),
+    ]);
+    expect(out!.movement).toBe("Toes to Bar");
+  });
+
+  it("on equal last-scaled dates, picks the higher scale count", () => {
+    const out = pickNoteNudge([
+      c("Pull-ups", 3, "2026-05-15"),
+      c("Toes to Bar", 6, "2026-05-15"),
+    ]);
+    expect(out!.movement).toBe("Toes to Bar");
+    expect(out!.scaleCount).toBe(6);
+  });
+
+  it("filters out sub-floor candidates even when they're more recent", () => {
+    // T2B scaled twice this week (sub-floor); DU scaled 4× last month.
+    const out = pickNoteNudge([
+      c("Toes to Bar", 2, "2026-05-30"),
+      c("Double Unders", 4, "2026-04-15"),
+    ]);
+    expect(out!.movement).toBe("Double Unders");
   });
 });
