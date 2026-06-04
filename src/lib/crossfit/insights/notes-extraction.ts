@@ -103,6 +103,9 @@ export type NotesInsights = {
   temporalCallouts?: NotesTemporalCallout[];
   rpeCallouts?: NotesRpeCallout[];
   dormantWins?: NotesDormantWin[];
+  // Added in PR 2 — scaling-graduation tracker. Optional for the same
+  // forward-compat reason.
+  graduationTracker?: GraduationTrackerEntry[];
 };
 
 // ============================================
@@ -1440,6 +1443,247 @@ export async function aggregateDormantComplaints(
     ),
   }));
   return aggregateDormantComplaintsFromRows(rows);
+}
+
+// ---------- (d) Scaling-graduation tracker (Notes Insights v2 PR 2 §2.3) ----------
+//
+// "You've scaled X 4× over 6 weeks and your numbers on X are trending up —
+// try RX next time." Powered by joining `scoring_rationale` entries
+// (scaled movement + reason) to the same-score performance signals.
+
+const GRADUATION_WINDOW_DAYS = 90;
+const GRADUATION_MIN_SCALES = 3;
+const GRADUATION_TREND_LEN = 3;
+const GRADUATION_FLAT_LEN = 4;
+const GRADUATION_FLAT_TOLERANCE = 0.05; // 5%
+const GRADUATION_MAX_OUTPUT = 4;
+
+// Lower-is-better metrics — pace and set-split are time bounds where a
+// smaller number means the athlete moved faster.
+const GRADUATION_LOWER_IS_BETTER: ReadonlySet<NotesPerformanceMetric> =
+  new Set(["pace", "set_split"]);
+
+export type GraduationStatus = "trending_up" | "flat" | "trending_down";
+
+export type GraduationTrackerEntry = {
+  movement: string;
+  reason: string;
+  status: GraduationStatus;
+  scaleCount: number;
+  weeksSpan: number;
+  // Latest scaled-session date for sort + display.
+  lastScaledAt: string; // YYYY-MM-DD
+};
+
+// One entry per (score, scaled movement). Each carries the same-score
+// performance signal for that movement when one exists. Shape is exposed
+// for unit testability — the aggregator never touches the DB.
+export type GraduationEntry = {
+  scoreId: string;
+  workoutDate: string; // YYYY-MM-DD
+  movement: string;
+  reason: string;
+  signal: { metric: NotesPerformanceMetric; value: number } | null;
+};
+
+function compareGraduationDirection(
+  prev: { metric: NotesPerformanceMetric; value: number },
+  cur: { metric: NotesPerformanceMetric; value: number }
+): "better" | "worse" | "same" {
+  // Trend only defined across same-metric signals.
+  if (prev.metric !== cur.metric) return "same";
+  if (cur.value === prev.value) return "same";
+  const lowerBetter = GRADUATION_LOWER_IS_BETTER.has(cur.metric);
+  if (lowerBetter) return cur.value < prev.value ? "better" : "worse";
+  return cur.value > prev.value ? "better" : "worse";
+}
+
+function isFlatWithinTolerance(values: number[]): boolean {
+  if (values.length === 0) return false;
+  const base = values[0];
+  if (base === 0) return values.every((v) => v === 0);
+  const tolerance = Math.abs(base) * GRADUATION_FLAT_TOLERANCE;
+  return values.every((v) => Math.abs(v - base) <= tolerance);
+}
+
+function computeWeeksSpan(firstIso: string, lastIso: string): number {
+  const first = parseIsoDate(firstIso);
+  const last = parseIsoDate(lastIso);
+  if (!first || !last) return 0;
+  const diffDays = Math.round(
+    (last.getTime() - first.getTime()) / (24 * 60 * 60 * 1000)
+  );
+  if (diffDays <= 0) return 1;
+  return Math.max(1, Math.round(diffDays / 7));
+}
+
+export function aggregateGraduationTrackerFromRows(
+  rows: GraduationEntry[]
+): GraduationTrackerEntry[] {
+  type Bucket = {
+    movement: string;
+    reason: string;
+    scoreIds: Set<string>;
+    items: GraduationEntry[];
+    firstDate: string;
+    lastDate: string;
+  };
+  const buckets = new Map<string, Bucket>();
+  for (const row of rows) {
+    const key = `${row.movement.toLowerCase()}::${row.reason.toLowerCase()}`;
+    let b = buckets.get(key);
+    if (!b) {
+      b = {
+        movement: row.movement,
+        reason: row.reason,
+        scoreIds: new Set(),
+        items: [],
+        firstDate: row.workoutDate,
+        lastDate: row.workoutDate,
+      };
+      buckets.set(key, b);
+    }
+    b.scoreIds.add(row.scoreId);
+    b.items.push(row);
+    if (row.workoutDate < b.firstDate) b.firstDate = row.workoutDate;
+    if (row.workoutDate > b.lastDate) b.lastDate = row.workoutDate;
+  }
+
+  const out: GraduationTrackerEntry[] = [];
+  for (const b of buckets.values()) {
+    if (b.scoreIds.size < GRADUATION_MIN_SCALES) continue;
+
+    // Chronologically-ordered signal series for this movement across the
+    // scaled scores. Drop entries without a signal so the trend window
+    // walks contiguous values.
+    const signals = b.items
+      .filter(
+        (i): i is GraduationEntry & {
+          signal: { metric: NotesPerformanceMetric; value: number };
+        } => i.signal !== null
+      )
+      .sort((x, y) => x.workoutDate.localeCompare(y.workoutDate))
+      .map((i) => i.signal);
+
+    let status: GraduationStatus | null = null;
+
+    if (signals.length >= GRADUATION_TREND_LEN) {
+      const recent3 = signals.slice(-GRADUATION_TREND_LEN);
+      const sameMetric = recent3.every((s) => s.metric === recent3[0].metric);
+      if (sameMetric) {
+        const dirs: ("better" | "worse" | "same")[] = [];
+        for (let i = 1; i < recent3.length; i++) {
+          dirs.push(compareGraduationDirection(recent3[i - 1], recent3[i]));
+        }
+        if (dirs.every((d) => d === "better")) status = "trending_up";
+        else if (dirs.every((d) => d === "worse")) status = "trending_down";
+      }
+    }
+
+    if (!status && signals.length >= GRADUATION_FLAT_LEN) {
+      const recent4 = signals.slice(-GRADUATION_FLAT_LEN);
+      const sameMetric = recent4.every((s) => s.metric === recent4[0].metric);
+      if (sameMetric && isFlatWithinTolerance(recent4.map((s) => s.value))) {
+        status = "flat";
+      }
+    }
+
+    if (!status) continue;
+
+    out.push({
+      movement: b.movement,
+      reason: b.reason,
+      status,
+      scaleCount: b.scoreIds.size,
+      weeksSpan: computeWeeksSpan(b.firstDate, b.lastDate),
+      lastScaledAt: b.lastDate,
+    });
+  }
+
+  // Most-recent last-scaled session first so the freshest signal surfaces.
+  out.sort((a, b) => b.lastScaledAt.localeCompare(a.lastScaledAt));
+  return out.slice(0, GRADUATION_MAX_OUTPUT);
+}
+
+export async function aggregateGraduationTracker(
+  userId: string
+): Promise<GraduationTrackerEntry[]> {
+  const since = daysAgoIso(GRADUATION_WINDOW_DAYS);
+
+  const extractionRows = await db
+    .select({
+      scoreId: scoreNotesExtractions.scoreId,
+      scalingRationale: scoreNotesExtractions.scalingRationale,
+      workoutDate: workoutSessions.workoutDate,
+    })
+    .from(scoreNotesExtractions)
+    .innerJoin(scores, eq(scores.id, scoreNotesExtractions.scoreId))
+    .innerJoin(workoutSessions, eq(workoutSessions.id, scores.workoutSessionId))
+    .where(
+      and(eq(scores.userId, userId), gte(workoutSessions.workoutDate, since))
+    );
+
+  if (extractionRows.length === 0) return [];
+
+  const scoreIds = extractionRows.map((r) => r.scoreId);
+
+  const signalRows = await db
+    .select({
+      scoreId: scoreMovementSignals.scoreId,
+      movementName: scoreMovementSignals.movementName,
+      metric: scoreMovementSignals.metric,
+      value: scoreMovementSignals.value,
+    })
+    .from(scoreMovementSignals)
+    .where(
+      and(
+        eq(scoreMovementSignals.userId, userId),
+        inArray(scoreMovementSignals.scoreId, scoreIds)
+      )
+    );
+
+  // Pick one signal per (score, movement). Highest value wins for
+  // higher-is-better metrics; pace ties are broken by first-seen so the
+  // walk is deterministic.
+  const signalByKey = new Map<
+    string,
+    { metric: NotesPerformanceMetric; value: number }
+  >();
+  for (const s of signalRows) {
+    const key = `${s.scoreId}::${s.movementName.toLowerCase()}`;
+    const cur = signalByKey.get(key);
+    const next = {
+      metric: s.metric as NotesPerformanceMetric,
+      value: Number(s.value),
+    };
+    if (!cur) {
+      signalByKey.set(key, next);
+      continue;
+    }
+    if (GRADUATION_LOWER_IS_BETTER.has(next.metric)) {
+      if (next.value < cur.value) signalByKey.set(key, next);
+    } else if (next.value > cur.value) {
+      signalByKey.set(key, next);
+    }
+  }
+
+  const rows: GraduationEntry[] = [];
+  for (const r of extractionRows) {
+    const rationale = (r.scalingRationale ?? []) as NotesScalingReason[];
+    for (const sr of rationale) {
+      if (!sr.movement) continue;
+      const key = `${r.scoreId}::${sr.movement.toLowerCase()}`;
+      rows.push({
+        scoreId: r.scoreId,
+        workoutDate: r.workoutDate,
+        movement: sr.movement,
+        reason: sr.reason,
+        signal: signalByKey.get(key) ?? null,
+      });
+    }
+  }
+
+  return aggregateGraduationTrackerFromRows(rows);
 }
 
 // ---------- shared date helpers ----------

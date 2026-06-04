@@ -731,10 +731,15 @@ function CrossfitPageBody() {
             const isPersonalAndOwn =
               workout.communityId == null && workout.createdBy === userId;
             const showMoveToGym = canMovePersonalToGym && isPersonalAndOwn;
-            const isSectioned = (workout.sections?.length ?? 0) > 0;
-            // Programming-published workouts get the flat per-section
-            // layout. Personal / legacy non-sectioned workouts keep the
-            // single-card layout below.
+            // Section layout is for gym programming only. Personal
+            // workouts always carry one synthetic section per session in
+            // the unified schema, but they're single-card by intent — and
+            // ProgrammedWorkoutDay hides Edit for any workout without a
+            // communityId (no /gym/programming/[weekStart] link to point
+            // at), so it would strand the athlete with no edit path.
+            const isSectioned =
+              (workout.sections?.length ?? 0) > 0 &&
+              workout.communityId != null;
             if (isSectioned) {
               return (
                 <ProgrammedWorkoutDay

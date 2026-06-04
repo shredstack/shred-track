@@ -433,12 +433,18 @@ export async function readSessionWorkouts(
 
     // Flatten parts across every section in the group. The UI looks up
     // parts by id (via section.partIds), so a flat list with stable ids
-    // is enough — order within the array doesn't matter.
+    // is enough — order within the array doesn't matter. Dedup by part
+    // id so a group that ended up with two sessions pointing at the
+    // same template (e.g. a double-submitted personal save) doesn't
+    // render the same part twice.
     const flatParts: SyntheticWorkout["parts"] = [];
+    const seenPartIds = new Set<string>();
     for (const s of groupSessions) {
       if (!s.crossfitWorkoutId) continue;
       const parts = partsByTemplate.get(s.crossfitWorkoutId) ?? [];
       for (const p of parts) {
+        if (seenPartIds.has(p.id)) continue;
+        seenPartIds.add(p.id);
         const score = scoreByPart.get(p.id);
         flatParts.push({
           id: p.id,

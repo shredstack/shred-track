@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import {
   aggregateDormantComplaints,
+  aggregateGraduationTracker,
   aggregateNotesForUser,
   aggregateRpeComplaintCorrelation,
   aggregateTemporalComplaints,
@@ -30,17 +31,24 @@ export async function GET() {
     );
   }
 
-  const [insights, temporalCallouts, rpeCallouts, dormantWins] =
-    await Promise.all([
-      aggregateNotesForUser(session.id),
-      aggregateTemporalComplaints(session.id),
-      aggregateRpeComplaintCorrelation(session.id),
-      aggregateDormantComplaints(session.id),
-    ]);
+  const [
+    insights,
+    temporalCallouts,
+    rpeCallouts,
+    dormantWins,
+    graduationTracker,
+  ] = await Promise.all([
+    aggregateNotesForUser(session.id),
+    aggregateTemporalComplaints(session.id),
+    aggregateRpeComplaintCorrelation(session.id),
+    aggregateDormantComplaints(session.id),
+    aggregateGraduationTracker(session.id),
+  ]);
   return NextResponse.json({
     ...insights,
     temporalCallouts,
     rpeCallouts,
     dormantWins,
+    graduationTracker,
   });
 }
