@@ -20,6 +20,7 @@ import {
   Dumbbell,
   Flag,
   HeartPulse,
+  Scale,
   Sparkles,
   Trophy,
   Users,
@@ -133,6 +134,14 @@ export const ADMIN_TOOLS: AdminTool[] = [
     icon: HeartPulse,
     group: "recovery",
     superOnly: false,
+  },
+  {
+    slug: "stimulus-profiles",
+    label: "Suggested-weight bands",
+    description: "Tune %1RM bands per stimulus class + movement category",
+    icon: Scale,
+    group: "crossfit",
+    superOnly: true,
   },
 ];
 

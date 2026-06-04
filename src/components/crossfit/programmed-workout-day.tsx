@@ -14,6 +14,11 @@ import { WorkoutSectionBlock } from "@/components/crossfit/workout-section-block
 import { PartSection } from "@/components/crossfit/workout-card";
 import { CalorieBadge } from "@/components/crossfit/calorie-badge";
 import { BenchmarkPrPill } from "@/components/crossfit/benchmark-pr-pill";
+import { TemplateHistoryLink } from "@/components/crossfit/template-history-sheet";
+import {
+  SuggestionContext,
+  useSuggestedWeights,
+} from "@/hooks/useSuggestedWeights";
 import type { WorkoutDisplay } from "@/types/crossfit";
 
 interface ProgrammedWorkoutDayProps {
@@ -63,6 +68,29 @@ export function ProgrammedWorkoutDay({
     (a, b) => a.position - b.position
   );
   const showKebab = !!(onEditInProgramming || onDelete || onMoveToGym);
+
+  // Pre-fetch the per-movement suggestion map for the owner template so
+  // each MovementRow inside PartSection can render its chip without firing
+  // its own request. Skip when every part already has a logged score
+  // (chips hide post-log anyway).
+  const needsSuggestions =
+    !!workout.crossfitWorkoutId && parts.some((p) => !p.score);
+  const { data: suggestionsData } = useSuggestedWeights(
+    needsSuggestions ? workout.crossfitWorkoutId ?? null : null
+  );
+  const suggestionMap = (() => {
+    if (!suggestionsData) return null;
+    const m = new Map<
+      string,
+      (typeof suggestionsData.parts)[number]["suggestions"][string]
+    >();
+    for (const part of suggestionsData.parts) {
+      for (const [cwmId, s] of Object.entries(part.suggestions)) {
+        m.set(cwmId, s);
+      }
+    }
+    return m;
+  })();
   const weekStart = mondayOfWeek(workout.workoutDate);
   // Programming admin deep-link. The page resolves the gym from the
   // user's active community (no communityId segment in the URL), so we
@@ -95,6 +123,7 @@ export function ProgrammedWorkoutDay({
     (!!workout.description || workout.isPartner || workout.requiresVest);
 
   return (
+    <SuggestionContext.Provider value={suggestionMap}>
     <div className="space-y-3">
       {/* Day header strip — slim, non-Card. Carries gym branding,
           calorie chip, and admin kebab. Workout title is intentionally
@@ -129,6 +158,12 @@ export function ProgrammedWorkoutDay({
             </>
           ) : null}
         </div>
+        <div className="flex items-center gap-1">
+          {workout.crossfitWorkoutId && (
+            <TemplateHistoryLink
+              crossfitWorkoutId={workout.crossfitWorkoutId}
+            />
+          )}
         {showKebab ? (
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -173,6 +208,7 @@ export function ProgrammedWorkoutDay({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
+        </div>
       </div>
 
       {/* One standalone card per section. */}
@@ -299,5 +335,6 @@ export function ProgrammedWorkoutDay({
         </div>
       )}
     </div>
+    </SuggestionContext.Provider>
   );
 }

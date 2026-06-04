@@ -173,6 +173,7 @@ interface WireWorkout {
   description: string | null;
   workoutDate: string;
   benchmarkWorkoutId: string | null;
+  crossfitWorkoutId: string | null;
   requiresVest?: boolean | null;
   vestWeightMaleLb?: number | null;
   vestWeightFemaleLb?: number | null;
@@ -305,6 +306,7 @@ function wireWorkoutToDisplay(w: WireWorkout): WorkoutDisplay {
     communityLogoUrl: w.communityLogoUrl,
     sections: w.sections ?? [],
     benchmarkWorkoutId: w.benchmarkWorkoutId,
+    crossfitWorkoutId: w.crossfitWorkoutId ?? null,
     requiresVest: w.requiresVest ?? undefined,
     vestWeightMaleLb: w.vestWeightMaleLb ?? undefined,
     vestWeightFemaleLb: w.vestWeightFemaleLb ?? undefined,

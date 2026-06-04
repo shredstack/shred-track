@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
   communityMemberships,
+  crossfitWorkoutMovements,
   crossfitWorkoutParts,
   crossfitWorkouts,
   familyMembers,
@@ -9,7 +10,7 @@ import {
   scoreMovementDetails,
   workoutSessions,
 } from "@/db/schema";
-import { and, eq, desc, asc } from "drizzle-orm";
+import { and, eq, desc, asc, inArray } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
 import { validateAndAggregateRoundDurations } from "@/lib/crossfit/round-aggregation";
@@ -18,10 +19,19 @@ import type { SetEntry } from "@/types/crossfit";
 import { computeScoreEstimate } from "@/lib/calories/orchestrator";
 import { workingWeightFromSetData } from "@/lib/calories/one-rep-max";
 import { buildAppleHealthMetadata } from "@/lib/apple-health/build-metadata";
+import { refreshStrengthForMovement } from "@/lib/crossfit/strength-updater";
+import type { SuggestedWeightMethod } from "@/db/schema";
 
 // ============================================
 // Request types
 // ============================================
+
+interface SuggestedWeightSnapshotInput {
+  lowLb: number;
+  highLb: number;
+  confidence?: "high" | "medium" | "low" | null;
+  method?: SuggestedWeightMethod | null;
+}
 
 interface MovementDetailInput {
   workoutMovementId: string;
@@ -39,6 +49,10 @@ interface MovementDetailInput {
   actualDurationSecondsPerRound?: number[];
   actualWeightLbsPerRound?: number[];
   notes?: string;
+  // Snapshot of the suggestion that was on screen when the athlete picked
+  // their weight. Display + analytics only — never used to override the
+  // actual logged weight. See suggested_working_weight_and_template_history_spec.md.
+  suggestedWeight?: SuggestedWeightSnapshotInput;
 }
 
 interface ScorePostBody {
@@ -481,6 +495,18 @@ export async function POST(req: NextRequest) {
                     )
                   : null,
               notes: d.notes ?? null,
+              suggestedWeightLbLow:
+                d.suggestedWeight?.lowLb != null
+                  ? String(d.suggestedWeight.lowLb)
+                  : null,
+              suggestedWeightLbHigh:
+                d.suggestedWeight?.highLb != null
+                  ? String(d.suggestedWeight.highLb)
+                  : null,
+              suggestedWeightConfidence:
+                d.suggestedWeight?.confidence ?? null,
+              suggestedWeightMethod:
+                d.suggestedWeight?.method ?? null,
             }))
         );
       }
@@ -490,6 +516,28 @@ export async function POST(req: NextRequest) {
 
     // Invalidate insights cache for whichever user the score belongs to.
     await invalidateCrossfitInsightsCache(effectiveUserId);
+
+    // Refresh the athlete_movement_strength cache for every (user, movement)
+    // touched by this score. Best-effort — a failure here must not block
+    // the score response. The nightly Inngest sweep is the safety net for
+    // drift; this synchronous path is just the fast path so the next WOD
+    // card render sees an updated suggestion.
+    try {
+      const cwmIds = normalizedDetails
+        .map((d) => d.workoutMovementId)
+        .filter((id): id is string => !!id);
+      if (cwmIds.length > 0) {
+        const movementRows = await db
+          .selectDistinct({ movementId: crossfitWorkoutMovements.movementId })
+          .from(crossfitWorkoutMovements)
+          .where(inArray(crossfitWorkoutMovements.id, cwmIds));
+        for (const m of movementRows) {
+          await refreshStrengthForMovement(effectiveUserId, m.movementId);
+        }
+      }
+    } catch (err) {
+      console.error("[strength] refresh failed for score POST", err);
+    }
 
     // Build the Apple Health metadata dict so the client can attach it to
     // the HKWorkout. Best-effort — failures must never block the score

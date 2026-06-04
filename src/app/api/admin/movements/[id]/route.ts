@@ -31,6 +31,7 @@ export async function PUT(
     supportedMetricTypes,
     rxFields,
     rxDefaults,
+    rxStimulusClass,
   } = body;
 
   const [existing] = await db
@@ -67,6 +68,9 @@ export async function PUT(
           ...(Array.isArray(rxFields) ? { rxFields } : {}),
           ...(rxDefaults !== undefined && rxDefaults !== null && typeof rxDefaults === "object"
             ? { rxDefaults }
+            : {}),
+          ...(rxStimulusClass !== undefined
+            ? { rxStimulusClass: rxStimulusClass || null }
             : {}),
         })
         .where(eq(movements.id, id))

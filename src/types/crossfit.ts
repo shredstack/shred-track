@@ -615,6 +615,10 @@ export interface WorkoutDisplay {
    *  the legacy single-body layout. */
   sections?: WorkoutSectionDisplay[];
   benchmarkWorkoutId?: string | null;
+  /** Unified-schema template id. Same value the History + Suggested-weight
+   *  endpoints key off. Null only on freeform sessions (warm-up /
+   *  stretching) which don't have a template. */
+  crossfitWorkoutId?: string | null;
   requiresVest?: boolean;
   vestWeightMaleLb?: number;
   vestWeightFemaleLb?: number;

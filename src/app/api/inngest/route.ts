@@ -18,6 +18,7 @@ import { committedClubEndOfMonth } from "@/inngest/functions/committed-club-end-
 import { classReservationReminder } from "@/inngest/functions/class-reservation-reminder";
 import { computeWorkoutCalories } from "@/inngest/functions/compute-workout-calories";
 import { refreshUserMovementPaces } from "@/inngest/functions/refresh-user-movement-paces";
+import { refreshAthleteMovementStrength } from "@/inngest/functions/refresh-athlete-movement-strength";
 
 // Each Inngest step runs as a separate Vercel function invocation.
 // Vercel Pro allows up to 300s per invocation. Each step makes one Claude
@@ -43,5 +44,6 @@ export const { GET, POST, PUT } = serve({
     classReservationReminder,
     computeWorkoutCalories,
     refreshUserMovementPaces,
+    refreshAthleteMovementStrength,
   ],
 });

@@ -674,6 +674,7 @@ export async function readSessionWorkouts(
       benchmarkWorkoutId: ownerTemplate?.isBenchmark
         ? ownerTemplate.id
         : null,
+      crossfitWorkoutId: ownerTemplate?.id ?? null,
       requiresVest: ownerTemplate?.requiresVest ?? false,
       vestWeightMaleLb:
         ownerTemplate?.vestWeightMaleLb != null
@@ -807,6 +808,9 @@ export interface SyntheticWorkout {
   communityName: string | null;
   communityLogoUrl: string | null;
   benchmarkWorkoutId: string | null;
+  /** Unified-schema template id (crossfit_workouts.id). Used by suggested-
+   *  weight + history endpoints. Null for freeform sessions. */
+  crossfitWorkoutId: string | null;
   requiresVest: boolean;
   vestWeightMaleLb: number | null;
   vestWeightFemaleLb: number | null;
