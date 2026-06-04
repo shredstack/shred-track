@@ -3,7 +3,12 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
-import { aggregateNotesForUser } from "@/lib/crossfit/insights/notes-extraction";
+import {
+  aggregateDormantComplaints,
+  aggregateNotesForUser,
+  aggregateRpeComplaintCorrelation,
+  aggregateTemporalComplaints,
+} from "@/lib/crossfit/insights/notes-extraction";
 
 export async function GET() {
   const session = await getSessionUser();
@@ -25,6 +30,17 @@ export async function GET() {
     );
   }
 
-  const insights = await aggregateNotesForUser(session.id);
-  return NextResponse.json(insights);
+  const [insights, temporalCallouts, rpeCallouts, dormantWins] =
+    await Promise.all([
+      aggregateNotesForUser(session.id),
+      aggregateTemporalComplaints(session.id),
+      aggregateRpeComplaintCorrelation(session.id),
+      aggregateDormantComplaints(session.id),
+    ]);
+  return NextResponse.json({
+    ...insights,
+    temporalCallouts,
+    rpeCallouts,
+    dormantWins,
+  });
 }

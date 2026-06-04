@@ -137,7 +137,8 @@ async function main() {
           note.scoreId,
           extraction,
           NOTES_MODEL_VERSION,
-          contentHash
+          contentHash,
+          { userId: user.id, workoutDate: note.workoutDate }
         );
         const counts = `${extraction.complaints.length}c/${extraction.scalingRationale.length}s/${extraction.milestones.length}m`;
         process.stdout.write(`${counts}\n`);

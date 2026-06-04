@@ -1,0 +1,1 @@
+SELECT score_id, movement_name, metric, value, unit, metric_window FROM score_movement_signals ORDER BY extracted_at DESC LIMIT 10;

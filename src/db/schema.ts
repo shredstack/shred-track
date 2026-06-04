@@ -23,6 +23,7 @@ import type {
   NotesComplaint,
   NotesScalingReason,
   NotesMilestone,
+  NotesPerformanceSignal,
 } from "@/types/crossfit";
 
 // ============================================
@@ -939,10 +940,59 @@ export const scoreNotesExtractions = pgTable("score_notes_extractions", {
   complaints: jsonb("complaints").$type<NotesComplaint[]>().notNull(),
   scalingRationale: jsonb("scaling_rationale").$type<NotesScalingReason[]>().notNull(),
   milestones: jsonb("milestones").$type<NotesMilestone[]>().notNull(),
+  performanceSignals: jsonb("performance_signals")
+    .$type<NotesPerformanceSignal[]>()
+    .notNull()
+    .default(sql`'[]'::jsonb`),
   extractedAt: timestamp("extracted_at", { withTimezone: true }).defaultNow().notNull(),
   modelVersion: text("model_version").notNull(),
   contentHash: text("content_hash"),
 });
+
+// Denormalized mirror of `scoreNotesExtractions.performanceSignals` —
+// one row per (score, performance signal). Populated by the extraction
+// worker in the same transaction that writes `scoreNotesExtractions`, so
+// the JSONB column and this table stay in lockstep without a backfill
+// job. Powers the workout-detail prep card lookup ("give me this user's
+// best signals for movement X in the last 90 days") cheaply.
+// See claude_code_instructions/crossfit_improvements/notes_insights_v2_spec.md §3.2.
+export const scoreMovementSignals = pgTable(
+  "score_movement_signals",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    scoreId: uuid("score_id")
+      .notNull()
+      .references(() => scores.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Canonical-ish movement string emitted by the LLM. Deliberately not
+    // an FK to movements.id — the prep card resolves to a catalog row at
+    // read time via case-insensitive canonical_name match.
+    movementName: text("movement_name").notNull(),
+    metric: text("metric").notNull(),
+    value: numeric("value").notNull(),
+    unit: text("unit").notNull(),
+    // SQL column is `metric_window` because `window` is a reserved word in
+    // PostgreSQL. The TS shape exposes it as `window` so callers see the
+    // same key as the LLM emits.
+    window: text("metric_window"),
+    qualitative: text("qualitative"),
+    phrase: text("phrase").notNull(),
+    workoutDate: date("workout_date").notNull(),
+    extractedAt: timestamp("extracted_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("score_movement_signals_user_movement_date_idx").on(
+      table.userId,
+      sql`lower(${table.movementName})`,
+      sql`${table.workoutDate} desc`
+    ),
+    index("score_movement_signals_score_id_idx").on(table.scoreId),
+  ]
+);
 
 export const benchmarkWorkoutParts = pgTable(
   "benchmark_workout_parts",

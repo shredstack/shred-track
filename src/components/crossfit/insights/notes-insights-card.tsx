@@ -1,6 +1,15 @@
 "use client";
 
-import { Sparkles, Loader2, AlertCircle, Trophy, Wrench } from "lucide-react";
+import {
+  Sparkles,
+  Loader2,
+  AlertCircle,
+  Trophy,
+  Wrench,
+  CalendarClock,
+  Flame,
+  Leaf,
+} from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useNotesInsights } from "@/hooks/useCrossfitInsights";
@@ -10,7 +19,10 @@ import type {
   NotesAggregateComplaint,
   NotesAggregateMilestone,
   NotesAggregateScalingReason,
+  NotesDormantWin,
   NotesInsights,
+  NotesRpeCallout,
+  NotesTemporalCallout,
 } from "@/lib/crossfit/insights/notes-extraction";
 
 export function NotesInsightsCard() {
@@ -99,10 +111,17 @@ function Body({ data }: { data: NotesInsights }) {
     );
   }
 
+  const temporalCallouts = data.temporalCallouts ?? [];
+  const rpeCallouts = data.rpeCallouts ?? [];
+  const dormantWins = data.dormantWins ?? [];
+
   const hasContent =
     data.complaints.length +
       data.scalingRationale.length +
-      data.milestones.length >
+      data.milestones.length +
+      temporalCallouts.length +
+      rpeCallouts.length +
+      dormantWins.length >
     0;
 
   return (
@@ -136,6 +155,30 @@ function Body({ data }: { data: NotesInsights }) {
             </Section>
           )}
 
+          {temporalCallouts.length > 0 && (
+            <Section
+              title="Patterns we noticed"
+              icon={
+                <CalendarClock className="h-3.5 w-3.5 text-sky-400" />
+              }
+            >
+              {temporalCallouts.map((c, i) => (
+                <TemporalCalloutRow key={i} item={c} />
+              ))}
+            </Section>
+          )}
+
+          {rpeCallouts.length > 0 && (
+            <Section
+              title="When effort spikes"
+              icon={<Flame className="h-3.5 w-3.5 text-rose-400" />}
+            >
+              {rpeCallouts.map((c, i) => (
+                <RpeCalloutRow key={i} item={c} />
+              ))}
+            </Section>
+          )}
+
           {data.scalingRationale.length > 0 && (
             <Section
               title="When you scale"
@@ -147,11 +190,14 @@ function Body({ data }: { data: NotesInsights }) {
             </Section>
           )}
 
-          {data.milestones.length > 0 && (
+          {(data.milestones.length > 0 || dormantWins.length > 0) && (
             <Section
-              title="Recent milestones"
+              title="Wins"
               icon={<Trophy className="h-3.5 w-3.5 text-emerald-400" />}
             >
+              {dormantWins.map((w) => (
+                <DormantWinRow key={w.topic} item={w} />
+              ))}
               {data.milestones.map((m) => (
                 <MilestoneRow key={m.scoreId + m.phrase} item={m} />
               ))}
@@ -235,6 +281,77 @@ function MilestoneRow({ item }: { item: NotesAggregateMilestone }) {
       </span>
       <span className="text-[10px] text-muted-foreground shrink-0">
         {shortDate(item.workoutDate)}
+      </span>
+    </div>
+  );
+}
+
+function TemporalCalloutRow({ item }: { item: NotesTemporalCallout }) {
+  // "after rest" or a day-of-week label.
+  const bucketCopy =
+    item.dimension === "post_rest" ? "after a rest day" : `on ${item.bucket}s`;
+  // Lift × baseline. Surface as integer when close to a round number.
+  const lift = item.baselineMentions > 0
+    ? item.mentions / item.baselineMentions
+    : 0;
+  const liftLabel = lift >= 10 ? "10×+" : `${lift.toFixed(1)}×`;
+  return (
+    <div className="text-xs">
+      <p className="text-foreground">
+        You mention{" "}
+        <span className="font-medium capitalize">&ldquo;{item.topic}&rdquo;</span>{" "}
+        {bucketCopy}{" "}
+        <span className="text-sky-300">{liftLabel} more than other days</span>.
+      </p>
+      <p className="text-[10px] text-muted-foreground">
+        {item.mentions} mention{item.mentions === 1 ? "" : "s"} vs ~
+        {item.baselineMentions} expected.
+      </p>
+    </div>
+  );
+}
+
+function RpeCalloutRow({ item }: { item: NotesRpeCallout }) {
+  const lift = item.overallRate > 0
+    ? item.highRpeRate / item.overallRate
+    : 0;
+  const liftLabel = lift >= 10 ? "10×+" : `${lift.toFixed(1)}×`;
+  return (
+    <div className="text-xs">
+      <p className="text-foreground">
+        On RPE-9+ days you mention{" "}
+        <span className="font-medium capitalize">&ldquo;{item.topic}&rdquo;</span>{" "}
+        <span className="text-rose-300">{liftLabel} more often</span>.
+      </p>
+      <p className="text-[10px] text-muted-foreground">
+        {item.highRpeMentions} of {item.highRpeScores} hard sessions.
+      </p>
+    </div>
+  );
+}
+
+function DormantWinRow({ item }: { item: NotesDormantWin }) {
+  const lastSeen = item.lastMentionedAt
+    ? ` (last on ${shortDate(item.lastMentionedAt)})`
+    : "";
+  return (
+    <div className="flex items-baseline justify-between gap-2 text-xs">
+      <span className="min-w-0">
+        <Badge
+          variant="outline"
+          className="mr-1.5 text-[9px] text-emerald-300 border-emerald-500/40 bg-emerald-500/10 align-middle"
+        >
+          <Leaf className="h-2.5 w-2.5 mr-0.5 inline" />
+          Quiet
+        </Badge>
+        <span className="text-foreground">
+          You haven&apos;t mentioned{" "}
+          <span className="font-medium capitalize">
+            &ldquo;{item.topic}&rdquo;
+          </span>{" "}
+          in 4+ weeks
+          <span className="text-muted-foreground">{lastSeen}</span>.
+        </span>
       </span>
     </div>
   );

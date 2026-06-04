@@ -1025,8 +1025,12 @@ export interface MovementOption {
 
 // One physical/mental complaint mentioned in a score note. `topic` is a short
 // canonical phrase (e.g. "shoulder", "low back") so we can group across notes.
+// `movement` is set when the LLM can attribute the complaint to a specific
+// movement (e.g. a movement-attached note saying "grip gave out" on T2B);
+// otherwise null. Drives the workout-detail anticipatory banner (PR 2).
 export interface NotesComplaint {
   topic: string;
+  movement: string | null;
   phrase: string; // verbatim snippet from the note
   confidence: number; // 0..1
 }
@@ -1044,10 +1048,31 @@ export interface NotesMilestone {
   phrase: string;
 }
 
+// Quantitative phrase the LLM extracted about a specific movement. Pointless
+// without a movement, so `movement` is required. Powers the workout-detail
+// prep card's "recent best" / "stretch goal" line (PR 2).
+export type NotesPerformanceMetric =
+  | "unbroken_reps"
+  | "reps_in_window"
+  | "set_split"
+  | "pace"
+  | "load_for_reps";
+
+export interface NotesPerformanceSignal {
+  movement: string;
+  metric: NotesPerformanceMetric;
+  value: number;
+  unit: string; // "reps" | "sec" | "m" | "lb"
+  window: string | null; // "1.5 min" | "10:00 AMRAP" | null
+  qualitative: "better" | "same" | "worse" | null;
+  phrase: string; // verbatim snippet
+}
+
 export interface NotesExtraction {
   complaints: NotesComplaint[];
   scalingRationale: NotesScalingReason[];
   milestones: NotesMilestone[];
+  performanceSignals: NotesPerformanceSignal[];
 }
 
 // ============================================
