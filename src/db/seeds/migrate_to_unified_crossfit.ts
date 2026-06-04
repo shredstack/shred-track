@@ -1952,17 +1952,18 @@ async function runVerifyAssertions(
     );
   }
 
-  // Every non-freeform session has either a template or a non-empty body.
-  // This mirrors the workout_sessions_content_check DB constraint and the
-  // session-writer invariant: gym admins can create a body-only placeholder
-  // (e.g., monthly_challenge, wod) before Smart Builder attaches a template.
+  // Every non-freeform session has either a template or a body. Mirrors
+  // the workout_sessions_content_check DB constraint exactly: gym admins
+  // can create a body-only placeholder (e.g., monthly_challenge, wod) via
+  // session-writer before Smart Builder attaches a template, and that's a
+  // legitimate post-cutover state we must not flag as a migration failure.
   const [orphanSessions] = await tx
     .select({ c: sql<number>`count(*)::int` })
     .from(workoutSessions)
     .where(
       sql`kind not in ('warm_up', 'stretching')
         and crossfit_workout_id is null
-        and (body is null or btrim(body) = '')`
+        and body is null`
     );
   if (Number(orphanSessions.c) > 0) {
     throw new Error(
