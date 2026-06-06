@@ -154,7 +154,7 @@ export function TrackDayEditorSheet({
             title: form.title || undefined,
             description: form.description || undefined,
             workoutDate: form.workoutDate || date,
-            requiresVest: !!form.requiresVest,
+            vestRequirement: form.vestRequirement ?? "none",
             vestWeightMaleLb: form.vestWeightMaleLb
               ? parseFloat(form.vestWeightMaleLb)
               : undefined,

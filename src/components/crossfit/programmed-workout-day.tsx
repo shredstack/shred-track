@@ -109,7 +109,9 @@ export function ProgrammedWorkoutDay({
     null;
   const hasOwnerMetadata =
     !!ownerSectionId &&
-    (!!workout.description || workout.isPartner || workout.requiresVest);
+    (!!workout.description ||
+      workout.isPartner ||
+      (workout.vestRequirement && workout.vestRequirement !== "none"));
 
   return (
     <SuggestionContext.Provider value={suggestionMap}>
@@ -251,17 +253,29 @@ export function ProgrammedWorkoutDay({
                 </p>
               )}
               {isOwnerSection &&
-                (workout.requiresVest || workout.isPartner) && (
+                (workout.vestRequirement === "required" ||
+                  workout.vestRequirement === "optional" ||
+                  workout.isPartner) && (
                   <div className="flex flex-wrap items-center gap-3">
-                    {workout.requiresVest && (
+                    {(workout.vestRequirement === "required" ||
+                      workout.vestRequirement === "optional") && (
                       <div className="flex items-center gap-1.5 text-[11px] text-amber-300/90">
                         <Shield className="size-3.5" />
                         <span>
-                          {workout.vestWeightMaleLb || workout.vestWeightFemaleLb
-                            ? `${workout.vestWeightMaleLb ?? "?"}/${
-                                workout.vestWeightFemaleLb ?? "?"
-                              } lb vest required`
-                            : "Weighted vest required"}
+                          {(() => {
+                            const verb =
+                              workout.vestRequirement === "required"
+                                ? "required"
+                                : "optional";
+                            const weights =
+                              workout.vestWeightMaleLb ||
+                              workout.vestWeightFemaleLb
+                                ? `${workout.vestWeightMaleLb ?? "?"}/${
+                                    workout.vestWeightFemaleLb ?? "?"
+                                  } lb vest ${verb}`
+                                : `Weighted vest ${verb}`;
+                            return weights;
+                          })()}
                         </span>
                       </div>
                     )}

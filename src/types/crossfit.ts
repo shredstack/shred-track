@@ -383,7 +383,7 @@ export interface BenchmarkWorkout {
   isSystem: boolean;
   createdBy: string | null;
   communityId: string | null;
-  requiresVest?: boolean;
+  vestRequirement?: VestRequirement;
   vestWeightMaleLb?: number | null;
   vestWeightFemaleLb?: number | null;
   isPartner?: boolean;
@@ -533,6 +533,42 @@ export interface WorkoutMovementDisplay {
 // between movements, scored by load.
 export type WorkoutPartStructure = "tabata" | "complex";
 
+// Workout-level vest prescription. Three-state.
+// - 'none'     — vest not part of the prescription
+// - 'optional' — coach allows it; wearing it doesn't change division
+// - 'required' — must wear vest to log as Rx (Murph)
+export const VEST_REQUIREMENTS = ["none", "optional", "required"] as const;
+export type VestRequirement = (typeof VEST_REQUIREMENTS)[number];
+
+// How partners share the work within a part.
+// - 'any'              — share-as-desired (default for partner workouts).
+// - 'alternating'      — round-by-round alternation (one round each).
+// - 'single_at_a_time' — each athlete works in isolation; score entry
+//                        surfaces N inputs (one per athlete) and the
+//                        aggregate goes in the primary score column.
+// - 'synchro'          — partners move in unison.
+export const PARTNER_WORK_MODES = [
+  "any",
+  "alternating",
+  "single_at_a_time",
+  "synchro",
+] as const;
+export type PartnerWorkMode = (typeof PARTNER_WORK_MODES)[number];
+
+export const PARTNER_WORK_MODE_LABELS: Record<PartnerWorkMode, string> = {
+  any: "Share as desired",
+  alternating: "Alternating",
+  single_at_a_time: "Each athlete in turn",
+  synchro: "Synchro",
+};
+
+// Per-athlete result row used when partnerWorkMode = 'single_at_a_time'.
+// Value semantics match the part's score type (calories, reps, seconds, …).
+export interface PerAthleteResult {
+  athleteLabel: string;
+  value: number;
+}
+
 export interface IntervalRoundSpec {
   workSeconds: number;
   restSeconds: number;
@@ -563,6 +599,12 @@ export interface WorkoutPartDisplay {
   // Timed Rounds — aggregation strategy + optional per-round window.
   roundScoreAggregation?: RoundScoreAggregation;
   roundWindowSeconds?: number;
+  // Partner work mode (effective only when the workout is `isPartner`).
+  partnerWorkMode?: PartnerWorkMode | null;
+  // Rest period (seconds) rendered after this part, before the next part.
+  restAfterSeconds?: number | null;
+  // For `intervals` parts: when true, omit the rest after the final round.
+  suppressTrailingRest?: boolean;
   notes?: string;
   movements: WorkoutMovementDisplay[];
   // Optional named groupings under this part. Empty = no grouping.
@@ -655,7 +697,7 @@ export interface WorkoutDisplay {
    *  endpoints key off. Null only on freeform sessions (warm-up /
    *  stretching) which don't have a template. */
   crossfitWorkoutId?: string | null;
-  requiresVest?: boolean;
+  vestRequirement?: VestRequirement;
   vestWeightMaleLb?: number;
   vestWeightFemaleLb?: number;
   isPartner?: boolean;
@@ -693,6 +735,9 @@ export interface ScoreDisplay {
   // sum / average) is stored in `timeSeconds` so leaderboard sort works
   // without any special-case math.
   roundDurationsSeconds?: number[];
+  // Populated when the part is logged in 'single_at_a_time' partner mode.
+  // The aggregate result still lives in the primary score columns.
+  perAthleteResults?: PerAthleteResult[];
   /** Personalized calorie estimate (athlete bodyweight, EPOC applied per
    *  user preference). Surfaced in post-score summary and the score row. */
   estimatedKcal?: number | null;
@@ -771,6 +816,10 @@ export interface ScoreInput {
   // (slowest / fastest / sum / average) from this array and writes it to
   // scores.time_seconds.
   roundDurationsSeconds?: number[];
+  // For partner parts logged in 'single_at_a_time' mode. The server sums
+  // (or otherwise aggregates) values into the primary score column;
+  // length should match the workout's partnerCount.
+  perAthleteResults?: PerAthleteResult[];
   movementScalings: MovementScaling[];
 }
 
@@ -937,6 +986,13 @@ export interface WorkoutBuilderPart {
   // carries until submit; the server parses it via parseDurationToSeconds.
   roundScoreAggregation?: RoundScoreAggregation;
   roundWindowInput?: string;
+  // Partner work mode for this part (effective only when workout-level
+  // `isPartner` is true). Undefined = no explicit mode (= 'any' on read).
+  partnerWorkMode?: PartnerWorkMode;
+  // Free-text mm:ss for rest rendered after this part. Parsed at submit.
+  restAfterInput?: string;
+  // For `intervals` parts: omit the rest period after the final round.
+  suppressTrailingRest?: boolean;
   movements: WorkoutBuilderMovement[];
   // Named groupings under this part. Empty = ungrouped flat rendering.
   // Each movement either references a block via `blockTempRef`/`blockId`
@@ -950,8 +1006,8 @@ export interface WorkoutBuilderForm {
   workoutDate: string;
   parts: WorkoutBuilderPart[];
   benchmarkWorkoutId?: string | null;
-  // Workout-level vest fields (Murph requires_vest = true / 20 / 14).
-  requiresVest?: boolean;
+  // Workout-level vest fields. Three-state: 'none' | 'optional' | 'required'.
+  vestRequirement?: VestRequirement;
   vestWeightMaleLb?: string;
   vestWeightFemaleLb?: string;
   // Partner / team workout flag. Description carries the split strategy.

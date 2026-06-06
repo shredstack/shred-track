@@ -13,6 +13,7 @@ import {
   upsertTemplate,
   type TemplatePartInput,
 } from "@/lib/crossfit/upsert-template";
+import type { VestRequirement } from "@/types/crossfit";
 
 // GET /api/admin/benchmarks — list every benchmark template (includes
 // system). Open to super admins + gym coaches/admins for curation.
@@ -115,7 +116,7 @@ export async function GET(_req: NextRequest) {
       isSystem: bw.isSystem,
       createdBy: bw.createdBy,
       communityId: bw.communityId,
-      requiresVest: bw.requiresVest,
+      vestRequirement: bw.vestRequirement as VestRequirement,
       vestWeightMaleLb:
         bw.vestWeightMaleLb != null ? Number(bw.vestWeightMaleLb) : null,
       vestWeightFemaleLb:
@@ -160,7 +161,7 @@ export async function POST(req: NextRequest) {
     description,
     category,
     isSystem,
-    requiresVest,
+    vestRequirement,
     vestWeightMaleLb,
     vestWeightFemaleLb,
     isPartner,
@@ -171,7 +172,7 @@ export async function POST(req: NextRequest) {
     description?: string;
     category?: string | null;
     isSystem?: boolean;
-    requiresVest?: boolean;
+    vestRequirement?: VestRequirement;
     vestWeightMaleLb?: number | string | null;
     vestWeightFemaleLb?: number | string | null;
     isPartner?: boolean;
@@ -232,7 +233,7 @@ export async function POST(req: NextRequest) {
       amrapDurationSeconds: firstPart.amrapDurationSeconds ?? null,
       repScheme: firstPart.repScheme ?? null,
       rounds: firstPart.rounds ?? null,
-      requiresVest: !!requiresVest,
+      vestRequirement: vestRequirement ?? "none",
       vestWeightMaleLb:
         vestWeightMaleLb != null && vestWeightMaleLb !== ""
           ? vestWeightMaleLb

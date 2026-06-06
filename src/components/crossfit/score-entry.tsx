@@ -231,6 +231,10 @@ interface PartState {
   // `roundDurationsSeconds`; the server computes the aggregate per the
   // part's `roundScoreAggregation`.
   roundDurationDrafts: string[];
+  // For partner parts in `single_at_a_time` mode — one value per athlete
+  // (calories / reps / time, depending on the part type). The aggregate
+  // (sum / fastest / etc.) feeds the primary score column.
+  perAthleteDrafts: string[];
 }
 
 export interface SetEntryDraft {
@@ -241,7 +245,8 @@ export interface SetEntryDraft {
 
 function emptyPartState(
   part: WorkoutPartDisplay | null,
-  existing?: ScoreDisplay | null
+  existing?: ScoreDisplay | null,
+  partnerCount?: number | null
 ): PartState {
   const scalings: Record<string, Partial<MovementScaling>> = {};
   const setEntriesMap: Record<string, SetEntryDraft[]> = {};
@@ -363,6 +368,17 @@ function emptyPartState(
       })
     : [];
 
+  // Per-athlete drafts for `single_at_a_time` partner parts. Length = team
+  // size; pre-fill from a previously saved score when editing.
+  const isSingleAtATime = part?.partnerWorkMode === "single_at_a_time";
+  const athleteCount = Math.max(2, Math.min(20, partnerCount ?? 2));
+  const perAthleteDrafts: string[] = isSingleAtATime
+    ? Array.from({ length: athleteCount }, (_, i) => {
+        const v = existing?.perAthleteResults?.[i]?.value;
+        return v != null ? String(v) : "";
+      })
+    : [];
+
   return {
     division: existing?.division ?? null,
     timeSeconds: timeSecondsWasAutoSummed ? undefined : existing?.timeSeconds,
@@ -386,6 +402,7 @@ function emptyPartState(
     durationPerRoundDrafts,
     weightPerRoundDrafts,
     roundDurationDrafts,
+    perAthleteDrafts,
   };
 }
 
@@ -704,7 +721,11 @@ interface ScoreEntryProps {
   // a vest prescription (e.g. Murph). If omitted, the vest UI is hidden.
   workout?: Pick<
     WorkoutDisplay,
-    "requiresVest" | "vestWeightMaleLb" | "vestWeightFemaleLb"
+    | "vestRequirement"
+    | "vestWeightMaleLb"
+    | "vestWeightFemaleLb"
+    | "isPartner"
+    | "partnerCount"
   >;
   // "Log for…" dependent picker (family_memberships, spec §8). When
   // candidates are non-empty the sheet shows a dropdown to attribute the
@@ -783,7 +804,12 @@ export function ScoreEntry({
       ? profile.gender
       : null;
 
-  const requiresVest = !!workout?.requiresVest;
+  // Show the vest UI whenever a vest is part of the prescription —
+  // 'required' OR 'optional'. The athlete still picks whether they
+  // wore one, with `optional` letting them log Rx either way.
+  const showVestUi =
+    workout?.vestRequirement === "required" ||
+    workout?.vestRequirement === "optional";
   const defaultVestWeightLb =
     gender === "female"
       ? workout?.vestWeightFemaleLb ?? workout?.vestWeightMaleLb ?? null
@@ -804,7 +830,12 @@ export function ScoreEntry({
   // is sufficient — no re-sync effect needed.
   const [partStates, setPartStates] = useState<Record<string, PartState>>(() => {
     const initial: Record<string, PartState> = {};
-    for (const p of parts) initial[p.id] = emptyPartState(p, p.score ?? null);
+    for (const p of parts)
+      initial[p.id] = emptyPartState(
+        p,
+        p.score ?? null,
+        workout?.partnerCount ?? null
+      );
     return initial;
   });
 
@@ -1034,7 +1065,7 @@ export function ScoreEntry({
         notes: st.notes || undefined,
         rpe: st.rpe,
         movementScalings: scalings,
-        ...(requiresVest
+        ...(showVestUi
           ? {
               woreVest,
               vestWeightLb:
@@ -1129,9 +1160,29 @@ export function ScoreEntry({
           score.scoreText = st.scoreText || undefined;
       }
 
+      // Partner part with per-athlete inputs: capture the array. The
+      // per-type cases above have already mirrored the sum into the
+      // primary score column.
+      if (
+        part.partnerWorkMode === "single_at_a_time" &&
+        st.perAthleteDrafts.length > 0
+      ) {
+        const parsed = st.perAthleteDrafts
+          .map((draft, i) => {
+            const n = parseFloat(draft);
+            return Number.isFinite(n) && n >= 0
+              ? { athleteLabel: `Athlete ${i + 1}`, value: n }
+              : null;
+          })
+          .filter((r): r is { athleteLabel: string; value: number } => !!r);
+        if (parsed.length > 0) {
+          score.perAthleteResults = parsed;
+        }
+      }
+
       return score;
     },
-    [workoutId, requiresVest, woreVest, vestWeightLbDraft, forUserId]
+    [workoutId, showVestUi, woreVest, vestWeightLbDraft, forUserId]
   );
 
   const partHasData = useCallback(
@@ -1143,6 +1194,10 @@ export function ScoreEntry({
           return (
             !!st.rounds ||
             !!st.remainderReps ||
+            // Single-at-a-time partner mode collects per-athlete reps and
+            // mirrors the sum into totalReps; the rounds/remainder fields
+            // are bypassed, so we count the per-athlete drafts directly.
+            st.perAthleteDrafts.some((d) => parseFloat(d) > 0) ||
             // A single-movement "AMRAP of max reps" is logged via the
             // per-round max-reps inputs, not the rounds/remainder fields —
             // count those as data so the part still gets submitted.
@@ -1354,7 +1409,26 @@ export function ScoreEntry({
           </div>
         );
 
-      case "amrap":
+      case "amrap": {
+        const isSingleAtATime =
+          activePart.partnerWorkMode === "single_at_a_time";
+        if (isSingleAtATime && state.perAthleteDrafts.length > 0) {
+          // For single_at_a_time AMRAPs we collect total reps per athlete
+          // (rounds-and-reps ambiguity goes away when each athlete had
+          // their own attempt). The sum lands in totalReps for ranking.
+          return (
+            <PerAthleteInputs
+              workoutMovementUnit="reps"
+              drafts={state.perAthleteDrafts}
+              onChange={(next) =>
+                updateState(activePart.id, {
+                  perAthleteDrafts: next,
+                  totalReps: sumDrafts(next),
+                })
+              }
+            />
+          );
+        }
         return (
           <div className="grid gap-4 grid-cols-2">
             <div className="space-y-2">
@@ -1395,6 +1469,7 @@ export function ScoreEntry({
             )}
           </div>
         );
+      }
 
       case "for_load": {
         // For Load: weight IS the score, so render per-set inputs for every
@@ -1643,6 +1718,27 @@ export function ScoreEntry({
         // input here. The per-round duration block below carries the score.
         if (partHasPerRoundDur && !partHasMax) {
           return null;
+        }
+        // Partner: each athlete works in isolation, score is the sum.
+        const isSingleAtATime =
+          activePart.partnerWorkMode === "single_at_a_time";
+        if (isSingleAtATime && state.perAthleteDrafts.length > 0) {
+          const unit =
+            workoutType === "for_calories" ? "calories" : "reps";
+          return (
+            <PerAthleteInputs
+              workoutMovementUnit={unit}
+              drafts={state.perAthleteDrafts}
+              onChange={(next) =>
+                updateState(activePart.id, {
+                  perAthleteDrafts: next,
+                  // Mirror the sum into the primary score column so existing
+                  // ranking math (totalReps) keeps working.
+                  totalReps: sumDrafts(next),
+                })
+              }
+            />
+          );
         }
         return (
           <div className="space-y-2">
@@ -1932,9 +2028,9 @@ export function ScoreEntry({
             )}
           </div>
 
-          {/* Workout-level vest toggle. Only renders when the workout
-              prescribes a vest. */}
-          {requiresVest && (
+          {/* Workout-level vest toggle. Renders whenever the workout
+              prescribes a vest — required or optional. */}
+          {showVestUi && (
             <div className="space-y-2 rounded-lg border border-border/40 bg-muted/20 p-3">
               <div className="flex items-center gap-2">
                 <Shield className="size-4 text-amber-400" />
@@ -2860,6 +2956,69 @@ function NoteNudgeBanner({
         {allowed.scaleCount}× recently — a quick note on what you did today
         helps us track your progress.
       </p>
+    </div>
+  );
+}
+
+// Sum a list of numeric drafts into a string for mirroring back into the
+// primary score column. Empty / non-numeric drafts contribute 0; an entirely
+// empty array sums to "" so the legacy "no score yet" check stays valid.
+function sumDrafts(drafts: string[]): string {
+  let total = 0;
+  let any = false;
+  for (const d of drafts) {
+    const n = parseFloat(d);
+    if (Number.isFinite(n) && n >= 0) {
+      total += n;
+      any = true;
+    }
+  }
+  return any ? String(total) : "";
+}
+
+// Per-athlete result inputs for a `single_at_a_time` partner part.
+function PerAthleteInputs({
+  workoutMovementUnit,
+  drafts,
+  onChange,
+}: {
+  workoutMovementUnit: "calories" | "reps";
+  drafts: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const total = sumDrafts(drafts);
+  return (
+    <div className="space-y-2 rounded-lg border border-cyan-500/20 bg-cyan-500/[0.04] p-3">
+      <Label className="text-xs font-medium text-cyan-200">
+        Per-athlete {workoutMovementUnit}
+      </Label>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {drafts.map((value, i) => (
+          <div key={i} className="space-y-1">
+            <Label className="text-[11px] text-muted-foreground">
+              Athlete {i + 1}
+            </Label>
+            <Input
+              type="number"
+              min={0}
+              value={value}
+              onChange={(e) => {
+                const next = drafts.slice();
+                next[i] = e.target.value;
+                onChange(next);
+              }}
+              placeholder="e.g. 22"
+              className="h-9 font-mono"
+            />
+          </div>
+        ))}
+      </div>
+      {total !== "" && (
+        <p className="text-[11px] text-muted-foreground">
+          Total: <span className="font-mono text-foreground">{total}</span>{" "}
+          {workoutMovementUnit}
+        </p>
+      )}
     </div>
   );
 }

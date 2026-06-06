@@ -556,7 +556,7 @@ async function upsertBenchmark(
       repScheme: firstPart.repScheme ?? null,
       isBenchmark: true,
       isSystem: true,
-      requiresVest: !!benchmark.requiresVest,
+      vestRequirement: benchmark.requiresVest ? "required" : "none",
       vestWeightMaleLb: benchmark.vestWeightMaleLb ?? null,
       vestWeightFemaleLb: benchmark.vestWeightFemaleLb ?? null,
       isPartner: !!benchmark.isPartner,
@@ -595,7 +595,7 @@ async function upsertBenchmark(
           amrapDurationSeconds: firstPart.amrapDurationSeconds || null,
           repScheme: firstPart.repScheme || null,
           contentFingerprint: fingerprint,
-          requiresVest: !!benchmark.requiresVest,
+          vestRequirement: benchmark.requiresVest ? "required" : "none",
           vestWeightMaleLb:
             benchmark.vestWeightMaleLb != null
               ? String(benchmark.vestWeightMaleLb)
@@ -626,7 +626,7 @@ async function upsertBenchmark(
           amrapDurationSeconds: firstPart.amrapDurationSeconds || null,
           repScheme: firstPart.repScheme || null,
           contentFingerprint: fingerprint,
-          requiresVest: !!benchmark.requiresVest,
+          vestRequirement: benchmark.requiresVest ? "required" : "none",
           vestWeightMaleLb:
             benchmark.vestWeightMaleLb != null
               ? String(benchmark.vestWeightMaleLb)

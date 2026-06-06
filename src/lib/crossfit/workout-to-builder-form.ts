@@ -33,7 +33,7 @@ export function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
     description: w.description ?? "",
     workoutDate: w.workoutDate,
     benchmarkWorkoutId: w.benchmarkWorkoutId ?? null,
-    requiresVest: !!w.requiresVest,
+    vestRequirement: w.vestRequirement ?? "none",
     vestWeightMaleLb:
       w.vestWeightMaleLb != null ? String(w.vestWeightMaleLb) : "",
     vestWeightFemaleLb:
@@ -108,6 +108,12 @@ export function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
           p.roundWindowSeconds != null
             ? formatSecondsAsClock(p.roundWindowSeconds)
             : "",
+        partnerWorkMode: p.partnerWorkMode ?? undefined,
+        restAfterInput:
+          p.restAfterSeconds != null
+            ? formatSecondsAsClock(p.restAfterSeconds)
+            : "",
+        suppressTrailingRest: !!p.suppressTrailingRest,
         movements: p.movements.map(
           (m): WorkoutBuilderMovement => ({
             tempId: generateTempId(),

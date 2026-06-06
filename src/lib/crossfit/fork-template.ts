@@ -134,7 +134,7 @@ export async function forkOrEditTemplate(
       amrapDurationSeconds: opts.next.amrapDurationSeconds ?? null,
       repScheme: opts.next.repScheme ?? null,
       rounds: opts.next.rounds ?? null,
-      requiresVest: !!opts.next.requiresVest,
+      vestRequirement: opts.next.vestRequirement ?? "none",
       vestWeightMaleLb:
         opts.next.vestWeightMaleLb != null
           ? String(opts.next.vestWeightMaleLb)

@@ -15,11 +15,13 @@ interface IntervalsConfigProps {
   intervalWorkInput: string;
   intervalRestInput: string;
   intervalRounds?: IntervalRoundDraft[];
+  suppressTrailingRest?: boolean;
   onChange: (updates: {
     rounds?: string;
     intervalWorkInput?: string;
     intervalRestInput?: string;
     intervalRounds?: IntervalRoundDraft[] | undefined;
+    suppressTrailingRest?: boolean;
   }) => void;
   compact?: boolean;
 }
@@ -37,6 +39,7 @@ export function IntervalsConfig({
   intervalWorkInput,
   intervalRestInput,
   intervalRounds,
+  suppressTrailingRest = false,
   onChange,
   compact = false,
 }: IntervalsConfigProps) {
@@ -153,6 +156,18 @@ export function IntervalsConfig({
           className="size-3 cursor-pointer"
         />
         Same work / rest every round
+      </label>
+
+      <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
+        <input
+          type="checkbox"
+          checked={suppressTrailingRest}
+          onChange={(e) =>
+            onChange({ suppressTrailingRest: e.target.checked })
+          }
+          className="size-3 cursor-pointer"
+        />
+        Skip rest after the final round
       </label>
 
       {perRound && intervalRounds && (

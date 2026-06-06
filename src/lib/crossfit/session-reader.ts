@@ -47,6 +47,10 @@ import {
   workoutSessions,
 } from "@/db/schema";
 import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
+import type {
+  PerAthleteResult,
+  VestRequirement,
+} from "@/types/crossfit";
 
 export interface SessionReaderFilters {
   // Required: caller's id, used to attach their scores.
@@ -462,6 +466,9 @@ export async function readSessionWorkouts(
           scoreType: p.scoreType,
           roundScoreAggregation: p.roundScoreAggregation,
           roundWindowSeconds: p.roundWindowSeconds,
+          partnerWorkMode: p.partnerWorkMode,
+          restAfterSeconds: p.restAfterSeconds,
+          suppressTrailingRest: p.suppressTrailingRest,
           repScheme: p.repScheme,
           rounds: p.rounds,
           structure: p.structure,
@@ -548,6 +555,11 @@ export async function readSessionWorkouts(
                   Array.isArray(score.roundDurationsSeconds) &&
                   score.roundDurationsSeconds.length > 0
                     ? score.roundDurationsSeconds
+                    : undefined,
+                perAthleteResults:
+                  Array.isArray(score.perAthleteResults) &&
+                  score.perAthleteResults.length > 0
+                    ? (score.perAthleteResults as PerAthleteResult[])
                     : undefined,
                 estimatedKcal: score.estimatedKcal ?? null,
                 estimatedKcalActive: score.estimatedKcalActive ?? null,
@@ -681,7 +693,8 @@ export async function readSessionWorkouts(
         ? ownerTemplate.id
         : null,
       crossfitWorkoutId: ownerTemplate?.id ?? null,
-      requiresVest: ownerTemplate?.requiresVest ?? false,
+      vestRequirement:
+        (ownerTemplate?.vestRequirement as VestRequirement) ?? "none",
       vestWeightMaleLb:
         ownerTemplate?.vestWeightMaleLb != null
           ? Number(ownerTemplate.vestWeightMaleLb)
@@ -750,6 +763,7 @@ export interface SyntheticWorkoutScore {
   woreVest?: boolean | null;
   vestWeightLb?: number;
   roundDurationsSeconds?: number[];
+  perAthleteResults?: PerAthleteResult[];
   estimatedKcal: number | null;
   estimatedKcalActive: number | null;
   estimatedKcalWithEpoc: number | null;
@@ -778,6 +792,9 @@ export interface SyntheticWorkoutPart {
   scoreType: string | null;
   roundScoreAggregation: string | null;
   roundWindowSeconds: number | null;
+  partnerWorkMode: string | null;
+  restAfterSeconds: number | null;
+  suppressTrailingRest: boolean;
   notes: string | null;
   blocks: { id: string; orderIndex: number; title: string }[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -817,7 +834,7 @@ export interface SyntheticWorkout {
   /** Unified-schema template id (crossfit_workouts.id). Used by suggested-
    *  weight + history endpoints. Null for freeform sessions. */
   crossfitWorkoutId: string | null;
-  requiresVest: boolean;
+  vestRequirement: VestRequirement;
   vestWeightMaleLb: number | null;
   vestWeightFemaleLb: number | null;
   isPartner: boolean;

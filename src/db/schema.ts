@@ -430,8 +430,8 @@ export const workouts = pgTable("workouts", {
   source: text("source").default("manual").notNull(), // 'manual' | 'parsed' | 'import' | 'benchmark'
   benchmarkWorkoutId: uuid("benchmark_workout_id").references(() => benchmarkWorkouts.id, { onDelete: "set null" }),
   // Vest prescription. Vest is workout-level (Murph wants the vest the
-  // whole way) — not per-part.
-  requiresVest: boolean("requires_vest").default(false).notNull(),
+  // whole way) — not per-part. Three-state: 'none' | 'optional' | 'required'.
+  vestRequirement: text("vest_requirement").default("none").notNull(),
   vestWeightMaleLb: numeric("vest_weight_male_lb"),
   vestWeightFemaleLb: numeric("vest_weight_female_lb"),
   // Partner / team workouts. Description carries the split strategy.
@@ -496,6 +496,15 @@ export const workoutParts = pgTable(
     // workout types don't need backfill.
     roundScoreAggregation: text("round_score_aggregation"),
     roundWindowSeconds: integer("round_window_seconds"),
+    // Partner / team work mode. 'any' = share-as-desired (default for
+    // partner workouts), 'alternating' = round-by-round, 'single_at_a_time'
+    // = each athlete works in isolation (per-athlete score entry),
+    // 'synchro' = must move in unison. Null = no explicit mode.
+    partnerWorkMode: text("partner_work_mode"),
+    // Rest period rendered between this part and the next ("Rest 5:00").
+    restAfterSeconds: integer("rest_after_seconds"),
+    // For `intervals` parts: omit the rest after the final round.
+    suppressTrailingRest: boolean("suppress_trailing_rest").default(false).notNull(),
     notes: text("notes"),
     // Group this part under a typed section (spec §1.6). Null = no section
     // (personal workouts and any pre-PR1 gym workout). FK declared in the
@@ -665,6 +674,11 @@ export const scores = pgTable(
     // average) is stored in `timeSeconds` so the existing ascending-time
     // sort works without any special-case math.
     roundDurationsSeconds: integer("round_durations_seconds").array(),
+    // Populated when the part's `partner_work_mode = 'single_at_a_time'`.
+    // Shape: `{ athleteLabel: string, value: number }[]`. The aggregated
+    // result (sum, slowest, etc.) still lives in the primary score columns
+    // so existing sort/leaderboard math is unchanged.
+    perAthleteResults: jsonb("per_athlete_results"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -902,8 +916,8 @@ export const benchmarkWorkouts = pgTable("benchmark_workouts", {
   communityId: uuid("community_id").references(() => communities.id),
   isSystem: boolean("is_system").default(false).notNull(),
   // Vest fields mirror the workouts table so benchmark seeds (Murph, Chad)
-  // can prescribe the vest as a first-class field.
-  requiresVest: boolean("requires_vest").default(false).notNull(),
+  // can prescribe the vest as a first-class field. Three-state.
+  vestRequirement: text("vest_requirement").default("none").notNull(),
   vestWeightMaleLb: numeric("vest_weight_male_lb"),
   vestWeightFemaleLb: numeric("vest_weight_female_lb"),
   // Partner / team flag — inherited onto user workouts created from this
@@ -1020,6 +1034,10 @@ export const benchmarkWorkoutParts = pgTable(
     // Timed Rounds — see workoutParts for documentation.
     roundScoreAggregation: text("round_score_aggregation"),
     roundWindowSeconds: integer("round_window_seconds"),
+    // Partner / inter-part rest / trailing-rest — see workoutParts.
+    partnerWorkMode: text("partner_work_mode"),
+    restAfterSeconds: integer("rest_after_seconds"),
+    suppressTrailingRest: boolean("suppress_trailing_rest").default(false).notNull(),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -1133,7 +1151,7 @@ export const crossfitWorkouts = pgTable(
     amrapDurationSeconds: integer("amrap_duration_seconds"),
     repScheme: text("rep_scheme"),
     rounds: integer("rounds"),
-    requiresVest: boolean("requires_vest").default(false).notNull(),
+    vestRequirement: text("vest_requirement").default("none").notNull(),
     vestWeightMaleLb: numeric("vest_weight_male_lb"),
     vestWeightFemaleLb: numeric("vest_weight_female_lb"),
     isPartner: boolean("is_partner").default(false).notNull(),
@@ -1204,6 +1222,10 @@ export const crossfitWorkoutParts = pgTable(
     // Timed Rounds — see workoutParts for documentation.
     roundScoreAggregation: text("round_score_aggregation"),
     roundWindowSeconds: integer("round_window_seconds"),
+    // Partner / inter-part rest / trailing-rest — see workoutParts.
+    partnerWorkMode: text("partner_work_mode"),
+    restAfterSeconds: integer("rest_after_seconds"),
+    suppressTrailingRest: boolean("suppress_trailing_rest").default(false).notNull(),
     notes: text("notes"),
     estimatedKcalLow: integer("estimated_kcal_low"),
     estimatedKcalHigh: integer("estimated_kcal_high"),

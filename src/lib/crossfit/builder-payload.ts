@@ -242,6 +242,12 @@ export function builderPartToPayload(
       part.workoutType === "timed_rounds" && part.roundWindowInput?.trim()
         ? part.roundWindowInput.trim()
         : undefined,
+    partnerWorkMode: part.partnerWorkMode,
+    restAfterSeconds: part.restAfterInput?.trim()
+      ? part.restAfterInput.trim()
+      : undefined,
+    suppressTrailingRest:
+      part.workoutType === "intervals" ? !!part.suppressTrailingRest : false,
     movements: movements.map((m, i) => {
       // Athlete-picked weight: hide every prescribed-weight notation
       // (absolute, BW%, %1RM). Mirrors the existing for_load short-circuit

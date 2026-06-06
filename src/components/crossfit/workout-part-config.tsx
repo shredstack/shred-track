@@ -15,10 +15,15 @@ import {
   canPromoteSequenceToLadder,
 } from "@/lib/crossfit/rep-scheme-parser";
 import type {
+  PartnerWorkMode,
   RoundScoreAggregation,
   WorkoutBuilderBlock,
   WorkoutBuilderMovement,
   WorkoutBuilderPart,
+} from "@/types/crossfit";
+import {
+  PARTNER_WORK_MODES,
+  PARTNER_WORK_MODE_LABELS,
 } from "@/types/crossfit";
 
 // ============================================
@@ -59,6 +64,12 @@ export interface WorkoutPartConfigProps {
    * option. Computed by MultiPartConfig from the parts above this one.
    */
   earlierLoadParts?: EarlierLoadPart[];
+  /**
+   * True when the parent workout is flagged as a partner / team workout.
+   * Gates the per-part "partner work mode" picker — there's no point
+   * picking a mode on a solo workout.
+   */
+  isPartnerWorkout?: boolean;
 }
 
 export function WorkoutPartConfig({
@@ -69,6 +80,7 @@ export function WorkoutPartConfig({
   showRepScheme = false,
   compact = false,
   earlierLoadParts = [],
+  isPartnerWorkout = false,
 }: WorkoutPartConfigProps) {
   const labelClass = compact
     ? "text-xs text-muted-foreground"
@@ -293,6 +305,7 @@ export function WorkoutPartConfig({
             intervalWorkInput={part.intervalWorkInput}
             intervalRestInput={part.intervalRestInput}
             intervalRounds={part.intervalRounds}
+            suppressTrailingRest={part.suppressTrailingRest ?? false}
             onChange={onChange}
             compact={compact}
           />
@@ -351,6 +364,98 @@ export function WorkoutPartConfig({
             part.sideCadenceIntervalInput.trim() !== "")
         }
       />
+
+      {isPartnerWorkout && (
+        <PartnerWorkModePicker
+          value={part.partnerWorkMode}
+          onChange={(partnerWorkMode) => onChange({ partnerWorkMode })}
+          labelClass={labelClass}
+        />
+      )}
+
+      <RestAfterPartField
+        value={part.restAfterInput ?? ""}
+        onChange={(restAfterInput) => onChange({ restAfterInput })}
+        labelClass={labelClass}
+        inputHeight={inputHeight}
+      />
+    </div>
+  );
+}
+
+// Per-part picker for how partners share the work. Only mounted when the
+// parent workout is flagged as a partner / team workout. Defaults to
+// 'any' (share as desired); 'single_at_a_time' opts the part into the
+// per-athlete score-entry flow.
+function PartnerWorkModePicker({
+  value,
+  onChange,
+  labelClass,
+}: {
+  value: PartnerWorkMode | undefined;
+  onChange: (mode: PartnerWorkMode) => void;
+  labelClass: string;
+}) {
+  const effective: PartnerWorkMode = value ?? "any";
+  return (
+    <div className="space-y-1.5 rounded-md border border-cyan-500/20 bg-cyan-500/5 p-2.5">
+      <Label className={labelClass}>How partners share the work</Label>
+      <div className="grid grid-cols-2 gap-1.5">
+        {PARTNER_WORK_MODES.map((mode) => {
+          const selected = effective === mode;
+          return (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => onChange(mode)}
+              className={`rounded-md border px-2 py-1.5 text-xs font-medium transition-colors ${
+                selected
+                  ? "border-cyan-400/50 bg-cyan-400/15 text-cyan-200"
+                  : "border-border/50 bg-muted/30 text-muted-foreground hover:bg-muted/50"
+              }`}
+              aria-pressed={selected}
+            >
+              {PARTNER_WORK_MODE_LABELS[mode]}
+            </button>
+          );
+        })}
+      </div>
+      {effective === "single_at_a_time" && (
+        <p className="text-[11px] text-cyan-300/80">
+          Score entry will capture a separate result per athlete.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// "Rest after this part" disclosure. Always offered; null/empty means no
+// rest pill is rendered. Free-text mm:ss; parsed at submit by the same
+// duration parser used everywhere else.
+function RestAfterPartField({
+  value,
+  onChange,
+  labelClass,
+  inputHeight,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  labelClass: string;
+  inputHeight: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <Label className={labelClass}>Rest after this part (optional)</Label>
+      <DurationInput
+        value={value}
+        onChange={onChange}
+        placeholder="e.g. 5:00"
+        className={inputHeight}
+        ariaLabel="Rest after this part"
+      />
+      <p className="text-[11px] text-muted-foreground">
+        Shown as a Rest pill between this part and the next.
+      </p>
     </div>
   );
 }

@@ -31,7 +31,11 @@ import type {
   FingerprintPart,
   FingerprintWorkoutLevel,
 } from "@/lib/crossfit/fingerprint";
-import type { WorkoutType } from "@/types/crossfit";
+import type {
+  PartnerWorkMode,
+  VestRequirement,
+  WorkoutType,
+} from "@/types/crossfit";
 
 export type TemplatePartMovementInput = {
   movementId: string;
@@ -100,6 +104,13 @@ export type TemplatePartInput = {
     | "average"
     | null;
   roundWindowSeconds?: number | string | null;
+  // Partner work mode — set on each part of an `isPartner` workout to
+  // pick the work-sharing style. Null = no explicit mode (= 'any' on read).
+  partnerWorkMode?: PartnerWorkMode | null;
+  // Rest period rendered after this part. Accepts mm:ss string or seconds.
+  restAfterSeconds?: number | string | null;
+  // For `intervals` parts: omit rest after the final round.
+  suppressTrailingRest?: boolean;
   notes?: string | null;
   movements: TemplatePartMovementInput[];
   blocks?: TemplatePartBlockInput[];
@@ -128,7 +139,7 @@ export type UpsertTemplateInput = {
   amrapDurationSeconds?: number | null;
   repScheme?: string | null;
   rounds?: number | null;
-  requiresVest?: boolean;
+  vestRequirement?: VestRequirement;
   vestWeightMaleLb?: number | string | null;
   vestWeightFemaleLb?: number | string | null;
   isPartner?: boolean;
@@ -238,7 +249,7 @@ export function buildFingerprintInput(
     amrapDurationSeconds: input.amrapDurationSeconds ?? null,
     repScheme: input.repScheme ?? null,
     rounds: input.rounds ?? null,
-    requiresVest: input.requiresVest ?? false,
+    vestRequirement: input.vestRequirement ?? "none",
     vestWeightMaleLb: input.vestWeightMaleLb ?? null,
     vestWeightFemaleLb: input.vestWeightFemaleLb ?? null,
     isPartner: input.isPartner ?? false,
@@ -330,6 +341,10 @@ export function buildFingerprintInput(
         p.workoutType === "timed_rounds"
           ? toDurationSecondsOrNull(p.roundWindowSeconds ?? null)
           : null,
+      partnerWorkMode: p.partnerWorkMode ?? null,
+      restAfterSeconds: toDurationSecondsOrNull(p.restAfterSeconds ?? null),
+      suppressTrailingRest:
+        p.workoutType === "intervals" ? !!p.suppressTrailingRest : false,
       movements,
     };
   });
@@ -386,7 +401,7 @@ export async function upsertTemplate(
       amrapDurationSeconds: input.amrapDurationSeconds ?? null,
       repScheme: input.repScheme ?? null,
       rounds: input.rounds ?? null,
-      requiresVest: !!input.requiresVest,
+      vestRequirement: input.vestRequirement ?? "none",
       vestWeightMaleLb:
         input.vestWeightMaleLb != null ? String(input.vestWeightMaleLb) : null,
       vestWeightFemaleLb:
@@ -530,6 +545,10 @@ export async function insertTemplateParts(
           p.workoutType === "timed_rounds"
             ? toDurationSecondsOrNull(p.roundWindowSeconds ?? null)
             : null,
+        partnerWorkMode: p.partnerWorkMode ?? null,
+        restAfterSeconds: toDurationSecondsOrNull(p.restAfterSeconds ?? null),
+        suppressTrailingRest:
+          p.workoutType === "intervals" ? !!p.suppressTrailingRest : false,
         notes: p.notes ?? null,
       })
       .returning({ id: crossfitWorkoutParts.id });

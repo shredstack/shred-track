@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { VestRequirement } from "@/types/crossfit";
 
 // ---------------------------------------------------------------------------
 // Content fingerprint for unified CrossFit workout templates.
@@ -22,7 +23,11 @@ export type FingerprintWorkoutLevel = {
   amrapDurationSeconds?: number | null;
   repScheme?: string | null;
   rounds?: number | null;
-  requiresVest?: boolean | null;
+  // Three-state vest: 'none' | 'optional' | 'required'. Hashed in a
+  // backwards-compatible way (see pickWorkoutLevel): 'none'/'required'
+  // map to the legacy `requiresVest` boolean; 'optional' adds a new key
+  // so legacy templates retain their existing fingerprints.
+  vestRequirement?: VestRequirement | null;
   vestWeightMaleLb?: number | string | null;
   vestWeightFemaleLb?: number | string | null;
   isPartner?: boolean | null;
@@ -80,6 +85,11 @@ export type FingerprintPart = {
   // workout types don't have their legacy hashes mutated.
   roundScoreAggregation?: string | null;
   roundWindowSeconds?: number | null;
+  // New per-part fields. All conditionally emitted (see pickPartLevel) so
+  // legacy parts that never set these keep their existing fingerprint.
+  partnerWorkMode?: string | null;
+  restAfterSeconds?: number | null;
+  suppressTrailingRest?: boolean | null;
   movements: FingerprintMovement[];
 };
 
@@ -129,19 +139,26 @@ function normalize(value: unknown): unknown {
 }
 
 function pickWorkoutLevel(w: FingerprintWorkoutLevel): Record<string, unknown> {
-  return {
+  const out: Record<string, unknown> = {
     workoutType: w.workoutType,
     timeCapSeconds: w.timeCapSeconds ?? null,
     amrapDurationSeconds: w.amrapDurationSeconds ?? null,
     repScheme: w.repScheme ?? null,
     rounds: w.rounds ?? null,
-    requiresVest: w.requiresVest ?? false,
+    // Legacy boolean stays in the hash so existing templates' fingerprints
+    // are preserved across the 'none'/'required' rename. 'optional' is a
+    // new state and hashes the same as 'none' here.
+    requiresVest: w.vestRequirement === "required",
     vestWeightMaleLb: w.vestWeightMaleLb ?? null,
     vestWeightFemaleLb: w.vestWeightFemaleLb ?? null,
     isPartner: w.isPartner ?? false,
     partnerCount: w.partnerCount ?? null,
     weightliftingMovementId: w.weightliftingMovementId ?? null,
   };
+  // Conditional emit so the new 'optional' state is a *distinct* hash
+  // from 'none' (which kept the legacy false boolean and no extra key).
+  if (w.vestRequirement === "optional") out.vestRequirement = "optional";
+  return out;
 }
 
 function pickPartLevel(p: FingerprintPart): Record<string, unknown> {
@@ -173,6 +190,13 @@ function pickPartLevel(p: FingerprintPart): Record<string, unknown> {
   if (p.roundWindowSeconds != null) {
     out.roundWindowSeconds = p.roundWindowSeconds;
   }
+  // Conditional emit for new per-part fields: a part that omits them
+  // hashes identically to a pre-feature part with the same prescription.
+  if (p.partnerWorkMode) out.partnerWorkMode = p.partnerWorkMode;
+  if (p.restAfterSeconds != null && p.restAfterSeconds > 0) {
+    out.restAfterSeconds = p.restAfterSeconds;
+  }
+  if (p.suppressTrailingRest) out.suppressTrailingRest = true;
   return out;
 }
 

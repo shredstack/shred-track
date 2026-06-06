@@ -32,6 +32,7 @@ import {
 import type {
   WorkoutSessionScoreType,
 } from "@/db/schema";
+import type { VestRequirement } from "@/types/crossfit";
 
 function isIsoDate(s: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
@@ -75,7 +76,7 @@ export async function POST(
     parts?: TemplatePartInput[];
     isScored?: boolean;
     scoreType?: WorkoutSessionScoreType | null;
-    requiresVest?: boolean;
+    vestRequirement?: VestRequirement;
     vestWeightMaleLb?: number | string | null;
     vestWeightFemaleLb?: number | string | null;
     isPartner?: boolean;
@@ -102,7 +103,7 @@ export async function POST(
       amrapDurationSeconds: firstPart.amrapDurationSeconds ?? null,
       repScheme: firstPart.repScheme ?? null,
       rounds: firstPart.rounds ?? null,
-      requiresVest: !!body.requiresVest,
+      vestRequirement: body.vestRequirement ?? "none",
       vestWeightMaleLb: body.vestWeightMaleLb ?? null,
       vestWeightFemaleLb: body.vestWeightFemaleLb ?? null,
       isPartner: !!body.isPartner,

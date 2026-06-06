@@ -38,6 +38,7 @@ import type {
   WorkoutPartDisplay,
 } from "@/types/crossfit";
 import {
+  PARTNER_WORK_MODE_LABELS,
   WORKOUT_TYPE_LABELS,
   WORKOUT_TYPE_COLORS,
 } from "@/types/crossfit";
@@ -227,6 +228,25 @@ function ScoreRow({
             windowSeconds={part.roundWindowSeconds ?? null}
           />
         )}
+
+      {/* Per-athlete breakdown for `single_at_a_time` partner parts. */}
+      {s.perAthleteResults && s.perAthleteResults.length > 0 && (
+        <div className="space-y-0.5 pl-2 text-xs">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            Per athlete
+          </span>
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 font-mono">
+            {s.perAthleteResults.map((r, i) => (
+              <span key={i}>
+                <span className="text-muted-foreground">
+                  {r.athleteLabel}:
+                </span>{" "}
+                <span className="text-foreground">{r.value}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Per-round time breakdown for movements that captured time per
           round (e.g. "Run 400m × 3 as fast as possible"). The summed total
@@ -702,6 +722,14 @@ export function PartSection({
         >
           {typeLabel}
         </Badge>
+        {part.partnerWorkMode && part.partnerWorkMode !== "any" && (
+          <Badge
+            variant="outline"
+            className="text-[10px] border-cyan-400/40 bg-cyan-500/10 text-cyan-300"
+          >
+            {PARTNER_WORK_MODE_LABELS[part.partnerWorkMode]}
+          </Badge>
+        )}
         {secondaryBits.length > 0 && (
           <span className="flex items-center gap-2.5 text-[11px] text-muted-foreground">
             {secondaryBits}
@@ -889,13 +917,22 @@ export function WorkoutCard({
           </p>
         )}
 
-        {workout.requiresVest && (
+        {(workout.vestRequirement === "required" ||
+          workout.vestRequirement === "optional") && (
           <div className="flex items-center gap-1.5 text-[11px] text-amber-300/90">
             <Shield className="size-3.5" />
             <span>
-              {workout.vestWeightMaleLb || workout.vestWeightFemaleLb
-                ? `${workout.vestWeightMaleLb ?? "?"}/${workout.vestWeightFemaleLb ?? "?"} lb vest required`
-                : "Weighted vest required"}
+              {(() => {
+                const verb =
+                  workout.vestRequirement === "required"
+                    ? "required"
+                    : "optional";
+                return workout.vestWeightMaleLb || workout.vestWeightFemaleLb
+                  ? `${workout.vestWeightMaleLb ?? "?"}/${
+                      workout.vestWeightFemaleLb ?? "?"
+                    } lb vest ${verb}`
+                  : `Weighted vest ${verb}`;
+              })()}
             </span>
           </div>
         )}
@@ -1012,17 +1049,28 @@ export function WorkoutCard({
             })()}
           </>
         ) : (
-          parts.map((part, idx) => (
-            <div key={part.id} className="space-y-4">
-              {idx > 0 && <Separator />}
-              <PartSection
-                part={part}
-                index={idx}
-                showLabel={multiPart}
-                communityId={workout.communityId}
-              />
-            </div>
-          ))
+          parts.map((part, idx) => {
+            const prev = idx > 0 ? parts[idx - 1] : null;
+            const prevRest = prev?.restAfterSeconds;
+            return (
+              <div key={part.id} className="space-y-4">
+                {idx > 0 && <Separator />}
+                {prevRest != null && prevRest > 0 && (
+                  <div className="flex items-center justify-center">
+                    <span className="rounded-full border border-dashed border-zinc-500/40 bg-zinc-500/10 px-2 py-0.5 text-[11px] text-muted-foreground">
+                      Rest {formatSecondsAsClock(prevRest)}
+                    </span>
+                  </div>
+                )}
+                <PartSection
+                  part={part}
+                  index={idx}
+                  showLabel={multiPart}
+                  communityId={workout.communityId}
+                />
+              </div>
+            );
+          })
         )}
 
         {/* "Last time you did this" prep card — stretch goals + anticipatory

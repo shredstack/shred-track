@@ -8,7 +8,11 @@ import {
 } from "@/db/schema";
 import { eq, inArray, and, isNull } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
-import { WORKOUT_TYPE_LABELS, type WorkoutType } from "@/types/crossfit";
+import {
+  WORKOUT_TYPE_LABELS,
+  type VestRequirement,
+  type WorkoutType,
+} from "@/types/crossfit";
 import type { WorkoutSectionKind } from "@/db/schema";
 import type { TrackKind } from "@/types/programming-tracks";
 
@@ -34,8 +38,10 @@ interface SuggestBody {
   parts: SuggestPartInput[];
   // Workout-level signal used for benchmark exact-match comparison.
   // Murph-without-vest should not match canonical Murph; it slides into
-  // the (modified) near-match instead.
-  requiresVest?: boolean;
+  // the (modified) near-match instead. 'optional' is treated as
+  // distinct-from-'required' for matching: an optional-vest Murph is still
+  // a modification of canonical Murph.
+  vestRequirement?: VestRequirement;
   vestWeightMaleLb?: number | null;
   vestWeightFemaleLb?: number | null;
   // Optional authoring context. When provided, biases naming style and
@@ -87,7 +93,7 @@ function normalizeRepScheme(raw: string | null | undefined): string {
 async function findBenchmarkMatch(
   part: SuggestPartInput,
   workoutVest: {
-    requiresVest?: boolean;
+    vestRequirement?: VestRequirement;
     vestWeightMaleLb?: number | null;
     vestWeightFemaleLb?: number | null;
   }
@@ -106,7 +112,7 @@ async function findBenchmarkMatch(
       name: crossfitWorkouts.title,
       workoutType: crossfitWorkouts.workoutType,
       repScheme: crossfitWorkouts.repScheme,
-      requiresVest: crossfitWorkouts.requiresVest,
+      vestRequirement: crossfitWorkouts.vestRequirement,
       vestWeightMaleLb: crossfitWorkouts.vestWeightMaleLb,
       vestWeightFemaleLb: crossfitWorkouts.vestWeightFemaleLb,
     })
@@ -141,7 +147,7 @@ async function findBenchmarkMatch(
 
   const wantMultiset = [...part.movementIds].sort();
   const wantRepScheme = normalizeRepScheme(part.repScheme);
-  const wantVest = !!workoutVest.requiresVest;
+  const wantVest = (workoutVest.vestRequirement ?? "none") as VestRequirement;
   const wantVestM =
     workoutVest.vestWeightMaleLb != null
       ? Number(workoutVest.vestWeightMaleLb)
@@ -167,7 +173,7 @@ async function findBenchmarkMatch(
       const bwVestF =
         bw.vestWeightFemaleLb != null ? Number(bw.vestWeightFemaleLb) : null;
       const vestMatches =
-        !!bw.requiresVest === wantVest &&
+        (bw.vestRequirement as VestRequirement) === wantVest &&
         bwVestM === wantVestM &&
         bwVestF === wantVestF;
       if (bwRepScheme === wantRepScheme && vestMatches) {
@@ -490,7 +496,7 @@ export async function POST(req: NextRequest) {
   //    actually helps the coach — see contextAllowsBenchmarkMatch).
   if (parts.length === 1 && contextAllowsBenchmarkMatch(body.context)) {
     const { exact, near } = await findBenchmarkMatch(parts[0], {
-      requiresVest: body.requiresVest,
+      vestRequirement: body.vestRequirement,
       vestWeightMaleLb: body.vestWeightMaleLb,
       vestWeightFemaleLb: body.vestWeightFemaleLb,
     });
