@@ -16,6 +16,9 @@ import type {
   ScoreDisplay,
   SetEntry,
   IntervalRoundSpec,
+  PartnerWorkMode,
+  PerAthleteResult,
+  VestRequirement,
 } from "@/types/crossfit";
 import type { RepSchemeParsed } from "@/lib/crossfit/rep-scheme-parser";
 
@@ -99,6 +102,7 @@ interface WireScore {
   woreVest?: boolean | null;
   vestWeightLb?: number;
   roundDurationsSeconds?: number[];
+  perAthleteResults?: PerAthleteResult[] | null;
   estimatedKcal?: number | null;
   estimatedKcalActive?: number | null;
   estimatedKcalWithEpoc?: number | null;
@@ -132,6 +136,9 @@ interface WirePart {
     | "average"
     | null;
   roundWindowSeconds?: number | null;
+  partnerWorkMode?: PartnerWorkMode | null;
+  restAfterSeconds?: number | null;
+  suppressTrailingRest?: boolean | null;
   notes: string | null;
   movements: WireMovement[];
   blocks: WireBlock[];
@@ -174,7 +181,7 @@ interface WireWorkout {
   workoutDate: string;
   benchmarkWorkoutId: string | null;
   crossfitWorkoutId: string | null;
-  requiresVest?: boolean | null;
+  vestRequirement?: VestRequirement | null;
   vestWeightMaleLb?: number | null;
   vestWeightFemaleLb?: number | null;
   isPartner?: boolean | null;
@@ -257,6 +264,10 @@ function wireScoreToDisplay(s: WireScore): ScoreDisplay {
       s.roundDurationsSeconds.length > 0
         ? s.roundDurationsSeconds
         : undefined,
+    perAthleteResults:
+      Array.isArray(s.perAthleteResults) && s.perAthleteResults.length > 0
+        ? s.perAthleteResults
+        : undefined,
     estimatedKcal: s.estimatedKcal ?? null,
     estimatedKcalActive: s.estimatedKcalActive ?? null,
     estimatedKcalWithEpoc: s.estimatedKcalWithEpoc ?? null,
@@ -286,6 +297,9 @@ function wirePartToDisplay(p: WirePart): WorkoutPartDisplay {
     scoreType: p.scoreType ?? undefined,
     roundScoreAggregation: p.roundScoreAggregation ?? undefined,
     roundWindowSeconds: p.roundWindowSeconds ?? undefined,
+    partnerWorkMode: p.partnerWorkMode ?? null,
+    restAfterSeconds: p.restAfterSeconds ?? null,
+    suppressTrailingRest: p.suppressTrailingRest ?? false,
     notes: p.notes ?? undefined,
     movements: p.movements.map(wireMovementToDisplay),
     blocks: (p.blocks ?? []).map(wireBlockToDisplay),
@@ -307,7 +321,7 @@ function wireWorkoutToDisplay(w: WireWorkout): WorkoutDisplay {
     sections: w.sections ?? [],
     benchmarkWorkoutId: w.benchmarkWorkoutId,
     crossfitWorkoutId: w.crossfitWorkoutId ?? null,
-    requiresVest: w.requiresVest ?? undefined,
+    vestRequirement: w.vestRequirement ?? undefined,
     vestWeightMaleLb: w.vestWeightMaleLb ?? undefined,
     vestWeightFemaleLb: w.vestWeightFemaleLb ?? undefined,
     isPartner: w.isPartner ?? undefined,
@@ -488,6 +502,13 @@ export interface CreatePartInput {
   // seconds. Server normalizes / validates per workout type.
   roundScoreAggregation?: "slowest" | "fastest" | "sum" | "average";
   roundWindowSeconds?: number | string;
+  // Partner work mode (only meaningful when the workout is isPartner).
+  partnerWorkMode?: PartnerWorkMode;
+  // Rest period (seconds) rendered after this part. Server accepts mm:ss
+  // string or numeric seconds; normalizes to integer seconds on persist.
+  restAfterSeconds?: number | string;
+  // For `intervals` parts: omit rest after the final round.
+  suppressTrailingRest?: boolean;
   notes?: string;
   movements: CreatePartMovementInput[];
   blocks?: CreatePartBlockInput[];
@@ -501,7 +522,7 @@ export interface CreateWorkoutInput {
   /** Set to a gym's id to make this gym programming. Caller must be a
    *  coach/admin of that gym. Omit/null for a personal workout. */
   communityId?: string | null;
-  requiresVest?: boolean;
+  vestRequirement?: VestRequirement;
   vestWeightMaleLb?: number;
   vestWeightFemaleLb?: number;
   isPartner?: boolean;
@@ -513,7 +534,7 @@ export interface UpdateWorkoutInput {
   title?: string;
   description?: string;
   workoutDate: string;
-  requiresVest?: boolean;
+  vestRequirement?: VestRequirement;
   vestWeightMaleLb?: number;
   vestWeightFemaleLb?: number;
   isPartner?: boolean;

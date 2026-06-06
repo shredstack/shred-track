@@ -133,13 +133,18 @@ export async function PUT(
     return NextResponse.json({ error: "Workout not found" }, { status: 404 });
   }
 
-  // Vest validation: if the resulting state has requiresVest=true, at
-  // least one gendered vest weight must be set. Only enforced when the
-  // caller is supplying parts (the body carries the new prescription).
-  if (Array.isArray(body.parts) && body.requiresVest === true) {
+  // Vest validation: if the resulting state has a vest in its prescription
+  // (required or optional), at least one gendered weight must be set.
+  // Only enforced when the caller is supplying parts (the body carries
+  // the new prescription).
+  if (
+    Array.isArray(body.parts) &&
+    (body.vestRequirement === "required" ||
+      body.vestRequirement === "optional")
+  ) {
     if (body.vestWeightMaleLb == null && body.vestWeightFemaleLb == null) {
       return NextResponse.json(
-        { error: "Vest weight is required when requiresVest is true" },
+        { error: "Vest weight is required when a vest is part of the prescription" },
         { status: 400 }
       );
     }
@@ -235,8 +240,8 @@ export async function PUT(
       amrapDurationSeconds: firstPart.amrapDurationSeconds ?? null,
       repScheme: firstPart.repScheme ?? null,
       rounds: firstPart.rounds ?? null,
-      requiresVest:
-        body.requiresVest !== undefined ? !!body.requiresVest : undefined,
+      vestRequirement:
+        body.vestRequirement !== undefined ? body.vestRequirement : undefined,
       vestWeightMaleLb:
         body.vestWeightMaleLb !== undefined ? body.vestWeightMaleLb : null,
       vestWeightFemaleLb:

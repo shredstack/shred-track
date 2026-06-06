@@ -84,6 +84,9 @@ interface ScorePostBody {
   // roundScoreAggregation and writes it to scores.timeSeconds so the
   // leaderboard's ascending-time sort works without special-case math.
   roundDurationsSeconds?: number[];
+  // For partner parts in `single_at_a_time` mode — one entry per athlete.
+  // The primary score column carries the aggregate (sum or other rule).
+  perAthleteResults?: { athleteLabel: string; value: number }[];
   // Live-logger bracket. When omitted, the calorie estimator falls back to
   // the score's own time fields and (last resort) the part's time cap.
   startedAt?: string;
@@ -425,6 +428,11 @@ export async function POST(req: NextRequest) {
           notes: body.notes ?? null,
           rpe: body.rpe ?? null,
           roundDurationsSeconds: timedRoundDurations ?? null,
+          perAthleteResults:
+            Array.isArray(body.perAthleteResults) &&
+            body.perAthleteResults.length > 0
+              ? body.perAthleteResults
+              : null,
           woreVest: body.woreVest ?? null,
           vestWeightLb:
             body.vestWeightLb != null ? body.vestWeightLb.toString() : null,

@@ -69,6 +69,7 @@ import {
   type BenchmarkWorkout,
   type MovementMetricType,
   type ParsedWorkout,
+  type VestRequirement,
   type WorkoutBuilderForm,
   type WorkoutDisplay,
   type WorkoutType,
@@ -762,7 +763,7 @@ function SectionRow({
       description?: string | null;
       isPartner?: boolean;
       partnerCount?: number | null;
-      requiresVest?: boolean;
+      vestRequirement?: VestRequirement;
       vestWeightMaleLb?: number | string | null;
       vestWeightFemaleLb?: number | string | null;
       successMessage?: string;
@@ -782,7 +783,7 @@ function SectionRow({
           description?: string | null;
           isPartner?: boolean;
           partnerCount?: number | null;
-          requiresVest?: boolean;
+          vestRequirement?: VestRequirement;
           vestWeightMaleLb?: number | string | null;
           vestWeightFemaleLb?: number | string | null;
         } = { parts: input.parts };
@@ -803,8 +804,8 @@ function SectionRow({
         if (input.isPartner !== undefined) payload.isPartner = input.isPartner;
         if (input.partnerCount !== undefined)
           payload.partnerCount = input.partnerCount;
-        if (input.requiresVest !== undefined)
-          payload.requiresVest = input.requiresVest;
+        if (input.vestRequirement !== undefined)
+          payload.vestRequirement = input.vestRequirement;
         if (input.vestWeightMaleLb !== undefined)
           payload.vestWeightMaleLb = input.vestWeightMaleLb;
         if (input.vestWeightFemaleLb !== undefined)

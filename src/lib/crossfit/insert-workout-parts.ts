@@ -12,7 +12,7 @@
 import { workoutBlocks, workoutMovements, workoutParts } from "@/db/schema";
 import { parseDurationToSeconds } from "@/lib/crossfit/duration-parser";
 import { parseRepScheme, type RepSchemeParsed } from "@/lib/crossfit/rep-scheme-parser";
-import type { WorkoutType } from "@/types/crossfit";
+import type { PartnerWorkMode, WorkoutType } from "@/types/crossfit";
 
 export interface PartMovementInput {
   movementId: string;
@@ -75,6 +75,9 @@ export interface PartInput {
   scoreType?: "reps" | "load" | null;
   roundScoreAggregation?: "slowest" | "fastest" | "sum" | "average";
   roundWindowSeconds?: number | string;
+  partnerWorkMode?: PartnerWorkMode | null;
+  restAfterSeconds?: number | string | null;
+  suppressTrailingRest?: boolean;
   notes?: string;
   movements: PartMovementInput[];
   blocks?: PartBlockInput[];
@@ -231,6 +234,10 @@ export async function insertWorkoutParts(
           p.workoutType === "timed_rounds"
             ? toDurationSecondsOrNull(p.roundWindowSeconds ?? null)
             : null,
+        partnerWorkMode: p.partnerWorkMode ?? null,
+        restAfterSeconds: toDurationSecondsOrNull(p.restAfterSeconds ?? null),
+        suppressTrailingRest:
+          p.workoutType === "intervals" ? !!p.suppressTrailingRest : false,
         notes: p.notes || null,
       })
       .returning();

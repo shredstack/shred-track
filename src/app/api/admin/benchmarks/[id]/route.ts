@@ -14,6 +14,7 @@ import {
   type TemplatePartInput,
 } from "@/lib/crossfit/upsert-template";
 import { computeWorkoutFingerprint } from "@/lib/crossfit/fingerprint";
+import type { VestRequirement } from "@/types/crossfit";
 
 // PUT /api/admin/benchmarks/[id] — update a benchmark template in place.
 //
@@ -37,7 +38,7 @@ export async function PUT(
     description,
     category,
     isSystem,
-    requiresVest,
+    vestRequirement,
     vestWeightMaleLb,
     vestWeightFemaleLb,
     isPartner,
@@ -48,7 +49,7 @@ export async function PUT(
     description?: string;
     category?: string | null;
     isSystem?: boolean;
-    requiresVest?: boolean;
+    vestRequirement?: VestRequirement;
     vestWeightMaleLb?: number | string | null;
     vestWeightFemaleLb?: number | string | null;
     isPartner?: boolean;
@@ -119,7 +120,9 @@ export async function PUT(
       rounds: firstPart.rounds ?? null,
       isBenchmark: true,
       isSystem: !!(isSystem !== undefined ? isSystem : existing.isSystem),
-      requiresVest: !!(requiresVest !== undefined ? requiresVest : existing.requiresVest),
+      vestRequirement: (vestRequirement !== undefined
+        ? vestRequirement
+        : (existing.vestRequirement as VestRequirement)) ?? "none",
       vestWeightMaleLb:
         vestWeightMaleLb !== undefined ? vestWeightMaleLb : existing.vestWeightMaleLb,
       vestWeightFemaleLb:
@@ -164,8 +167,8 @@ export async function PUT(
         isSystem:
           isSystem !== undefined ? !!isSystem : existing.isSystem,
         contentFingerprint: fingerprint,
-        ...(requiresVest !== undefined
-          ? { requiresVest: !!requiresVest }
+        ...(vestRequirement !== undefined
+          ? { vestRequirement }
           : {}),
         ...(vestWeightMaleLb !== undefined
           ? {

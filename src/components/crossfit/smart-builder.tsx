@@ -81,7 +81,7 @@ function createEmptyForm(workoutDate?: string): WorkoutBuilderForm {
     description: "",
     workoutDate: workoutDate || localTodayString(),
     parts: [emptyPart()],
-    requiresVest: false,
+    vestRequirement: "none",
     vestWeightMaleLb: "",
     vestWeightFemaleLb: "",
   };
@@ -358,7 +358,7 @@ export function SmartBuilder({
         rep: p.repScheme || null,
         ms: p.movements.map((m) => m.movementId || m.movementName).sort(),
       })),
-      vest: !!form.requiresVest,
+      vest: form.vestRequirement ?? "none",
       vm: form.vestWeightMaleLb || null,
       vf: form.vestWeightFemaleLb || null,
       ctxS: context?.sectionKind ?? null,
@@ -367,7 +367,7 @@ export function SmartBuilder({
     return JSON.stringify(payload);
   }, [
     form.parts,
-    form.requiresVest,
+    form.vestRequirement,
     form.vestWeightMaleLb,
     form.vestWeightFemaleLb,
     context?.sectionKind,
@@ -394,7 +394,7 @@ export function SmartBuilder({
             .filter((m) => !m.movementId && m.movementName)
             .map((m) => m.movementName),
         })),
-        requiresVest: !!form.requiresVest,
+        vestRequirement: form.vestRequirement ?? "none",
         vestWeightMaleLb: form.vestWeightMaleLb
           ? Number(form.vestWeightMaleLb)
           : null,
@@ -438,7 +438,7 @@ export function SmartBuilder({
     }
   }, [
     form.parts,
-    form.requiresVest,
+    form.vestRequirement,
     form.vestWeightMaleLb,
     form.vestWeightFemaleLb,
     context,
@@ -505,6 +505,7 @@ export function SmartBuilder({
           <MultiPartConfig
             parts={form.parts}
             onPartsChange={handlePartsChange}
+            isPartnerWorkout={!!form.isPartner}
             enableWeightPct
           />
 
@@ -660,7 +661,7 @@ export function SmartBuilder({
           {/* Workout requirements (vest) */}
           {!hideVest && (
             <VestRequirements
-              requiresVest={!!form.requiresVest}
+              vestRequirement={form.vestRequirement ?? "none"}
               vestWeightMaleLb={form.vestWeightMaleLb ?? ""}
               vestWeightFemaleLb={form.vestWeightFemaleLb ?? ""}
               onChange={(updates) =>

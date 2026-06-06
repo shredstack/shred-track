@@ -183,6 +183,13 @@ export async function PUT(
         rpe: body.rpe ?? existing.rpe,
         roundDurationsSeconds:
           timedRoundDurations ?? existing.roundDurationsSeconds,
+        perAthleteResults:
+          Array.isArray(body.perAthleteResults) &&
+          body.perAthleteResults.length > 0
+            ? body.perAthleteResults
+            : (body.perAthleteResults === null
+                ? null
+                : existing.perAthleteResults),
         woreVest: body.woreVest !== undefined ? body.woreVest : existing.woreVest,
         vestWeightLb:
           body.vestWeightLb != null

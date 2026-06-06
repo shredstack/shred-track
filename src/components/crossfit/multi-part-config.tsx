@@ -120,6 +120,7 @@ interface PartCardProps {
   isCollapsed: boolean;
   showRepScheme: boolean;
   earlierLoadParts: EarlierLoadPart[];
+  isPartnerWorkout: boolean;
   onToggleCollapse: () => void;
   onChange: (updates: Partial<WorkoutBuilderPart>) => void;
   onMovementsChange: (movements: WorkoutBuilderMovement[]) => void;
@@ -135,6 +136,7 @@ function PartCard({
   isCollapsed,
   showRepScheme,
   earlierLoadParts,
+  isPartnerWorkout,
   onToggleCollapse,
   onChange,
   onMovementsChange,
@@ -157,6 +159,7 @@ function PartCard({
         onBlocksChange={onBlocksChange}
         showRepScheme={showRepScheme}
         earlierLoadParts={earlierLoadParts}
+        isPartnerWorkout={isPartnerWorkout}
         compact
       />
     );
@@ -268,6 +271,9 @@ export interface MultiPartConfigProps {
    * benchmark forms (which reuse this component) are unaffected.
    */
   enableWeightPct?: boolean;
+  /** True when the parent workout is a partner / team workout. Lights up
+   *  the per-part partner work mode picker inside each part config. */
+  isPartnerWorkout?: boolean;
 }
 
 export function MultiPartConfig({
@@ -277,6 +283,7 @@ export function MultiPartConfig({
   showRepScheme = false,
   addButtonLabel = "Add another part",
   enableWeightPct = false,
+  isPartnerWorkout = false,
 }: MultiPartConfigProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
@@ -365,25 +372,41 @@ export function MultiPartConfig({
 
   return (
     <div className="space-y-3">
-      {parts.map((part, idx) => (
-        <PartCard
-          key={part.tempId}
-          part={part}
-          index={idx}
-          totalParts={parts.length}
-          isCollapsed={collapsed.has(part.tempId)}
-          showRepScheme={showRepScheme}
-          earlierLoadParts={earlierLoadPartsByTempId.get(part.tempId) ?? []}
-          onToggleCollapse={() => toggleCollapse(part.tempId)}
-          onChange={(updates) => updatePart(part.tempId, updates)}
-          onMovementsChange={(movements) =>
-            updatePartMovements(part.tempId, movements)
-          }
-          onBlocksChange={(blocks) => updatePartBlocks(part.tempId, blocks)}
-          onMove={(direction) => movePart(part.tempId, direction)}
-          onDelete={() => deletePart(part.tempId)}
-        />
-      ))}
+      {parts.map((part, idx) => {
+        const restAfter = (part.restAfterInput ?? "").trim();
+        const hasNext = idx < parts.length - 1;
+        return (
+          <div key={part.tempId} className="space-y-3">
+            <PartCard
+              part={part}
+              index={idx}
+              totalParts={parts.length}
+              isCollapsed={collapsed.has(part.tempId)}
+              showRepScheme={showRepScheme}
+              earlierLoadParts={earlierLoadPartsByTempId.get(part.tempId) ?? []}
+              isPartnerWorkout={isPartnerWorkout}
+              onToggleCollapse={() => toggleCollapse(part.tempId)}
+              onChange={(updates) => updatePart(part.tempId, updates)}
+              onMovementsChange={(movements) =>
+                updatePartMovements(part.tempId, movements)
+              }
+              onBlocksChange={(blocks) => updatePartBlocks(part.tempId, blocks)}
+              onMove={(direction) => movePart(part.tempId, direction)}
+              onDelete={() => deletePart(part.tempId)}
+            />
+            {hasNext && restAfter !== "" && (
+              <div className="flex items-center justify-center">
+                <Badge
+                  variant="outline"
+                  className="border-dashed border-zinc-500/40 bg-zinc-500/10 text-[11px] text-muted-foreground"
+                >
+                  Rest {restAfter}
+                </Badge>
+              </div>
+            )}
+          </div>
+        );
+      })}
 
       {parts.length < maxParts && (
         <Button

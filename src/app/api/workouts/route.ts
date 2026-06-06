@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
     published,
     source,
     benchmarkWorkoutId,
-    requiresVest,
+    vestRequirement,
     vestWeightMaleLb,
     vestWeightFemaleLb,
     isPartner,
@@ -136,16 +136,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Vest validation: if the workout claims it requires a vest, at least
-  // one of the gendered weights must be set. We won't trust a "true"
-  // toggle with no weight on either side.
-  if (requiresVest === true) {
+  // Vest validation: when the workout requires (or optionally permits)
+  // a vest, at least one of the gendered weights must be set so the
+  // builder/score UI knows what to suggest.
+  if (vestRequirement === "required" || vestRequirement === "optional") {
     if (
       vestWeightMaleLb == null &&
       vestWeightFemaleLb == null
     ) {
       return NextResponse.json(
-        { error: "Vest weight is required when requiresVest is true" },
+        { error: "Vest weight is required when a vest is part of the prescription" },
         { status: 400 }
       );
     }
@@ -298,7 +298,7 @@ export async function POST(req: NextRequest) {
           amrapDurationSeconds: firstPart.amrapDurationSeconds ?? null,
           repScheme: firstPart.repScheme ?? null,
           rounds: firstPart.rounds ?? null,
-          requiresVest: !!requiresVest,
+          vestRequirement: vestRequirement ?? "none",
           vestWeightMaleLb: vestWeightMaleLb ?? null,
           vestWeightFemaleLb: vestWeightFemaleLb ?? null,
           isPartner: !!isPartner,

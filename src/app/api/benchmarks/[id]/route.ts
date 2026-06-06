@@ -17,6 +17,7 @@ import {
   type TemplatePartInput,
 } from "@/lib/crossfit/upsert-template";
 import { computeWorkoutFingerprint } from "@/lib/crossfit/fingerprint";
+import type { VestRequirement } from "@/types/crossfit";
 
 export async function PUT(
   req: NextRequest,
@@ -122,7 +123,7 @@ export async function PUT(
       repScheme: firstPart.repScheme ?? null,
       isBenchmark: true,
       isSystem: false,
-      requiresVest: !!existing.requiresVest,
+      vestRequirement: (existing.vestRequirement as VestRequirement) ?? "none",
       vestWeightMaleLb: existing.vestWeightMaleLb,
       vestWeightFemaleLb: existing.vestWeightFemaleLb,
       isPartner:

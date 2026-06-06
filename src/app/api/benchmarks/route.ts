@@ -27,7 +27,12 @@ import {
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 import { pickBestScore, type ScoreRow } from "@/lib/crossfit/benchmark-stats";
-import type { RepMaxTarget, RepMaxStat, WorkoutType } from "@/types/crossfit";
+import type {
+  RepMaxTarget,
+  RepMaxStat,
+  VestRequirement,
+  WorkoutType,
+} from "@/types/crossfit";
 import {
   classifyRepMaxSets,
   pickBestPerRepTarget,
@@ -494,7 +499,7 @@ export async function GET(req: NextRequest) {
       isSystem: bw.isSystem,
       createdBy: bw.createdBy,
       communityId: bw.communityId,
-      requiresVest: bw.requiresVest,
+      vestRequirement: bw.vestRequirement as VestRequirement,
       vestWeightMaleLb:
         bw.vestWeightMaleLb != null ? Number(bw.vestWeightMaleLb) : null,
       vestWeightFemaleLb:

@@ -344,7 +344,7 @@ function CrossfitPageBody() {
         // In gym mode (coach view), write the workout into the gym so all
         // active members see it. Personal view stays personal.
         communityId: inGymMode && isCoach ? activeMembership!.communityId : null,
-        requiresVest: !!form.requiresVest,
+        vestRequirement: form.vestRequirement ?? "none",
         vestWeightMaleLb: form.vestWeightMaleLb
           ? parseFloat(form.vestWeightMaleLb)
           : undefined,
@@ -457,7 +457,7 @@ function CrossfitPageBody() {
           title: form.title || undefined,
           description: form.description || undefined,
           workoutDate: form.workoutDate || dateStr,
-          requiresVest: !!form.requiresVest,
+          vestRequirement: form.vestRequirement ?? "none",
           vestWeightMaleLb: form.vestWeightMaleLb
             ? parseFloat(form.vestWeightMaleLb)
             : undefined,

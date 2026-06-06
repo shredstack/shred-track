@@ -35,6 +35,7 @@ import {
 import type {
   BenchmarkWorkout,
   BenchmarkCategoryName,
+  VestRequirement,
   WorkoutBuilderPart,
 } from "@/types/crossfit";
 import {
@@ -77,8 +78,8 @@ interface BenchmarkFormState {
   description: string;
   category: BenchmarkCategoryName | null;
   isSystem: boolean;
-  // Vest requirement applies to the whole benchmark (Murph, Chad).
-  requiresVest: boolean;
+  // Vest prescription applies to the whole benchmark (Murph, Chad).
+  vestRequirement: VestRequirement;
   vestWeightMaleLb: string;
   vestWeightFemaleLb: string;
   isPartner: boolean;
@@ -94,7 +95,7 @@ const emptyForm: BenchmarkFormState = {
   description: "",
   category: null,
   isSystem: false,
-  requiresVest: false,
+  vestRequirement: "none",
   vestWeightMaleLb: "",
   vestWeightFemaleLb: "",
   isPartner: false,
@@ -111,7 +112,7 @@ function benchmarkToForm(b: BenchmarkWorkout): BenchmarkFormState {
     description: b.description || "",
     category: b.category,
     isSystem: b.isSystem,
-    requiresVest: !!b.requiresVest,
+    vestRequirement: b.vestRequirement ?? "none",
     vestWeightMaleLb:
       b.vestWeightMaleLb != null ? String(b.vestWeightMaleLb) : "",
     vestWeightFemaleLb:
@@ -134,7 +135,7 @@ function formToPayload(form: BenchmarkFormState) {
     description: form.description || undefined,
     category: form.category ?? null,
     isSystem: form.isSystem,
-    requiresVest: form.requiresVest,
+    vestRequirement: form.vestRequirement,
     vestWeightMaleLb: form.vestWeightMaleLb
       ? Number(form.vestWeightMaleLb)
       : undefined,
@@ -441,7 +442,7 @@ export function AdminBenchmarks() {
             />
 
             <VestRequirements
-              requiresVest={form.requiresVest}
+              vestRequirement={form.vestRequirement}
               vestWeightMaleLb={form.vestWeightMaleLb}
               vestWeightFemaleLb={form.vestWeightFemaleLb}
               onChange={(updates) =>
