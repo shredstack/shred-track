@@ -2069,14 +2069,16 @@ export function ScoreEntry({
                   />
                 </div>
               )}
-              {!woreVest && state.division === "rx" && (
-                <p className="flex items-start gap-1.5 text-[11px] text-amber-300/90">
-                  <AlertTriangle className="size-3 mt-0.5 shrink-0" />
-                  Without the vest this typically logs as Scaled. The score
-                  will keep Rx and surface a &quot;No vest&quot; badge — the
-                  leaderboard will reflect both signals.
-                </p>
-              )}
+              {!woreVest &&
+                state.division === "rx" &&
+                workout?.vestRequirement === "required" && (
+                  <p className="flex items-start gap-1.5 text-[11px] text-amber-300/90">
+                    <AlertTriangle className="size-3 mt-0.5 shrink-0" />
+                    Without the vest this typically logs as Scaled. The score
+                    will keep Rx and surface a &quot;No vest&quot; badge — the
+                    leaderboard will reflect both signals.
+                  </p>
+                )}
             </div>
           )}
 
