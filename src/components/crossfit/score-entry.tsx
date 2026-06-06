@@ -1723,8 +1723,15 @@ export function ScoreEntry({
         const isSingleAtATime =
           activePart.partnerWorkMode === "single_at_a_time";
         if (isSingleAtATime && state.perAthleteDrafts.length > 0) {
-          const unit =
-            workoutType === "for_calories" ? "calories" : "reps";
+          // Label the unit by the part's metric. for_calories is always
+          // calories; intervals/for_reps follow the first movement (an
+          // air-bike intervals part is still measured in calories).
+          const firstMovementMetric = activePart.movements[0]?.metricType;
+          const unit: "calories" | "reps" =
+            workoutType === "for_calories" ||
+            firstMovementMetric === "calories"
+              ? "calories"
+              : "reps";
           return (
             <PerAthleteInputs
               workoutMovementUnit={unit}

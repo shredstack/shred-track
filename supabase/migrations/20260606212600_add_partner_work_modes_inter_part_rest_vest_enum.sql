@@ -28,6 +28,8 @@
 --     is logged in single_at_a_time mode. Null otherwise.
 -- ============================================================================
 
+begin;
+
 -- ---- Per-part columns (×3 part tables) -------------------------------------
 
 alter table workout_parts
@@ -117,3 +119,5 @@ alter table crossfit_workouts drop column if exists requires_vest;
 
 alter table scores
   add column if not exists per_athlete_results jsonb;
+
+commit;
