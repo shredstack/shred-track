@@ -497,9 +497,16 @@ function CrossfitPageBody() {
   // ============================================
 
   const handlePartScoreSubmit = async (partId: string, score: ScoreInput) => {
-    if (!scoringWorkout) return;
+    // These guards used to `return` silently, which resolved the submit as a
+    // success and let ScoreEntry close the dialog WITHOUT ever saving. Throw
+    // instead so handleSubmit surfaces the failure and keeps the dialog open.
+    if (!scoringWorkout) {
+      throw new Error("Lost track of the workout — please reopen and try again.");
+    }
     const part = scoringWorkout.parts.find((p) => p.id === partId);
-    if (!part) return;
+    if (!part) {
+      throw new Error("Couldn't match that part — please reopen and try again.");
+    }
 
     // Errors propagate to ScoreEntry's handleSubmit, which surfaces them in
     // the dialog and keeps it open so the failed part can be retried.
@@ -940,6 +947,11 @@ function CrossfitPageBody() {
 
       {scoringWorkout && (
         <ScoreEntry
+          // Force a fresh mount per target. ScoreEntry seeds its per-part
+          // state once at mount and relies on being remounted for each new
+          // workout/section; without a key React reuses the instance and the
+          // seeded state can go stale, stranding the save (empty `pending`).
+          key={`${scoringWorkout.id}:${scoringSectionId ?? "all"}`}
           open
           onOpenChange={(open) => {
             if (!open) {

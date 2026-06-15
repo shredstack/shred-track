@@ -672,7 +672,13 @@ export function useLogScore() {
         const body = await res.json().catch(() => null);
         throw new Error(body?.error || "Failed to log score");
       }
-      return res.json();
+      const saved = await res.json().catch(() => null);
+      // Guard against a 2xx with a missing/malformed body so a non-persisting
+      // "success" can't slip through and close the dialog without saving.
+      if (!saved?.id) {
+        throw new Error("Score didn't save — please try again.");
+      }
+      return saved;
     },
     onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ["workouts"] });
