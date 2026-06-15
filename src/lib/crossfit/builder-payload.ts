@@ -152,6 +152,7 @@ export function benchmarkPartToBuilderPart(
         isMaxReps: !!m.isMaxReps,
         captureDurationPerRound: !!m.captureDurationPerRound,
         isSideCadence: !!m.isSideCadence,
+        slotIndex: m.slotIndex ?? null,
         equipmentCount: m.equipmentCount ?? undefined,
         rxStandard: m.rxStandard ?? "",
         notes: m.notes ?? "",
@@ -173,6 +174,10 @@ export function builderPartToPayload(
   // are phantom defaults (auto-filled from movement library commonRx) that
   // the builder hides from the UI but still carries in state.
   const stripRxWeights = part.workoutType === "for_load";
+  // slotIndex is only meaningful on a rotating EMOM. Gate it so a stale slot
+  // left over from a workout-type switch can't persist; send null otherwise
+  // so the API clears any old value.
+  const isEmom = part.workoutType === "emom";
   return {
     id: part.id,
     // Always sent: weight_pct movements in later parts reference this part
@@ -207,6 +212,9 @@ export function builderPartToPayload(
         part.workoutType === "intervals" ||
         // for_load uses `rounds` as the prescribed set count ("5 sets of…").
         part.workoutType === "for_load" ||
+        // for_reps uses `rounds` as the set count for clock-based formats
+        // ("4 sets, on a 3:00 clock…"). Drives the per-round max-reps grid.
+        part.workoutType === "for_reps" ||
         // timed_rounds always carries a round count — it's the N in
         // "Every X:XX for N rounds".
         part.workoutType === "timed_rounds") &&
@@ -314,6 +322,7 @@ export function builderPartToPayload(
       isMaxReps: !!m.isMaxReps,
       captureDurationPerRound: !!m.captureDurationPerRound,
       isSideCadence: !!m.isSideCadence,
+      slotIndex: isEmom ? m.slotIndex ?? null : null,
       promoteSequenceToLadder: m.promoteSequenceToLadder || undefined,
       equipmentCount: m.equipmentCount,
       rxStandard: m.rxStandard || undefined,

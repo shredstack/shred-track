@@ -197,6 +197,7 @@ export function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
             isMaxReps: !!m.isMaxReps,
             captureDurationPerRound: !!m.captureDurationPerRound,
             isSideCadence: !!m.isSideCadence,
+            slotIndex: m.slotIndex ?? null,
             equipmentCount: m.equipmentCount,
             rxStandard: m.rxStandard ?? "",
             notes: m.notes ?? "",

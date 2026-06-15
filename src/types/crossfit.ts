@@ -472,6 +472,9 @@ export interface BenchmarkMovement {
   // time. Mutually exclusive with isMaxReps.
   captureDurationPerRound?: boolean;
   isSideCadence?: boolean;
+  // Rotating EMOM: 0-based minute/slot of the repeating cycle. null/undefined
+  // = non-rotating.
+  slotIndex?: number | null;
   equipmentCount?: number | null;
   rxStandard: string | null;
   notes?: string | null;
@@ -518,6 +521,9 @@ export interface WorkoutMovementDisplay {
   // When true, this movement runs on the part's side-cadence rather than
   // contributing to the main task.
   isSideCadence?: boolean;
+  // Rotating EMOM: 0-based minute/slot of the repeating cycle. null/undefined
+  // = non-rotating.
+  slotIndex?: number | null;
   equipmentCount?: number;
   rxStandard?: string;
   notes?: string;
@@ -906,6 +912,9 @@ export interface WorkoutBuilderMovement {
   // When true, this movement is the part's side-cadence movement (runs
   // on the part's cadence rather than contributing to the main task).
   isSideCadence?: boolean;
+  // Rotating EMOM: 0-based minute/slot of the repeating cycle. null/undefined
+  // = non-rotating.
+  slotIndex?: number | null;
   equipmentCount?: number;
   rxStandard: string;
   notes: string;

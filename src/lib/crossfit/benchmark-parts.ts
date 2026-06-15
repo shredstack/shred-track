@@ -30,6 +30,7 @@ export interface BenchmarkPartMovementInput {
   isMaxReps?: boolean;
   captureDurationPerRound?: boolean;
   isSideCadence?: boolean;
+  slotIndex?: number | null;
   equipmentCount?: number | null;
   rxStandard?: string | null;
   notes?: string | null;

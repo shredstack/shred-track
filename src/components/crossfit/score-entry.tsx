@@ -442,6 +442,41 @@ function resolveSourcePartMax(
   return null;
 }
 
+// A side-cadence EMOM ("100 wall balls for time, EMOM 5 burpees") is authored
+// as `emom` but scored like for_time on the main task. Resolve the effective
+// scoring type so the render / build / has-data switches all route it the same
+// way. Plain and rotating EMOMs stay `emom`.
+function scoringTypeOf(part: WorkoutPartDisplay): string {
+  if (part.workoutType === "emom" && part.sideCadenceIntervalSeconds) {
+    return "for_time";
+  }
+  return part.workoutType;
+}
+
+// Number of per-round inputs the max-reps / per-round grids should show.
+// Normally the part's `rounds`, but a rotating EMOM has no `rounds` column —
+// its round count is the number of cycles = timeCap / (cycleLength × interval),
+// where cycleLength = max(slotIndex)+1.
+function effectiveMaxRepsRounds(part: WorkoutPartDisplay): number {
+  const isRotatingEmom =
+    part.workoutType === "emom" &&
+    part.movements.some((m) => m.slotIndex != null);
+  if (isRotatingEmom && part.timeCapSeconds && part.emomIntervalSeconds) {
+    const cycleLength =
+      part.movements.reduce(
+        (mx, m) => (m.slotIndex != null ? Math.max(mx, m.slotIndex) : mx),
+        -1
+      ) + 1;
+    if (cycleLength > 0) {
+      const cycles = Math.floor(
+        part.timeCapSeconds / (part.emomIntervalSeconds * cycleLength)
+      );
+      if (cycles > 0) return cycles;
+    }
+  }
+  return part.rounds && part.rounds > 0 ? part.rounds : 1;
+}
+
 // Returns one movement per distinct movement_id, in first-occurrence order.
 function distinctMovements(part: WorkoutPartDisplay) {
   const seen = new Set<string>();
@@ -1076,7 +1111,7 @@ export function ScoreEntry({
           : {}),
       };
 
-      switch (part.workoutType) {
+      switch (scoringTypeOf(part)) {
         case "for_time":
           if (st.hitTimeCap) {
             score.totalReps = st.totalReps ? parseInt(st.totalReps) : undefined;
@@ -1153,6 +1188,18 @@ export function ScoreEntry({
           break;
         }
         case "emom":
+          // Rotating EMOM scores by total reps (auto-summed from the per-cycle
+          // max-reps inputs); a plain EMOM keeps the free-text result.
+          if (partHasMaxReps) {
+            score.totalReps = st.totalReps
+              ? parseInt(st.totalReps)
+              : sumFromMaxReps > 0
+                ? sumFromMaxReps
+                : undefined;
+          } else {
+            score.scoreText = st.scoreText || undefined;
+          }
+          break;
         case "tabata":
           score.scoreText = st.scoreText || undefined;
           break;
@@ -1187,7 +1234,7 @@ export function ScoreEntry({
 
   const partHasData = useCallback(
     (part: WorkoutPartDisplay, st: PartState): boolean => {
-      switch (part.workoutType) {
+      switch (scoringTypeOf(part)) {
         case "for_time":
           return st.timeSeconds != null || st.hitTimeCap;
         case "amrap":
@@ -1248,6 +1295,16 @@ export function ScoreEntry({
             // Per-round athlete-weight entries — same rationale.
             Object.values(st.weightPerRoundDrafts).some((rounds) =>
               rounds.some((s) => parseFloat(s) > 0)
+            )
+          );
+        case "emom":
+          // Plain EMOM: free-text result. Rotating EMOM: per-cycle max-reps
+          // inputs (or the auto-summed total) count as data.
+          return (
+            !!st.scoreText ||
+            !!st.totalReps ||
+            Object.values(st.maxRepsDrafts).some((rounds) =>
+              rounds.some((r) => parseInt(r, 10) > 0)
             )
           );
         default:
@@ -1379,7 +1436,7 @@ export function ScoreEntry({
   const workoutType = activePart.workoutType;
 
   const renderScoreInputs = () => {
-    switch (workoutType) {
+    switch (scoringTypeOf(activePart)) {
       case "for_time":
         return (
           <div className="space-y-4">
@@ -1787,7 +1844,34 @@ export function ScoreEntry({
         );
       }
 
-      case "emom":
+      case "emom": {
+        // Rotating EMOM with max-effort movements (e.g. "Min 1 max pull-ups /
+        // Min 2 max ring dips …") scores by total reps, auto-summed from the
+        // per-cycle grid below. A plain EMOM keeps the free-text result.
+        const partHasMax = activePart.movements.some((m) => m.isMaxReps);
+        if (partHasMax) {
+          return (
+            <div className="space-y-2">
+              <Label htmlFor="se-emom-total">
+                Total Reps
+                <span className="ml-1 text-xs font-normal text-muted-foreground">
+                  (auto from per-round inputs)
+                </span>
+              </Label>
+              <Input
+                id="se-emom-total"
+                type="number"
+                min={0}
+                value={state.totalReps}
+                onChange={(e) =>
+                  updateState(activePart.id, { totalReps: e.target.value })
+                }
+                placeholder="Auto-summed below"
+                className="font-mono text-lg"
+              />
+            </div>
+          );
+        }
         return (
           <div className="space-y-2">
             <Label htmlFor="se-emom-score">Score / Notes</Label>
@@ -1801,6 +1885,7 @@ export function ScoreEntry({
             />
           </div>
         );
+      }
 
       case "timed_rounds": {
         const aggregation = activePart.roundScoreAggregation ?? "slowest";
@@ -2109,9 +2194,7 @@ export function ScoreEntry({
               (m) => m.isMaxReps
             );
             if (maxMovements.length === 0) return null;
-            const rounds = activePart.rounds && activePart.rounds > 0
-              ? activePart.rounds
-              : 1;
+            const rounds = effectiveMaxRepsRounds(activePart);
             const totalAcrossMovements = maxMovements.reduce((acc, mov) => {
               const drafts = state.maxRepsDrafts[mov.id] ?? [];
               const movSum = drafts.reduce((a, s) => {
@@ -2213,10 +2296,7 @@ export function ScoreEntry({
               (m) => m.weightSource === "athlete"
             );
             if (athleteWeightMovements.length === 0) return null;
-            const rounds =
-              activePart.rounds && activePart.rounds > 0
-                ? activePart.rounds
-                : 1;
+            const rounds = effectiveMaxRepsRounds(activePart);
             const heaviestAcross = athleteWeightMovements.reduce((acc, mov) => {
               const drafts = state.weightPerRoundDrafts[mov.id] ?? [];
               const movMax = drafts.reduce((a, s) => {
@@ -2321,10 +2401,7 @@ export function ScoreEntry({
               (m) => m.captureDurationPerRound
             );
             if (timedMovements.length === 0) return null;
-            const rounds =
-              activePart.rounds && activePart.rounds > 0
-                ? activePart.rounds
-                : 1;
+            const rounds = effectiveMaxRepsRounds(activePart);
             const totalSecondsAcross = timedMovements.reduce((acc, mov) => {
               const drafts = state.durationPerRoundDrafts[mov.id] ?? [];
               const movSum = drafts.reduce((a, s) => {

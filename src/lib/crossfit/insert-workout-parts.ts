@@ -43,6 +43,7 @@ export interface PartMovementInput {
   isMaxReps?: boolean;
   captureDurationPerRound?: boolean;
   isSideCadence?: boolean;
+  slotIndex?: number | null;
   weightSource?: "prescribed" | "athlete";
   blockId?: string | null;
   blockTempRef?: string | null;
@@ -312,6 +313,7 @@ export async function insertWorkoutParts(
           isMaxReps: !!m.isMaxReps,
           captureDurationPerRound: !!m.captureDurationPerRound,
           isSideCadence: !!m.isSideCadence,
+          slotIndex: m.slotIndex ?? null,
           repSchemeParsed: parseAndPromote(
             m.prescribedReps,
             m.promoteSequenceToLadder ?? false

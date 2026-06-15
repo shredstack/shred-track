@@ -56,6 +56,7 @@ interface WireMovement {
   isMaxReps: boolean;
   captureDurationPerRound: boolean;
   isSideCadence: boolean;
+  slotIndex: number | null;
   repSchemeParsed: RepSchemeParsed | null;
   equipmentCount: number | null;
   rxStandard: string | null;
@@ -230,6 +231,7 @@ function wireMovementToDisplay(m: WireMovement): WorkoutMovementDisplay {
     isMaxReps: m.isMaxReps,
     captureDurationPerRound: m.captureDurationPerRound,
     isSideCadence: m.isSideCadence,
+    slotIndex: m.slotIndex ?? null,
     repSchemeParsed: m.repSchemeParsed,
     equipmentCount: m.equipmentCount ?? undefined,
     rxStandard: m.rxStandard ?? undefined,
@@ -459,6 +461,7 @@ export interface CreatePartMovementInput {
   tempo?: string;
   isMaxReps?: boolean;
   isSideCadence?: boolean;
+  slotIndex?: number | null;
   promoteSequenceToLadder?: boolean;
   equipmentCount?: number;
   rxStandard?: string;

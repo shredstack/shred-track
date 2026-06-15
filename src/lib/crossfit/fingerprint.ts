@@ -61,6 +61,9 @@ export type FingerprintMovement = {
   isMaxReps?: boolean | null;
   captureDurationPerRound?: boolean | null;
   isSideCadence?: boolean | null;
+  // Rotating EMOM minute/slot. Conditionally emitted (only when non-null) so
+  // legacy non-rotating workouts keep their existing hash.
+  slotIndex?: number | null;
   equipmentCount?: number | null;
   rxStandard?: string | null;
   weightSource?: string | null;
@@ -234,6 +237,9 @@ function pickMovementLevel(m: FingerprintMovement): Record<string, unknown> {
     rxStandard: m.rxStandard ?? null,
   };
   if (m.weightSource === "athlete") out.weightSource = "athlete";
+  // Conditional emit: a rotating EMOM slot only adds a key when present, so
+  // legacy non-rotating rows keep their hash. See the weightSource note above.
+  if (m.slotIndex != null) out.slotIndex = m.slotIndex;
   return out;
 }
 
