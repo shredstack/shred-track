@@ -1304,9 +1304,17 @@ export function ScoreEntry({
     // Collect the parts that still need saving — has data, has a division,
     // and didn't already persist on an earlier attempt this session.
     const pending: { part: WorkoutPartDisplay; score: ScoreInput }[] = [];
+    // A part with no seeded state slot means our partStates went stale
+    // relative to the parts prop (the component was reused instead of
+    // remounted). Entered data for that part is unrecoverable in this state —
+    // flag it so we surface an error instead of closing silently.
+    let missingState = false;
     for (const part of parts) {
       const st = partStates[part.id];
-      if (!st) continue;
+      if (!st) {
+        missingState = true;
+        continue;
+      }
       if (!partHasData(part, st)) continue;
       if (st.division === null) continue;
       if (savedPartIds.has(part.id)) continue;
@@ -1316,6 +1324,13 @@ export function ScoreEntry({
       });
     }
     if (pending.length === 0) {
+      // Nothing to save AND we lost a part's state — don't pretend it worked.
+      if (missingState) {
+        setSubmitError(
+          "Something went wrong reading your entry. Please reopen this workout and re-enter your score."
+        );
+        return;
+      }
       onOpenChange(false);
       return;
     }
