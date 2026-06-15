@@ -9,6 +9,7 @@ import {
   type EarlierLoadPart,
 } from "@/components/crossfit/movement-list-builder";
 import { IntervalsConfig } from "@/components/crossfit/intervals-config";
+import { EmomRotationConfig } from "@/components/crossfit/emom-rotation-config";
 import { DurationInput } from "@/components/crossfit/duration-input";
 import {
   parseRepScheme,
@@ -87,6 +88,14 @@ export function WorkoutPartConfig({
     : "text-sm";
   const inputHeight = compact ? "h-8" : "";
 
+  // For Reps doubles as a clock-based "N sets" format ("4 sets, on a 3:00
+  // clock, rest 3:00 between"). When the user sets more than one set, the
+  // time-cap input becomes the per-set clock and a rest-between-sets input
+  // appears. Single-set for_reps keeps the plain time-cap semantics.
+  const forRepsSets =
+    part.workoutType === "for_reps" ? parseInt(part.rounds || "", 10) : NaN;
+  const forRepsMultiSet = Number.isFinite(forRepsSets) && forRepsSets > 1;
+
   return (
     <div className="space-y-3">
       <div className="space-y-1.5">
@@ -121,18 +130,65 @@ export function WorkoutPartConfig({
           <Label className={labelClass}>
             {part.workoutType === "emom"
               ? "EMOM Duration (mm:ss)"
-              : "Time Cap (mm:ss)"}
+              : forRepsMultiSet
+                ? "Per-set clock (mm:ss)"
+                : "Time Cap (mm:ss)"}
           </Label>
           <DurationInput
             value={part.timeCapInput}
             onChange={(v) => onChange({ timeCapInput: v })}
             placeholder={
-              part.workoutType === "emom" ? "e.g. 20:00" : "Optional"
+              part.workoutType === "emom"
+                ? "e.g. 20:00"
+                : forRepsMultiSet
+                  ? "e.g. 3:00"
+                  : "Optional"
             }
             className={inputHeight}
             ariaLabel={
-              part.workoutType === "emom" ? "EMOM duration" : "Time cap"
+              part.workoutType === "emom"
+                ? "EMOM duration"
+                : forRepsMultiSet
+                  ? "Per-set clock"
+                  : "Time cap"
             }
+          />
+          {forRepsMultiSet && (
+            <p className="text-[11px] text-muted-foreground">
+              Each set runs on this clock. Work through any fixed buy-in
+              movements, then max out the movement(s) you mark “Max reps”.
+            </p>
+          )}
+        </div>
+      )}
+
+      {part.workoutType === "for_reps" && (
+        <div className="space-y-1.5">
+          <Label className={labelClass}>Sets (optional)</Label>
+          <Input
+            type="number"
+            min={1}
+            value={part.rounds}
+            onChange={(e) => onChange({ rounds: e.target.value })}
+            placeholder="e.g. 4"
+            className={inputHeight}
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Set more than one for a clock-based format (e.g. “4 sets, on a 3:00
+            clock”). Score is total reps across all sets.
+          </p>
+        </div>
+      )}
+
+      {part.workoutType === "for_reps" && forRepsMultiSet && (
+        <div className="space-y-1.5">
+          <Label className={labelClass}>Rest between sets (mm:ss)</Label>
+          <DurationInput
+            value={part.intervalRestInput ?? ""}
+            onChange={(v) => onChange({ intervalRestInput: v })}
+            placeholder="e.g. 3:00"
+            className={inputHeight}
+            ariaLabel="Rest between sets"
           />
         </div>
       )}
@@ -254,6 +310,16 @@ export function WorkoutPartConfig({
         </div>
       )}
 
+      {part.workoutType === "emom" && (
+        <EmomRotationConfig
+          movements={part.movements}
+          onMovementsChange={onMovementsChange}
+          timeCapInput={part.timeCapInput}
+          emomIntervalInput={part.emomIntervalInput}
+          compact={compact}
+        />
+      )}
+
       {part.workoutType === "timed_rounds" && (
         <TimedRoundsConfig
           rounds={part.rounds}
@@ -335,15 +401,20 @@ export function WorkoutPartConfig({
       {/* Side-cadence — pairs the part with a recurring on-the-minute
           movement (e.g. "150 DB hang power cleans for time, EMOM 5
           burpees"). Only meaningful on workouts that have a main task
-          to grind through. */}
+          to grind through. Also surfaced on EMOM so "X for time, every
+          minute do Y" is buildable where users naturally look. */}
       {(part.workoutType === "for_time" ||
         part.workoutType === "amrap" ||
-        part.workoutType === "intervals") && (
+        part.workoutType === "intervals" ||
+        part.workoutType === "emom") && (
         <SideCadenceConfig
           intervalInput={part.sideCadenceIntervalInput ?? ""}
           openEnded={!!part.sideCadenceOpenEnded}
           onChange={(updates) => onChange(updates)}
           compact={compact}
+          seedIntervalInput={
+            part.workoutType === "emom" ? part.emomIntervalInput : undefined
+          }
         />
       )}
 
@@ -359,7 +430,8 @@ export function WorkoutPartConfig({
         showSideCadence={
           (part.workoutType === "for_time" ||
             part.workoutType === "amrap" ||
-            part.workoutType === "intervals") &&
+            part.workoutType === "intervals" ||
+            part.workoutType === "emom") &&
           (!!part.sideCadenceIntervalInput &&
             part.sideCadenceIntervalInput.trim() !== "")
         }
@@ -680,6 +752,7 @@ function SideCadenceConfig({
   openEnded,
   onChange,
   compact,
+  seedIntervalInput,
 }: {
   intervalInput: string;
   openEnded: boolean;
@@ -688,9 +761,20 @@ function SideCadenceConfig({
     sideCadenceOpenEnded?: boolean;
   }) => void;
   compact: boolean;
+  /**
+   * When set, used as the cadence placeholder hint (e.g. the parent EMOM's
+   * own interval) so the common "every minute" case is one tap away. We
+   * intentionally do NOT auto-write it — an empty interval keeps the part
+   * from being mis-flagged as a side-cadence workout.
+   */
+  seedIntervalInput?: string;
 }) {
   const labelClass = compact ? "text-xs text-muted-foreground" : "text-sm";
   const enabled = !!intervalInput && intervalInput.trim() !== "";
+  const intervalPlaceholder =
+    seedIntervalInput && seedIntervalInput.trim() !== ""
+      ? `e.g. ${seedIntervalInput.trim()}`
+      : "e.g. 1:00";
   return (
     <details
       className="rounded-md border border-border/40 bg-muted/15 p-2"
@@ -705,7 +789,7 @@ function SideCadenceConfig({
           <DurationInput
             value={intervalInput}
             onChange={(v) => onChange({ sideCadenceIntervalInput: v })}
-            placeholder="e.g. 1:00"
+            placeholder={intervalPlaceholder}
             className={compact ? "h-8" : ""}
             ariaLabel="Side cadence interval"
           />

@@ -444,6 +444,14 @@ function MovementRow({
       ? partRepScheme.trim()
       : "");
 
+  // Rotating EMOM: tag each row with the minute of the cycle it belongs to.
+  const minuteChip =
+    partWorkoutType === "emom" && mov.slotIndex != null ? (
+      <span className="mr-1 inline-flex items-center rounded bg-primary/15 px-1 py-px text-[10px] font-bold text-primary">
+        MIN {mov.slotIndex + 1}
+      </span>
+    ) : null;
+
   // Rest rows promote the duration to the bold lead slot so the prescribed
   // length is the first thing the athlete reads — "0:30 Rest" instead of
   // "Rest (0:30)" tucked into muted parens.
@@ -459,6 +467,7 @@ function MovementRow({
           <Dumbbell className="size-3 text-primary/70" />
         </div>
         <span className="flex-1">
+          {minuteChip}
           {durLabel && (
             <span className="font-mono font-bold text-foreground">
               {durLabel}{" "}
@@ -477,6 +486,7 @@ function MovementRow({
       </div>
       <span className="flex-1">
         <span>
+          {minuteChip}
           {mov.isMaxReps ? (
             <span className="mr-1 inline-flex items-center rounded bg-amber-500/15 px-1 py-px text-[10px] font-bold text-amber-300">
               {mov.metricType === "calories"
@@ -678,6 +688,64 @@ export function PartSection({
       return duration;
     }
 
+    if (part.workoutType === "emom") {
+      const duration = part.timeCapSeconds
+        ? formatTime(part.timeCapSeconds)
+        : null;
+      const interval = part.emomIntervalSeconds
+        ? formatSecondsAsClock(part.emomIntervalSeconds)
+        : null;
+      const rotating = part.movements.some((m) => m.slotIndex != null);
+      const headline = duration ? `EMOM ${duration}` : "EMOM";
+      const subBits: string[] = [];
+      if (interval) subBits.push(`every ${interval}`);
+      if (rotating) {
+        const cycleLength =
+          part.movements.reduce(
+            (mx, m) => (m.slotIndex != null ? Math.max(mx, m.slotIndex) : mx),
+            -1
+          ) + 1;
+        if (cycleLength > 0) subBits.push(`${cycleLength}-min rotation`);
+      }
+      if (subBits.length === 0) return headline;
+      return (
+        <span className="flex flex-col gap-0.5">
+          <span>{headline}</span>
+          <span className="text-sm font-normal text-muted-foreground">
+            {subBits.join(" · ")}
+          </span>
+        </span>
+      );
+    }
+
+    // Clock-based For Reps ("4 sets, on a 3:00 clock, rest 3:00 between").
+    // The time cap is per-set here, so it rides in the sub-line rather than
+    // the generic "X cap" secondary pill.
+    if (part.workoutType === "for_reps" && part.rounds && part.rounds > 1) {
+      const clock =
+        part.timeCapSeconds != null
+          ? formatSecondsAsClock(part.timeCapSeconds)
+          : null;
+      const rest =
+        part.intervalRestSeconds != null
+          ? formatSecondsAsClock(part.intervalRestSeconds)
+          : null;
+      const subBits = [
+        clock ? `${clock} clock` : null,
+        rest ? `${rest} rest` : null,
+      ].filter(Boolean);
+      return (
+        <span className="flex flex-col gap-0.5">
+          <span>{`${part.rounds} sets`}</span>
+          {subBits.length > 0 && (
+            <span className="text-sm font-normal text-muted-foreground">
+              {subBits.join(" · ")}
+            </span>
+          )}
+        </span>
+      );
+    }
+
     if (part.repScheme) return part.repScheme;
 
     if (part.rounds) {
@@ -691,7 +759,14 @@ export function PartSection({
   // Secondary meta — kept small. Time cap is dropped for AMRAP since the
   // duration is already the signature.
   const secondaryBits: React.ReactNode[] = [];
-  if (part.timeCapSeconds && part.workoutType !== "amrap") {
+  const forRepsMultiSet =
+    part.workoutType === "for_reps" && !!part.rounds && part.rounds > 1;
+  if (
+    part.timeCapSeconds &&
+    part.workoutType !== "amrap" &&
+    part.workoutType !== "emom" &&
+    !forRepsMultiSet
+  ) {
     secondaryBits.push(
       <span key="tc" className="flex items-center gap-1">
         <Clock className="size-3" />
@@ -700,9 +775,12 @@ export function PartSection({
     );
   }
   if (part.sideCadenceIntervalSeconds) {
+    // On an EMOM-typed part the "EMOM" pill already shows, so label the
+    // cadence "every X" to avoid the doubled "EMOM … EMOM" reading.
+    const cadencePrefix = part.workoutType === "emom" ? "every" : "EMOM";
     secondaryBits.push(
       <span key="side-cadence" className="text-cyan-300/90 font-mono">
-        EMOM {formatSecondsAsClock(part.sideCadenceIntervalSeconds)}
+        {cadencePrefix} {formatSecondsAsClock(part.sideCadenceIntervalSeconds)}
         {part.sideCadenceOpenEnded ? " (open-ended)" : ""}
       </span>
     );

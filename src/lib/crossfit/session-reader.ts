@@ -243,6 +243,7 @@ export async function readSessionWorkouts(
           captureDurationPerRound:
             crossfitWorkoutMovements.captureDurationPerRound,
           isSideCadence: crossfitWorkoutMovements.isSideCadence,
+          slotIndex: crossfitWorkoutMovements.slotIndex,
           repSchemeParsed: crossfitWorkoutMovements.repSchemeParsed,
           equipmentCount: crossfitWorkoutMovements.equipmentCount,
           rxStandard: crossfitWorkoutMovements.rxStandard,
@@ -526,6 +527,7 @@ export async function readSessionWorkouts(
             isMaxReps: !!m.isMaxReps,
             captureDurationPerRound: !!m.captureDurationPerRound,
             isSideCadence: !!m.isSideCadence,
+            slotIndex: m.slotIndex ?? undefined,
             repSchemeParsed: m.repSchemeParsed,
             equipmentCount: m.equipmentCount,
             rxStandard: m.rxStandard,

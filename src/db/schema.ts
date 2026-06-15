@@ -600,6 +600,10 @@ export const workoutMovements = pgTable("workout_movements", {
   // When true, this movement is the side-cadence movement (performed at
   // the part's cadence) rather than part of the main task. See workout_parts.
   isSideCadence: boolean("is_side_cadence").default(false).notNull(),
+  // Rotating EMOM: which minute/slot of the repeating cycle this movement
+  // belongs to (0-based). NULL for non-rotating movements. See
+  // crossfit_workout_movements for the full semantics.
+  slotIndex: integer("slot_index"),
   repSchemeParsed: jsonb("rep_scheme_parsed"), // RepSchemeParsed | null — see lib/crossfit/rep-scheme-parser.ts
   equipmentCount: integer("equipment_count"),
   rxStandard: text("rx_standard"),
@@ -1314,6 +1318,13 @@ export const crossfitWorkoutMovements = pgTable(
       .default(false)
       .notNull(),
     isSideCadence: boolean("is_side_cadence").default(false).notNull(),
+    // Rotating EMOM: which minute/slot of the repeating cycle this movement
+    // belongs to (0-based). Movements sharing a slotIndex run together in
+    // that minute; a slot occupied only by the "Rest" library movement is a
+    // rest minute. NULL = non-rotating EMOM / any other workout type. The
+    // cycle length is derived as max(slotIndex)+1, and the number of cycles
+    // (= score-entry rounds) as timeCapSeconds / (cycleLength × emomIntervalSeconds).
+    slotIndex: integer("slot_index"),
     repSchemeParsed: jsonb("rep_scheme_parsed"),
     equipmentCount: integer("equipment_count"),
     rxStandard: text("rx_standard"),
