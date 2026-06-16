@@ -1045,6 +1045,8 @@ export interface LeaderboardEntry {
   scoreText?: string;
   hitTimeCap: boolean;
   rpe?: number;
+  /** Free-form athlete note (scaling rationale / how it felt). */
+  notes?: string | null;
   scalingDetails?: MovementScalingDisplay[];
   /** Heaviest weight (lb) the athlete used across rounds. Set only when
    *  the part has at least one `weightSource: "athlete"` movement AND
