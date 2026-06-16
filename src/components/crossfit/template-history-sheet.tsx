@@ -19,6 +19,7 @@ import {
 } from "@/components/crossfit/movement-scaling-row";
 import { formatTime } from "@/lib/workout-parser";
 import { formatShortDate } from "@/lib/format-date";
+import { cn } from "@/lib/utils";
 import type { SetEntry, WorkoutType } from "@/types/crossfit";
 
 // Template-history sheet. Triggered from the History link in a workout
@@ -134,17 +135,24 @@ export function TemplateHistoryLink({
   if (!crossfitWorkoutId) return null;
   if (isSystemTemplate && count === 0) return null;
 
+  const hasHistory = count != null && count > 0;
+
   return (
     <>
       <Button
         variant="ghost"
         size="sm"
-        className="h-7 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+        className={cn(
+          "h-7 gap-1 px-2 text-[11px]",
+          hasHistory
+            ? "border border-cyan-500/40 bg-cyan-500/10 font-medium text-cyan-400 hover:bg-cyan-500/20 hover:text-cyan-300"
+            : "text-muted-foreground hover:text-foreground"
+        )}
         onClick={() => setOpen(true)}
         aria-label="View history for this template"
       >
         <HistoryIcon className="size-3.5" />
-        History{count != null && count > 0 ? ` (${count})` : ""}
+        History{hasHistory ? ` (${count})` : ""}
       </Button>
       {open && (
         <TemplateHistorySheet

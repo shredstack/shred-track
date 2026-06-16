@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { parseDurationToSeconds } from "@/lib/crossfit/duration-parser";
@@ -32,7 +32,16 @@ export function EmomRotationConfig({
   compact = false,
 }: EmomRotationConfigProps) {
   const labelClass = compact ? "text-xs text-muted-foreground" : "text-sm";
-  const rotating = movements.some((m) => m.slotIndex != null);
+  // Rotation is persisted purely via per-movement `slotIndex`, so a part with
+  // movements is "rotating" iff any movement carries a slot. But the checkbox
+  // sits above the movement list, so a user often toggles it on *before*
+  // adding movements — with nothing to mark, the derived flag could never turn
+  // true and the checkbox appeared stuck. Track the user's intent explicitly so
+  // the box checks immediately; the effect below then assigns slots to
+  // movements as they're added.
+  const hasRotation = movements.some((m) => m.slotIndex != null);
+  const [rotatingEnabled, setRotatingEnabled] = useState(hasRotation);
+  const rotating = rotatingEnabled || hasRotation;
 
   // Keep slotIndex populated on every movement while rotating so the cycle
   // length and minute labels stay correct as movements are added below. A
@@ -70,10 +79,14 @@ export function EmomRotationConfig({
     return c > 0 ? c : null;
   }, [timeCapInput, emomIntervalInput, cycleLength]);
 
-  const enable = () =>
+  const enable = () => {
+    setRotatingEnabled(true);
     onMovementsChange(movements.map((m, i) => ({ ...m, slotIndex: i })));
-  const disable = () =>
+  };
+  const disable = () => {
+    setRotatingEnabled(false);
     onMovementsChange(movements.map((m) => ({ ...m, slotIndex: null })));
+  };
 
   const setMinute = (tempId: string, minute1Based: number) => {
     const slot = Math.max(0, minute1Based - 1);
