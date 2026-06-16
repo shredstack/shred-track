@@ -93,6 +93,8 @@ export interface WorkoutLeaderboardRowEntry extends BaseLeaderboardRowEntry {
   division: "rx" | "scaled" | "rx_plus";
   hitTimeCap: boolean;
   rpe?: number;
+  /** Free-form athlete note (scaling rationale / how it felt). */
+  notes?: string | null;
   scalingDetails?: Array<{
     workoutMovementId: string;
     movementName: string;
@@ -147,7 +149,7 @@ export function LeaderboardRow({
     entry.kind === "workout" &&
     !!entry.scalingDetails &&
     entry.scalingDetails.some((s) => !s.wasRx);
-  const hasNotes = entry.kind === "track_day" && !!entry.notes?.trim();
+  const hasNotes = !!entry.notes?.trim();
   const expandable = hasScalingDetails || hasNotes;
 
   return (
@@ -311,7 +313,7 @@ export function LeaderboardRow({
       )}
 
       {/* Expanded details */}
-      {expanded && entry.kind === "workout" && entry.scalingDetails && (
+      {expanded && entry.kind === "workout" && hasScalingDetails && entry.scalingDetails && (
         <div className="ml-13 mb-2 space-y-1 rounded-lg bg-muted/30 p-3">
           <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5">
             Scaling Details
@@ -341,7 +343,7 @@ export function LeaderboardRow({
         </div>
       )}
 
-      {expanded && entry.kind === "track_day" && entry.notes && (
+      {expanded && hasNotes && (
         <div className="ml-13 mb-2 rounded-lg bg-muted/30 p-3">
           <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5">
             Notes

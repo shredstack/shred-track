@@ -23,6 +23,7 @@ import {
   Users,
   Building2,
   Loader2,
+  StickyNote,
 } from "lucide-react";
 import {
   Dialog,
@@ -329,6 +330,18 @@ function ScoreRow({
               </div>
             );
           })}
+
+      {/* Athlete notes — scaling/how-it-felt commentary captured at log
+          time. Mirrors the leaderboard notes block so the same text the
+          athlete reads here shows up for peers on the leaderboard. */}
+      {s.notes?.trim() && (
+        <div className="flex items-start gap-1.5 rounded-lg bg-muted/30 px-3 py-2">
+          <StickyNote className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+          <p className="whitespace-pre-wrap text-xs leading-snug text-foreground/90">
+            {s.notes}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
