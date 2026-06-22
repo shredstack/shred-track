@@ -393,7 +393,16 @@ function emptyPartState(
     rpe: existing?.rpe ?? 7,
     rpeAutoSetActive: false,
     rpeUserOverride: false,
-    notes: existing?.notes ?? "",
+    // for_quality entries used to store their free-text in `scoreText`. The UI
+    // now drives that text off the shared Notes box, so migrate a legacy value
+    // into `notes` on load — otherwise the old text is invisible and the save
+    // gate (which checks `notes`) stays disabled for previously-saved entries.
+    notes:
+      part?.workoutType === "for_quality" &&
+      !existing?.notes &&
+      existing?.scoreText
+        ? existing.scoreText
+        : (existing?.notes ?? ""),
     movementScalings: scalings,
     setEntriesMap,
     durationDrafts,

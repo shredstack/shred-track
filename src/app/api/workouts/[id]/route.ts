@@ -293,7 +293,7 @@ export async function PUT(
     let templateId: string;
     let isNew: boolean;
     let mode: Mode;
-    let newPartIdsByOrder: string[];
+    let newPartIdsByOrder: string[] = [];
     if (!session.crossfitWorkoutId) {
       const r = await upsertTemplate(tx, nextTemplate);
       templateId = r.templateId;
