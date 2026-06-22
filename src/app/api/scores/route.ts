@@ -12,7 +12,10 @@ import {
 } from "@/db/schema";
 import { and, eq, desc, asc, inArray } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
-import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
+import {
+  normalizeSetEntries,
+  qualifyingTopSetWeight,
+} from "@/lib/crossfit/set-entries";
 import { validateAndAggregateRoundDurations } from "@/lib/crossfit/round-aggregation";
 import { invalidateCrossfitInsightsCache } from "@/lib/crossfit/insights/cache";
 import type { SetEntry } from "@/types/crossfit";
@@ -296,16 +299,21 @@ export async function POST(req: NextRequest) {
   // tiny lookup before the transaction so the txn body stays write-only.
   let timedRoundsAggregate: number | null = null;
   let timedRoundDurations: number[] | null = null;
+  // Part-level rep scheme, used to decide which sets count toward a for_load
+  // top-set score (a set logged below its prescribed reps doesn't count).
+  let partRepScheme: string | null = null;
   if (crossfitWorkoutPartId) {
     const [partRow] = await db
       .select({
         workoutType: crossfitWorkoutParts.workoutType,
         rounds: crossfitWorkoutParts.rounds,
         roundScoreAggregation: crossfitWorkoutParts.roundScoreAggregation,
+        repScheme: crossfitWorkoutParts.repScheme,
       })
       .from(crossfitWorkoutParts)
       .where(eq(crossfitWorkoutParts.id, crossfitWorkoutPartId))
       .limit(1);
+    partRepScheme = partRow?.repScheme ?? null;
     const result = validateAndAggregateRoundDurations(partRow, body);
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: result.status });
@@ -331,13 +339,44 @@ export async function POST(req: NextRequest) {
   // weight as `scores.weightLbs` would make the quick-view score card
   // display "X lb" instead of the rep count. The leaderboard derives
   // heaviest weight directly from the per-round arrays at read time.
+  //
+  // The summary is the heaviest set that met its prescribed reps — a set
+  // logged below the prescription (e.g. a failed final rep on 5-5-5-5-5)
+  // shouldn't count as the top-set load. The per-movement prescribed scheme
+  // comes from crossfit_workout_movements, falling back to the part scheme.
   let weightLbs = body.weightLbs;
   if (weightLbs == null) {
-    const setMax = Math.max(
-      0,
-      ...normalizedDetails.flatMap((d) => (d.setEntries ?? []).map((e) => e.weight))
+    const detailsWithSets = normalizedDetails.filter(
+      (d) => d.setEntries && d.setEntries.length > 0
     );
-    if (setMax > 0) weightLbs = setMax;
+    if (detailsWithSets.length > 0) {
+      const schemeByMovement = new Map<string, string | null>();
+      if (crossfitWorkoutPartId) {
+        const movs = await db
+          .select({
+            id: crossfitWorkoutMovements.id,
+            prescribedReps: crossfitWorkoutMovements.prescribedReps,
+          })
+          .from(crossfitWorkoutMovements)
+          .where(
+            eq(crossfitWorkoutMovements.crossfitWorkoutPartId, crossfitWorkoutPartId)
+          );
+        for (const m of movs) {
+          schemeByMovement.set(m.id, m.prescribedReps ?? partRepScheme);
+        }
+      }
+      const setMax = Math.max(
+        0,
+        ...detailsWithSets.map((d) => {
+          const scheme =
+            (d.workoutMovementId
+              ? schemeByMovement.get(d.workoutMovementId)
+              : null) ?? partRepScheme;
+          return qualifyingTopSetWeight(d.setEntries!, scheme);
+        })
+      );
+      if (setMax > 0) weightLbs = setMax;
+    }
   }
 
   const startedAt = body.startedAt ? new Date(body.startedAt) : null;

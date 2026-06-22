@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
+  crossfitWorkoutMovements,
   crossfitWorkoutParts,
   scores,
   scoreMovementDetails,
@@ -8,7 +9,10 @@ import {
 } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
-import { normalizeSetEntries } from "@/lib/crossfit/set-entries";
+import {
+  normalizeSetEntries,
+  qualifyingTopSetWeight,
+} from "@/lib/crossfit/set-entries";
 import { validateAndAggregateRoundDurations } from "@/lib/crossfit/round-aggregation";
 import { invalidateCrossfitInsightsCache } from "@/lib/crossfit/insights/cache";
 import type { SetEntry } from "@/types/crossfit";
@@ -61,13 +65,52 @@ export async function PUT(
     setEntries: d.setEntries ? normalizeSetEntries(d.setEntries) : undefined,
   }));
 
+  // The summary weight is the heaviest set that met its prescribed reps — a
+  // set logged below the prescription (a failed rep) shouldn't count as the
+  // top-set load. See scores/route.ts for the full rationale.
   let weightLbs = body.weightLbs;
   if (weightLbs == null && normalizedDetails) {
-    const setMax = Math.max(
-      0,
-      ...normalizedDetails.flatMap((d) => (d.setEntries ?? []).map((e) => e.weight))
+    const detailsWithSets = normalizedDetails.filter(
+      (d) => d.setEntries && d.setEntries.length > 0
     );
-    if (setMax > 0) weightLbs = setMax;
+    if (detailsWithSets.length > 0) {
+      const schemeByMovement = new Map<string, string | null>();
+      let partRepScheme: string | null = null;
+      if (existing.crossfitWorkoutPartId) {
+        const [partRow] = await db
+          .select({ repScheme: crossfitWorkoutParts.repScheme })
+          .from(crossfitWorkoutParts)
+          .where(eq(crossfitWorkoutParts.id, existing.crossfitWorkoutPartId))
+          .limit(1);
+        partRepScheme = partRow?.repScheme ?? null;
+        const movs = await db
+          .select({
+            id: crossfitWorkoutMovements.id,
+            prescribedReps: crossfitWorkoutMovements.prescribedReps,
+          })
+          .from(crossfitWorkoutMovements)
+          .where(
+            eq(
+              crossfitWorkoutMovements.crossfitWorkoutPartId,
+              existing.crossfitWorkoutPartId
+            )
+          );
+        for (const m of movs) {
+          schemeByMovement.set(m.id, m.prescribedReps ?? partRepScheme);
+        }
+      }
+      const setMax = Math.max(
+        0,
+        ...detailsWithSets.map((d) => {
+          const scheme =
+            (d.workoutMovementId
+              ? schemeByMovement.get(d.workoutMovementId)
+              : null) ?? partRepScheme;
+          return qualifyingTopSetWeight(d.setEntries!, scheme);
+        })
+      );
+      if (setMax > 0) weightLbs = setMax;
+    }
   }
   // Athlete-weight per-round arrays are intentionally NOT derived into
   // scores.weightLbs — see scores/route.ts for the rationale.

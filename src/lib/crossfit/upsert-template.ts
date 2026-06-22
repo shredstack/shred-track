@@ -347,6 +347,7 @@ export function buildFingerprintInput(
       restAfterSeconds: toDurationSecondsOrNull(p.restAfterSeconds ?? null),
       suppressTrailingRest:
         p.workoutType === "intervals" ? !!p.suppressTrailingRest : false,
+      notes: p.notes ?? null,
       movements,
     };
   });

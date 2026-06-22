@@ -169,15 +169,20 @@ export function builderPartToPayload(
   part: WorkoutBuilderPart
 ): CreatePartInput | null {
   const movements = part.movements.filter((m) => m.movementId);
-  if (movements.length === 0) return null;
+  // For Quality is a free-text practice block — movements are optional, so
+  // an empty movement list is still a valid part. Every other type requires
+  // at least one movement.
+  if (movements.length === 0 && part.workoutType !== "for_quality") return null;
   // for_load parts: weight IS the score, so any prescribed weight values
   // are phantom defaults (auto-filled from movement library commonRx) that
   // the builder hides from the UI but still carries in state.
   const stripRxWeights = part.workoutType === "for_load";
-  // slotIndex is only meaningful on a rotating EMOM. Gate it so a stale slot
-  // left over from a workout-type switch can't persist; send null otherwise
-  // so the API clears any old value.
+  // slotIndex is meaningful on a rotating EMOM (per-minute slot) and on a
+  // rotating intervals part (per-round slot). Gate it so a stale slot left
+  // over from a workout-type switch can't persist; send null otherwise so
+  // the API clears any old value.
   const isEmom = part.workoutType === "emom";
+  const isIntervals = part.workoutType === "intervals";
   return {
     id: part.id,
     // Always sent: weight_pct movements in later parts reference this part
@@ -256,6 +261,11 @@ export function builderPartToPayload(
       : undefined,
     suppressTrailingRest:
       part.workoutType === "intervals" ? !!part.suppressTrailingRest : false,
+    // For Quality carries its prescription free-text in the part's notes.
+    notes:
+      part.workoutType === "for_quality"
+        ? part.partDescription?.trim() || undefined
+        : undefined,
     movements: movements.map((m, i) => {
       // Athlete-picked weight: hide every prescribed-weight notation
       // (absolute, BW%, %1RM). Mirrors the existing for_load short-circuit
@@ -322,7 +332,7 @@ export function builderPartToPayload(
       isMaxReps: !!m.isMaxReps,
       captureDurationPerRound: !!m.captureDurationPerRound,
       isSideCadence: !!m.isSideCadence,
-      slotIndex: isEmom ? m.slotIndex ?? null : null,
+      slotIndex: isEmom || isIntervals ? m.slotIndex ?? null : null,
       promoteSequenceToLadder: m.promoteSequenceToLadder || undefined,
       equipmentCount: m.equipmentCount,
       rxStandard: m.rxStandard || undefined,
