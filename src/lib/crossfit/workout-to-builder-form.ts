@@ -114,6 +114,9 @@ export function workoutToBuilderForm(w: WorkoutDisplay): WorkoutBuilderForm {
             ? formatSecondsAsClock(p.restAfterSeconds)
             : "",
         suppressTrailingRest: !!p.suppressTrailingRest,
+        // For Quality blocks carry their free-text prescription in `notes`.
+        partDescription:
+          p.workoutType === "for_quality" ? p.notes ?? "" : undefined,
         movements: p.movements.map(
           (m): WorkoutBuilderMovement => ({
             tempId: generateTempId(),

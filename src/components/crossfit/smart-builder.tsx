@@ -339,6 +339,17 @@ export function SmartBuilder({
       return `${headline} — ${aggregationLabel}`;
     }
     const typeLabel = WORKOUT_TYPE_LABELS[firstPart.workoutType];
+    // For Quality blocks often have no movements — fall back to the first
+    // line of the prescription so the title isn't a bare "For Quality".
+    if (firstPart.workoutType === "for_quality") {
+      const firstLine = firstPart.partDescription
+        ?.split("\n")
+        .map((l) => l.trim())
+        .find(Boolean);
+      if (firstLine) {
+        return firstLine.length > 60 ? `${firstLine.slice(0, 57)}…` : firstLine;
+      }
+    }
     const names = firstPart.movements
       .slice(0, 2)
       .map((m) => m.movementName)
@@ -465,7 +476,14 @@ export function SmartBuilder({
 
   const canReview =
     form.parts.length > 0 &&
-    form.parts.every((p) => p.movements.length > 0);
+    form.parts.every(
+      (p) =>
+        p.movements.length > 0 ||
+        // For Quality is a free-text practice block — movements are optional,
+        // so it's reviewable once it has a prescription or a duration.
+        (p.workoutType === "for_quality" &&
+          (!!p.partDescription?.trim() || !!p.timeCapInput.trim()))
+    );
 
   // ============================================
   // Render
@@ -587,8 +605,17 @@ export function SmartBuilder({
                     part.timeCapInput
                       ? ` · ${part.timeCapInput} cap`
                       : ""}
+                    {part.workoutType === "for_quality" && part.timeCapInput
+                      ? ` · ${part.timeCapInput} clock`
+                      : ""}
                   </span>
                 </div>
+                {part.workoutType === "for_quality" &&
+                  part.partDescription?.trim() && (
+                    <p className="whitespace-pre-wrap text-sm text-foreground/85">
+                      {part.partDescription.trim()}
+                    </p>
+                  )}
                 <Separator />
                 <SmartBuilderMovementBlocks part={part} />
               </div>

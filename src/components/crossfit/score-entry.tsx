@@ -477,6 +477,27 @@ function effectiveMaxRepsRounds(part: WorkoutPartDisplay): number {
   return part.rounds && part.rounds > 0 ? part.rounds : 1;
 }
 
+// How many max-reps inputs a single movement should show. Usually the part's
+// round count, but a rotating intervals part runs each round once: a movement
+// pinned to a round (slotIndex set) is performed exactly once → one input,
+// while a constant (no-slot) movement is performed every round → N inputs.
+function maxRepsRoundsForMovement(
+  part: WorkoutPartDisplay,
+  mov: WorkoutMovementDisplay
+): number {
+  const isRotatingIntervals =
+    part.workoutType === "intervals" &&
+    part.movements.some((m) => m.slotIndex != null);
+  if (isRotatingIntervals) {
+    return mov.slotIndex != null
+      ? 1
+      : part.rounds && part.rounds > 0
+        ? part.rounds
+        : 1;
+  }
+  return effectiveMaxRepsRounds(part);
+}
+
 // Returns one movement per distinct movement_id, in first-occurrence order.
 function distinctMovements(part: WorkoutPartDisplay) {
   const seen = new Set<string>();
@@ -1751,6 +1772,7 @@ export function ScoreEntry({
                     </div>
                     <SetWeightBreakdown
                       entries={displayEntries}
+                      repScheme={movScheme}
                       repsPerSet={fallbackRepsPerSet}
                     />
                   </div>
@@ -1991,6 +2013,26 @@ export function ScoreEntry({
           </div>
         );
 
+      case "for_quality":
+        // A practice / skill block — no score is tracked. Offer an optional
+        // free-text note so the athlete can record what they worked on.
+        return (
+          <div className="space-y-2">
+            <Label htmlFor="se-quality">What did you work on? (optional)</Label>
+            <Input
+              id="se-quality"
+              value={state.scoreText}
+              onChange={(e) =>
+                updateState(activePart.id, { scoreText: e.target.value })
+              }
+              placeholder="e.g. Worked freestanding handstand holds"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              For-quality work isn&rsquo;t scored or ranked.
+            </p>
+          </div>
+        );
+
       default:
         return (
           <div className="space-y-2">
@@ -2194,7 +2236,14 @@ export function ScoreEntry({
               (m) => m.isMaxReps
             );
             if (maxMovements.length === 0) return null;
-            const rounds = effectiveMaxRepsRounds(activePart);
+            // Header copy keys off the largest per-movement round count so a
+            // rotating-intervals part (each skill done once, but several
+            // skills) still reads "per round".
+            const maxRoundsAny = Math.max(
+              ...maxMovements.map((m) =>
+                maxRepsRoundsForMovement(activePart, m)
+              )
+            );
             const totalAcrossMovements = maxMovements.reduce((acc, mov) => {
               const drafts = state.maxRepsDrafts[mov.id] ?? [];
               const movSum = drafts.reduce((a, s) => {
@@ -2207,7 +2256,7 @@ export function ScoreEntry({
               <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
                 <div className="flex items-center gap-2">
                   <Label className="text-sm font-medium flex-1">
-                    Max reps {rounds > 1 ? "per round" : ""}
+                    Max reps {maxRoundsAny > 1 ? "per round" : ""}
                   </Label>
                   <span className="font-mono text-sm font-bold text-amber-300">
                     Total: {totalAcrossMovements}
@@ -2219,6 +2268,13 @@ export function ScoreEntry({
                     const n = parseInt(s, 10);
                     return a + (Number.isFinite(n) && n > 0 ? n : 0);
                   }, 0);
+                  const rounds = maxRepsRoundsForMovement(activePart, mov);
+                  // A movement pinned to one round of a rotating intervals
+                  // part shows a single input — label it with that round.
+                  const singleRoundLabel =
+                    rounds === 1 && mov.slotIndex != null
+                      ? `R${mov.slotIndex + 1}`
+                      : "Reps";
                   return (
                     <div key={mov.id} className="space-y-1.5">
                       <div className="flex items-center justify-between">
@@ -2240,7 +2296,7 @@ export function ScoreEntry({
                         {Array.from({ length: rounds }, (_, i) => (
                           <div key={i} className="space-y-0.5">
                             <Label className="text-[10px] text-muted-foreground text-center block">
-                              {rounds > 1 ? `R${i + 1}` : "Reps"}
+                              {rounds > 1 ? `R${i + 1}` : singleRoundLabel}
                             </Label>
                             <Input
                               type="number"

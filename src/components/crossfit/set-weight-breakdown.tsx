@@ -8,10 +8,15 @@
 // uniform case clean. RPE suffix (`@N`) renders whenever present.
 
 import type { SetEntry } from "@/types/crossfit";
+import { qualifyingTopSetWeight } from "@/lib/crossfit/set-entries";
 
 interface SetWeightBreakdownProps {
   entries: SetEntry[];
   repsPerSet?: number;
+  // Full prescribed rep scheme (e.g. "5-5-5-5-5"). When provided, the "max"
+  // label reflects the heaviest set that met its prescription — matching the
+  // stored top-set score — rather than the raw heaviest weight touched.
+  repScheme?: string | null;
   unit?: "lb" | "kg";
   className?: string;
 }
@@ -24,6 +29,7 @@ function brzyckiE1RM(weight: number, reps: number): number {
 export function SetWeightBreakdown({
   entries,
   repsPerSet,
+  repScheme,
   unit = "lb",
   className,
 }: SetWeightBreakdownProps) {
@@ -43,7 +49,10 @@ export function SetWeightBreakdown({
     }
   }
 
-  const max = Math.max(...nonZero.map((e) => e.weight));
+  // "max" = the top set that counts as the score. With a known scheme that's
+  // the heaviest set that met its prescribed reps (a failed set doesn't win);
+  // without one it's simply the heaviest weight touched.
+  const max = qualifyingTopSetWeight(entries, repScheme);
   const repsVary = nonZero.some(
     (e, _i, arr) => e.reps != null && e.reps !== arr[0].reps
   );

@@ -11,6 +11,7 @@ import {
   Zap,
   Repeat,
   Hourglass,
+  Target,
   MoreHorizontal,
 } from "lucide-react";
 import type { WorkoutType } from "@/types/crossfit";
@@ -34,6 +35,7 @@ const WORKOUT_TYPE_OPTIONS: {
   { value: "tabata", label: "Tabata", icon: BarChart3, color: "bg-pink-500/20 text-pink-400 border-pink-500/30" },
   { value: "intervals", label: "Intervals", icon: Repeat, color: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30" },
   { value: "max_effort", label: "Max Effort", icon: Zap, color: "bg-rose-500/20 text-rose-400 border-rose-500/30" },
+  { value: "for_quality", label: "For Quality", icon: Target, color: "bg-teal-500/20 text-teal-400 border-teal-500/30" },
   { value: "other", label: "Other", icon: MoreHorizontal, color: "bg-zinc-500/20 text-zinc-400 border-zinc-500/30" },
 ];
 

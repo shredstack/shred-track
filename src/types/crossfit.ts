@@ -46,6 +46,7 @@ export const WORKOUT_TYPES = [
   "tabata",
   "intervals",
   "max_effort",
+  "for_quality",
   "other",
 ] as const;
 
@@ -62,6 +63,7 @@ export const WORKOUT_TYPE_LABELS: Record<WorkoutType, string> = {
   tabata: "Tabata",
   intervals: "Intervals",
   max_effort: "Max Effort",
+  for_quality: "For Quality",
   other: "Other",
 };
 
@@ -76,6 +78,7 @@ export const WORKOUT_TYPE_COLORS: Record<WorkoutType, string> = {
   tabata: "bg-pink-500/20 text-pink-400 border-pink-500/30",
   intervals: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30",
   max_effort: "bg-rose-500/20 text-rose-400 border-rose-500/30",
+  for_quality: "bg-teal-500/20 text-teal-400 border-teal-500/30",
   other: "bg-zinc-500/20 text-zinc-400 border-zinc-500/30",
 };
 
@@ -1002,6 +1005,11 @@ export interface WorkoutBuilderPart {
   restAfterInput?: string;
   // For `intervals` parts: omit the rest period after the final round.
   suppressTrailingRest?: boolean;
+  // Free-text prescription body for `for_quality` parts (e.g. "Gymnastics
+  // practice — athlete's choice of skill"). Persisted to the part's `notes`
+  // column. Movements are optional for this format, so this carries the
+  // human description of what to work on.
+  partDescription?: string;
   movements: WorkoutBuilderMovement[];
   // Named groupings under this part. Empty = ungrouped flat rendering.
   // Each movement either references a block via `blockTempRef`/`blockId`

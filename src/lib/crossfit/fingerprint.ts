@@ -93,6 +93,10 @@ export type FingerprintPart = {
   partnerWorkMode?: string | null;
   restAfterSeconds?: number | null;
   suppressTrailingRest?: boolean | null;
+  // For Quality blocks carry their prescription in `notes`, which IS the
+  // content — so it's hashed (conditionally, only for for_quality) to keep
+  // two different skill blocks from deduping into one template.
+  notes?: string | null;
   movements: FingerprintMovement[];
 };
 
@@ -200,6 +204,12 @@ function pickPartLevel(p: FingerprintPart): Record<string, unknown> {
     out.restAfterSeconds = p.restAfterSeconds;
   }
   if (p.suppressTrailingRest) out.suppressTrailingRest = true;
+  // Conditional emit: only for_quality hashes its notes (its prescription is
+  // free-text, so two blocks that differ only in wording are different
+  // workouts). Every other type leaves the key off, preserving legacy hashes.
+  if (p.workoutType === "for_quality" && p.notes?.trim()) {
+    out.notes = p.notes.trim();
+  }
   return out;
 }
 

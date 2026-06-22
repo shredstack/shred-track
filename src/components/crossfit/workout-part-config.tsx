@@ -3,12 +3,14 @@
 import { useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { WorkoutTypeSelector } from "@/components/crossfit/workout-type-selector";
 import {
   MovementListBuilder,
   type EarlierLoadPart,
 } from "@/components/crossfit/movement-list-builder";
 import { IntervalsConfig } from "@/components/crossfit/intervals-config";
+import { IntervalRotationConfig } from "@/components/crossfit/interval-rotation-config";
 import { EmomRotationConfig } from "@/components/crossfit/emom-rotation-config";
 import { DurationInput } from "@/components/crossfit/duration-input";
 import {
@@ -122,6 +124,39 @@ export function WorkoutPartConfig({
           }
         />
       </div>
+
+      {/* For Quality — a no-score practice block: a duration on the clock,
+          free-text prescription, and optional movements. Used for skill
+          work like "On a 10:00 clock: Gymnastics practice, athlete's
+          choice." */}
+      {part.workoutType === "for_quality" && (
+        <>
+          <div className="space-y-1.5">
+            <Label className={labelClass}>Duration (mm:ss, optional)</Label>
+            <DurationInput
+              value={part.timeCapInput}
+              onChange={(v) => onChange({ timeCapInput: v })}
+              placeholder="e.g. 10:00"
+              className={inputHeight}
+              ariaLabel="Quality block duration"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className={labelClass}>Prescription</Label>
+            <Textarea
+              value={part.partDescription ?? ""}
+              onChange={(e) => onChange({ partDescription: e.target.value })}
+              placeholder="e.g. Gymnastics practice — athlete's choice of skill."
+              rows={3}
+              className="resize-y text-sm"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              No score is tracked. Movements below are optional — add them if
+              you want to anchor the skill work to specific movements.
+            </p>
+          </div>
+        </>
+      )}
 
       {(part.workoutType === "for_time" ||
         part.workoutType === "emom" ||
@@ -378,6 +413,12 @@ export function WorkoutPartConfig({
           <p className="text-[11px] text-muted-foreground pt-1">
             EMOM-style work + rest cadence. Score is total reps across all rounds.
           </p>
+          <IntervalRotationConfig
+            movements={part.movements}
+            onMovementsChange={onMovementsChange}
+            rounds={part.rounds}
+            compact={compact}
+          />
         </div>
       )}
 

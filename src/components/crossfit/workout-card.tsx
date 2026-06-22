@@ -315,6 +315,9 @@ function ScoreRow({
                 )}
                 <SetWeightBreakdown
                   entries={d.setEntries!}
+                  repScheme={
+                    isComplex ? undefined : mov?.prescribedReps || part.repScheme
+                  }
                   repsPerSet={
                     isComplex
                       ? undefined
@@ -432,6 +435,7 @@ function MovementRow({
   partWorkoutType,
   partRepScheme,
   suggestionsHidden,
+  partIsRotating,
 }: {
   mov: WorkoutMovementDisplay;
   partWorkoutType: WorkoutPartDisplay["workoutType"];
@@ -443,6 +447,9 @@ function MovementRow({
   /** When true, suppress the suggestion chip (used after a score is logged
    *  for the part — we don't second-guess the athlete on the same card). */
   suggestionsHidden?: boolean;
+  /** True when the part has any per-slot rotation. Lets a no-slot movement
+   *  on a rotating intervals part read as "every round" rather than blank. */
+  partIsRotating?: boolean;
 }) {
   const suggestion = useSuggestionForMovement(mov.id);
   const metricText = formatMovementMetric(mov, partWorkoutType);
@@ -457,11 +464,21 @@ function MovementRow({
       ? partRepScheme.trim()
       : "");
 
-  // Rotating EMOM: tag each row with the minute of the cycle it belongs to.
+  // Rotating EMOM / intervals: tag each row with the slot it belongs to —
+  // the minute of the cycle (EMOM) or the round (intervals). A movement with
+  // no slotIndex on a rotating intervals part is performed every round, so
+  // it stays unchipped.
   const minuteChip =
-    partWorkoutType === "emom" && mov.slotIndex != null ? (
+    mov.slotIndex != null &&
+    (partWorkoutType === "emom" || partWorkoutType === "intervals") ? (
       <span className="mr-1 inline-flex items-center rounded bg-primary/15 px-1 py-px text-[10px] font-bold text-primary">
-        MIN {mov.slotIndex + 1}
+        {partWorkoutType === "emom" ? "MIN" : "RD"} {mov.slotIndex + 1}
+      </span>
+    ) : partWorkoutType === "intervals" &&
+      partIsRotating &&
+      mov.slotIndex == null ? (
+      <span className="mr-1 inline-flex items-center rounded bg-muted px-1 py-px text-[10px] font-bold text-muted-foreground">
+        EVERY RD
       </span>
     ) : null;
 
@@ -595,6 +612,9 @@ export function PartSection({
   // part (spec §"Per-movement suggestion on the WOD card" — we don't
   // second-guess the athlete on the same card).
   const suggestionsHidden = !!part.score;
+  const intervalsRotating =
+    part.workoutType === "intervals" &&
+    part.movements.some((m) => m.slotIndex != null);
   const typeColor = WORKOUT_TYPE_COLORS[part.workoutType];
   const typeLabel = WORKOUT_TYPE_LABELS[part.workoutType];
   const defaultLabel = `Part ${String.fromCharCode(65 + index)}`;
@@ -604,6 +624,20 @@ export function PartSection({
   // "75-50-25" (rep scheme), "5 rounds", "20:00" (AMRAP duration), the
   // interval sequence, etc. null = no signature line, just the pill.
   const signature: React.ReactNode = (() => {
+    if (part.workoutType === "for_quality") {
+      const duration = part.timeCapSeconds
+        ? formatSecondsAsClock(part.timeCapSeconds)
+        : null;
+      return (
+        <span className="flex flex-col gap-0.5">
+          <span>{duration ? `On a ${duration} clock` : "For Quality"}</span>
+          <span className="text-sm font-normal text-muted-foreground">
+            No score — quality work
+          </span>
+        </span>
+      );
+    }
+
     if (part.workoutType === "tabata" || part.structure === "tabata") {
       return (
         <>
@@ -835,6 +869,11 @@ export function PartSection({
       )}
 
       <div className="space-y-1.5 rounded-lg bg-white/[0.02] border border-white/[0.04] p-3">
+        {part.workoutType === "for_quality" && part.notes?.trim() && (
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/85">
+            {part.notes.trim()}
+          </p>
+        )}
         {part.structure === "complex" ? (
           // A complex is one unbroken set — render the movements joined,
           // ignoring any block grouping (a complex has none by definition).
@@ -864,6 +903,7 @@ export function PartSection({
                       partWorkoutType={part.workoutType}
                       partRepScheme={part.repScheme}
                       suggestionsHidden={suggestionsHidden}
+                      partIsRotating={intervalsRotating}
                     />
                   ))}
                 </div>
@@ -891,6 +931,7 @@ export function PartSection({
                           partWorkoutType={part.workoutType}
                           partRepScheme={part.repScheme}
                           suggestionsHidden={suggestionsHidden}
+                          partIsRotating={intervalsRotating}
                         />
                       ))}
                     </div>

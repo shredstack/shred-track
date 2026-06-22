@@ -37,3 +37,52 @@ export function normalizeSetEntries(raw: unknown): SetEntry[] {
 export function maxWeight(entries: SetEntry[]): number {
   return entries.reduce((max, e) => (e.weight > max ? e.weight : max), 0);
 }
+
+// Parse a rep scheme string like "5-5-5-5-5" or "10-10-7-7-3" into per-set
+// prescribed rep counts. Only whole-number segments count; non-numeric
+// segments ("max", "amrap") are dropped. Mirrors the parser used in the
+// score-entry UI so prescribed-rep logic agrees on both sides.
+export function parseRepScheme(repScheme?: string | null): number[] {
+  if (!repScheme) return [];
+  return repScheme
+    .split("-")
+    .map((s) => s.trim())
+    .filter((s) => /^\d+$/.test(s))
+    .map((s) => parseInt(s, 10));
+}
+
+// Prescribed reps for the set at index `setIdx`. A multi-value scheme maps one
+// value per set; a single value applies to every set; extra sets beyond the
+// scheme reuse the last prescribed value. Returns undefined when the scheme
+// carries no numeric info.
+export function prescribedRepsForSet(
+  repScheme: string | null | undefined,
+  setIdx: number
+): number | undefined {
+  const parts = parseRepScheme(repScheme);
+  if (parts.length === 0) return undefined;
+  if (setIdx < parts.length) return parts[setIdx];
+  return parts[parts.length - 1];
+}
+
+// The heaviest set that COUNTS as a load score: the top working set whose
+// logged reps met its prescription. A set with no logged reps is assumed to
+// have hit the prescription — the UI only stores per-set reps when the athlete
+// overrides them (e.g. a missed final rep). When the scheme is unknown every
+// set counts (we can't judge). If no set met its prescription (every set fell
+// short), falls back to the overall heaviest set so a score is still produced.
+export function qualifyingTopSetWeight(
+  entries: SetEntry[],
+  repScheme?: string | null
+): number {
+  let qualifyingMax = 0;
+  let overallMax = 0;
+  entries.forEach((e, i) => {
+    if (e.weight > overallMax) overallMax = e.weight;
+    const prescribed = prescribedRepsForSet(repScheme, i);
+    const metPrescription =
+      e.reps == null || prescribed == null || e.reps >= prescribed;
+    if (metPrescription && e.weight > qualifyingMax) qualifyingMax = e.weight;
+  });
+  return qualifyingMax > 0 ? qualifyingMax : overallMax;
+}
