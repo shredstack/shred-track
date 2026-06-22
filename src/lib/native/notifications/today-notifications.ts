@@ -57,8 +57,27 @@ interface ClassRegistration {
 }
 
 interface WodRow {
+  kind?: string | null;
   title?: string | null;
   loggedByUser?: boolean;
+}
+
+/// A day's CrossFit programming is a list of sessions — warm-up,
+/// pre-skill, the WOD, cool-down, etc. The WOD (kind === "wod") is the
+/// main scored part the athlete cares about, but it's rarely first in
+/// the list (the warmup usually is). These helpers pick the WOD by kind
+/// and only fall back to the first session if nothing is tagged "wod".
+function pickHeadlineWod<T extends { kind?: string | null }>(
+  wods: T[],
+): T | undefined {
+  return wods.find((w) => w.kind === "wod") ?? wods[0];
+}
+
+function pickUnloggedWod<
+  T extends { kind?: string | null; loggedByUser?: boolean },
+>(wods: T[]): T | undefined {
+  const unlogged = wods.filter((w) => !w.loggedByUser);
+  return unlogged.find((w) => w.kind === "wod") ?? unlogged[0];
 }
 
 interface TodayState {
@@ -145,7 +164,7 @@ function buildMorningBrief(
 
   let wodLabel: string | undefined;
   if (prefs.includeCrossfit) {
-    const wod = (state.crossfit?.workouts ?? [])[0];
+    const wod = pickHeadlineWod((state.crossfit?.workouts ?? []) as WodRow[]);
     if (wod?.title) wodLabel = wod.title;
   }
 
@@ -217,7 +236,7 @@ function buildMiddayNudge(
     ? hyroxSessions.find((s) => !s.log)
     : undefined;
   const unloggedWod = prefs.includeCrossfit
-    ? wods.find((w) => !w.loggedByUser)
+    ? pickUnloggedWod(wods as WodRow[])
     : undefined;
   const incompleteRecovery = prefs.includeRecovery
     ? recoveryItems.find((r) => r?.session?.status !== "complete")
@@ -282,7 +301,7 @@ function buildCrossfitLogPlan(
   if (!prefs.crossfitLogNudgeEnabled || !prefs.includeCrossfit) return fallback;
 
   const wods = (state?.crossfit?.workouts ?? []) as WodRow[];
-  const unloggedWod = wods.find((w) => !w.loggedByUser);
+  const unloggedWod = pickUnloggedWod(wods);
   if (!unloggedWod) return fallback; // nothing to nudge about
 
   // 1) Class registration — earliest of today.

@@ -40,6 +40,11 @@ export function Leaderboard({
     [entries]
   );
 
+  // For-quality blocks aren't scored or ranked — every entry has the same
+  // (zero) sort value, so a podium would be meaningless. Render them as a
+  // participation list ordered by most-recent instead.
+  const isQuality = workoutType === "for_quality";
+
   const sortedEntries = useMemo(() => {
     const filtered = entries.filter((entry) => {
       if (filter === "all") return true;
@@ -48,13 +53,17 @@ export function Leaderboard({
       return entry.division === "scaled";
     });
     return [...filtered].sort((a, b) => {
+      if (isQuality) {
+        // ISO timestamps sort lexicographically; desc = most recent first.
+        return b.createdAt.localeCompare(a.createdAt);
+      }
       if (workoutType === "for_time") {
         if (a.hitTimeCap !== b.hitTimeCap) return a.hitTimeCap ? 1 : -1;
         return a.sortValue - b.sortValue;
       }
       return b.sortValue - a.sortValue;
     });
-  }, [entries, filter, workoutType]);
+  }, [entries, filter, workoutType, isQuality]);
 
   return (
     <div className="flex flex-col gap-3 pt-3 pb-6">
@@ -114,7 +123,14 @@ export function Leaderboard({
                 ? () => onOpenComments(entry.scoreId)
                 : undefined,
             };
-            return <LeaderboardRow key={entry.scoreId} entry={row} rank={idx + 1} />;
+            return (
+              <LeaderboardRow
+                key={entry.scoreId}
+                entry={row}
+                rank={idx + 1}
+                unranked={isQuality}
+              />
+            );
           })
         )}
       </div>

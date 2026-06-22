@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { crossfitWorkouts, workoutSessions } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import {
+  crossfitWorkouts,
+  crossfitWorkoutParts,
+  scores,
+  workoutSessions,
+} from "@/db/schema";
+import { and, eq } from "drizzle-orm";
 import { getSessionUser } from "@/lib/session";
 import { getSessionAccess } from "@/lib/authz/workout";
 import {
@@ -228,6 +233,29 @@ export async function PUT(
           .limit(1)
       : [undefined];
 
+    // Snapshot the current template's parts (by order) BEFORE we fork/edit.
+    // A fingerprint change (e.g. reordering a movement) forks to a new
+    // template — or recreates parts in place — minting fresh part UUIDs.
+    // Scores bind to a part via scores.crossfit_workout_part_id, which has no
+    // FK, so without repointing them afterward they'd be silently orphaned
+    // (still linked to the session, but matched to a part id that no longer
+    // exists → they vanish from the session view). We map old → new by order
+    // position once the write resolves.
+    const oldPartIdsByOrder = session.crossfitWorkoutId
+      ? (
+          await tx
+            .select({ id: crossfitWorkoutParts.id })
+            .from(crossfitWorkoutParts)
+            .where(
+              eq(
+                crossfitWorkoutParts.crossfitWorkoutId,
+                session.crossfitWorkoutId
+              )
+            )
+            .orderBy(crossfitWorkoutParts.orderIndex)
+        ).map((p) => p.id)
+      : [];
+
     const nextTemplate = {
       title: deriveTitle(body.title, currentTemplate?.title, firstPart),
       description:
@@ -265,16 +293,19 @@ export async function PUT(
     let templateId: string;
     let isNew: boolean;
     let mode: Mode;
+    let newPartIdsByOrder: string[] = [];
     if (!session.crossfitWorkoutId) {
       const r = await upsertTemplate(tx, nextTemplate);
       templateId = r.templateId;
       isNew = r.isNew;
       mode = "upsert";
+      newPartIdsByOrder = r.partIdsByOrder;
     } else if (currentTemplate?.isSystem) {
       const r = await upsertTemplate(tx, nextTemplate);
       templateId = r.templateId;
       isNew = r.isNew;
       mode = "forked";
+      newPartIdsByOrder = r.partIdsByOrder;
     } else {
       const r = await forkOrEditTemplate(tx, {
         originalTemplateId: session.crossfitWorkoutId,
@@ -284,6 +315,31 @@ export async function PUT(
       templateId = r.templateId;
       isNew = r.isNew;
       mode = r.mode;
+      newPartIdsByOrder = r.partIdsByOrder;
+    }
+
+    // Repoint this session's scores from the old parts to the new ones,
+    // matched by order position. Needed whenever the part rows changed: a
+    // fork/match/upsert to a different template id, or an in-place edit that
+    // recreated parts under the same template id. Without this, scores keep
+    // pointing at deleted/foreign part ids and disappear from the view.
+    const partsChanged =
+      templateId !== session.crossfitWorkoutId || mode === "edited_in_place";
+    if (partsChanged && oldPartIdsByOrder.length > 0) {
+      for (let i = 0; i < oldPartIdsByOrder.length; i++) {
+        const oldPartId = oldPartIdsByOrder[i];
+        const newPartId = newPartIdsByOrder[i];
+        if (!newPartId || newPartId === oldPartId) continue;
+        await tx
+          .update(scores)
+          .set({ crossfitWorkoutPartId: newPartId })
+          .where(
+            and(
+              eq(scores.workoutSessionId, id),
+              eq(scores.crossfitWorkoutPartId, oldPartId)
+            )
+          );
+      }
     }
 
     // Relink the session if the resolved template id differs.
