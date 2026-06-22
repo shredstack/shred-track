@@ -111,6 +111,13 @@ interface MovementListBuilderProps {
   // per-movement rep input is hidden behind an "Override reps" disclosure
   // and the ladder flag is governed by the part-level checkbox.
   partPromoteSequenceToLadder?: boolean;
+  // When set (intervals parts with rotation enabled), each movement card
+  // shows a "Round" selector mirroring the rotation panel above — so the
+  // user can pin a movement to its round right where they add it, instead
+  // of scrolling back up. The number is how many rounds to offer; the
+  // selection is persisted as the movement's `slotIndex` (null = every
+  // round). Undefined hides the selector entirely.
+  intervalRoundCount?: number;
 }
 
 // ============================================
@@ -249,6 +256,7 @@ export function MovementListBuilder({
   earlierLoadParts = [],
   partRepScheme,
   partPromoteSequenceToLadder,
+  intervalRoundCount,
 }: MovementListBuilderProps) {
   const showRxWeights = workoutType !== "for_load";
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -611,6 +619,7 @@ export function MovementListBuilder({
               partRepScheme={partRepScheme}
               overrideOpenIds={overrideOpenIds}
               onOpenOverride={openOverride}
+              intervalRoundCount={intervalRoundCount}
             />
           )}
 
@@ -645,6 +654,7 @@ export function MovementListBuilder({
               partRepScheme={partRepScheme}
               overrideOpenIds={overrideOpenIds}
               onOpenOverride={openOverride}
+              intervalRoundCount={intervalRoundCount}
             />
           ))}
         </div>
@@ -715,6 +725,9 @@ interface SectionBodyProps {
   // overridable reps field (via the "Override reps" link).
   overrideOpenIds: Set<string>;
   onOpenOverride: (tempId: string) => void;
+  // When set, each movement card shows a per-round "Round" selector
+  // (intervals rotation). Number of rounds to offer; undefined hides it.
+  intervalRoundCount?: number;
 }
 
 function Section({
@@ -837,6 +850,7 @@ function SectionBody({
   partRepScheme,
   overrideOpenIds,
   onOpenOverride,
+  intervalRoundCount,
 }: SectionBodyProps & { sectionId: string }) {
   const { setNodeRef, isOver } = useDroppable({ id: sectionId });
   const itemIds = useMemo(() => movements.map((m) => m.tempId), [movements]);
@@ -873,6 +887,7 @@ function SectionBody({
               partRepScheme={partRepScheme}
               isOverrideOpen={overrideOpenIds.has(mov.tempId)}
               onOpenOverride={onOpenOverride}
+              intervalRoundCount={intervalRoundCount}
             />
           ))
         )}
@@ -919,6 +934,9 @@ interface MovementCardProps {
   // True when the user has clicked "Override reps" on this movement.
   isOverrideOpen: boolean;
   onOpenOverride: (tempId: string) => void;
+  // When set, render a per-round "Round" selector (intervals rotation).
+  // Number of rounds to offer; undefined hides it.
+  intervalRoundCount?: number;
 }
 
 function SortableMovementCard(props: MovementCardProps) {
@@ -962,6 +980,7 @@ function MovementCard({
   partRepScheme,
   isOverrideOpen,
   onOpenOverride,
+  intervalRoundCount,
   dragListeners,
 }: MovementCardProps & { dragListeners?: Record<string, unknown> }) {
   const rxFields = resolveRxFields(mov, movementLibrary);
@@ -1028,6 +1047,34 @@ function MovementCard({
           </Button>
         </div>
       </div>
+
+      {/* Round assignment (intervals rotation) — mirrors the "Rotate
+          movements" panel above so the user can pin a movement to its round
+          right here, without scrolling back up. `slotIndex` null = every
+          round; N = round N+1. */}
+      {intervalRoundCount != null && intervalRoundCount > 0 && (
+        <div className="flex items-center gap-1.5">
+          <Label className="text-xs text-muted-foreground">Round</Label>
+          <select
+            value={mov.slotIndex != null ? String(mov.slotIndex) : ""}
+            onChange={(e) =>
+              onUpdate(mov.tempId, {
+                slotIndex:
+                  e.target.value === "" ? null : parseInt(e.target.value, 10),
+              })
+            }
+            className="h-7 rounded-md border border-input bg-background px-1.5 text-xs"
+            aria-label={`${mov.movementName || "Movement"} round`}
+          >
+            <option value="">Every round</option>
+            {Array.from({ length: intervalRoundCount }, (_, i) => (
+              <option key={i} value={String(i)}>
+                Round {i + 1}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Reps — visible for everything except duration-typed movements
           (Rest, Plank, etc.). For_load uses the per-movement rep scheme

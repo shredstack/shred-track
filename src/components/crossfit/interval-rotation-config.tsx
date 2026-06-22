@@ -1,15 +1,19 @@
 "use client";
 
-import { useMemo, useState } from "react";
 import { Label } from "@/components/ui/label";
 import type { WorkoutBuilderMovement } from "@/types/crossfit";
 
 interface IntervalRotationConfigProps {
   movements: WorkoutBuilderMovement[];
   onMovementsChange: (movements: WorkoutBuilderMovement[]) => void;
-  /** The part's round count (free-text string). Drives how many "Round N"
-   *  slots a movement can be pinned to. */
-  rounds: string;
+  /** Whether the rotation UI is active. Controlled by the parent so the
+   *  per-movement Round selectors (rendered down in the movement list) stay
+   *  in sync with this panel's "Rotate movements" checkbox. */
+  enabled: boolean;
+  onEnabledChange: (enabled: boolean) => void;
+  /** How many "Round N" slots a movement can be pinned to. Computed by the
+   *  parent from the part's round count (and any already-pinned slots). */
+  roundCount: number;
   compact?: boolean;
 }
 
@@ -25,34 +29,20 @@ interface IntervalRotationConfigProps {
 export function IntervalRotationConfig({
   movements,
   onMovementsChange,
-  rounds,
+  enabled,
+  onEnabledChange,
+  roundCount,
   compact = false,
 }: IntervalRotationConfigProps) {
   const labelClass = compact ? "text-xs text-muted-foreground" : "text-sm";
 
-  // Rotation is persisted purely via per-movement `slotIndex`; a part is
-  // "rotating" iff any movement carries a slot. Track the user's intent
-  // explicitly too so the checkbox responds immediately even before any
-  // movement has been pinned (mirrors EmomRotationConfig).
-  const hasRotation = movements.some((m) => m.slotIndex != null);
-  const [rotatingEnabled, setRotatingEnabled] = useState(hasRotation);
-  const rotating = rotatingEnabled || hasRotation;
-
-  // How many rounds the dropdown should offer. Prefer the explicit round
-  // count; fall back to the highest slot already assigned so a saved
-  // workout with rounds unset still renders every pinned movement.
-  const roundCount = useMemo(() => {
-    const explicit = parseInt(rounds, 10);
-    const maxSlot =
-      movements.reduce(
-        (mx, m) => (m.slotIndex != null ? Math.max(mx, m.slotIndex) : mx),
-        -1
-      ) + 1;
-    return Math.max(Number.isFinite(explicit) && explicit > 0 ? explicit : 0, maxSlot, 0);
-  }, [rounds, movements]);
+  // Rotation is persisted purely via per-movement `slotIndex`; the parent
+  // folds the explicit "user turned it on" intent together with whether any
+  // movement already carries a slot into `enabled`.
+  const rotating = enabled;
 
   const disable = () => {
-    setRotatingEnabled(false);
+    onEnabledChange(false);
     onMovementsChange(movements.map((m) => ({ ...m, slotIndex: null })));
   };
 
@@ -69,7 +59,7 @@ export function IntervalRotationConfig({
           type="checkbox"
           checked={rotating}
           onChange={(e) =>
-            e.target.checked ? setRotatingEnabled(true) : disable()
+            e.target.checked ? onEnabledChange(true) : disable()
           }
           className="size-3 cursor-pointer"
         />

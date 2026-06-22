@@ -140,9 +140,13 @@ export type LeaderboardRowEntry =
 export function LeaderboardRow({
   entry,
   rank,
+  unranked = false,
 }: {
   entry: LeaderboardRowEntry;
   rank: number;
+  /** For-quality / participation rows: suppress the rank medal, top-3
+   *  highlight, and numeric score — show a "logged" marker instead. */
+  unranked?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasScalingDetails =
@@ -159,10 +163,14 @@ export function LeaderboardRow({
         onClick={() => expandable && setExpanded(!expanded)}
         className={`flex w-full items-center gap-3 rounded-lg px-2 py-3 text-left transition-colors ${
           expandable ? "hover:bg-muted/50 cursor-pointer" : "cursor-default"
-        } ${rank <= 3 ? "bg-muted/20" : ""}`}
+        } ${!unranked && rank <= 3 ? "bg-muted/20" : ""}`}
       >
         <div className="flex w-8 shrink-0 items-center justify-center">
-          {getRankIcon(rank)}
+          {unranked ? (
+            <CheckCircle2 className="size-4 text-emerald-400" />
+          ) : (
+            getRankIcon(rank)
+          )}
         </div>
 
         <div className="flex flex-1 items-center gap-2 min-w-0">
@@ -182,12 +190,16 @@ export function LeaderboardRow({
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="font-mono text-sm font-semibold text-foreground">
-            {entry.displayScore}
-          </span>
+          {unranked ? (
+            <span className="text-xs font-medium text-emerald-400">Logged</span>
+          ) : (
+            <span className="font-mono text-sm font-semibold text-foreground">
+              {entry.displayScore}
+            </span>
+          )}
           {entry.kind === "workout" && (
             <>
-              {entry.heaviestAthleteWeightLb != null && (
+              {!unranked && entry.heaviestAthleteWeightLb != null && (
                 <Badge
                   variant="outline"
                   className="text-[10px] bg-sky-500/10 text-sky-300 border-sky-500/30"
@@ -201,7 +213,7 @@ export function LeaderboardRow({
               >
                 {DIVISION_LABELS[entry.division]}
               </Badge>
-              {entry.hitTimeCap && (
+              {!unranked && entry.hitTimeCap && (
                 <Badge
                   variant="outline"
                   className="text-[10px] bg-red-500/10 text-red-400 border-red-500/30"

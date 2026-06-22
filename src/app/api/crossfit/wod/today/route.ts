@@ -108,6 +108,7 @@ export async function GET(req: NextRequest) {
         loggedScoreBySessionId.get(r.session.id) ?? null;
       return {
         id: r.session.id,
+        kind: r.session.kind,
         title: r.session.title ?? r.template?.title ?? null,
         description: r.template?.description ?? null,
         rawText: null,

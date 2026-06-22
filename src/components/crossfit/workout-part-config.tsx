@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -97,6 +97,36 @@ export function WorkoutPartConfig({
   const forRepsSets =
     part.workoutType === "for_reps" ? parseInt(part.rounds || "", 10) : NaN;
   const forRepsMultiSet = Number.isFinite(forRepsSets) && forRepsSets > 1;
+
+  // Interval rotation ("a different movement each round") is persisted purely
+  // via per-movement `slotIndex`. Track the user's explicit "turn it on"
+  // intent here so the checkbox responds before any movement is pinned, and
+  // so the per-movement Round selectors in the movement list light up in sync
+  // with the rotation panel above it.
+  const [intervalRotationEnabled, setIntervalRotationEnabled] = useState(() =>
+    part.movements.some((m) => m.slotIndex != null)
+  );
+  const intervalRotating =
+    part.workoutType === "intervals" &&
+    (intervalRotationEnabled ||
+      part.movements.some((m) => m.slotIndex != null));
+
+  // How many rounds the per-movement dropdown should offer. Prefer the
+  // explicit round count; fall back to the highest slot already assigned so a
+  // saved workout with rounds unset still renders every pinned movement.
+  const intervalRoundCount = useMemo(() => {
+    const explicit = parseInt(part.rounds, 10);
+    const maxSlot =
+      part.movements.reduce(
+        (mx, m) => (m.slotIndex != null ? Math.max(mx, m.slotIndex) : mx),
+        -1
+      ) + 1;
+    return Math.max(
+      Number.isFinite(explicit) && explicit > 0 ? explicit : 0,
+      maxSlot,
+      0
+    );
+  }, [part.rounds, part.movements]);
 
   return (
     <div className="space-y-3">
@@ -416,7 +446,9 @@ export function WorkoutPartConfig({
           <IntervalRotationConfig
             movements={part.movements}
             onMovementsChange={onMovementsChange}
-            rounds={part.rounds}
+            enabled={intervalRotating}
+            onEnabledChange={setIntervalRotationEnabled}
+            roundCount={intervalRoundCount}
             compact={compact}
           />
         </div>
@@ -468,6 +500,7 @@ export function WorkoutPartConfig({
         earlierLoadParts={earlierLoadParts}
         partRepScheme={part.repScheme}
         partPromoteSequenceToLadder={part.promoteSequenceToLadder}
+        intervalRoundCount={intervalRotating ? intervalRoundCount : undefined}
         showSideCadence={
           (part.workoutType === "for_time" ||
             part.workoutType === "amrap" ||

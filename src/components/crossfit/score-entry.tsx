@@ -1328,6 +1328,10 @@ export function ScoreEntry({
               rounds.some((r) => parseInt(r, 10) > 0)
             )
           );
+        case "for_quality":
+          // For-quality work has no score input — the only thing worth saving
+          // is the athlete's note about what they worked on.
+          return !!st.notes;
         default:
           return !!st.scoreText;
       }
@@ -2014,23 +2018,14 @@ export function ScoreEntry({
         );
 
       case "for_quality":
-        // A practice / skill block — no score is tracked. Offer an optional
-        // free-text note so the athlete can record what they worked on.
+        // A practice / skill block — no score is tracked. The athlete records
+        // what they worked on in the shared Notes box below, so we don't show a
+        // separate score input here (avoids two redundant free-text fields).
         return (
-          <div className="space-y-2">
-            <Label htmlFor="se-quality">What did you work on? (optional)</Label>
-            <Input
-              id="se-quality"
-              value={state.scoreText}
-              onChange={(e) =>
-                updateState(activePart.id, { scoreText: e.target.value })
-              }
-              placeholder="e.g. Worked freestanding handstand holds"
-            />
-            <p className="text-[11px] text-muted-foreground">
-              For-quality work isn&rsquo;t scored or ranked.
-            </p>
-          </div>
+          <p className="text-[11px] text-muted-foreground">
+            For-quality work isn&rsquo;t scored or ranked. Use the Notes box
+            below to jot down what you worked on.
+          </p>
         );
 
       default:
