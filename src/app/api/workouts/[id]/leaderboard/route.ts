@@ -70,14 +70,11 @@ function computeSortValue(
       // scores.timeSeconds is the pre-computed aggregate (slowest /
       // fastest / sum / average). Lower wins, same as for_time.
       return row.timeSeconds ?? Number.POSITIVE_INFINITY;
-    case "amrap": {
-      if (row.totalReps != null) return row.totalReps;
-      return (row.rounds ?? 0) * 1000 + (row.remainderReps ?? 0);
-    }
+    // EMOM shares AMRAP's encoding: reps mode ranks by total reps; rounds mode
+    // by rounds + remainder. EMOM load mode is handled by the scoreType ===
+    // "load" branch above; note mode has no numeric key → 0.
+    case "amrap":
     case "emom": {
-      // Load mode is handled by the scoreType === "load" branch above. Reps
-      // mode ranks by total reps; rounds mode by rounds + remainder (same
-      // encoding as AMRAP); note mode has no numeric key → 0.
       if (row.totalReps != null) return row.totalReps;
       return (row.rounds ?? 0) * 1000 + (row.remainderReps ?? 0);
     }
@@ -187,7 +184,7 @@ export async function GET(
   // picker is the signal. Treat them like athlete-weight parts so the
   // heaviest-weight sort branch (and chip) fires.
   for (const p of parts) {
-    if (p.workoutType === "emom" && (p.scoreType ?? null) === "load") {
+    if (p.workoutType === "emom" && p.scoreType === "load") {
       partHasAthleteWeight.add(p.id);
     }
   }
