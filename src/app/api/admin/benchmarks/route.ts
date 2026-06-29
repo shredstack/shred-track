@@ -6,7 +6,7 @@ import {
   crossfitWorkouts,
   movements,
 } from "@/db/schema";
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, ilike, inArray } from "drizzle-orm";
 import { getAdminAccess } from "@/lib/admin/access";
 import { type BenchmarkPartInput } from "@/lib/crossfit/benchmark-parts";
 import {
@@ -216,6 +216,36 @@ export async function POST(req: NextRequest) {
   }
 
   const firstPart = parts[0];
+
+  // Reject duplicates on Name + Type within the same scope. A benchmark is
+  // identified by its name and workout type (e.g. "JT" / for_time), so the
+  // same pairing can't be created twice — system benchmarks are deduped
+  // globally, personal ones per-creator.
+  const dupConditions = [
+    eq(crossfitWorkouts.isBenchmark, true),
+    ilike(crossfitWorkouts.title, trimmedName),
+    eq(crossfitWorkouts.workoutType, firstPart.workoutType),
+  ];
+  if (isSystem) {
+    dupConditions.push(eq(crossfitWorkouts.isSystem, true));
+  } else {
+    dupConditions.push(eq(crossfitWorkouts.isSystem, false));
+    dupConditions.push(eq(crossfitWorkouts.createdBy, access.user.id));
+  }
+  const existingDup = await db
+    .select({ id: crossfitWorkouts.id })
+    .from(crossfitWorkouts)
+    .where(and(...dupConditions))
+    .limit(1);
+  if (existingDup.length > 0) {
+    return NextResponse.json(
+      {
+        error: `A ${isSystem ? "system " : ""}benchmark named "${trimmedName}" (${firstPart.workoutType}) already exists.`,
+      },
+      { status: 409 }
+    );
+  }
+
   const scope = isSystem
     ? ({ kind: "system" } as const)
     : ({ kind: "personal" as const, userId: access.user.id });

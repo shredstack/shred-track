@@ -95,7 +95,7 @@ export type TemplatePartInput = {
   repScheme?: string | null;
   rounds?: number | null;
   structure?: string | null;
-  scoreType?: "reps" | "load" | null;
+  scoreType?: "reps" | "load" | "rounds" | "note" | null;
   // Timed Rounds — aggregation strategy + optional per-round window
   // (seconds, or mm:ss-style string the server parses).
   roundScoreAggregation?:

@@ -415,6 +415,24 @@ function emptyPartState(
   };
 }
 
+// Whether the athlete has entered real detail on a part beyond the primary
+// score — notes or per-movement scaling. Used to avoid silently discarding
+// that work when they hit Save without an actual score (e.g. notes on a
+// for-time WOD but no time entered). Division alone is intentionally NOT a
+// signal: it's a trivial re-pick, and a stray tap shouldn't block a save.
+function partHasSecondaryInput(st: PartState): boolean {
+  if (st.notes.trim()) return true;
+  return Object.values(st.movementScalings).some(
+    (s) =>
+      s.wasRx === false ||
+      s.actualWeight != null ||
+      s.actualReps != null ||
+      !!s.modification?.trim() ||
+      !!s.substitutionMovementId ||
+      !!s.notes?.trim()
+  );
+}
+
 // Resolve the max load logged on a for_load source part — the basis for a
 // weight_pct prescription. Prefers the live in-dialog draft (the athlete is
 // scoring both parts in the same sitting) and falls back to a previously
@@ -462,6 +480,39 @@ function scoringTypeOf(part: WorkoutPartDisplay): string {
   return part.workoutType;
 }
 
+type EmomScoreMode = "reps" | "rounds" | "load" | "note";
+
+// EMOM is scored four ways. The part's scoreType override wins; when unset we
+// fall back to the legacy derivation (max-reps movements → total reps,
+// otherwise a free-text note) so existing EMOMs keep their behavior.
+function emomScoreMode(part: WorkoutPartDisplay): EmomScoreMode {
+  switch (part.scoreType) {
+    case "reps":
+    case "rounds":
+    case "load":
+    case "note":
+      return part.scoreType;
+    default:
+      return part.movements.some((m) => m.isMaxReps) ? "reps" : "note";
+  }
+}
+
+// Whether a movement should surface the per-interval weight grid at score
+// time. Athlete-picked-weight movements always do; an EMOM scored by load
+// also captures per-interval weight for its weighted movements even when the
+// prescription didn't explicitly flag them athlete-picked.
+function usesAthleteWeightGrid(
+  part: WorkoutPartDisplay,
+  mov: WorkoutMovementDisplay
+): boolean {
+  if (mov.weightSource === "athlete") return true;
+  return (
+    part.workoutType === "emom" &&
+    part.scoreType === "load" &&
+    mov.isWeighted
+  );
+}
+
 // Number of per-round inputs the max-reps / per-round grids should show.
 // Normally the part's `rounds`, but a rotating EMOM has no `rounds` column —
 // its round count is the number of cycles = timeCap / (cycleLength × interval),
@@ -482,6 +533,21 @@ function effectiveMaxRepsRounds(part: WorkoutPartDisplay): number {
       );
       if (cycles > 0) return cycles;
     }
+  }
+  // Non-rotating EMOM: one input per interval (timeCap / interval), so a
+  // "build to a heavy clean every 2:00 for 10:00" load EMOM gets 5 weight
+  // boxes. Only when `rounds` wasn't explicitly set on the part.
+  if (
+    part.workoutType === "emom" &&
+    !isRotatingEmom &&
+    !part.rounds &&
+    part.timeCapSeconds &&
+    part.emomIntervalSeconds
+  ) {
+    const intervals = Math.floor(
+      part.timeCapSeconds / part.emomIntervalSeconds
+    );
+    if (intervals > 0) return intervals;
   }
   return part.rounds && part.rounds > 0 ? part.rounds : 1;
 }
@@ -1055,7 +1121,7 @@ export function ScoreEntry({
         const perRoundWeightDrafts = st.weightPerRoundDrafts[mov.id];
         let actualWeightLbsPerRound: number[] | undefined;
         if (
-          mov.weightSource === "athlete" &&
+          usesAthleteWeightGrid(part, mov) &&
           perRoundWeightDrafts &&
           perRoundWeightDrafts.length > 0
         ) {
@@ -1107,6 +1173,14 @@ export function ScoreEntry({
         return acc + s.actualRepsPerRound.reduce((a, b) => a + b, 0);
       }, 0);
       const partHasMaxReps = part.movements.some((m) => m.isMaxReps);
+
+      // Heaviest weight captured across the per-interval weight grid — the
+      // rank value for a load-scored EMOM (and the leaderboard chip elsewhere).
+      const heaviestAthleteWeight = scalings.reduce((mx, s) => {
+        if (!s.actualWeightLbsPerRound || s.actualWeightLbsPerRound.length === 0)
+          return mx;
+        return Math.max(mx, ...s.actualWeightLbsPerRound);
+      }, 0);
 
       // Auto-sum total time from per-round duration captures (e.g. "Run
       // 400m × 3 as fast as possible"). The athlete logs one mm:ss per
@@ -1217,10 +1291,19 @@ export function ScoreEntry({
           }
           break;
         }
-        case "emom":
-          // Rotating EMOM scores by total reps (auto-summed from the per-cycle
-          // max-reps inputs); a plain EMOM keeps the free-text result.
-          if (partHasMaxReps) {
+        case "emom": {
+          // EMOM scores four ways (see emomScoreMode): rounds completed, load
+          // lifted, total reps (rotating max-effort), or a free-text note.
+          const mode = emomScoreMode(part);
+          if (mode === "load") {
+            score.weightLbs =
+              heaviestAthleteWeight > 0 ? heaviestAthleteWeight : undefined;
+          } else if (mode === "rounds") {
+            score.rounds = st.rounds ? parseInt(st.rounds) : undefined;
+            score.remainderReps = st.remainderReps
+              ? parseInt(st.remainderReps)
+              : undefined;
+          } else if (mode === "reps") {
             score.totalReps = st.totalReps
               ? parseInt(st.totalReps)
               : sumFromMaxReps > 0
@@ -1230,6 +1313,7 @@ export function ScoreEntry({
             score.scoreText = st.scoreText || undefined;
           }
           break;
+        }
         case "tabata":
           score.scoreText = st.scoreText || undefined;
           break;
@@ -1328,13 +1412,19 @@ export function ScoreEntry({
             )
           );
         case "emom":
-          // Plain EMOM: free-text result. Rotating EMOM: per-cycle max-reps
-          // inputs (or the auto-summed total) count as data.
+          // Any of the four EMOM modes counts: free-text note, total reps
+          // (typed or via per-cycle max-reps grid), rounds completed, or
+          // per-interval weight (load mode).
           return (
             !!st.scoreText ||
             !!st.totalReps ||
+            !!st.rounds ||
+            !!st.remainderReps ||
             Object.values(st.maxRepsDrafts).some((rounds) =>
               rounds.some((r) => parseInt(r, 10) > 0)
+            ) ||
+            Object.values(st.weightPerRoundDrafts).some((rounds) =>
+              rounds.some((s) => parseFloat(s) > 0)
             )
           );
         case "for_quality":
@@ -1388,6 +1478,30 @@ export function ScoreEntry({
       setActivePartId(incompleteTimed.id);
       setSubmitError(
         "Fill in every round time before saving (or clear them all)."
+      );
+      return;
+    }
+
+    // Guard against silent data loss: a part the athlete clearly engaged with
+    // (picked a division, wrote notes, scaled a movement) but never gave an
+    // actual score — e.g. notes on a for-time WOD with no time entered. Saving
+    // would drop that part, so point them at the missing score instead of
+    // closing. for_quality is exempt (its "score" IS the note, already counted
+    // by partHasData).
+    const needsScore = parts.find((part) => {
+      const st = partStates[part.id];
+      return (
+        !!st &&
+        !savedPartIds.has(part.id) &&
+        scoringTypeOf(part) !== "for_quality" &&
+        !partHasData(part, st) &&
+        partHasSecondaryInput(st)
+      );
+    });
+    if (needsScore) {
+      setActivePartId(needsScore.id);
+      setSubmitError(
+        "Enter your score before saving — otherwise your notes and details for this part won’t be saved."
       );
       return;
     }
@@ -1880,18 +1994,78 @@ export function ScoreEntry({
       }
 
       case "emom": {
-        // Rotating EMOM with max-effort movements (e.g. "Min 1 max pull-ups /
-        // Min 2 max ring dips …") scores by total reps, auto-summed from the
-        // per-cycle grid below. A plain EMOM keeps the free-text result.
-        const partHasMax = activePart.movements.some((m) => m.isMaxReps);
-        if (partHasMax) {
+        const mode = emomScoreMode(activePart);
+        // Load: the per-interval weight grid below the switch is the score
+        // input (heaviest ranks). Nothing extra to render here.
+        if (mode === "load") {
+          return (
+            <p className="text-xs text-muted-foreground">
+              Log the weight you hit each interval below — your heaviest is the
+              score.
+            </p>
+          );
+        }
+        // Rounds completed — structured "X rounds + Y reps", same shape as
+        // AMRAP so capacity EMOMs rank by rounds.
+        if (mode === "rounds") {
+          return (
+            <div className="grid gap-4 grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="se-emom-rounds">Rounds completed</Label>
+                <Input
+                  id="se-emom-rounds"
+                  type="number"
+                  min={0}
+                  value={state.rounds}
+                  onChange={(e) =>
+                    updateState(activePart.id, { rounds: e.target.value })
+                  }
+                  placeholder="e.g. 8"
+                  className="font-mono"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="se-emom-extra">+ Extra Reps</Label>
+                <Input
+                  id="se-emom-extra"
+                  type="number"
+                  min={0}
+                  value={state.remainderReps}
+                  onChange={(e) =>
+                    updateState(activePart.id, {
+                      remainderReps: e.target.value,
+                    })
+                  }
+                  placeholder="e.g. 5"
+                  className="font-mono"
+                />
+              </div>
+              {state.rounds && (
+                <div className="col-span-2 text-center">
+                  <span className="font-mono text-lg font-semibold text-foreground">
+                    {state.rounds} rds
+                    {state.remainderReps
+                      ? ` + ${state.remainderReps} reps`
+                      : ""}
+                  </span>
+                </div>
+              )}
+            </div>
+          );
+        }
+        // Reps — total across intervals, auto-summed from the per-cycle
+        // max-reps grid below when present.
+        if (mode === "reps") {
+          const partHasMax = activePart.movements.some((m) => m.isMaxReps);
           return (
             <div className="space-y-2">
               <Label htmlFor="se-emom-total">
                 Total Reps
-                <span className="ml-1 text-xs font-normal text-muted-foreground">
-                  (auto from per-round inputs)
-                </span>
+                {partHasMax && (
+                  <span className="ml-1 text-xs font-normal text-muted-foreground">
+                    (auto from per-round inputs)
+                  </span>
+                )}
               </Label>
               <Input
                 id="se-emom-total"
@@ -1901,12 +2075,13 @@ export function ScoreEntry({
                 onChange={(e) =>
                   updateState(activePart.id, { totalReps: e.target.value })
                 }
-                placeholder="Auto-summed below"
+                placeholder={partHasMax ? "Auto-summed below" : "e.g. 120"}
                 className="font-mono text-lg"
               />
             </div>
           );
         }
+        // Note — free-text result.
         return (
           <div className="space-y-2">
             <Label htmlFor="se-emom-score">Score / Notes</Label>
@@ -2353,7 +2528,7 @@ export function ScoreEntry({
               same part each get their own input grid. */}
           {(() => {
             const athleteWeightMovements = activePart.movements.filter(
-              (m) => m.weightSource === "athlete"
+              (m) => usesAthleteWeightGrid(activePart, m)
             );
             if (athleteWeightMovements.length === 0) return null;
             const rounds = effectiveMaxRepsRounds(activePart);

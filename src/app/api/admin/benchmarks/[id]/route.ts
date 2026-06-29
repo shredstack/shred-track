@@ -4,7 +4,7 @@ import {
   crossfitWorkoutParts,
   crossfitWorkouts,
 } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ilike, ne } from "drizzle-orm";
 import { getAdminUser } from "@/lib/admin";
 import { getAdminAccess } from "@/lib/admin/access";
 import { type BenchmarkPartInput } from "@/lib/crossfit/benchmark-parts";
@@ -98,6 +98,36 @@ export async function PUT(
 
   const firstPart = parts[0];
   const nextTitle = name?.trim() || existing.title;
+
+  // Block edits that would collide with another benchmark on Name + Type
+  // within the same scope (excluding this row).
+  const nextIsSystem = !!(isSystem !== undefined ? isSystem : existing.isSystem);
+  const dupConditions = [
+    ne(crossfitWorkouts.id, id),
+    eq(crossfitWorkouts.isBenchmark, true),
+    ilike(crossfitWorkouts.title, nextTitle),
+    eq(crossfitWorkouts.workoutType, firstPart.workoutType),
+  ];
+  if (nextIsSystem) {
+    dupConditions.push(eq(crossfitWorkouts.isSystem, true));
+  } else if (existing.createdBy) {
+    dupConditions.push(eq(crossfitWorkouts.isSystem, false));
+    dupConditions.push(eq(crossfitWorkouts.createdBy, existing.createdBy));
+  }
+  const dupConflict = await db
+    .select({ id: crossfitWorkouts.id })
+    .from(crossfitWorkouts)
+    .where(and(...dupConditions))
+    .limit(1);
+  if (dupConflict.length > 0) {
+    return NextResponse.json(
+      {
+        error: `A ${nextIsSystem ? "system " : ""}benchmark named "${nextTitle}" (${firstPart.workoutType}) already exists.`,
+      },
+      { status: 409 }
+    );
+  }
+
   const nextDescription =
     description !== undefined
       ? description?.trim() || null

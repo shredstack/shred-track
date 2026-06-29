@@ -375,6 +375,58 @@ export function WorkoutPartConfig({
         </div>
       )}
 
+      {/* EMOM score-by picker. EMOM scoring is genuinely ambiguous — the
+          same "every N minutes" clock can be scored by rounds completed, by
+          the load lifted (pre-strength skill work), by total reps (rotating
+          max-effort), or kept as a free-text note. Default mirrors the legacy
+          behavior: max-reps movements → reps, otherwise a free-text note. */}
+      {part.workoutType === "emom" &&
+        (() => {
+          const current =
+            part.scoreType ??
+            (part.movements.some((m) => m.isMaxReps) ? "reps" : "note");
+          const hint =
+            current === "rounds"
+              ? "Athlete logs rounds completed (e.g. 8 rounds + 5 reps)."
+              : current === "load"
+                ? "Athlete logs weight per interval; the heaviest ranks the board. Set the lifted movement's weight to athlete-picked."
+                : current === "reps"
+                  ? "Total reps across all intervals (auto-summed from max-reps movements)."
+                  : "Free-text result (e.g. “all rounds unbroken”).";
+          return (
+            <div className="space-y-1.5">
+              <Label className={labelClass}>Score by</Label>
+              <div className="flex flex-wrap gap-1">
+                {(
+                  [
+                    { key: "rounds", label: "Rounds" },
+                    { key: "load", label: "Load" },
+                    { key: "reps", label: "Reps" },
+                    { key: "note", label: "Note" },
+                  ] as const
+                ).map((opt) => {
+                  const selected = current === opt.key;
+                  return (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => onChange({ scoreType: opt.key })}
+                      className={`rounded-md px-2 py-0.5 text-xs font-medium ${
+                        selected
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted/50 text-muted-foreground hover:bg-muted"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-muted-foreground pt-1">{hint}</p>
+            </div>
+          );
+        })()}
+
       {part.workoutType === "emom" && (
         <EmomRotationConfig
           movements={part.movements}

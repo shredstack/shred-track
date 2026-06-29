@@ -74,6 +74,13 @@ function computeSortValue(
       if (row.totalReps != null) return row.totalReps;
       return (row.rounds ?? 0) * 1000 + (row.remainderReps ?? 0);
     }
+    case "emom": {
+      // Load mode is handled by the scoreType === "load" branch above. Reps
+      // mode ranks by total reps; rounds mode by rounds + remainder (same
+      // encoding as AMRAP); note mode has no numeric key → 0.
+      if (row.totalReps != null) return row.totalReps;
+      return (row.rounds ?? 0) * 1000 + (row.remainderReps ?? 0);
+    }
     case "for_load":
     case "max_effort":
       return row.weightLbs ?? 0;
@@ -175,6 +182,15 @@ export async function GET(
       .map((r) => r.crossfitWorkoutPartId)
       .filter((id): id is string => !!id)
   );
+  // Load-scored EMOMs rank by the heaviest per-interval weight even when the
+  // movement wasn't explicitly flagged athlete-weight — the "Score by: Load"
+  // picker is the signal. Treat them like athlete-weight parts so the
+  // heaviest-weight sort branch (and chip) fires.
+  for (const p of parts) {
+    if (p.workoutType === "emom" && (p.scoreType ?? null) === "load") {
+      partHasAthleteWeight.add(p.id);
+    }
+  }
 
   // Sessions to include in the leaderboard: every session at this gym on
   // this date. We deliberately do NOT filter by crossfit_workout_id here

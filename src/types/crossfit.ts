@@ -28,7 +28,10 @@ export type WeightSource = (typeof WEIGHT_SOURCES)[number];
 // Part Score Type Override
 // ============================================
 
-export const PART_SCORE_TYPES = ["reps", "load"] as const;
+// "reps" / "load" disambiguate athlete-weight parts (for_reps/amrap/intervals).
+// "rounds" / "note" are EMOM-only modes: score by rounds completed, or keep a
+// free-text result. EMOM still defaults to derived behavior when unset.
+export const PART_SCORE_TYPES = ["reps", "load", "rounds", "note"] as const;
 export type PartScoreType = (typeof PART_SCORE_TYPES)[number];
 
 // ============================================

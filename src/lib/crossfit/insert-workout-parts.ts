@@ -73,7 +73,7 @@ export interface PartInput {
   repScheme?: string;
   rounds?: number;
   structure?: string;
-  scoreType?: "reps" | "load" | null;
+  scoreType?: "reps" | "load" | "rounds" | "note" | null;
   roundScoreAggregation?: "slowest" | "fastest" | "sum" | "average";
   roundWindowSeconds?: number | string;
   partnerWorkMode?: PartnerWorkMode | null;
