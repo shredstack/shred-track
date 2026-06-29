@@ -233,16 +233,23 @@ export function builderPartToPayload(
       (part.workoutType === "for_load" && part.structure === "complex")
         ? part.structure
         : undefined,
-    // scoreType picker only fires for for_reps / amrap / intervals; if the
-    // workout type was switched after the user picked one, drop the stale
-    // value. Sent through as null when unset so the API can clear an old row.
+    // scoreType picker fires for for_reps / amrap / intervals (reps|load) and
+    // for emom (reps|load|rounds|note). If the workout type was switched after
+    // the user picked one, drop the stale value. Sent through as null when
+    // unset so the API can clear an old row.
     scoreType:
       (part.workoutType === "for_reps" ||
         part.workoutType === "amrap" ||
         part.workoutType === "intervals") &&
       (part.scoreType === "reps" || part.scoreType === "load")
         ? part.scoreType
-        : null,
+        : part.workoutType === "emom" &&
+            (part.scoreType === "reps" ||
+              part.scoreType === "load" ||
+              part.scoreType === "rounds" ||
+              part.scoreType === "note")
+          ? part.scoreType
+          : null,
     // Timed Rounds: aggregation always sent (defaults to slowest if the
     // builder didn't set it); window only when the user provided a value.
     // Both fields are dropped for any other workout type so a stale value

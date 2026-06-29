@@ -59,6 +59,18 @@ export function pickBestScore(
     }
     case "amrap":
       return [...rows].sort(cmpAmrap)[0];
+    case "emom":
+      // EMOM scores by one of: load (heaviest weight), rounds, or total reps.
+      // Within a single benchmark every score shares the same mode, so a
+      // weight-aware comparator that otherwise defers to the reps/rounds rule
+      // ranks each mode correctly. Note-only EMOMs have no numeric key → the
+      // comparator is a no-op and the first row wins.
+      return [...rows].sort((a, b) => {
+        if (a.weightLbs != null || b.weightLbs != null) {
+          return (b.weightLbs ?? -Infinity) - (a.weightLbs ?? -Infinity);
+        }
+        return cmpAmrap(a, b);
+      })[0];
     case "for_load":
     case "max_effort":
       return [...rows].sort(
@@ -131,6 +143,15 @@ export function formatBestScore(
       return `${base} ${suffix}`;
     }
     case "amrap": {
+      if (score.totalReps != null) return `${score.totalReps} reps`;
+      if (score.rounds != null) {
+        return `${score.rounds}+${score.remainderReps ?? 0}`;
+      }
+      return "—";
+    }
+    case "emom": {
+      // Load mode is handled above (scoreType === "load" → weight). Here we
+      // cover reps mode (total reps) and rounds mode (rounds + remainder).
       if (score.totalReps != null) return `${score.totalReps} reps`;
       if (score.rounds != null) {
         return `${score.rounds}+${score.remainderReps ?? 0}`;

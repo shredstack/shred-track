@@ -234,13 +234,13 @@ export function AdminBenchmarks() {
     setShowForm(true);
   }, []);
 
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault();
-      saveMutation.mutate({ id: editingId || undefined, form });
-    },
-    [editingId, form, saveMutation]
-  );
+  // Plain callback (not a form onSubmit). The builder nests many text inputs
+  // — rep schemes, weights, the movement search — and an implicit form submit
+  // on Enter would create the benchmark half-finished and close the dialog.
+  // Saving is an explicit button press instead.
+  const handleSubmit = useCallback(() => {
+    saveMutation.mutate({ id: editingId || undefined, form });
+  }, [editingId, form, saveMutation]);
 
   const handlePartsChange = useCallback((parts: WorkoutBuilderPart[]) => {
     setForm((prev) => ({ ...prev, parts }));
@@ -366,7 +366,7 @@ export function AdminBenchmarks() {
               {editingId ? "Edit Benchmark" : "Add Benchmark"}
             </DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="ab-name">Name</Label>
               <Input
@@ -502,9 +502,14 @@ export function AdminBenchmarks() {
 
             <div className="flex gap-2">
               <Button
-                type="submit"
+                type="button"
+                onClick={handleSubmit}
                 className="flex-1"
-                disabled={saveMutation.isPending || form.parts.length === 0}
+                disabled={
+                  saveMutation.isPending ||
+                  form.parts.length === 0 ||
+                  !form.name.trim()
+                }
               >
                 {saveMutation.isPending
                   ? "Saving..."
@@ -516,7 +521,7 @@ export function AdminBenchmarks() {
                 Cancel
               </Button>
             </div>
-          </form>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

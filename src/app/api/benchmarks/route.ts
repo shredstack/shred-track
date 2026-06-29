@@ -636,20 +636,27 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Name uniqueness checks (system + own).
+  // Uniqueness checks on Name + Type (system + own). A benchmark is identified
+  // by its name and workout type, so e.g. "JT" / for_time can't be created
+  // twice, while a same-named benchmark of a different type is allowed. Name
+  // matching is case-insensitive (ilike) to stay consistent with the admin
+  // routes — "JT" and "jt" are treated as the same benchmark.
+  const benchmarkType = parts[0].workoutType;
   const systemConflict = await db
     .select({ id: crossfitWorkouts.id })
     .from(crossfitWorkouts)
     .where(
       and(
-        eq(crossfitWorkouts.title, trimmedName),
-        eq(crossfitWorkouts.isSystem, true)
+        ilike(crossfitWorkouts.title, trimmedName),
+        eq(crossfitWorkouts.workoutType, benchmarkType),
+        eq(crossfitWorkouts.isSystem, true),
+        eq(crossfitWorkouts.isBenchmark, true)
       )
     )
     .limit(1);
   if (systemConflict.length > 0) {
     return NextResponse.json(
-      { error: "A system benchmark with this name already exists" },
+      { error: "A system benchmark with this name and type already exists" },
       { status: 409 }
     );
   }
@@ -661,7 +668,8 @@ export async function POST(req: NextRequest) {
       .where(
         and(
           eq(crossfitWorkouts.createdBy, user.id),
-          eq(crossfitWorkouts.title, trimmedName),
+          ilike(crossfitWorkouts.title, trimmedName),
+          eq(crossfitWorkouts.workoutType, benchmarkType),
           eq(crossfitWorkouts.isSystem, false),
           eq(crossfitWorkouts.isBenchmark, true)
         )
@@ -669,7 +677,7 @@ export async function POST(req: NextRequest) {
       .limit(1);
     if (userConflict.length > 0) {
       return NextResponse.json(
-        { error: "You already have a benchmark with this name" },
+        { error: "You already have a benchmark with this name and type" },
         { status: 409 }
       );
     }

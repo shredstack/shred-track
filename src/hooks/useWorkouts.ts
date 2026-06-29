@@ -128,7 +128,7 @@ interface WirePart {
   repScheme: string | null;
   rounds: number | null;
   structure: string | null;
-  scoreType?: "reps" | "load" | null;
+  scoreType?: "reps" | "load" | "rounds" | "note" | null;
   // Timed Rounds — aggregation strategy + optional per-round window.
   roundScoreAggregation?:
     | "slowest"
@@ -500,7 +500,7 @@ export interface CreatePartInput {
   repScheme?: string;
   rounds?: number;
   structure?: WorkoutPartStructure;
-  scoreType?: "reps" | "load" | null;
+  scoreType?: "reps" | "load" | "rounds" | "note" | null;
   // Timed Rounds — aggregation strategy + optional per-round window in
   // seconds. Server normalizes / validates per workout type.
   roundScoreAggregation?: "slowest" | "fastest" | "sum" | "average";
