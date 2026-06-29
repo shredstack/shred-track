@@ -649,7 +649,8 @@ export async function POST(req: NextRequest) {
       and(
         ilike(crossfitWorkouts.title, trimmedName),
         eq(crossfitWorkouts.workoutType, benchmarkType),
-        eq(crossfitWorkouts.isSystem, true)
+        eq(crossfitWorkouts.isSystem, true),
+        eq(crossfitWorkouts.isBenchmark, true)
       )
     )
     .limit(1);
